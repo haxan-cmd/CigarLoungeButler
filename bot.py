@@ -486,19 +486,10 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
         if qualifies:
             await original_message.add_reaction("<:weapon_hs:1350656128635375698>")
 
-        # highscore — personal best on this weapon board
-        discord_id = str(interaction.user.id)
-        existing_score = 0
-        for row in all_values[1:]:
-            if row[0] == selected_weapon and (row[2] if len(row) > 2 else '') == discord_id:
-                existing_score = int(row[3]) if row[3] else 0
-                break
-        if takedowns >= existing_score:
-            await original_message.add_reaction("<a:highscore:1360312918545269057>")
-
     # Update leaderboards
+    any_updated = False
     try:
-        await update_leaderboards(
+        any_updated = await update_leaderboards(
             interaction, selected_weapon, selected_map, faction,
             takedowns, kills, deaths, vip, feats,
             interaction.user.display_name, message_link
@@ -506,11 +497,15 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     except Exception as e:
         print(f"Leaderboard update error: {e}")
 
+    if any_updated:
+        await original_message.add_reaction("<a:highscore:1360312918545269057>")
+
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
                               player_name, message_link):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
+    any_updated = False
 
     # (lb_name, score, top_10, personal_best)
     updates = []
@@ -542,7 +537,6 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     all_lb_rows = leaderboards_ws.get_all_records()
 
     for lb_name, score, top_10, personal_best in updates:
-        # Find existing entry by Discord ID
         existing_sheet_row = None
         existing_score = None
         for i, row in enumerate(all_values[1:], start=2):
@@ -557,12 +551,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         if personal_best:
             if existing_sheet_row is not None:
                 if score > existing_score:
-                    # Update display name, score, and link
                     leaderboard_data_ws.update_cell(existing_sheet_row, 2, player_name)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 4, score)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 5, message_link)
+                    any_updated = True
                 else:
-                    continue  # Score not better, skip
+                    continue
             else:
                 if top_10:
                     board_entries = [row for row in all_values[1:] if row[0] == lb_name]
@@ -573,16 +567,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         lowest_score = int(board_entries_sorted[9][3]) if board_entries_sorted[9][3] else 0
                         if score <= lowest_score:
                             continue
-                        # Remove 10th place entry
                         tenth_discord_id = board_entries_sorted[9][2] if len(board_entries_sorted[9]) > 2 else ''
                         for i, row in enumerate(all_values[1:], start=2):
                             if row[0] == lb_name and (row[2] if len(row) > 2 else '') == tenth_discord_id:
                                 leaderboard_data_ws.delete_rows(i)
                                 break
                 leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+                any_updated = True
         else:
-            # Unlimited all entries — always append
             leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+            any_updated = True
 
         # Reload and update Discord message
         updated_values = leaderboard_data_ws.get_all_values()
@@ -612,9 +606,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
-
-leaderboards_ws = sheet.worksheet('Leaderboards')
-leaderboard_data_ws = sheet.worksheet('LeaderboardData')
+    return any_updated
 
 FACTION_EMOJIS = {
     "Mason": "<:mason:1350669458863292426>",
