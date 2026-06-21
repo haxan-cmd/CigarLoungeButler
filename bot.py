@@ -677,6 +677,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         for i, row in enumerate(all_values[1:], start=2):
                             if row[0] == lb_name and (row[2] if len(row) > 2 else '') == tenth_discord_id:
                                 leaderboard_data_ws.delete_rows(i)
+                                all_values = leaderboard_data_ws.get_all_values()  # reload after delete
                                 break
                 leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
                 any_updated = True
