@@ -323,7 +323,7 @@ class RetryStatsView(discord.ui.View):
     async def on_timeout(self):
         try:
             await self.original_message.reply(
-                "⏱️ Submission timed out. Please click Submit Run again to restart.",
+                "Are you still there? I am not being paid enough for this.",
                 mention_author=False
             )
         except Exception:
@@ -411,7 +411,7 @@ class VIPView(discord.ui.View):
     async def on_timeout(self):
         try:
             await self.original_message.reply(
-                "⏱️ Submission timed out at the VIP step. Please click Submit Run again to restart.",
+                "Are you still there? I am not being paid enough for this.",
                 mention_author=False
             )
         except Exception:
@@ -465,7 +465,7 @@ class TripleCheckView(discord.ui.View):
     async def on_timeout(self):
         try:
             await self.original_message.reply(
-                "⏱️ Submission timed out at the score check step. Please click Submit Run again to restart.",
+                "Are you still there? I am not being paid enough for this.",
                 mention_author=False
             )
         except Exception:
