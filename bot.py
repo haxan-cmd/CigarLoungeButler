@@ -886,6 +886,66 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
 
         await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
+@bot.tree.command(name="refresh", description="Refresh a leaderboard's Discord messages from the current sheet data")
+@discord.app_commands.describe(name="Exact leaderboard name e.g. Spear or Darkforest - Agatha")
+async def refresh_leaderboard(interaction: discord.Interaction, name: str):
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"Refreshing **{name}**...", ephemeral=True)
+
+    all_lb_rows = leaderboards_ws.get_all_records()
+    lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
+    if not lb_row:
+        await interaction.edit_original_response(content=f"❌ No leaderboard found with name: `{name}`")
+        return
+
+    entries = get_leaderboard_entries(name)
+    entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+
+    if name in ("100 Kills", "200 Takedowns"):
+        overflow = max(0, len(entries) - 50)
+        display_entries = entries[:50]
+    else:
+        overflow = 0
+        display_entries = entries
+
+    chunks = format_leaderboard_text(display_entries, overflow)
+
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+
+    try:
+        guild = interaction.guild
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+        for idx, mid in enumerate(message_ids):
+            try:
+                msg = await thread.fetch_message(mid)
+                if idx < len(chunks):
+                    await msg.edit(content=chunks[idx])
+                else:
+                    await msg.edit(content="\u200b")
+            except Exception as e:
+                print(f"Refresh edit error for {name} msg {mid}: {e}")
+
+        # Post new messages if chunks grew
+        if len(chunks) > len(message_ids):
+            new_ids = list(message_ids)
+            for chunk in chunks[len(message_ids):]:
+                new_msg = await thread.send(chunk)
+                new_ids.append(new_msg.id)
+            # Update sheet
+            for i, row in enumerate(leaderboards_ws.get_all_values()):
+                if row[0] == name:
+                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
+                    break
+
+        await interaction.edit_original_response(content=f"✅ **{name}** refreshed with {len(entries)} entries.")
+    except Exception as e:
+        await interaction.edit_original_response(content=f"❌ Error refreshing {name}: {e}")
+
 import traceback
 try:
     bot.run(TOKEN)
