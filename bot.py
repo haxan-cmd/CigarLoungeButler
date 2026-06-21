@@ -141,6 +141,12 @@ class SubmitView(discord.ui.View):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
 
+    async def on_timeout(self):
+        try:
+            await self.prompt_msg.edit(content="⏱️ This submission prompt has expired.", view=None)
+        except Exception:
+            pass
+
     @discord.ui.button(label='Submit Run', style=discord.ButtonStyle.green, emoji='⚔️')
     async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
@@ -292,6 +298,35 @@ class FactionSelect(discord.ui.Select):
             StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, selected_faction)
         )
 
+class RetryStatsView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, error_msg):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        self.faction = faction
+        self.error_msg = error_msg
+
+    async def on_timeout(self):
+        try:
+            await self.original_message.reply(
+                "⏱️ Submission timed out. Please click Submit Run again to restart.",
+                mention_author=False
+            )
+        except Exception:
+            pass
+
+    @discord.ui.button(label='Try Again', style=discord.ButtonStyle.blurple, emoji='🔄')
+    async def try_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction)
+        )
+
 class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
     takedowns = discord.ui.TextInput(label="Takedowns", placeholder="e.g. 215", required=True)
     kills = discord.ui.TextInput(label="Kills", placeholder="e.g. 104", required=True)
@@ -312,7 +347,31 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
             kills = int(self.kills.value)
             deaths = int(self.deaths.value)
         except ValueError:
-            await interaction.response.send_message("Terribly sorry, but Takedowns, Kills, and Deaths must be whole numbers. Shall we try again?", ephemeral=True)
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "invalid")
+            await interaction.response.send_message(
+                "❌ Takedowns, Kills, and Deaths must be whole numbers. Please try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        # Sanity checks
+        if takedowns < 0 or kills < 0 or deaths < 0:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "negative")
+            await interaction.response.send_message(
+                "❌ Takedowns, Kills, and Deaths cannot be negative. Please try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        if kills > takedowns:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "kills>td")
+            await interaction.response.send_message(
+                f"❌ Kills ({kills}) cannot exceed Takedowns ({takedowns}) — takedowns include kills plus assists. Please try again.",
+                view=view,
+                ephemeral=True
+            )
             return
 
         view = VIPView(
@@ -337,6 +396,15 @@ class VIPView(discord.ui.View):
         self.takedowns = takedowns
         self.kills = kills
         self.deaths = deaths
+
+    async def on_timeout(self):
+        try:
+            await self.original_message.reply(
+                "⏱️ Submission timed out at the VIP step. Please click Submit Run again to restart.",
+                mention_author=False
+            )
+        except Exception:
+            pass
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.red)
     async def vip_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -382,6 +450,15 @@ class TripleCheckView(discord.ui.View):
         self.kills = kills
         self.deaths = deaths
         self.vip = vip
+
+    async def on_timeout(self):
+        try:
+            await self.original_message.reply(
+                "⏱️ Submission timed out at the score check step. Please click Submit Run again to restart.",
+                mention_author=False
+            )
+        except Exception:
+            pass
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
     async def score_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -490,8 +567,9 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
 
     # Update leaderboards
     any_updated = False
+    placements = []
     try:
-        any_updated = await update_leaderboards(
+        any_updated, placements = await update_leaderboards(
             interaction, selected_weapon, selected_map, faction,
             takedowns, kills, deaths, vip, feats,
             interaction.user.display_name, message_link
@@ -502,43 +580,56 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     if any_updated:
         await original_message.add_reaction("<a:highscore:1360312918545269057>")
 
+    # Edit the summary reply to include placements
+    if placements:
+        placement_lines = "\n".join(f"🏆 {lb} — #{pos}" for lb, pos in placements)
+        try:
+            # Find the reply we sent and edit it
+            async for msg in original_message.channel.history(limit=10, after=original_message):
+                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                    await msg.edit(content=msg.content + f"\n{placement_lines}")
+                    break
+        except Exception as e:
+            print(f"Placement edit error: {e}")
+
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
                               player_name, message_link):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
     any_updated = False
+    placements = []  # list of (lb_name, position)
 
-    # (lb_name, score, top_10, personal_best)
+    # (lb_name, score, top_10, personal_best, unlimited_top50)
     updates = []
 
     # Weapon board — exclude VIP, top 10
     if not vip:
-        updates.append((selected_weapon, takedowns, True, True))
+        updates.append((selected_weapon, takedowns, True, True, False))
 
     # Map board — top 10
     map_lb_name = f"{selected_map} - {faction}"
-    updates.append((map_lb_name, takedowns, True, True))
+    updates.append((map_lb_name, takedowns, True, True, False))
 
     # Feat boards
     if "Flawless" in feats:
-        updates.append(("Flawless", takedowns, False, True))
+        updates.append(("Flawless", takedowns, False, True, False))
     if "100 Kills" in feats:
-        updates.append(("100 Kills", kills, False, False))
+        updates.append(("100 Kills", kills, False, False, True))
     if "200 Takedowns" in feats:
-        updates.append(("200 Takedowns", takedowns, False, False))
+        updates.append(("200 Takedowns", takedowns, False, False, True))
     if selected_weapon == "Mallet" and kills >= 100:
-        updates.append(("Mallet", takedowns, True, True))
+        updates.append(("Mallet", takedowns, True, True, False))
     if selected_weapon == "Knife" and kills >= 100:
-        updates.append(("Knife", takedowns, True, True))
+        updates.append(("Knife", takedowns, True, True, False))
     if selected_weapon == "Healing Horn" and kills >= 100:
-        updates.append(("Healing Horn", kills, False, True))
+        updates.append(("Healing Horn", kills, False, True, False))
 
     # Columns: A=Leaderboard Name, B=Player, C=Discord ID, D=Score, E=Message Link
     all_values = leaderboard_data_ws.get_all_values()
     all_lb_rows = leaderboards_ws.get_all_records()
 
-    for lb_name, score, top_10, personal_best in updates:
+    for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
         existing_sheet_row = None
         existing_score = None
         for i, row in enumerate(all_values[1:], start=2):
@@ -550,13 +641,31 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 existing_score = int(row_score) if row_score else 0
                 break
 
-        if personal_best:
+        if unlimited_top50:
+            # Always append, no cap, no personal best check
+            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+            any_updated = True
+            # Find position after append
+            all_board = [int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]]
+            all_board.append(score)
+            all_board.sort(reverse=True)
+            pos = all_board.index(score) + 1
+            placements.append((lb_name, pos))
+        elif personal_best:
             if existing_sheet_row is not None:
                 if score > existing_score:
                     leaderboard_data_ws.update_cell(existing_sheet_row, 2, player_name)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 4, score)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 5, message_link)
                     any_updated = True
+                    # Find position
+                    board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                    # Replace old score with new
+                    board_scores = [s for s in board_scores if s != existing_score]
+                    board_scores.append(score)
+                    board_scores.sort(reverse=True)
+                    pos = board_scores.index(score) + 1
+                    placements.append((lb_name, pos))
                 else:
                     continue
             else:
@@ -576,9 +685,19 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                                 break
                 leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
                 any_updated = True
+                board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                board_scores.append(score)
+                board_scores.sort(reverse=True)
+                pos = board_scores.index(score) + 1
+                placements.append((lb_name, pos))
         else:
             leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
             any_updated = True
+            board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+            board_scores.append(score)
+            board_scores.sort(reverse=True)
+            pos = board_scores.index(score) + 1
+            placements.append((lb_name, pos))
 
         # Reload and update Discord message
         updated_values = leaderboard_data_ws.get_all_values()
@@ -591,7 +710,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     'link': row[4] if len(row) > 4 else ''
                 })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
-        chunks = format_leaderboard_text(entries)
+
+        # Cap 100 Kills / 200 Takedowns display at top 50
+        if lb_name in ("100 Kills", "200 Takedowns"):
+            display_entries = entries[:50]
+            overflow = len(entries) - 50
+        else:
+            display_entries = entries
+            overflow = 0
+
+        chunks = format_leaderboard_text(display_entries, overflow)
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -599,16 +727,38 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             continue
 
         thread_id = int(lb_row['Thread ID'])
-        message_id = int(lb_row['Message ID'])
+        message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            msg = await thread.fetch_message(message_id)
-            await msg.edit(content=chunks[0])
+
+            # Edit existing messages for each chunk
+            for idx, mid in enumerate(message_ids):
+                try:
+                    msg = await thread.fetch_message(mid)
+                    if idx < len(chunks):
+                        await msg.edit(content=chunks[idx])
+                    else:
+                        # More stored messages than chunks — clear extras
+                        await msg.edit(content="\u200b")
+                except Exception as e:
+                    print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+
+            # If chunks grew beyond stored messages, post new ones and update sheet
+            if len(chunks) > len(message_ids):
+                new_ids = list(message_ids)
+                for chunk in chunks[len(message_ids):]:
+                    new_msg = await thread.send(chunk)
+                    new_ids.append(new_msg.id)
+                # Update sheet with new IDs
+                for i, row in enumerate(leaderboards_ws.get_all_values()):
+                    if row[0] == lb_name:
+                        leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
+                        break
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
-    return any_updated
+    return any_updated, placements
 
 FACTION_EMOJIS = {
     "Mason": "<:mason:1350669458863292426>",
@@ -644,7 +794,7 @@ def get_leaderboard_entries(name):
             })
     return sorted(entries, key=lambda x: x['score'], reverse=True)
 
-def format_leaderboard_text(entries):
+def format_leaderboard_text(entries, overflow=0):
     if not entries:
         return ["No entries yet."]
 
@@ -654,6 +804,9 @@ def format_leaderboard_text(entries):
             lines.append(f"• {e['player']} - [{e['score']}]({e['link']})")
         else:
             lines.append(f"• {e['player']} - {e['score']}")
+
+    if overflow > 0:
+        lines.append(f"*...and {overflow} more entries*")
 
     chunks = []
     current = ""
@@ -706,16 +859,20 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
 
         await thread.send(file=discord.File(DECORATION_TOP))
         await thread.send(attack_header)
+        attack_msg_ids = []
         for chunk in attack_chunks:
             attack_msg = await thread.send(chunk)
+            attack_msg_ids.append(str(attack_msg.id))
         await thread.send(file=discord.File(DECORATION_BOTTOM))
         await thread.send(defense_header)
+        defense_msg_ids = []
         for chunk in defense_chunks:
             defense_msg = await thread.send(chunk)
+            defense_msg_ids.append(str(defense_msg.id))
         await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-        leaderboards_ws.append_row([attack_name, str(thread.id), str(attack_msg.id), "map"])
-        leaderboards_ws.append_row([defense_name, str(thread.id), str(defense_msg.id), "map"])
+        leaderboards_ws.append_row([attack_name, str(thread.id), ",".join(attack_msg_ids), "map"])
+        leaderboards_ws.append_row([defense_name, str(thread.id), ",".join(defense_msg_ids), "map"])
 
         await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
 
@@ -723,12 +880,13 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
         entries = get_leaderboard_entries(name)
         chunks = format_leaderboard_text(entries)
         await thread.send(file=discord.File(DECORATION_TOP))
-        lb_msg = None
+        msg_ids = []
         for chunk in chunks:
             lb_msg = await thread.send(chunk)
+            msg_ids.append(str(lb_msg.id))
         await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-        leaderboards_ws.append_row([name, str(thread.id), str(lb_msg.id), type])
+        leaderboards_ws.append_row([name, str(thread.id), ",".join(msg_ids), type])
 
         await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
