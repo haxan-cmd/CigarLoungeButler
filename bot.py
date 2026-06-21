@@ -25,6 +25,8 @@ gc = gspread.authorize(creds)
 sheet = gc.open_by_key(SHEET_ID)
 submissions_ws = sheet.worksheet('Submissions')
 players_ws = sheet.worksheet('Players')
+leaderboards_ws = sheet.worksheet('Leaderboards')
+leaderboard_data_ws = sheet.worksheet('LeaderboardData')
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 
