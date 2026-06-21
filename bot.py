@@ -96,6 +96,21 @@ def get_weapons_for_class_and_category(selected_class, category):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
     return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
 
+def upsert_player(discord_id, discord_name):
+    try:
+        rows = players_ws.get_all_values()
+        discord_id_str = str(discord_id)
+        for i, row in enumerate(rows[1:], start=2):
+            if row and row[0] == discord_id_str:
+                # Update name if changed
+                if len(row) < 2 or row[1] != discord_name:
+                    players_ws.update_cell(i, 2, discord_name)
+                return
+        # Not found — append new row
+        players_ws.append_row([discord_id_str, discord_name, ""])
+    except Exception as e:
+        print(f"Player upsert error: {e}")
+
 def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     vip_str = "Yes" if vip else "No"
@@ -104,6 +119,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
     ])
+    upsert_player(discord_id, discord_name)
 
 GUILD_ID = 1324379304544567356
 
