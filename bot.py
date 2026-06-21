@@ -2,6 +2,7 @@ import discord
 import os
 import asyncio
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -18,7 +19,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
+creds = Credentials.from_service_account_info(json.loads(google_creds_json), scopes=SCOPES)
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key(SHEET_ID)
 submissions_ws = sheet.worksheet('Submissions')
