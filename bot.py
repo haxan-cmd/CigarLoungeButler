@@ -102,6 +102,12 @@ MAP_FACTIONS = {
 MAPS = sorted(MAP_FACTIONS.keys())
 FEAT_WEAPONS = ["Mallet", "Knife", "Healing Horn", "Fist and Shield"]
 
+MARKSMAN_SUBCLASSES = {
+    "Longbowman": ["Bow", "War Bow"],
+    "Crossbowman": ["Crossbow", "Siege Crossbow"],
+    "Skirmisher": ["Javelin", "Throwing Axe"],
+}
+
 def get_classes_for_category(category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     result = []
@@ -184,7 +190,7 @@ class SubmitView(discord.ui.View):
             return
         view = WeaponTypeView(self.original_message, self.prompt_msg)
         await interaction.response.send_message(
-            content="**Step 1 of 6:** Did you use a two-handed or one-handed weapon?",
+            content="**Step 1 of 6:** What type of weapon did you use?",
             view=view,
             ephemeral=True
         )
@@ -226,6 +232,66 @@ class WeaponTypeView(discord.ui.View):
             content="**Step 2 of 6:** Which class were you playing?",
             view=view
         )
+
+    @discord.ui.button(label='Ranged', style=discord.ButtonStyle.blurple)
+    async def ranged(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        view = MarksmanSubclassView(self.original_message, self.prompt_msg)
+        await interaction.response.edit_message(
+            content="**Step 2 of 6:** Class: `Marksman`\nWhich subclass were you playing?",
+            view=view
+        )
+
+class MarksmanSubclassView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.add_item(MarksmanSubclassSelect(original_message, prompt_msg))
+
+class MarksmanSubclassSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        options = [discord.SelectOption(label=s) for s in MARKSMAN_SUBCLASSES.keys()]
+        super().__init__(placeholder="Choose your subclass...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        subclass = self.values[0]
+        weapons = sorted(MARKSMAN_SUBCLASSES[subclass])
+        view = RangedWeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons)
+        await interaction.response.edit_message(
+            content=f"**Step 3 of 6:** Class: `Marksman` | Subclass: `{subclass}`\nWhich weapon did you use?",
+            view=view
+        )
+
+class RangedWeaponSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, subclass, weapons):
+        super().__init__(timeout=300)
+        self.add_item(RangedWeaponSelect(original_message, prompt_msg, subclass, weapons))
+
+class RangedWeaponSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, subclass, weapons):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.subclass = subclass
+        options = [discord.SelectOption(label=w) for w in weapons]
+        super().__init__(placeholder="Choose your weapon...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_weapon = self.values[0]
+        view = MapSelectView(self.original_message, self.prompt_msg, f"Marksman ({self.subclass})", selected_weapon)
+        await interaction.response.edit_message(
+            content=f"**Step 4 of 6:** Class: `Marksman ({self.subclass})` | Weapon: `{selected_weapon}`\nWhich map were you on?",
+            view=view
+        )
+
 
 class ClassSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, category, classes):
@@ -559,8 +625,10 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     if takedowns >= 150 and kills >= 100 and score_over_20k:
         await original_message.add_reaction("<a:triple:1365532698260668466>")
 
-    # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP)
-    if not vip:
+    is_ranged = selected_class.startswith("Marksman")
+
+    # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
+    if not vip and not is_ranged:
         all_values = leaderboard_data_ws.get_all_values()
         weapon_entries = [row for row in all_values[1:] if row[0] == selected_weapon]
         scores = sorted(
@@ -571,29 +639,31 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
         if qualifies:
             await original_message.add_reaction("<:weapon_hs:1350656128635375698>")
 
-    # Update leaderboards
+    # Update leaderboards (skip for ranged submissions)
     any_updated = False
     placements = []
-    try:
-        any_updated, placements = await update_leaderboards(
-            interaction, selected_weapon, selected_map, faction,
-            takedowns, kills, deaths, vip, feats,
-            interaction.user.display_name, message_link
-        )
-    except Exception as e:
-        print(f"Leaderboard update error: {e}")
+    if not is_ranged:
+        try:
+            any_updated, placements = await update_leaderboards(
+                interaction, selected_weapon, selected_map, faction,
+                takedowns, kills, deaths, vip, feats,
+                interaction.user.display_name, message_link
+            )
+        except Exception as e:
+            print(f"Leaderboard update error: {e}")
 
     if any_updated:
         await original_message.add_reaction("<a:highscore:1360312918545269057>")
 
-    # Bounty check
-    try:
-        await update_bounty(
-            interaction.guild, selected_weapon,
-            interaction.user.display_name, interaction.user.id, takedowns
-        )
-    except Exception as e:
-        print(f"Bounty update error: {e}")
+    # Bounty check (skip for ranged submissions)
+    if not is_ranged:
+        try:
+            await update_bounty(
+                interaction.guild, selected_weapon,
+                interaction.user.display_name, interaction.user.id, takedowns
+            )
+        except Exception as e:
+            print(f"Bounty update error: {e}")
 
     # Edit the summary reply to include placements
     if placements:
