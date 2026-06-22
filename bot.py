@@ -749,17 +749,17 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 except Exception as e:
                     print(f"Discord edit error for {lb_name} msg {mid}: {e}")
 
-            # If chunks grew beyond stored messages, post new ones and update sheet
+            # If chunks grew beyond stored messages, post new ones
+            final_ids = list(message_ids)
             if len(chunks) > len(message_ids):
-                new_ids = list(message_ids)
                 for chunk in chunks[len(message_ids):]:
                     new_msg = await thread.send(chunk)
-                    new_ids.append(new_msg.id)
-                # Update sheet with new IDs
-                for i, row in enumerate(leaderboards_ws.get_all_values()):
-                    if row[0] == lb_name:
-                        leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
-                        break
+                    final_ids.append(new_msg.id)
+            # Always write the definitive ID list back to the sheet
+            for i, row in enumerate(leaderboards_ws.get_all_values()):
+                if row[0] == lb_name:
+                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in final_ids))
+                    break
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
@@ -956,15 +956,16 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
                 except Exception as e:
                     print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
 
+            final_ids = list(message_ids)
             if len(chunks) > len(message_ids):
-                new_ids = list(message_ids)
                 for chunk in chunks[len(message_ids):]:
                     new_msg = await thread.send(chunk)
-                    new_ids.append(new_msg.id)
-                for i, row in enumerate(leaderboards_ws.get_all_values()):
-                    if row[0] == lb_name:
-                        leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
-                        break
+                    final_ids.append(new_msg.id)
+            # Always write the definitive ID list back to the sheet
+            for i, row in enumerate(leaderboards_ws.get_all_values()):
+                if row[0] == lb_name:
+                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in final_ids))
+                    break
 
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
