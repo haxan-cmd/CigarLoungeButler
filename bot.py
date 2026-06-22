@@ -1137,9 +1137,11 @@ async def check_bounty_completion(guild, bounty, player_name, player_id):
     title="Bounty title e.g. Meowy's Birthday Bounty",
     channel_name="Channel name e.g. meowys-birthday-bounty",
     theme_emoji="Emoji pair for special challenge header e.g. 🐾",
-    weapon1="Weapon slot 1", weapon2="Weapon slot 2", weapon3="Weapon slot 3",
-    weapon4="Weapon slot 4", weapon5="Weapon slot 5", weapon6="Weapon slot 6",
-    weapon7="Weapon slot 7 (optional — repeat a weapon to double its total)",
+    weapon1="Weapon slot 1 — e.g. Messer or Messer:9 for custom total (default 3)",
+    weapon2="Weapon slot 2 — e.g. Dane Axe or Dane Axe:6",
+    weapon3="Weapon slot 3", weapon4="Weapon slot 4",
+    weapon5="Weapon slot 5", weapon6="Weapon slot 6",
+    weapon7="Weapon slot 7 (optional)",
     special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)"
 )
 async def bounty_create(
@@ -1164,19 +1166,34 @@ async def bounty_create(
         if len(row) >= 9 and row[8] == 'TRUE':
             bounty_ws.update_cell(i, 9, 'FALSE')
 
-    # Count weapons — duplicates multiply the total
+    # Parse weapons — supports "WeaponName" (default 3) or "WeaponName:9" (custom total)
+    def parse_weapon(raw):
+        if raw is None:
+            return None
+        raw = raw.strip()
+        if ':' in raw:
+            parts = raw.rsplit(':', 1)
+            name = parts[0].strip()
+            try:
+                total = int(parts[1].strip())
+            except ValueError:
+                total = 3
+        else:
+            name = raw
+            total = 3
+        return name, total
+
     raw_weapons = [weapon1, weapon2, weapon3, weapon4, weapon5, weapon6]
     if weapon7:
         raw_weapons.append(weapon7)
 
-    weapon_counts = {}
-    for w in raw_weapons:
-        weapon_counts[w] = weapon_counts.get(w, 0) + 1
-
-    # Build weapons dict: unique name → {current, total}
+    # Build weapons dict: name → {current, total}
     weapons = {}
-    for w, count in weapon_counts.items():
-        weapons[w] = {"current": 0, "total": count * 3}
+    for raw in raw_weapons:
+        parsed = parse_weapon(raw)
+        if parsed:
+            name, total = parsed
+            weapons[name] = {"current": 0, "total": total}
 
     # Create the channel under The Bulletin Board category
     guild = interaction.guild
