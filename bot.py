@@ -716,10 +716,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-        # Cap 100 Kills / 200 Takedowns display at top 25
+        # Cap 100 Kills / 200 Takedowns display at top 50
         if lb_name in ("100 Kills", "200 Takedowns"):
-            display_entries = entries[:25]
-            overflow = len(entries) - 25
+            display_entries = entries[:50]
+            overflow = len(entries) - 50
         else:
             display_entries = entries
             overflow = 0
@@ -931,8 +931,8 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
         if lb_name in ("100 Kills", "200 Takedowns"):
-            overflow = max(0, len(entries) - 25)
-            display_entries = entries[:25]
+            overflow = max(0, len(entries) - 50)
+            display_entries = entries[:50]
         else:
             overflow = 0
             display_entries = entries
