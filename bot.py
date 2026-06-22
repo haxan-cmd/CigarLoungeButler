@@ -1349,6 +1349,48 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     except Exception as e:
         print(f"Bounty card update error: {e}")
 
+@bot.tree.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def seed_players(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        guild = interaction.guild
+        role = guild.get_role(1433215577173786758)
+
+        if not role:
+            await interaction.followup.send("❌ Role not found.", ephemeral=True)
+            return
+
+        existing_rows = players_ws.get_all_values()
+        existing_ids = set(row[0] for row in existing_rows[1:] if row)
+
+        rows_to_add = []
+        skipped = 0
+
+        for member in role.members:
+            discord_id = str(member.id)
+            display_name = member.nick if member.nick else member.display_name
+
+            if discord_id in existing_ids:
+                skipped += 1
+                continue
+
+            rows_to_add.append([discord_id, display_name, ""])
+
+        if rows_to_add:
+            players_ws.append_rows(rows_to_add, value_input_option="RAW")
+
+        await interaction.followup.send(
+            f"✅ Seeded **{len(rows_to_add)}** players from role.\n"
+            f"⏭️ Skipped **{skipped}** already in the sheet.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
 import traceback
 try:
     bot.run(TOKEN)
