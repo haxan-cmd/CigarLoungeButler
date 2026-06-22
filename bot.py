@@ -1238,8 +1238,8 @@ async def bounty_create(
 
     # Create the channel under The Bulletin Board category
     guild = interaction.guild
-    bulletin_board = discord.utils.get(guild.categories, name="The Bulletin Board")
-    channel = await guild.create_text_channel(channel_name, category=bulletin_board)
+    bulletin_board = guild.get_channel(BULLETIN_BOARD_CATEGORY_ID)
+    channel = await guild.create_text_channel(formatted_channel_name, category=bulletin_board)
 
     # Create the bounty role — lavender colour, cat emoji icon
     lavender = discord.Colour(0xB57EDC)
