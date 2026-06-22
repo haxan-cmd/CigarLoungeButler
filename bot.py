@@ -28,6 +28,13 @@ players_ws = sheet.worksheet('Players')
 leaderboards_ws = sheet.worksheet('Leaderboards')
 leaderboard_data_ws = sheet.worksheet('LeaderboardData')
 
+# BountyPlayers sheet — columns: BountyTitle, DiscordID, PlayerName, ForumPostID, Progress (JSON)
+try:
+    bounty_players_ws = sheet.worksheet('BountyPlayers')
+except gspread.exceptions.WorksheetNotFound:
+    bounty_players_ws = sheet.add_worksheet(title='BountyPlayers', rows=500, cols=10)
+    bounty_players_ws.append_row(['BountyTitle','DiscordID','PlayerName','ForumPostID','Progress'])
+
 # Bounty sheet — columns: Title, ChannelID, MessageID, ThemeEmoji, Weapons (JSON),
 #                          SpecialChallenge, SpecialDone (0/1), Completions (JSON), Active (TRUE/FALSE), RoleID
 try:
@@ -37,6 +44,8 @@ except gspread.exceptions.WorksheetNotFound:
     bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID'])
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
+BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
+BULLETIN_BOARD_CATEGORY_ID = 1359537379039252550
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -1183,6 +1192,50 @@ async def bounty_status(interaction: discord.Interaction):
     await interaction.response.send_message(card, ephemeral=True)
 
 
+
+def get_player_bounty_progress(bounty_title, discord_id):
+    """Get a player's row from BountyPlayers sheet, or None."""
+    rows = bounty_players_ws.get_all_values()
+    discord_id_str = str(discord_id)
+    for i, row in enumerate(rows[1:], start=2):
+        if len(row) >= 2 and row[0] == bounty_title and row[1] == discord_id_str:
+            return {
+                'row': i,
+                'player_name': row[2] if len(row) > 2 else '',
+                'forum_post_id': int(row[3]) if len(row) > 3 and row[3] else None,
+                'progress': json.loads(row[4]) if len(row) > 4 and row[4] else {}
+            }
+    return None
+
+def save_player_bounty_progress(row_idx, player_name, forum_post_id, progress):
+    bounty_players_ws.update_cell(row_idx, 3, player_name)
+    bounty_players_ws.update_cell(row_idx, 4, str(forum_post_id) if forum_post_id else '')
+    bounty_players_ws.update_cell(row_idx, 5, json.dumps(progress))
+
+def build_player_bounty_card(bounty, player_progress):
+    """Build a personal bounty card for a player showing only their own progress."""
+    weapons = bounty['weapons']
+    lines = []
+    lines.append("╭──────────────────────────────╮")
+    lines.append(f"     😼 {bounty['title']} ◈")
+    lines.append("╰──────────────────────────────╯")
+
+    for weapon, data in weapons.items():
+        tot = data['total']
+        cur = player_progress.get(weapon, 0)
+        label = f"~~{weapon}~~" if cur >= tot else weapon
+        progress = f"{cur}/{tot}"
+        lines.append(f"▸ {label:<22} {progress:>4}")
+
+    lines.append("╭──────────────────────────────╮")
+    lines.append(f"      {bounty['theme_emoji']} SPECIAL CHALLENGE {bounty['theme_emoji']}")
+    lines.append("╰──────────────────────────────╯")
+    sc_cur = player_progress.get('__special__', 0)
+    sc_progress = f"{sc_cur}/1"
+    lines.append(f"▸ {bounty['special_challenge']:<22} {sc_progress:>4}")
+
+    return "```\n" + "\n".join(lines) + "\n```"
+
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies."""
     if takedowns < 100:
@@ -1199,7 +1252,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if not matched_key:
         return  # Weapon not on this bounty
 
-    # Increment if not already maxed
+    # Increment master total if not already maxed
     w = weapons[matched_key]
     if w['current'] >= w['total']:
         return  # Already complete for this weapon
@@ -1217,6 +1270,54 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
         except Exception as e:
             print(f"Bounty role assign error: {e}")
 
+    # ── PLAYER PROGRESS ───────────────────────────────────────────────────────
+    player_row = get_player_bounty_progress(bounty['title'], player_id)
+    if player_row:
+        player_progress = player_row['progress']
+        forum_post_id = player_row['forum_post_id']
+    else:
+        player_progress = {}
+        forum_post_id = None
+
+    # Increment player's personal count for this weapon
+    player_progress[matched_key] = player_progress.get(matched_key, 0) + 1
+
+    # Get or create the player's forum post
+    forum_channel = guild.get_channel(BOUNTY_FORUM_CHANNEL_ID)
+    if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+        if forum_post_id:
+            # Edit existing post
+            try:
+                forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+                async for msg in forum_thread.history(limit=1, oldest_first=True):
+                    await msg.edit(content=build_player_bounty_card(bounty, player_progress))
+                    break
+            except Exception as e:
+                print(f"Forum post update error: {e}")
+                forum_post_id = None
+
+        if not forum_post_id:
+            # Create new forum post for this player
+            try:
+                card_text = build_player_bounty_card(bounty, player_progress)
+                new_thread, _ = await forum_channel.create_thread(
+                    name=player_name,
+                    content=card_text
+                )
+                forum_post_id = new_thread.id
+            except Exception as e:
+                print(f"Forum post create error: {e}")
+
+    # Save player progress
+    if player_row:
+        save_player_bounty_progress(player_row['row'], player_name, forum_post_id, player_progress)
+    else:
+        bounty_players_ws.append_row([
+            bounty['title'], str(player_id), player_name,
+            str(forum_post_id) if forum_post_id else '', json.dumps(player_progress)
+        ])
+
+    # ── MASTER CARD ───────────────────────────────────────────────────────────
     # Check full completion (all weapons done)
     completions = bounty['completions']
     newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
@@ -1232,10 +1333,10 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")
 
-    # Save updated state
+    # Save updated master state
     save_bounty_state(bounty['row'], weapons, bounty['special_done'], completions)
 
-    # Rebuild and edit the card message
+    # Rebuild and edit the master card message
     card_text = build_bounty_card(
         bounty['title'], bounty['theme_emoji'], weapons,
         bounty['special_challenge'], bounty['special_done'], completions
