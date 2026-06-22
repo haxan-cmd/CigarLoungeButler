@@ -1248,10 +1248,14 @@ async def bounty_create(
     # Create the forum channel under The Ledger category
     ledger = guild.get_channel(LEDGER_CATEGORY_ID)
     forum_channel = None
-    if ledger:
+    forum_error = None
+    if not ledger:
+        forum_error = f"Ledger category not found (ID: {LEDGER_CATEGORY_ID})"
+    else:
         try:
             forum_channel = await guild.create_forum_channel(formatted_channel_name, category=ledger)
         except Exception as e:
+            forum_error = str(e)
             print(f"Forum channel create error: {e}")
 
     # Create the bounty role — lavender colour, cat emoji icon
@@ -1285,7 +1289,7 @@ async def bounty_create(
         ''
     ])
 
-    forum_mention = forum_channel.mention if forum_channel else "*(forum creation failed)*"
+    forum_mention = forum_channel.mention if forum_channel else f"*(forum creation failed: {forum_error})*"
     msg = (
         f"✅ Bounty **{title}** created!\n"
         f"📋 Bulletin Board: {channel.mention} — post your art there to activate the leaderboards\n"
