@@ -220,6 +220,13 @@ class SubmitView(discord.ui.View):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
 
+    async def on_timeout(self):
+        try:
+            await self.prompt_msg.delete()
+        except Exception:
+            pass
+        self.stop()
+
 
     @discord.ui.button(label='Submit Run', style=discord.ButtonStyle.green, emoji='⚔️')
     async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
