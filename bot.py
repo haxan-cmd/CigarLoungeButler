@@ -1253,7 +1253,7 @@ async def bounty_create(
         forum_error = f"Ledger category not found (ID: {LEDGER_CATEGORY_ID})"
     else:
         try:
-            forum_channel = await guild.create_forum_channel(formatted_channel_name, category=ledger)
+            forum_channel = await guild.create_forum(formatted_channel_name, category=ledger)
         except Exception as e:
             forum_error = str(e)
             print(f"Forum channel create error: {e}")
