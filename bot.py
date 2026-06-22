@@ -886,7 +886,7 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
 
     else:
         entries = get_leaderboard_entries(name)
-        chunks = format_leaderboard_text(entries)
+        chunks = format_leaderboard_text(entries, show_weapon=(name in ("100 Kills", "200 Takedowns")))
         await thread.send(file=discord.File(DECORATION_TOP))
         msg_ids = []
         for chunk in chunks:
