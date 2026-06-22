@@ -41,7 +41,7 @@ try:
     bounty_ws = sheet.worksheet('Bounty')
 except gspread.exceptions.WorksheetNotFound:
     bounty_ws = sheet.add_worksheet(title='Bounty', rows=100, cols=20)
-    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID'])
+    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID'])
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
@@ -1075,6 +1075,7 @@ def get_active_bounty():
                 'special_done': row[6] == '1',
                 'completions': json.loads(row[7]) if row[7] else [],
                 'role_id': int(row[9]) if len(row) > 9 and row[9] else None,
+                'forum_channel_id': int(row[10]) if len(row) > 10 and row[10] else None,
             }
     return None
 
@@ -1218,7 +1219,7 @@ async def bounty_create(
     card_text = build_bounty_card(title, theme_emoji, weapons, special_challenge, False, [])
     card_msg = await channel.send(card_text)
 
-    # Save to sheet (col 10 = RoleID)
+    # Save to sheet (col 10 = RoleID, col 11 = ForumChannelID)
     bounty_ws.append_row([
         title,
         str(channel.id),
@@ -1229,7 +1230,8 @@ async def bounty_create(
         '0',
         json.dumps([]),
         'TRUE',
-        str(bounty_role.id)
+        str(bounty_role.id),
+        str(forum_channel.id) if forum_channel else ''
     ])
 
     await interaction.edit_original_response(
@@ -1372,7 +1374,8 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     player_progress[matched_key] = player_progress.get(matched_key, 0) + 1
 
     # Get or create the player's forum post
-    forum_channel = guild.get_channel(BOUNTY_FORUM_CHANNEL_ID)
+    forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+    forum_channel = guild.get_channel(forum_channel_id)
     if forum_channel and isinstance(forum_channel, discord.ForumChannel):
         if forum_post_id:
             # Edit existing post
