@@ -1403,12 +1403,12 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     # Normalize weapon name for matching (case-insensitive)
     matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
     if not matched_key:
-        return  # Weapon not on this bounty
+        return False  # Weapon not on this bounty
 
     # Increment master total if not already maxed
     w = weapons[matched_key]
     if w['current'] >= w['total']:
-        return  # Already complete for this weapon
+        return False  # Already complete for this weapon
 
     w['current'] += 1
     weapons[matched_key] = w
@@ -1519,6 +1519,8 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             await comp_msg.edit(content=comp_text)
         except Exception as e:
             print(f"Completions board update error: {e}")
+
+    return True
 
 @bot.tree.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
 @discord.app_commands.checks.has_permissions(administrator=True)
