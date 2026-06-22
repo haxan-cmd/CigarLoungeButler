@@ -320,14 +320,6 @@ class RetryStatsView(discord.ui.View):
         self.faction = faction
         self.error_msg = error_msg
 
-    async def on_timeout(self):
-        try:
-            await self.original_message.reply(
-                "Are you still there? I am not being paid enough for this.",
-                mention_author=False
-            )
-        except Exception:
-            pass
 
     @discord.ui.button(label='Try Again', style=discord.ButtonStyle.blurple, emoji='🔄')
     async def try_again(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -408,14 +400,6 @@ class VIPView(discord.ui.View):
         self.kills = kills
         self.deaths = deaths
 
-    async def on_timeout(self):
-        try:
-            await self.original_message.reply(
-                "Are you still there? I am not being paid enough for this.",
-                mention_author=False
-            )
-        except Exception:
-            pass
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.red)
     async def vip_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -462,14 +446,6 @@ class TripleCheckView(discord.ui.View):
         self.deaths = deaths
         self.vip = vip
 
-    async def on_timeout(self):
-        try:
-            await self.original_message.reply(
-                "Are you still there? I am not being paid enough for this.",
-                mention_author=False
-            )
-        except Exception:
-            pass
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
     async def score_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
