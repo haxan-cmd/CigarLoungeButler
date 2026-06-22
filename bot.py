@@ -46,6 +46,7 @@ except gspread.exceptions.WorksheetNotFound:
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
 BULLETIN_BOARD_CATEGORY_ID = 1359537379039252550
+MOD_ROLE_ID = 1472259982241300611
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -844,7 +845,7 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False):
     type="Type: weapon, feat, or map"
 )
 async def setup_leaderboard(interaction: discord.Interaction, name: str, type: str):
-    if not interaction.user.guild_permissions.manage_messages:
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
         await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
         return
 
@@ -910,7 +911,7 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
 @bot.tree.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name")
 @discord.app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
 async def refresh_leaderboard(interaction: discord.Interaction, name: str = None):
-    if not interaction.user.guild_permissions.manage_messages:
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
         await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
         return
 
@@ -1080,7 +1081,7 @@ async def bounty_create(
     special_challenge: str,
     weapon7: str = None,
 ):
-    if not interaction.user.guild_permissions.manage_messages:
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
         await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
         return
 
@@ -1150,7 +1151,7 @@ async def bounty_create(
 
 @bot.tree.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
 async def bounty_end(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_messages:
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
         await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
         return
 
