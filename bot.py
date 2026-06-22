@@ -707,10 +707,13 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
                 interaction.guild, selected_weapon,
                 interaction.user.display_name, interaction.user.id, takedowns
             )
+            print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
             if bounty_hit:
                 await original_message.add_reaction("🐱")
         except Exception as e:
+            import traceback
             print(f"Bounty update error: {e}")
+            traceback.print_exc()
 
     # Edit the summary reply to include placements
     if placements:
