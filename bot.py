@@ -1532,6 +1532,68 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
 
     return True
 
+
+@bot.tree.command(name="bounty_add_card", description="Manually create a bounty forum card for a player (mod only)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(member="The player to create a card for")
+async def bounty_add_card(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.followup.send("No active bounty found.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+    forum_channel = guild.get_channel(forum_channel_id)
+    if not forum_channel:
+        await interaction.followup.send("❌ Ledger forum channel not found.", ephemeral=True)
+        return
+
+    player_name = member.nick if member.nick else member.display_name
+    player_id = member.id
+
+    # Check if player already has a card
+    player_row = get_player_bounty_row(bounty['title'], str(player_id))
+    if player_row and player_row.get('forum_post_id'):
+        await interaction.followup.send(f"⚠️ {player_name} already has a forum card.", ephemeral=True)
+        return
+
+    # Build progress from existing BountyPlayers data or empty
+    if player_row:
+        player_progress = player_row['progress']
+        row_idx = player_row['row']
+    else:
+        player_progress = {w: {"current": 0, "total": bounty['weapons'][w]['total']} for w in bounty['weapons']}
+        row_idx = None
+
+    # Create forum post
+    try:
+        new_thread, _ = await forum_channel.create_thread(
+            name=player_name,
+            content=bounty['theme_emoji']
+        )
+        card_text = build_player_bounty_card(bounty, player_progress)
+        await new_thread.send(card_text)
+        forum_post_id = new_thread.id
+
+        # Save to BountyPlayers sheet
+        if row_idx:
+            save_player_bounty_progress(row_idx, player_name, forum_post_id, player_progress)
+        else:
+            bounty_players_ws.append_row([
+                bounty['title'],
+                str(player_id),
+                player_name,
+                str(forum_post_id),
+                json.dumps(player_progress)
+            ])
+
+        await interaction.followup.send(f"✅ Created bounty card for **{player_name}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 @bot.tree.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def seed_players(interaction: discord.Interaction):
