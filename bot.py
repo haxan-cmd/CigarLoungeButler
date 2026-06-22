@@ -647,7 +647,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         if unlimited_top50:
             # Always append, no cap, no personal best check
-            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
             any_updated = True
             # Find position after append
             all_board = [int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]]
@@ -661,6 +661,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     leaderboard_data_ws.update_cell(existing_sheet_row, 2, player_name)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 4, score)
                     leaderboard_data_ws.update_cell(existing_sheet_row, 5, message_link)
+                    leaderboard_data_ws.update_cell(existing_sheet_row, 6, selected_weapon)
                     any_updated = True
                     # Find position
                     board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
@@ -688,7 +689,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                                 leaderboard_data_ws.delete_rows(i)
                                 all_values = leaderboard_data_ws.get_all_values()  # reload after delete
                                 break
-                leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+                leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
                 any_updated = True
                 board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
                 board_scores.append(score)
@@ -696,7 +697,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 pos = board_scores.index(score) + 1
                 placements.append((lb_name, pos))
         else:
-            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link])
+            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
             any_updated = True
             board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
             board_scores.append(score)
@@ -724,7 +725,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             display_entries = entries
             overflow = 0
 
-        chunks = format_leaderboard_text(display_entries, overflow)
+        chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -795,20 +796,22 @@ def get_leaderboard_entries(name):
             entries.append({
                 'player': row[1] if len(row) > 1 else '',
                 'score': int(row[3]) if len(row) > 3 and row[3] else 0,
-                'link': row[4] if len(row) > 4 else ''
+                'link': row[4] if len(row) > 4 else '',
+                'weapon': row[5] if len(row) > 5 else ''
             })
     return sorted(entries, key=lambda x: x['score'], reverse=True)
 
-def format_leaderboard_text(entries, overflow=0):
+def format_leaderboard_text(entries, overflow=0, show_weapon=False):
     if not entries:
         return ["No entries yet."]
 
     lines = []
     for e in entries:
+        weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         if e['link']:
-            lines.append(f"• {e['player']} - [{e['score']}]({e['link']})")
+            lines.append(f"• {e['player']} — [{e['score']}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"• {e['player']} - {e['score']}")
+            lines.append(f"• {e['player']} — {e['score']}{weapon_str}")
 
     if overflow > 0:
         lines.append(f"*...and {overflow} more entries*")
@@ -937,7 +940,7 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
             overflow = 0
             display_entries = entries
 
-        chunks = format_leaderboard_text(display_entries, overflow)
+        chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
