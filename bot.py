@@ -81,7 +81,7 @@ CLASS_WEAPON_MAP = {
     "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
     "Officer": ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
     "Guardian": ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
-    "Crusader": ["Battle Axe", "Executioner's Axe", "Messer", "Quarterstaff", "Two-Handed Hammer"],
+    "Crusader": ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
 }
 
 MAP_FACTIONS = {
