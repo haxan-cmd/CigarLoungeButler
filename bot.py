@@ -53,6 +53,7 @@ intents.message_content = True
 intents.messages = True
 intents.guilds = True
 intents.reactions = True
+intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
