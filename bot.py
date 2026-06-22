@@ -696,10 +696,12 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     # Bounty check (skip for ranged submissions)
     if not is_ranged:
         try:
-            await update_bounty(
+            bounty_hit = await update_bounty(
                 interaction.guild, selected_weapon,
                 interaction.user.display_name, interaction.user.id, takedowns
             )
+            if bounty_hit:
+                await original_message.add_reaction("🐱")
         except Exception as e:
             print(f"Bounty update error: {e}")
 
@@ -1388,13 +1390,13 @@ def build_player_bounty_card(bounty, player_progress):
     return "```\n" + "\n".join(lines) + "\n```"
 
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
-    """Called from finalise_submission. Updates bounty progress if weapon qualifies."""
+    """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched."""
     if takedowns < 100:
-        return
+        return False
 
     bounty = get_active_bounty()
     if not bounty:
-        return
+        return False
 
     weapons = bounty['weapons']
 
