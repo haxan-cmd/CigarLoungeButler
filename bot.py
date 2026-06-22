@@ -1236,10 +1236,23 @@ async def bounty_create(
             name, total = parsed
             weapons[name] = {"current": 0, "total": total}
 
-    # Create the channel under The Bulletin Board category
     guild = interaction.guild
+
+    # Format channel name with cat emoji prefix
+    formatted_channel_name = f"🐱 ┃{channel_name}"
+
+    # Create the text channel under The Bulletin Board category
     bulletin_board = guild.get_channel(BULLETIN_BOARD_CATEGORY_ID)
     channel = await guild.create_text_channel(formatted_channel_name, category=bulletin_board)
+
+    # Create the forum channel under The Ledger category
+    ledger = guild.get_channel(LEDGER_CATEGORY_ID)
+    forum_channel = None
+    if ledger:
+        try:
+            forum_channel = await guild.create_forum_channel(formatted_channel_name, category=ledger)
+        except Exception as e:
+            print(f"Forum channel create error: {e}")
 
     # Create the bounty role — lavender colour, cat emoji icon
     lavender = discord.Colour(0xB57EDC)
