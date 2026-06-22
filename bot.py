@@ -6,7 +6,7 @@ import json
 from google.oauth2.service_account import Credentials
 from discord.ext import commands
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -27,6 +27,14 @@ submissions_ws = sheet.worksheet('Submissions')
 players_ws = sheet.worksheet('Players')
 leaderboards_ws = sheet.worksheet('Leaderboards')
 leaderboard_data_ws = sheet.worksheet('LeaderboardData')
+
+# Bounty sheet — columns: Title, ChannelID, MessageID, ThemeEmoji, Weapons (JSON),
+#                          SpecialChallenge, SpecialDone (0/1), Completions (JSON), Active (TRUE/FALSE), RoleID
+try:
+    bounty_ws = sheet.worksheet('Bounty')
+except gspread.exceptions.WorksheetNotFound:
+    bounty_ws = sheet.add_worksheet(title='Bounty', rows=100, cols=20)
+    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID'])
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 
@@ -567,6 +575,15 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     if any_updated:
         await original_message.add_reaction("<a:highscore:1360312918545269057>")
 
+    # Bounty check
+    try:
+        await update_bounty(
+            interaction.guild, selected_weapon,
+            interaction.user.display_name, interaction.user.id, takedowns
+        )
+    except Exception as e:
+        print(f"Bounty update error: {e}")
+
     # Edit the summary reply to include placements
     if placements:
         placement_lines = "\n".join(f"🏆 {lb} — #{pos}" for lb, pos in placements)
@@ -937,6 +954,277 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str):
         await interaction.edit_original_response(content=f"✅ **{name}** refreshed with {len(entries)} entries.")
     except Exception as e:
         await interaction.edit_original_response(content=f"❌ Error refreshing {name}: {e}")
+
+# ── BOUNTY HELPERS ────────────────────────────────────────────────────────────
+
+def get_active_bounty():
+    """Return the active bounty row as a dict, or None."""
+    rows = bounty_ws.get_all_values()
+    for i, row in enumerate(rows[1:], start=2):
+        if len(row) >= 9 and row[8] == 'TRUE':
+            return {
+                'row': i,
+                'title': row[0],
+                'channel_id': int(row[1]) if row[1] else None,
+                'message_id': int(row[2]) if row[2] else None,
+                'theme_emoji': row[3],
+                'weapons': json.loads(row[4]) if row[4] else {},
+                'special_challenge': row[5],
+                'special_done': row[6] == '1',
+                'completions': json.loads(row[7]) if row[7] else [],
+                'role_id': int(row[9]) if len(row) > 9 and row[9] else None,
+            }
+    return None
+
+def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_done, completions):
+    """
+    weapons: dict of { display_name: {"current": int, "total": int} }
+    completions: list of {"name": str, "date": str}
+    """
+    lines = []
+    lines.append("╭──────────────────────────────╮")
+    lines.append(f"     😼 {title} ◈")
+    lines.append("╰──────────────────────────────╯")
+
+    for weapon, data in weapons.items():
+        cur = data['current']
+        tot = data['total']
+        label = f"~~{weapon}~~" if cur >= tot else weapon
+        progress = f"{cur}/{tot}"
+        lines.append(f"▸ {label:<22} {progress:>4}")
+
+    lines.append("╭──────────────────────────────╮")
+    lines.append(f"      {theme_emoji} SPECIAL CHALLENGE {theme_emoji}")
+    lines.append("╰──────────────────────────────╯")
+    sc_progress = "1/1" if special_done else "0/1"
+    lines.append(f"▸ {special_challenge:<22} {sc_progress:>4}")
+
+    if completions:
+        lines.append("")
+        lines.append("🏆 **Completions**")
+        for idx, c in enumerate(completions, 1):
+            lines.append(f"{idx}. {c['name']} — {c['date']}")
+
+    return "```\n" + "\n".join(lines) + "\n```"
+
+def save_bounty_state(row_idx, weapons, special_done, completions, message_id=None):
+    bounty_ws.update_cell(row_idx, 5, json.dumps(weapons))
+    bounty_ws.update_cell(row_idx, 7, '1' if special_done else '0')
+    bounty_ws.update_cell(row_idx, 8, json.dumps(completions))
+    if message_id:
+        bounty_ws.update_cell(row_idx, 3, str(message_id))
+
+async def check_bounty_completion(guild, bounty, player_name, player_id):
+    """Check if player just completed the full bounty. Returns True if newly completed."""
+    weapons = bounty['weapons']
+    # All weapons maxed out
+    all_weapons_done = all(w['current'] >= w['total'] for w in weapons.values())
+    if not all_weapons_done:
+        return False
+    # Check they're not already in completions
+    completions = bounty['completions']
+    already = any(str(c.get('id')) == str(player_id) for c in completions)
+    if already:
+        return False
+    return True
+
+# ── BOUNTY COMMANDS ───────────────────────────────────────────────────────────
+
+@bot.tree.command(name="bounty_create", description="Create a new monthly bounty (mod only)")
+@discord.app_commands.describe(
+    title="Bounty title e.g. Meowy's Birthday Bounty",
+    channel_name="Channel name e.g. meowys-birthday-bounty",
+    theme_emoji="Emoji pair for special challenge header e.g. 🐾",
+    weapon1="Weapon slot 1", weapon2="Weapon slot 2", weapon3="Weapon slot 3",
+    weapon4="Weapon slot 4", weapon5="Weapon slot 5", weapon6="Weapon slot 6",
+    weapon7="Weapon slot 7 (optional — repeat a weapon to double its total)",
+    special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)"
+)
+async def bounty_create(
+    interaction: discord.Interaction,
+    title: str,
+    channel_name: str,
+    theme_emoji: str,
+    weapon1: str, weapon2: str, weapon3: str,
+    weapon4: str, weapon5: str, weapon6: str,
+    special_challenge: str,
+    weapon7: str = None,
+):
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Creating bounty...", ephemeral=True)
+
+    # Deactivate any existing active bounty
+    rows = bounty_ws.get_all_values()
+    for i, row in enumerate(rows[1:], start=2):
+        if len(row) >= 9 and row[8] == 'TRUE':
+            bounty_ws.update_cell(i, 9, 'FALSE')
+
+    # Count weapons — duplicates multiply the total
+    raw_weapons = [weapon1, weapon2, weapon3, weapon4, weapon5, weapon6]
+    if weapon7:
+        raw_weapons.append(weapon7)
+
+    weapon_counts = {}
+    for w in raw_weapons:
+        weapon_counts[w] = weapon_counts.get(w, 0) + 1
+
+    # Build weapons dict: unique name → {current, total}
+    weapons = {}
+    for w, count in weapon_counts.items():
+        weapons[w] = {"current": 0, "total": count * 3}
+
+    # Create the channel under The Bulletin Board category
+    guild = interaction.guild
+    bulletin_board = discord.utils.get(guild.categories, name="The Bulletin Board")
+    channel = await guild.create_text_channel(channel_name, category=bulletin_board)
+
+    # Create the bounty role — lavender colour, cat emoji icon
+    lavender = discord.Colour(0xB57EDC)
+    bounty_role = await guild.create_role(
+        name=title,
+        colour=lavender,
+        mentionable=True,
+        reason=f"Bounty role for: {title}"
+    )
+    # Set the role icon to the cat emoji (requires server with role icons feature)
+    try:
+        await bounty_role.edit(unicode_emoji="🐱")
+    except Exception:
+        pass  # Server may not support role icons — silently skip
+
+    # Build and post the card
+    card_text = build_bounty_card(title, theme_emoji, weapons, special_challenge, False, [])
+    card_msg = await channel.send(card_text)
+
+    # Save to sheet (col 10 = RoleID)
+    bounty_ws.append_row([
+        title,
+        str(channel.id),
+        str(card_msg.id),
+        theme_emoji,
+        json.dumps(weapons),
+        special_challenge,
+        '0',
+        json.dumps([]),
+        'TRUE',
+        str(bounty_role.id)
+    ])
+
+    await interaction.edit_original_response(
+        content=f"✅ Bounty **{title}** created in {channel.mention} with role {bounty_role.mention}! Post your announcement art there first, then the card is ready."
+    )
+
+
+@bot.tree.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
+async def bounty_end(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+        return
+
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.response.send_message("No active bounty found.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        f"⏳ Grace period started for **{bounty['title']}**. Channel will be deleted in 24 hours.",
+        ephemeral=False
+    )
+
+    # Mark inactive immediately so no new completions count
+    bounty_ws.update_cell(bounty['row'], 9, 'FALSE')
+
+    # Wait 24 hours then delete the channel and role
+    await asyncio.sleep(86400)
+    guild = interaction.guild
+    channel = guild.get_channel(bounty['channel_id'])
+    if channel:
+        await channel.delete(reason=f"Bounty ended: {bounty['title']}")
+    if bounty['role_id']:
+        role = guild.get_role(bounty['role_id'])
+        if role:
+            await role.delete(reason=f"Bounty ended: {bounty['title']}")
+
+
+@bot.tree.command(name="bounty_status", description="Show the current active bounty card")
+async def bounty_status(interaction: discord.Interaction):
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+        return
+    card = build_bounty_card(
+        bounty['title'], bounty['theme_emoji'], bounty['weapons'],
+        bounty['special_challenge'], bounty['special_done'], bounty['completions']
+    )
+    await interaction.response.send_message(card, ephemeral=True)
+
+
+async def update_bounty(guild, weapon, player_name, player_id, takedowns):
+    """Called from finalise_submission. Updates bounty progress if weapon qualifies."""
+    if takedowns < 100:
+        return
+
+    bounty = get_active_bounty()
+    if not bounty:
+        return
+
+    weapons = bounty['weapons']
+
+    # Normalize weapon name for matching (case-insensitive)
+    matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
+    if not matched_key:
+        return  # Weapon not on this bounty
+
+    # Increment if not already maxed
+    w = weapons[matched_key]
+    if w['current'] >= w['total']:
+        return  # Already complete for this weapon
+
+    w['current'] += 1
+    weapons[matched_key] = w
+
+    # Assign the bounty role to the player if not already assigned
+    bounty_channel = guild.get_channel(bounty['channel_id'])
+    bounty_role = guild.get_role(bounty['role_id']) if bounty['role_id'] else None
+    member = guild.get_member(player_id)
+    if member and bounty_role and bounty_role not in member.roles:
+        try:
+            await member.add_roles(bounty_role, reason="Bounty participant")
+        except Exception as e:
+            print(f"Bounty role assign error: {e}")
+
+    # Check full completion (all weapons done)
+    completions = bounty['completions']
+    newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
+    if newly_completed:
+        date_str = datetime.now(timezone.utc).strftime('%b %d')
+        completions.append({"id": str(player_id), "name": player_name, "date": date_str})
+        # Ping the bounty role in the bounty channel
+        if bounty_channel and bounty_role:
+            try:
+                await bounty_channel.send(
+                    f"{bounty_role.mention} 🏆 **{player_name}** has completed the **{bounty['title']}**!"
+                )
+            except Exception as e:
+                print(f"Bounty completion ping error: {e}")
+
+    # Save updated state
+    save_bounty_state(bounty['row'], weapons, bounty['special_done'], completions)
+
+    # Rebuild and edit the card message
+    card_text = build_bounty_card(
+        bounty['title'], bounty['theme_emoji'], weapons,
+        bounty['special_challenge'], bounty['special_done'], completions
+    )
+    try:
+        if bounty_channel:
+            msg = await bounty_channel.fetch_message(bounty['message_id'])
+            await msg.edit(content=card_text)
+    except Exception as e:
+        print(f"Bounty card update error: {e}")
 
 import traceback
 try:
