@@ -41,11 +41,12 @@ try:
     bounty_ws = sheet.worksheet('Bounty')
 except gspread.exceptions.WorksheetNotFound:
     bounty_ws = sheet.add_worksheet(title='Bounty', rows=100, cols=20)
-    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID'])
+    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID','CompletionsMsgID','BonusMsgID'])
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
 BULLETIN_BOARD_CATEGORY_ID = 1359537379039252550
+LEDGER_CATEGORY_ID = 1456640264004435978
 MOD_ROLE_ID = 1472259982241300611
 
 intents = discord.Intents.default()
@@ -159,12 +160,49 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
+
+    image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+
+    # Check if this is an art post in the active bounty channel
+    bounty = get_active_bounty()
+    if bounty and message.channel.id == bounty['channel_id']:
+        has_image = any(
+            att.filename.lower().endswith(image_extensions)
+            for att in message.attachments
+        )
+        if has_image and not bounty['completions_msg_id'] and not bounty['bonus_msg_id']:
+            # Post placeholder completions and bonus boards
+            completions_placeholder = (
+                f"```\n"
+                f"╭──────────────────────────────╮\n"
+                f"  {bounty['theme_emoji']} COMPLETIONS {bounty['theme_emoji']}\n"
+                f"╰──────────────────────────────╯\n"
+                f"No completions yet.\n"
+                f"```"
+            )
+            bonus_placeholder = (
+                f"```\n"
+                f"╭──────────────────────────────╮\n"
+                f"  {bounty['theme_emoji']} BONUS COMPLETIONS {bounty['theme_emoji']}\n"
+                f"╰──────────────────────────────╯\n"
+                f"No bonus completions yet.\n"
+                f"```"
+            )
+            try:
+                comp_msg = await message.channel.send(completions_placeholder)
+                bonus_msg = await message.channel.send(bonus_placeholder)
+                # Save message IDs to sheet (cols 12 & 13)
+                bounty_ws.update_cell(bounty['row'], 12, str(comp_msg.id))
+                bounty_ws.update_cell(bounty['row'], 13, str(bonus_msg.id))
+            except Exception as e:
+                print(f"Bounty placeholder post error: {e}")
+        return
+
     if message.channel.id != SUBMISSIONS_CHANNEL_ID:
         return
     if not message.attachments:
         return
 
-    image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
     has_image = any(
         att.filename.lower().endswith(image_extensions)
         for att in message.attachments
@@ -1076,6 +1114,8 @@ def get_active_bounty():
                 'completions': json.loads(row[7]) if row[7] else [],
                 'role_id': int(row[9]) if len(row) > 9 and row[9] else None,
                 'forum_channel_id': int(row[10]) if len(row) > 10 and row[10] else None,
+                'completions_msg_id': int(row[11]) if len(row) > 11 and row[11] else None,
+                'bonus_msg_id': int(row[12]) if len(row) > 12 and row[12] else None,
             }
     return None
 
@@ -1215,15 +1255,11 @@ async def bounty_create(
     except Exception:
         pass  # Server may not support role icons — silently skip
 
-    # Build and post the card
-    card_text = build_bounty_card(title, theme_emoji, weapons, special_challenge, False, [])
-    card_msg = await channel.send(card_text)
-
-    # Save to sheet (col 10 = RoleID, col 11 = ForumChannelID)
+    # Save to sheet (col 10 = RoleID, col 11 = ForumChannelID, cols 12-13 = msg IDs set later)
     bounty_ws.append_row([
         title,
         str(channel.id),
-        str(card_msg.id),
+        '',
         theme_emoji,
         json.dumps(weapons),
         special_challenge,
@@ -1231,12 +1267,19 @@ async def bounty_create(
         json.dumps([]),
         'TRUE',
         str(bounty_role.id),
-        str(forum_channel.id) if forum_channel else ''
+        str(forum_channel.id) if forum_channel else '',
+        '',
+        ''
     ])
 
-    await interaction.edit_original_response(
-        content=f"✅ Bounty **{title}** created in {channel.mention} with role {bounty_role.mention}! Post your announcement art there first, then the card is ready."
+    forum_mention = forum_channel.mention if forum_channel else "*(forum creation failed)*"
+    msg = (
+        f"✅ Bounty **{title}** created!\n"
+        f"📋 Bulletin Board: {channel.mention} — post your art there to activate the leaderboards\n"
+        f"📖 Ledger: {forum_mention}\n"
+        f"🎭 Role: {bounty_role.mention}"
     )
+    await interaction.edit_original_response(content=msg)
 
 
 @bot.tree.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
@@ -1378,24 +1421,31 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     forum_channel = guild.get_channel(forum_channel_id)
     if forum_channel and isinstance(forum_channel, discord.ForumChannel):
         if forum_post_id:
-            # Edit existing post
+            # Edit the card message (second message, after the theme emoji)
             try:
                 forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
-                async for msg in forum_thread.history(limit=1, oldest_first=True):
-                    await msg.edit(content=build_player_bounty_card(bounty, player_progress))
-                    break
+                messages = []
+                async for msg in forum_thread.history(limit=2, oldest_first=True):
+                    messages.append(msg)
+                if len(messages) >= 2:
+                    await messages[1].edit(content=build_player_bounty_card(bounty, player_progress))
+                elif len(messages) == 1:
+                    # Card message missing, post it
+                    await forum_thread.send(build_player_bounty_card(bounty, player_progress))
             except Exception as e:
                 print(f"Forum post update error: {e}")
                 forum_post_id = None
 
         if not forum_post_id:
             # Create new forum post for this player
+            # First message is the theme emoji, bot then posts the bounty card
             try:
-                card_text = build_player_bounty_card(bounty, player_progress)
-                new_thread, _ = await forum_channel.create_thread(
+                new_thread, first_msg = await forum_channel.create_thread(
                     name=player_name,
-                    content=card_text
+                    content=bounty['theme_emoji']
                 )
+                card_text = build_player_bounty_card(bounty, player_progress)
+                await new_thread.send(card_text)
                 forum_post_id = new_thread.id
             except Exception as e:
                 print(f"Forum post create error: {e}")
@@ -1409,8 +1459,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             str(forum_post_id) if forum_post_id else '', json.dumps(player_progress)
         ])
 
-    # ── MASTER CARD ───────────────────────────────────────────────────────────
-    # Check full completion (all weapons done)
+    # ── COMPLETIONS & BONUS BOARDS ───────────────────────────────────────────
     completions = bounty['completions']
     newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
     if newly_completed:
@@ -1425,20 +1474,32 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")
 
-    # Save updated master state
+    # Save updated state
     save_bounty_state(bounty['row'], weapons, bounty['special_done'], completions)
 
-    # Rebuild and edit the master card message
-    card_text = build_bounty_card(
-        bounty['title'], bounty['theme_emoji'], weapons,
-        bounty['special_challenge'], bounty['special_done'], completions
-    )
-    try:
-        if bounty_channel:
-            msg = await bounty_channel.fetch_message(bounty['message_id'])
-            await msg.edit(content=card_text)
-    except Exception as e:
-        print(f"Bounty card update error: {e}")
+    # Update completions board in Bulletin Board channel
+    if bounty_channel and bounty.get('completions_msg_id'):
+        try:
+            if completions:
+                lines = [f"```"]
+                lines.append(f"╭──────────────────────────────╮")
+                lines.append(f"  {bounty['theme_emoji']} COMPLETIONS {bounty['theme_emoji']}")
+                lines.append(f"╰──────────────────────────────╯")
+                for idx, c in enumerate(completions, 1):
+                    lines.append(f"{idx}. {c['name']}  {c['date']}")
+                lines.append("```")
+                comp_text = "\n".join(lines)
+            else:
+                comp_text = (
+                    f"```\n╭──────────────────────────────╮\n"
+                    f"  {bounty['theme_emoji']} COMPLETIONS {bounty['theme_emoji']}\n"
+                    f"╰──────────────────────────────╯\n"
+                    f"No completions yet.\n```"
+                )
+            comp_msg = await bounty_channel.fetch_message(bounty['completions_msg_id'])
+            await comp_msg.edit(content=comp_text)
+        except Exception as e:
+            print(f"Completions board update error: {e}")
 
 @bot.tree.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
 @discord.app_commands.checks.has_permissions(administrator=True)
