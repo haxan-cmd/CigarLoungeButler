@@ -56,7 +56,7 @@ WEAPONS_2H = [
 
 WEAPONS_1H = [
     "Axe", "Dagger", "Falchion", "Fist and Shield", "Hatchet", "Healing Horn",
-    "Heavy Cavalry Sword", "Knife", "Mallet", "One-Handed Spear",
+    "Heavy Cavalry Sword", "Knife", "Mace", "Mallet", "One-Handed Spear",
     "Pick Axe", "Rapier", "Short Sword", "Sword", "Warhammer", "Cudgel"
 ]
 
@@ -65,9 +65,9 @@ CLASS_WEAPON_MAP = {
     "Raider": ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
     "Ambusher": ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
     "Poleman": ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
-    "Man-at-Arms": ["Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
+    "Man-at-Arms": ["Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Mace", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
     "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
-    "Officer": ["Greatsword", "Heavy Mace", "Longsword", "Pole Axe", "War Axe"],
+    "Officer": ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
     "Guardian": ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
     "Crusader": ["Battle Axe", "Executioner's Axe", "Messer", "Quarterstaff", "Two-Handed Hammer"],
 }
