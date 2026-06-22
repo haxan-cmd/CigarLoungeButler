@@ -716,10 +716,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-        # Cap 100 Kills / 200 Takedowns display at top 50
+        # Cap 100 Kills / 200 Takedowns display at top 25
         if lb_name in ("100 Kills", "200 Takedowns"):
-            display_entries = entries[:50]
-            overflow = len(entries) - 50
+            display_entries = entries[:25]
+            overflow = len(entries) - 25
         else:
             display_entries = entries
             overflow = 0
@@ -895,65 +895,82 @@ async def setup_leaderboard(interaction: discord.Interaction, name: str, type: s
 
         await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
-@bot.tree.command(name="refresh", description="Refresh a leaderboard's Discord messages from the current sheet data")
-@discord.app_commands.describe(name="Exact leaderboard name e.g. Spear or Darkforest - Agatha")
-async def refresh_leaderboard(interaction: discord.Interaction, name: str):
+@bot.tree.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name")
+@discord.app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
+async def refresh_leaderboard(interaction: discord.Interaction, name: str = None):
     if not interaction.user.guild_permissions.manage_messages:
         await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"Refreshing **{name}**...", ephemeral=True)
-
     all_lb_rows = leaderboards_ws.get_all_records()
-    lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
-    if not lb_row:
-        await interaction.edit_original_response(content=f"❌ No leaderboard found with name: `{name}`")
-        return
 
-    entries = get_leaderboard_entries(name)
-    entries = sorted(entries, key=lambda x: x['score'], reverse=True)
-
-    if name in ("100 Kills", "200 Takedowns"):
-        overflow = max(0, len(entries) - 50)
-        display_entries = entries[:50]
+    if name is None:
+        # Auto-detect by current channel/thread ID
+        channel_id = str(interaction.channel.id)
+        matching = [r for r in all_lb_rows if str(r['Thread ID']) == channel_id]
+        if not matching:
+            await interaction.response.send_message("❌ No leaderboard found for this channel. Try specifying the name manually.", ephemeral=True)
+            return
+        # If multiple (e.g. map boards with attack + defense), refresh all
+        names_to_refresh = [r['Leaderboard Name'] for r in matching]
     else:
-        overflow = 0
-        display_entries = entries
+        lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
+        if not lb_row:
+            await interaction.response.send_message(f"❌ No leaderboard found with name: `{name}`", ephemeral=True)
+            return
+        names_to_refresh = [name]
 
-    chunks = format_leaderboard_text(display_entries, overflow)
+    await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
 
-    thread_id = int(lb_row['Thread ID'])
-    message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+    for lb_name in names_to_refresh:
+        lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+        if not lb_row:
+            continue
 
-    try:
-        guild = interaction.guild
-        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        entries = get_leaderboard_entries(lb_name)
+        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-        for idx, mid in enumerate(message_ids):
-            try:
-                msg = await thread.fetch_message(mid)
-                if idx < len(chunks):
-                    await msg.edit(content=chunks[idx])
-                else:
-                    await msg.edit(content="\u200b")
-            except Exception as e:
-                print(f"Refresh edit error for {name} msg {mid}: {e}")
+        if lb_name in ("100 Kills", "200 Takedowns"):
+            overflow = max(0, len(entries) - 25)
+            display_entries = entries[:25]
+        else:
+            overflow = 0
+            display_entries = entries
 
-        # Post new messages if chunks grew
-        if len(chunks) > len(message_ids):
-            new_ids = list(message_ids)
-            for chunk in chunks[len(message_ids):]:
-                new_msg = await thread.send(chunk)
-                new_ids.append(new_msg.id)
-            # Update sheet
-            for i, row in enumerate(leaderboards_ws.get_all_values()):
-                if row[0] == name:
-                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
-                    break
+        chunks = format_leaderboard_text(display_entries, overflow)
 
-        await interaction.edit_original_response(content=f"✅ **{name}** refreshed with {len(entries)} entries.")
-    except Exception as e:
-        await interaction.edit_original_response(content=f"❌ Error refreshing {name}: {e}")
+        thread_id = int(lb_row['Thread ID'])
+        message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+
+        try:
+            guild = interaction.guild
+            thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+            for idx, mid in enumerate(message_ids):
+                try:
+                    msg = await thread.fetch_message(mid)
+                    if idx < len(chunks):
+                        await msg.edit(content=chunks[idx])
+                    else:
+                        await msg.edit(content="\u200b")
+                except Exception as e:
+                    print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+
+            if len(chunks) > len(message_ids):
+                new_ids = list(message_ids)
+                for chunk in chunks[len(message_ids):]:
+                    new_msg = await thread.send(chunk)
+                    new_ids.append(new_msg.id)
+                for i, row in enumerate(leaderboards_ws.get_all_values()):
+                    if row[0] == lb_name:
+                        leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in new_ids))
+                        break
+
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
+            return
+
+    await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
 
 # ── BOUNTY HELPERS ────────────────────────────────────────────────────────────
 
