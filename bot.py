@@ -256,20 +256,24 @@ def parse_submission_text(text):
             break
 
     # Check subclass/class aliases
+    detected_parent = None
     for alias in sorted(SUBCLASS_ALIASES.keys(), key=len, reverse=True):
         if alias in text_lower:
             raw = SUBCLASS_ALIASES[alias]
-            # If it's a parent class name, don't resolve to subclass yet — too ambiguous
-            # unless only one subclass exists (Archer -> handled in Marksman flow separately)
             if raw in PARENT_TO_SUBCLASSES:
-                # Only resolve if there's exactly one subclass (e.g. future-proofing)
-                subs = PARENT_TO_SUBCLASSES[raw]
-                if len(subs) == 1:
-                    detected_subclass = subs[0]
-                # else leave as None — too ambiguous
+                # Parent class detected — try to resolve via weapon cross-reference
+                detected_parent = raw
             else:
                 detected_subclass = raw
             break
+
+    # Cross-reference: if we have a parent class + weapon, resolve to exact subclass
+    if detected_parent and detected_weapon:
+        subs = PARENT_TO_SUBCLASSES[detected_parent]
+        candidates = [s for s in subs if detected_weapon in CLASS_WEAPON_MAP.get(s, [])]
+        if len(candidates) == 1:
+            detected_subclass = candidates[0]
+        # else ambiguous even with weapon — leave None
 
     return detected_weapon, detected_subclass
 
