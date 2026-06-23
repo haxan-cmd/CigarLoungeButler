@@ -1994,6 +1994,19 @@ def calculate_butler_stats():
     fav_weapon = max(weapon_counts, key=weapon_counts.get) if weapon_counts else "N/A"
     fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
 
+    # Also check LeaderboardData 100 Kills board for historical entries missing from Submissions
+    for row in ld:
+        if len(row) < 4:
+            continue
+        if row[0].strip() == '100 Kills':
+            player = row[1].strip()
+            try:
+                score = int(row[3])
+            except ValueError:
+                continue
+            if score > top_kills[0]:
+                top_kills = (score, player)
+
     # Title calculations from LeaderboardData
     # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
     # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
