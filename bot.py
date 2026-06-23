@@ -2293,6 +2293,50 @@ async def butlers_report(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
 
 
+@bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
+@app_commands.checks.has_role(NULL_MOD_ROLE_ID)
+async def title_guide(interaction: discord.Interaction):
+    channel = bot.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+    if not channel:
+        await interaction.response.send_message("Could not find the Butler's Favourites channel.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="Butler's Favourites — Title Guide",
+        description="Prestige titles awarded to the Lounge's top performers. Titles are recalculated automatically after every submission.",
+        color=discord.Color.from_str("#c8a45a")
+    )
+    embed.add_field(
+        name="🏆 Grand Marshal",
+        value="Appears on 15+ leaderboards across all categories, ranked by average placement.",
+        inline=False
+    )
+    embed.add_field(
+        name="⚔️ Weapons Master",
+        value="Appears on 9+ weapon leaderboards, ranked by average placement.",
+        inline=False
+    )
+    embed.add_field(
+        name="🗺️ Campaign Master",
+        value="Appears on 6+ map leaderboards, ranked by average placement.",
+        inline=False
+    )
+    embed.add_field(
+        name="💀 Headhunter",
+        value="Held by the #1 player on the 100 Kills board. Hit 100+ kills in a single match and submit your scoreboard to enter. Ranked by average kills score, weighted by number of submissions.",
+        inline=False
+    )
+    embed.add_field(
+        name="🩸 Butcher",
+        value="Held by the #1 player on the 200 Takedowns board. Hit 200+ takedowns in a single match and submit your scoreboard to enter. Ranked by average takedowns score, weighted by number of submissions.",
+        inline=False
+    )
+    embed.set_footer(text="Only one player holds each title at a time.")
+
+    await channel.send(embed=embed)
+    await interaction.response.send_message("Title guide posted.", ephemeral=True)
+
+
 import traceback
 try:
     bot.run(TOKEN)
