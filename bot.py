@@ -1555,7 +1555,7 @@ async def bounty_add_card(interaction: discord.Interaction, member: discord.Memb
     player_id = member.id
 
     # Check if player already has a card
-    player_row = get_player_bounty_row(bounty['title'], str(player_id))
+    player_row = get_player_bounty_progress(bounty['title'], str(player_id))
     if player_row and player_row.get('forum_post_id'):
         await interaction.followup.send(f"⚠️ {player_name} already has a forum card.", ephemeral=True)
         return
