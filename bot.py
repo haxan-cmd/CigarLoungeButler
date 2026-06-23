@@ -48,6 +48,7 @@ BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bou
 BULLETIN_BOARD_CATEGORY_ID = 1359537379039252550
 LEDGER_CATEGORY_ID = 1456640264004435978
 MOD_ROLE_ID = 1472259982241300611
+BUTLERS_NOTES_CHANNEL_ID = 1324384915367325836
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -1636,6 +1637,77 @@ async def seed_players(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
+
+
+@bot.tree.command(name="patch_notes", description="Post patch notes to butler's notes channel (mod only)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(version="Version number e.g. v1.3.0", notes="What changed — use | to separate bullet points")
+async def patch_notes(interaction: discord.Interaction, version: str, notes: str):
+    await interaction.response.defer(ephemeral=True)
+
+    channel = interaction.guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
+    if not channel:
+        await interaction.followup.send("❌ Butler's notes channel not found.", ephemeral=True)
+        return
+
+    bullets = [f"• {n.strip()}" for n in notes.split("|")]
+    bullet_text = "\n".join(bullets)
+
+    msg = (
+        f"📝 **Cigar Lounge Butler {version}**\n"
+        f"──────────────────────\n"
+        f"{bullet_text}"
+    )
+
+    await channel.send(msg)
+    await interaction.followup.send(f"✅ Patch notes posted for {version}.", ephemeral=True)
+
+
+@bot.tree.command(name="bounty_refresh_card", description="Refresh a player's bounty forum card (mod only)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(member="The player whose card to refresh")
+async def bounty_refresh_card(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.followup.send("No active bounty found.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    player_name = member.nick if member.nick else member.display_name
+    player_id = str(member.id)
+
+    player_row = get_player_bounty_progress(bounty['title'], player_id)
+    if not player_row:
+        await interaction.followup.send(f"❌ No bounty data found for {player_name}.", ephemeral=True)
+        return
+
+    forum_post_id = player_row.get('forum_post_id')
+    if not forum_post_id:
+        await interaction.followup.send(f"❌ No forum card found for {player_name}. Use /bounty_add_card instead.", ephemeral=True)
+        return
+
+    forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+    forum_channel = guild.get_channel(forum_channel_id)
+    if not forum_channel:
+        await interaction.followup.send("❌ Ledger forum channel not found.", ephemeral=True)
+        return
+
+    try:
+        forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+        player_progress = player_row['progress']
+        card_text = build_player_bounty_card(bounty, player_progress)
+        messages = []
+        async for msg in forum_thread.history(limit=2, oldest_first=True):
+            messages.append(msg)
+        if len(messages) >= 2:
+            await messages[1].edit(content=card_text)
+        elif len(messages) == 1:
+            await forum_thread.send(card_text)
+        await interaction.followup.send(f"✅ Refreshed bounty card for **{player_name}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 import traceback
 try:
