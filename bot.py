@@ -136,6 +136,143 @@ MARKSMAN_SUBCLASSES = {
     "Skirmisher": ["Javelin", "Throwing Axe"],
 }
 
+
+# ---------------------------------------------------------------------------
+# Submission text parser — alias map for weapon/class inference
+# Add new aliases here as the community uses them
+# ---------------------------------------------------------------------------
+WEAPON_ALIASES = {
+    "ls": "Longsword",
+    "longsword": "Longsword",
+    "hmace": "Heavy Mace",
+    "heavy mace": "Heavy Mace",
+    "mace": "Mace",
+    "1h mace": "Mace",
+    "dane": "Dane Axe",
+    "dane axe": "Dane Axe",
+    "exe axe": "Executioner's Axe",
+    "exec axe": "Executioner's Axe",
+    "executioner axe": "Executioner's Axe",
+    "executioners axe": "Executioner's Axe",
+    "baxe": "Battle Axe",
+    "battle axe": "Battle Axe",
+    "gs": "Greatsword",
+    "greatsword": "Greatsword",
+    "mstar": "Morning Star",
+    "morning star": "Morning Star",
+    "qs": "Quarterstaff",
+    "quarterstaff": "Quarterstaff",
+    "halberd": "Halberd",
+    "glaive": "Glaive",
+    "spear": "Spear",
+    "dagger": "Dagger",
+    "knife": "Knife",
+    "hatchet": "Hatchet",
+    "katars": "Katars",
+    "falchion": "Falchion",
+    "rapier": "Rapier",
+    "sword": "Sword",
+    "short sword": "Short Sword",
+    "war axe": "War Axe",
+    "pole axe": "Pole Axe",
+    "poleaxe": "Pole Axe",
+    "polehammer": "Polehammer",
+    "maul": "Maul",
+    "war club": "War Club",
+    "shovel": "Shovel",
+    "pick axe": "Pick Axe",
+    "pickaxe": "Pick Axe",
+    "mallet": "Mallet",
+    "sledge": "Sledge Hammer",
+    "sledgehammer": "Sledge Hammer",
+    "sledge hammer": "Sledge Hammer",
+    "highland sword": "Highland Sword",
+    "warhammer": "Warhammer",
+    "war hammer": "Warhammer",
+    "goedendag": "Goedendag",
+    "cudgel": "Cudgel",
+    "healing horn": "Healing Horn",
+    "fist": "Fist and Shield",
+    "fist and shield": "Fist and Shield",
+    "heavy cavalry sword": "Heavy Cavalry Sword",
+    "hcs": "Heavy Cavalry Sword",
+    "one handed spear": "One-Handed Spear",
+    "1h spear": "One-Handed Spear",
+    "two handed hammer": "Two-Handed Hammer",
+    "2h hammer": "Two-Handed Hammer",
+    "bow": "Bow",
+    "war bow": "War Bow",
+    "crossbow": "Crossbow",
+    "siege crossbow": "Siege Crossbow",
+    "javelin": "Javelin",
+    "throwing axe": "Throwing Axe",
+}
+
+SUBCLASS_ALIASES = {
+    "knight": "Knight",
+    "vanguard": "Vanguard",
+    "van": "Vanguard",
+    "footman": "Footman",
+    "archer": "Archer",
+    "devastator": "Devastator",
+    "dev": "Devastator",
+    "crusader": "Crusader",
+    "guardian": "Guardian",
+    "raider": "Raider",
+    "ambusher": "Ambusher",
+    "poleman": "Poleman",
+    "man at arms": "Man-at-Arms",
+    "man-at-arms": "Man-at-Arms",
+    "maa": "Man-at-Arms",
+    "field engineer": "Field Engineer",
+    "engineer": "Field Engineer",
+    "eng": "Field Engineer",
+    "officer": "Officer",
+    "longbowman": "Longbowman",
+    "crossbowman": "Crossbowman",
+    "skirmisher": "Skirmisher",
+}
+
+# Parent class -> list of subclasses
+PARENT_TO_SUBCLASSES = {
+    "Knight": ["Crusader", "Devastator", "Guardian"],
+    "Vanguard": ["Ambusher", "Poleman", "Raider"],
+    "Footman": ["Field Engineer", "Man-at-Arms", "Officer"],
+    "Archer": ["Crossbowman", "Longbowman", "Skirmisher"],
+}
+
+def parse_submission_text(text):
+    """Parse message caption for weapon and subclass hints.
+    Returns (weapon, subclass) — either may be None if not detected."""
+    text_lower = text.lower().strip()
+
+    detected_weapon = None
+    detected_subclass = None
+
+    # Check weapon aliases (longest match first to avoid 'mace' matching before 'heavy mace')
+    for alias in sorted(WEAPON_ALIASES.keys(), key=len, reverse=True):
+        if alias in text_lower:
+            detected_weapon = WEAPON_ALIASES[alias]
+            break
+
+    # Check subclass/class aliases
+    for alias in sorted(SUBCLASS_ALIASES.keys(), key=len, reverse=True):
+        if alias in text_lower:
+            raw = SUBCLASS_ALIASES[alias]
+            # If it's a parent class name, don't resolve to subclass yet — too ambiguous
+            # unless only one subclass exists (Archer -> handled in Marksman flow separately)
+            if raw in PARENT_TO_SUBCLASSES:
+                # Only resolve if there's exactly one subclass (e.g. future-proofing)
+                subs = PARENT_TO_SUBCLASSES[raw]
+                if len(subs) == 1:
+                    detected_subclass = subs[0]
+                # else leave as None — too ambiguous
+            else:
+                detected_subclass = raw
+            break
+
+    return detected_weapon, detected_subclass
+
 def get_classes_for_category(category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     result = []
@@ -265,12 +402,27 @@ class SubmitView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        view = WeaponTypeView(self.original_message, self.prompt_msg)
-        await interaction.response.send_message(
-            content="**Step 1 of 6:** What type of weapon did you use?",
-            view=view,
-            ephemeral=True
-        )
+        caption = self.original_message.content.strip()
+        detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
+        if detected_weapon or detected_subclass:
+            view = ParseConfirmView(self.original_message, self.prompt_msg, detected_weapon, detected_subclass)
+            hints = []
+            if detected_weapon:
+                hints.append(f"Weapon: `{detected_weapon}`")
+            if detected_subclass:
+                hints.append(f"Class: `{detected_subclass}`")
+            await interaction.response.send_message(
+                content="\U0001f4cb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
+                view=view,
+                ephemeral=True
+            )
+        else:
+            view = WeaponTypeView(self.original_message, self.prompt_msg)
+            await interaction.response.send_message(
+                content="**Step 1 of 6:** What type of weapon did you use?",
+                view=view,
+                ephemeral=True
+            )
 
     @discord.ui.button(label='Dismiss', style=discord.ButtonStyle.grey, emoji='✖️')
     async def dismiss_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -279,6 +431,67 @@ class SubmitView(discord.ui.View):
             return
         await self.prompt_msg.delete()
         await interaction.response.defer()
+
+
+class ParseConfirmView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, detected_weapon, detected_subclass):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.detected_weapon = detected_weapon
+        self.detected_subclass = detected_subclass
+
+    async def on_timeout(self):
+        try:
+            await self.prompt_msg.delete()
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label='Confirm', style=discord.ButtonStyle.green, emoji='✅')
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        weapon = self.detected_weapon
+        subclass = self.detected_subclass
+
+        # If we have both weapon and subclass, skip straight to map
+        if weapon and subclass:
+            # Determine category from weapon
+            category = "2h" if weapon in WEAPONS_2H else "1h"
+            view = MapSelectView(self.original_message, self.prompt_msg, subclass, weapon)
+            await interaction.response.edit_message(
+                content=f"**Step 4 of 6:** Class: `{subclass}` | Weapon: `{weapon}`\nWhich map were you on?",
+                view=view
+            )
+        elif weapon:
+            # Have weapon, still need class
+            category = "2h" if weapon in WEAPONS_2H else "1h"
+            classes = get_classes_for_category(category)
+            view = ClassSelectView(self.original_message, self.prompt_msg, category, classes)
+            await interaction.response.edit_message(
+                content=f"**Step 2 of 6:** Weapon: `{weapon}`\nWhich class were you playing?",
+                view=view
+            )
+        elif subclass:
+            # Have class, still need weapon
+            view = WeaponTypeView(self.original_message, self.prompt_msg)
+            await interaction.response.edit_message(
+                content=f"**Step 1 of 6:** Class: `{subclass}`\nWhat type of weapon did you use?",
+                view=view
+            )
+
+    @discord.ui.button(label='Change', style=discord.ButtonStyle.grey, emoji='🔄')
+    async def change(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        view = WeaponTypeView(self.original_message, self.prompt_msg)
+        await interaction.response.edit_message(
+            content="**Step 1 of 6:** What type of weapon did you use?",
+            view=view
+        )
 
 class WeaponTypeView(discord.ui.View):
     def __init__(self, original_message, prompt_msg):
