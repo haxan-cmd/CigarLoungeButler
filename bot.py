@@ -1598,10 +1598,9 @@ async def bounty_status(interaction: discord.Interaction):
     if not bounty:
         await interaction.response.send_message("No active bounty right now.", ephemeral=True)
         return
-    card = build_bounty_card(
-        bounty['title'], bounty['theme_emoji'], bounty['weapons'],
-        bounty['special_challenge'], bounty['special_done'], bounty['completions']
-    )
+    player_data = get_player_bounty_progress(bounty['title'], interaction.user.id)
+    player_progress = player_data['progress'] if player_data else {}
+    card = build_player_bounty_card(bounty, player_progress)
     await interaction.response.send_message(card, ephemeral=True)
 
 
