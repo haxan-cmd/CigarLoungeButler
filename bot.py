@@ -1109,29 +1109,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-            # Edit existing messages for each chunk
+            # Pack all chunks into existing messages — never post new ones (would appear after decoration)
+            packed = pack_chunks_into_slots(chunks, len(message_ids))
+
             for idx, mid in enumerate(message_ids):
                 try:
                     msg = await thread.fetch_message(mid)
-                    if idx < len(chunks):
-                        await msg.edit(content=chunks[idx])
-                    else:
-                        # More stored messages than chunks — clear extras
-                        await msg.edit(content="\u200b")
+                    await msg.edit(content=packed[idx])
                 except Exception as e:
                     print(f"Discord edit error for {lb_name} msg {mid}: {e}")
 
-            # If chunks grew beyond stored messages, post new ones
-            final_ids = list(message_ids)
-            if len(chunks) > len(message_ids):
-                for chunk in chunks[len(message_ids):]:
-                    new_msg = await thread.send(chunk)
-                    final_ids.append(new_msg.id)
-            # Always write the definitive ID list back to the sheet
-            for i, row in enumerate(leaderboards_ws.get_all_values()):
-                if row[0] == lb_name:
-                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in final_ids))
-                    break
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
@@ -1171,6 +1158,35 @@ def get_leaderboard_entries(name):
                 'weapon': row[5] if len(row) > 5 else ''
             })
     return sorted(entries, key=lambda x: x['score'], reverse=True)
+
+def pack_chunks_into_slots(chunks, num_slots):
+    """Pack chunks into exactly num_slots messages.
+    If chunks > slots, concatenate overflow into the last slot (up to 1900 chars).
+    If chunks < slots, fill remaining slots with zero-width space.
+    """
+    if num_slots == 0:
+        return []
+
+    if len(chunks) <= num_slots:
+        packed = list(chunks)
+        while len(packed) < num_slots:
+            packed.append("\u200b")
+        return packed
+
+    # More chunks than slots — merge excess into last slot
+    packed = list(chunks[:num_slots - 1])
+    last = chunks[num_slots - 1]
+    for extra in chunks[num_slots:]:
+        candidate = last + "\n" + extra
+        if len(candidate) <= 1900:
+            last = candidate
+        else:
+            # Truncate with overflow note
+            last = last + "\n*...continued*"
+            break
+    packed.append(last)
+    return packed
+
 
 def format_leaderboard_text(entries, overflow=0, show_weapon=False):
     if not entries:
@@ -1320,26 +1336,15 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
             guild = interaction.guild
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
+            # Pack all chunks into existing messages — never post new ones (would appear after decoration)
+            packed = pack_chunks_into_slots(chunks, len(message_ids))
+
             for idx, mid in enumerate(message_ids):
                 try:
                     msg = await thread.fetch_message(mid)
-                    if idx < len(chunks):
-                        await msg.edit(content=chunks[idx])
-                    else:
-                        await msg.edit(content="\u200b")
+                    await msg.edit(content=packed[idx])
                 except Exception as e:
                     print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
-
-            final_ids = list(message_ids)
-            if len(chunks) > len(message_ids):
-                for chunk in chunks[len(message_ids):]:
-                    new_msg = await thread.send(chunk)
-                    final_ids.append(new_msg.id)
-            # Always write the definitive ID list back to the sheet
-            for i, row in enumerate(leaderboards_ws.get_all_values()):
-                if row[0] == lb_name:
-                    leaderboards_ws.update_cell(i + 1, 3, ",".join(str(x) for x in final_ids))
-                    break
 
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
