@@ -1456,13 +1456,14 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             try:
                 forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
                 messages = []
-                async for msg in forum_thread.history(limit=2, oldest_first=True):
+                async for msg in forum_thread.history(limit=5, oldest_first=True):
                     messages.append(msg)
-                if len(messages) >= 2:
-                    await messages[1].edit(content=build_player_bounty_card(bounty, player_progress))
-                elif len(messages) == 1:
-                    # Card message missing, post it
-                    await forum_thread.send(build_player_bounty_card(bounty, player_progress))
+                bot_messages = [m for m in messages if m.author.bot]
+                card_text = build_player_bounty_card(bounty, player_progress)
+                if bot_messages:
+                    await bot_messages[-1].edit(content=card_text)
+                else:
+                    await forum_thread.send(card_text)
             except Exception as e:
                 print(f"Forum post update error: {e}")
                 forum_post_id = None
@@ -1700,11 +1701,13 @@ async def bounty_refresh_card(interaction: discord.Interaction, member: discord.
         print(f"[REFRESH] player_progress={json.dumps(player_progress)}")
         card_text = build_player_bounty_card(bounty, player_progress)
         messages = []
-        async for msg in forum_thread.history(limit=2, oldest_first=True):
+        async for msg in forum_thread.history(limit=5, oldest_first=True):
             messages.append(msg)
-        if len(messages) >= 2:
-            await messages[1].edit(content=card_text)
-        elif len(messages) == 1:
+        # Find the last bot message to edit
+        bot_messages = [m for m in messages if m.author.bot]
+        if bot_messages:
+            await bot_messages[-1].edit(content=card_text)
+        else:
             await forum_thread.send(card_text)
         await interaction.followup.send(f"✅ Refreshed bounty card for **{player_name}**.", ephemeral=True)
     except Exception as e:
