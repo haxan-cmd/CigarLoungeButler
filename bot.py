@@ -53,8 +53,10 @@ BUTLERS_FAVOURITES_CHANNEL_ID = 1518822798116524092
 MAIN_CHANNEL_ID = 1324447691467526338  # #main
 
 GRAND_MARSHAL_ROLE_ID = 1467680214560674020
-GRANDMASTER_OF_ARMS_ROLE_ID = 1467679890706010277
+WEAPONS_MASTER_ROLE_ID = 1467679890706010277
 CAMPAIGN_MASTER_ROLE_ID = 1518820158821367858
+HEADHUNTER_ROLE_ID = 1518827472718921819
+BUTCHER_ROLE_ID = 1518827620572205097
 
 # Rate limiting for /butlers_report — user_id -> last used timestamp
 _butlers_report_cooldowns = {}
@@ -1989,9 +1991,13 @@ def calculate_butler_stats():
     fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
 
     # Title calculations from LeaderboardData
-    # Map boards have " - " in the name, weapon boards don't
-    weapon_placements = {}  # player -> [placements]
-    map_placements = {}
+    # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
+    # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
+    weapon_placements = {}   # player -> [placements] — weapon + feat boards
+    map_placements = {}      # player -> [placements] — map boards
+
+    PLACEMENT_FEAT_BOARDS = {'Mallet', 'Knife', 'Flawless', 'Healing Horn'}
+    SKIP_LB = {'100 Kills', '200 Takedowns'}
 
     lb_groups = {}
     for row in ld:
@@ -2003,8 +2009,6 @@ def calculate_butler_stats():
             lb_groups[lb_name] = []
         lb_groups[lb_name].append(player)
 
-    SKIP_LB = {'100 Kills', '200 Takedowns', 'Flawless', 'Healing Horn', 'Mallet', 'Knife'}
-
     for lb_name, players in lb_groups.items():
         if lb_name in SKIP_LB:
             continue
@@ -2014,13 +2018,14 @@ def calculate_butler_stats():
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
             else:
+                # Weapon boards and feat placement boards both count under weapons_master / grand_marshal
                 weapon_placements.setdefault(player, []).append(placement)
 
-    def avg_placement(d):
+    def best_placement_title(d):
+        """Return player with best avg placement; tiebreak on most boards."""
         if not d:
             return None
-        avgs = {p: sum(v)/len(v) for p, v in d.items()}
-        return min(avgs, key=avgs.get)
+        return min(d.keys(), key=lambda p: (sum(d[p]) / len(d[p]), -len(d[p])))
 
     combined = {}
     for p, v in weapon_placements.items():
@@ -2028,9 +2033,37 @@ def calculate_butler_stats():
     for p, v in map_placements.items():
         combined.setdefault(p, []).extend(v)
 
-    grand_marshal = avg_placement(combined)
-    grandmaster_of_arms = avg_placement(weapon_placements)
-    campaign_master = avg_placement(map_placements)
+    grand_marshal = best_placement_title(combined)
+    weapons_master = best_placement_title(weapon_placements)
+    campaign_master = best_placement_title(map_placements)
+
+    # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
+    # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
+    kills_scores = {}    # player -> [kill scores]
+    td_scores = {}       # player -> [takedown scores]
+
+    for row in ld:
+        if len(row) < 3:
+            continue
+        lb_name = row[0].strip()
+        player = row[1].strip()
+        try:
+            score = int(row[2])
+        except (ValueError, IndexError):
+            continue
+        if lb_name == '100 Kills':
+            kills_scores.setdefault(player, []).append(score)
+        elif lb_name == '200 Takedowns':
+            td_scores.setdefault(player, []).append(score)
+
+    def best_score_title(d):
+        """Return player with best average score; tiebreak on most submissions."""
+        if not d:
+            return None
+        return max(d.keys(), key=lambda p: (sum(d[p]) / len(d[p]), len(d[p])))
+
+    headhunter = best_score_title(kills_scores)
+    butcher = best_score_title(td_scores)
 
     return {
         'most_active': f"{most_active} — {player_counts.get(most_active, 0)} runs",
@@ -2041,8 +2074,10 @@ def calculate_butler_stats():
         'total_runs': len(subs),
         'total_players': len(players_set),
         'grand_marshal': grand_marshal or "N/A",
-        'grandmaster_of_arms': grandmaster_of_arms or "N/A",
+        'weapons_master': weapons_master or "N/A",
         'campaign_master': campaign_master or "N/A",
+        'headhunter': headhunter or "N/A",
+        'butcher': butcher or "N/A",
     }
 
 
@@ -2064,8 +2099,10 @@ def build_favourites_embed(stats):
         f"\n"
         f"─────────────────────\n"
         f"🏆 **Grand Marshal** — {stats['grand_marshal']}\n"
-        f"⚔️ **Grandmaster of Arms** — {stats['grandmaster_of_arms']}\n"
-        f"🗺️ **Campaign Master** — {stats['campaign_master']}"
+        f"⚔️ **Weapons Master** — {stats['weapons_master']}\n"
+        f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
+        f"💀 **Headhunter** — {stats['headhunter']}\n"
+        f"🩸 **Butcher** — {stats['butcher']}"
     )
 
 
@@ -2076,10 +2113,14 @@ async def update_title_roles(guild, stats):
     title_configs = [
         ('grand_marshal', GRAND_MARSHAL_ROLE_ID, 'Grand Marshal',
          "After careful review of the battlefield records, I must inform {old} that your commission has been reassigned. {new}, the Grand Marshal's standard is yours to carry. Try not to embarrass the household."),
-        ('grandmaster_of_arms', GRANDMASTER_OF_ARMS_ROLE_ID, 'Grandmaster of Arms',
-         "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Grandmaster of Arms title is yours. Do try to keep the blades sharp."),
+        ('weapons_master', WEAPONS_MASTER_ROLE_ID, 'Weapons Master',
+         "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
+        ('headhunter', HEADHUNTER_ROLE_ID, 'Headhunter',
+         "The tally has been reviewed. {old}, your count has been surpassed. {new}, the Headhunter title is yours. The butler suggests you stop being modest about it."),
+        ('butcher', BUTCHER_ROLE_ID, 'Butcher',
+         "The battlefield reports are in. {old}, someone has left more bodies behind. {new}, you are hereby declared the Butcher. The butler finds the whole affair rather distasteful, but acknowledges your commitment."),
     ]
 
     for stat_key, role_id, title_name, msg_template in title_configs:
