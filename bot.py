@@ -1878,16 +1878,11 @@ async def seed_players(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="patch_notes", description="Post patch notes to butler's notes channel (mod only)")
+@bot.tree.command(name="patch_notes", description="Post patch notes to the current channel (mod only)")
 @discord.app_commands.checks.has_permissions(administrator=True)
 @discord.app_commands.describe(version="Version number e.g. v1.3.0", notes="What changed — use | to separate bullet points")
 async def patch_notes(interaction: discord.Interaction, version: str, notes: str):
     await interaction.response.defer(ephemeral=True)
-
-    channel = interaction.guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
-    if not channel:
-        await interaction.followup.send("❌ Butler's notes channel not found.", ephemeral=True)
-        return
 
     bullets = [f"• {n.strip()}" for n in notes.split("|")]
     bullet_text = "\n".join(bullets)
@@ -1898,9 +1893,8 @@ async def patch_notes(interaction: discord.Interaction, version: str, notes: str
         f"{bullet_text}"
     )
 
-    await channel.send(msg)
+    await interaction.channel.send(msg)
     await interaction.followup.send(f"✅ Patch notes posted for {version}.", ephemeral=True)
-
 
 @bot.tree.command(name="bounty_refresh_card", description="Refresh a player's bounty forum card (mod only)")
 @discord.app_commands.checks.has_permissions(administrator=True)
@@ -1995,8 +1989,10 @@ def calculate_butler_stats():
     # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
     weapon_placements = {}   # player -> [placements] — weapon + feat boards
     map_placements = {}      # player -> [placements] — map boards
+    non_weapon_feat_placements = {}  # player -> [placements] — Flawless/Healing Horn (grand marshal only)
 
-    PLACEMENT_FEAT_BOARDS = {'Mallet', 'Knife', 'Flawless', 'Healing Horn'}
+    WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}
+    NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn'}
     SKIP_LB = {'100 Kills', '200 Takedowns'}
 
     lb_groups = {}
@@ -2017,8 +2013,11 @@ def calculate_butler_stats():
             placement = i + 1
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
+            elif lb_name in NON_WEAPON_FEAT_BOARDS:
+                # Flawless and Healing Horn count toward Grand Marshal only
+                non_weapon_feat_placements.setdefault(player, []).append(placement)
             else:
-                # Weapon boards and feat placement boards both count under weapons_master / grand_marshal
+                # Regular weapon boards + Mallet/Knife count toward Weapons Master
                 weapon_placements.setdefault(player, []).append(placement)
 
     def best_placement_title(d):
@@ -2031,6 +2030,8 @@ def calculate_butler_stats():
     for p, v in weapon_placements.items():
         combined.setdefault(p, []).extend(v)
     for p, v in map_placements.items():
+        combined.setdefault(p, []).extend(v)
+    for p, v in non_weapon_feat_placements.items():
         combined.setdefault(p, []).extend(v)
 
     grand_marshal = best_placement_title(combined)
