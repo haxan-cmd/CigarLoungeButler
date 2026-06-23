@@ -1144,6 +1144,7 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     is_ranged = selected_class.startswith("Marksman")
 
     # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
+    # and beats the player's own existing score on that board
     if not vip and not is_ranged:
         all_values = leaderboard_data_ws.get_all_values()
         weapon_entries = [row for row in all_values[1:] if row[0] == selected_weapon]
@@ -1151,8 +1152,15 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
             [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
             reverse=True
         )
-        qualifies = len(scores) < 10 or takedowns > scores[9]
-        if qualifies:
+        qualifies_board = len(scores) < 10 or takedowns > scores[9]
+        # Check if player already has a higher score on this board
+        discord_id_str = str(interaction.user.id)
+        player_existing = [
+            int(row[3]) for row in weapon_entries
+            if len(row) > 3 and row[3] and len(row) > 2 and row[2] == discord_id_str
+        ]
+        beats_personal_best = not player_existing or takedowns > max(player_existing)
+        if qualifies_board and beats_personal_best:
             await original_message.add_reaction("<:weapon_hs:1350656128635375698>")
 
     # Update leaderboards (skip for ranged submissions)
