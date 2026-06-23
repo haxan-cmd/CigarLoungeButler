@@ -49,6 +49,15 @@ BULLETIN_BOARD_CATEGORY_ID = 1359537379039252550
 LEDGER_CATEGORY_ID = 1456640264004435978
 MOD_ROLE_ID = 1472259982241300611
 BUTLERS_NOTES_CHANNEL_ID = 1518771519075909702
+BUTLERS_FAVOURITES_CHANNEL_ID = 1518822798116524092
+MAIN_CHANNEL_ID = 1324447691467526338  # #main
+
+GRAND_MARSHAL_ROLE_ID = 1467680214560674020
+GRANDMASTER_OF_ARMS_ROLE_ID = 1467679890706010277
+CAMPAIGN_MASTER_ROLE_ID = 1518820158821367858
+
+# Rate limiting for /butlers_report — user_id -> last used timestamp
+_butlers_report_cooldowns = {}
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -938,6 +947,23 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
                     break
         except Exception as e:
             print(f"Placement edit error: {e}")
+
+    # Silently update Butler's Favourites pinned message
+    try:
+        if BUTLERS_FAVOURITES_CHANNEL_ID:
+            fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+            if fav_channel:
+                stats = calculate_butler_stats()
+                embed_text = build_favourites_embed(stats)
+                async for msg in fav_channel.history(limit=5):
+                    if msg.author == interaction.guild.me:
+                        await msg.edit(content=embed_text)
+                        break
+                else:
+                    await fav_channel.send(embed_text)
+                await update_title_roles(interaction.guild, stats)
+    except Exception as e:
+        print(f"Butler favourites update error: {e}")
 
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
@@ -1922,6 +1948,250 @@ async def bounty_refresh_card(interaction: discord.Interaction, member: discord.
         await interaction.followup.send(f"✅ Refreshed bounty card for **{player_name}**.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+def calculate_butler_stats():
+    """Pull stats from Submissions and LeaderboardData sheets."""
+    subs = submissions_ws.get_all_values()[1:]
+    ld = leaderboard_data_ws.get_all_values()[1:]
+
+    # Submission stats
+    player_counts = {}
+    weapon_counts = {}
+    map_counts = {}
+    top_td = (0, "")
+    top_kills = (0, "")
+    players_set = set()
+
+    for row in subs:
+        if len(row) < 9:
+            continue
+        player = row[1].strip()
+        weapon = row[3].strip()
+        map_name = row[5].strip()
+        try:
+            td = int(row[7])
+            kills = int(row[8])
+        except (ValueError, IndexError):
+            td, kills = 0, 0
+
+        player_counts[player] = player_counts.get(player, 0) + 1
+        weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
+        map_counts[map_name] = map_counts.get(map_name, 0) + 1
+        players_set.add(player)
+        if td > top_td[0]:
+            top_td = (td, player)
+        if kills > top_kills[0]:
+            top_kills = (kills, player)
+
+    most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
+    fav_weapon = max(weapon_counts, key=weapon_counts.get) if weapon_counts else "N/A"
+    fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
+
+    # Title calculations from LeaderboardData
+    # Map boards have " - " in the name, weapon boards don't
+    weapon_placements = {}  # player -> [placements]
+    map_placements = {}
+
+    lb_groups = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        lb_name = row[0].strip()
+        player = row[1].strip()
+        if lb_name not in lb_groups:
+            lb_groups[lb_name] = []
+        lb_groups[lb_name].append(player)
+
+    SKIP_LB = {'100 Kills', '200 Takedowns', 'Flawless', 'Healing Horn', 'Mallet', 'Knife'}
+
+    for lb_name, players in lb_groups.items():
+        if lb_name in SKIP_LB:
+            continue
+        is_map = ' - ' in lb_name
+        for i, player in enumerate(players[:10]):
+            placement = i + 1
+            if is_map:
+                map_placements.setdefault(player, []).append(placement)
+            else:
+                weapon_placements.setdefault(player, []).append(placement)
+
+    def avg_placement(d):
+        if not d:
+            return None
+        avgs = {p: sum(v)/len(v) for p, v in d.items()}
+        return min(avgs, key=avgs.get)
+
+    combined = {}
+    for p, v in weapon_placements.items():
+        combined.setdefault(p, []).extend(v)
+    for p, v in map_placements.items():
+        combined.setdefault(p, []).extend(v)
+
+    grand_marshal = avg_placement(combined)
+    grandmaster_of_arms = avg_placement(weapon_placements)
+    campaign_master = avg_placement(map_placements)
+
+    return {
+        'most_active': f"{most_active} — {player_counts.get(most_active, 0)} runs",
+        'top_td': f"{top_td[1]} — {top_td[0]} TD",
+        'top_kills': f"{top_kills[1]} — {top_kills[0]} K",
+        'fav_weapon': f"{fav_weapon} — {weapon_counts.get(fav_weapon, 0)} runs",
+        'fav_map': f"{fav_map} — {map_counts.get(fav_map, 0)} runs",
+        'total_runs': len(subs),
+        'total_players': len(players_set),
+        'grand_marshal': grand_marshal or "N/A",
+        'grandmaster_of_arms': grandmaster_of_arms or "N/A",
+        'campaign_master': campaign_master or "N/A",
+    }
+
+
+def build_favourites_embed(stats):
+    return (
+        f"**📋 The Butler's Favourites**\n"
+        f"\n"
+        f"**Most Active Knight**\n{stats['most_active']}\n"
+        f"\n"
+        f"**Highest Takedowns**\n{stats['top_td']}\n"
+        f"\n"
+        f"**Most Kills**\n{stats['top_kills']}\n"
+        f"\n"
+        f"**Favourite Weapon**\n{stats['fav_weapon']}\n"
+        f"\n"
+        f"**Favourite Map**\n{stats['fav_map']}\n"
+        f"\n"
+        f"**Total Runs:** {stats['total_runs']} | **Total Players:** {stats['total_players']}\n"
+        f"\n"
+        f"─────────────────────\n"
+        f"🏆 **Grand Marshal** — {stats['grand_marshal']}\n"
+        f"⚔️ **Grandmaster of Arms** — {stats['grandmaster_of_arms']}\n"
+        f"🗺️ **Campaign Master** — {stats['campaign_master']}"
+    )
+
+
+async def update_title_roles(guild, stats):
+    """Assign title roles and announce changes in #main."""
+    main_channel = guild.get_channel(MAIN_CHANNEL_ID)
+
+    title_configs = [
+        ('grand_marshal', GRAND_MARSHAL_ROLE_ID, 'Grand Marshal',
+         "After careful review of the battlefield records, I must inform {old} that your commission has been reassigned. {new}, the Grand Marshal's standard is yours to carry. Try not to embarrass the household."),
+        ('grandmaster_of_arms', GRANDMASTER_OF_ARMS_ROLE_ID, 'Grandmaster of Arms',
+         "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Grandmaster of Arms title is yours. Do try to keep the blades sharp."),
+        ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
+         "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
+    ]
+
+    for stat_key, role_id, title_name, msg_template in title_configs:
+        new_holder_name = stats.get(stat_key, 'N/A')
+        if new_holder_name == 'N/A':
+            continue
+
+        role = guild.get_role(role_id)
+        if not role:
+            continue
+
+        # Find current holder
+        current_holders = [m for m in guild.members if role in m.roles]
+
+        # Find new holder by display name
+        new_member = discord.utils.find(
+            lambda m: (m.nick or m.display_name).lower() == new_holder_name.lower(),
+            guild.members
+        )
+        if not new_member:
+            continue
+
+        # Check if it changed hands
+        if current_holders and new_member in current_holders:
+            continue  # Same person, no change
+
+        # Remove from old holders
+        for old_member in current_holders:
+            try:
+                await old_member.remove_roles(role)
+            except Exception:
+                pass
+
+        # Give to new holder
+        try:
+            await new_member.add_roles(role)
+        except Exception:
+            pass
+
+        # Announce in main
+        if main_channel and current_holders:
+            old_mention = current_holders[0].mention
+            new_mention = new_member.mention
+            msg = msg_template.format(old=old_mention, new=new_mention)
+            try:
+                await main_channel.send(msg)
+            except Exception as e:
+                print(f"Title announcement error: {e}")
+
+
+@bot.tree.command(name="butlers_report", description="Summon the Butler's Favourites report")
+async def butlers_report(interaction: discord.Interaction):
+    import time
+
+    # Check if user is in Players sheet
+    player_ids = set()
+    for row in players_ws.get_all_values()[1:]:
+        if row and row[0]:
+            player_ids.add(row[0].strip())
+
+    if str(interaction.user.id) not in player_ids:
+        await interaction.response.send_message(
+            "I'm afraid I don't recognise you, sir. Only registered players may summon the report.",
+            ephemeral=True
+        )
+        return
+
+    # Rate limit — 5 minutes
+    now = time.time()
+    last = _butlers_report_cooldowns.get(interaction.user.id, 0)
+    if now - last < 300:
+        remaining = int(300 - (now - last))
+        await interaction.response.send_message(
+            f"Do you really think my manager would stand for this kind of excessive nagging? Try again in {remaining} seconds.",
+            ephemeral=True
+        )
+        return
+
+    _butlers_report_cooldowns[interaction.user.id] = now
+
+    await interaction.response.defer()
+
+    try:
+        stats = calculate_butler_stats()
+        embed_text = build_favourites_embed(stats)
+
+        # Post publicly in the channel
+        await interaction.followup.send(embed_text)
+
+        # Update pinned favourites channel if set
+        if BUTLERS_FAVOURITES_CHANNEL_ID:
+            fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+            if fav_channel:
+                try:
+                    async for msg in fav_channel.history(limit=5):
+                        if msg.author == interaction.guild.me:
+                            await msg.edit(content=embed_text)
+                            break
+                    else:
+                        await fav_channel.send(embed_text)
+                except Exception as e:
+                    print(f"Favourites channel update error: {e}")
+
+        # Update title roles
+        try:
+            await update_title_roles(interaction.guild, stats)
+        except Exception as e:
+            print(f"Title role update error: {e}")
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
+
 
 import traceback
 try:
