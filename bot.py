@@ -2078,10 +2078,11 @@ def calculate_butler_stats():
             td_scores.setdefault(player, []).append(score)
 
     def best_score_title(d):
-        """Return player with best average score; tiebreak on most submissions."""
+        """Return player with best weighted score: avg * log(count+1)."""
         if not d:
             return None
-        return max(d.keys(), key=lambda p: (sum(d[p]) / len(d[p]), len(d[p])))
+        import math
+        return max(d.keys(), key=lambda p: (sum(d[p]) / len(d[p])) * math.log(len(d[p]) + 1))
 
     headhunter = best_score_title(kills_scores)
     butcher = best_score_title(td_scores)
