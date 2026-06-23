@@ -2294,7 +2294,7 @@ async def butlers_report(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
-@app_commands.checks.has_role(NULL_MOD_ROLE_ID)
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def title_guide(interaction: discord.Interaction):
     channel = bot.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
     if not channel:
