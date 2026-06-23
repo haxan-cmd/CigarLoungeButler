@@ -85,27 +85,30 @@ WEAPONS_1H = [
 ]
 
 CLASS_WEAPON_MAP = {
-    "Devastator": ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
-    "Raider": ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
-    "Ambusher": ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
-    "Poleman": ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
-    "Man-at-Arms": ["Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Mace", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
-    "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
+    # Knight subclasses
     "Officer": ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
     "Guardian": ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
     "Crusader": ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
+    # Vanguard subclasses
+    "Devastator": ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
+    "Raider": ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
+    "Ambusher": ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
+    # Footman subclasses
+    "Poleman": ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
+    "Man-at-Arms": ["Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Mace", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
+    "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
 }
 
 SUBCLASS_PARENT = {
-    "Devastator": "Knight",
-    "Crusader": "Knight",
+    "Officer": "Knight",
     "Guardian": "Knight",
+    "Crusader": "Knight",
+    "Devastator": "Vanguard",
     "Raider": "Vanguard",
     "Ambusher": "Vanguard",
-    "Poleman": "Vanguard",
+    "Poleman": "Footman",
     "Man-at-Arms": "Footman",
     "Field Engineer": "Footman",
-    "Officer": "Footman",
     "Longbowman": "Archer",
     "Crossbowman": "Archer",
     "Skirmisher": "Archer",
@@ -235,9 +238,9 @@ SUBCLASS_ALIASES = {
 
 # Parent class -> list of subclasses
 PARENT_TO_SUBCLASSES = {
-    "Knight": ["Crusader", "Devastator", "Guardian"],
-    "Vanguard": ["Ambusher", "Poleman", "Raider"],
-    "Footman": ["Field Engineer", "Man-at-Arms", "Officer"],
+    "Knight": ["Officer", "Guardian", "Crusader"],
+    "Vanguard": ["Devastator", "Raider", "Ambusher"],
+    "Footman": ["Poleman", "Man-at-Arms", "Field Engineer"],
     "Archer": ["Crossbowman", "Longbowman", "Skirmisher"],
 }
 
@@ -288,7 +291,7 @@ def get_classes_for_category(category):
 def get_weapons_for_class_and_category(selected_class, category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w in weapon_list])
+    return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
 
 def upsert_player(discord_id, discord_name):
     try:
@@ -600,7 +603,7 @@ class ClassSelect(discord.ui.Select):
         self.pre_detected_weapon = pre_detected_weapon
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
         sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -616,7 +619,10 @@ class ClassSelect(discord.ui.Select):
                 view=view
             )
         else:
-            weapons = get_weapons_for_class_and_category(selected_class, self.category)
+            if selected_class == "Other":
+                weapons = sorted(WEAPONS_2H if self.category == "2h" else WEAPONS_1H) + ["Other"]
+            else:
+                weapons = get_weapons_for_class_and_category(selected_class, self.category)
             view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
             await interaction.response.edit_message(
                 content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
