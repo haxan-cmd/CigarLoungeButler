@@ -1997,8 +1997,8 @@ def calculate_butler_stats():
             dominant_ratios.setdefault(player, []).append(td / kills) # td/kills — Low Lethality
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
-    fav_weapon = max(weapon_counts, key=weapon_counts.get) if weapon_counts else "N/A"
-    fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
+    top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_maps = sorted(map_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # High Lethality — pure avg kills/td ratio, min 5 (fewer subs tiebreak)
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
@@ -2123,8 +2123,8 @@ def calculate_butler_stats():
         'most_active': f"{most_active} — {player_counts.get(most_active, 0)} runs",
         'top_td': f"{top_td[1]} — {top_td[0]} TD",
         'top_kills': f"{top_kills[1]} — {top_kills[0]} K",
-        'fav_weapon': f"{fav_weapon} — {weapon_counts.get(fav_weapon, 0)} runs",
-        'fav_map': f"{fav_map} — {map_counts.get(fav_map, 0)} runs",
+        'top_weapons': [(w, c) for w, c in top_weapons],
+        'top_maps': [(m, c) for m, c in top_maps],
         'total_runs': len(subs),
         'total_players': len(players_set),
         'grand_marshal': grand_marshal or "N/A",
@@ -2147,9 +2147,9 @@ def build_favourites_embed(stats):
         f"\n"
         f"**Most Kills**\n{stats['top_kills']}\n"
         f"\n"
-        f"**Favourite Weapon**\n{stats['fav_weapon']}\n"
+        "**Top Weapons**\n" + "\n".join(f"{i+1}. {w} — {c} runs" for i, (w, c) in enumerate(stats['top_weapons'])) + "\n"
         f"\n"
-        f"**Favourite Map**\n{stats['fav_map']}\n"
+        "**Top Maps**\n" + "\n".join(f"{i+1}. {m} — {c} runs" for i, (m, c) in enumerate(stats['top_maps'])) + "\n"
         f"\n"
         f"**Total Runs:** {stats['total_runs']} | **Total Players:** {stats['total_players']}\n"
         f"\n"
@@ -2294,7 +2294,7 @@ async def butlers_report(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@app_commands.checks.has_role(NULL_MOD_ROLE_ID)
 async def title_guide(interaction: discord.Interaction):
     channel = bot.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
     if not channel:
