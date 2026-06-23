@@ -600,6 +600,205 @@ class TripleCheckView(discord.ui.View):
             self.takedowns, self.kills, self.deaths, self.vip, False
         )
 
+
+class EditSubmissionView(discord.ui.View):
+    def __init__(self, original_message, author, submission_row,
+                 weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.author = author
+        self.submission_row = submission_row
+        self.weapon = weapon
+        self.cls = cls
+        self.map_name = map_name
+        self.faction = faction
+        self.takedowns = takedowns
+        self.kills = kills
+        self.deaths = deaths
+        self.vip = vip
+        self.feats = feats
+        self.message_link = message_link
+
+    async def on_timeout(self):
+        try:
+            # Remove the edit button but keep the summary message
+            await self._message.edit(view=None)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label='✏️ Edit', style=discord.ButtonStyle.grey)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Only the person who submitted can edit this.", ephemeral=True)
+            return
+        view = EditFieldSelectView(self)
+        await interaction.response.send_message(
+            content="**Which field would you like to correct?**",
+            view=view,
+            ephemeral=True
+        )
+
+
+class EditFieldSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.edit_view = edit_view
+        self.add_item(EditFieldSelect(edit_view))
+
+
+class EditFieldSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        options = [
+            discord.SelectOption(label="Weapon / Class", value="weapon"),
+            discord.SelectOption(label="Map", value="map"),
+            discord.SelectOption(label="Faction", value="faction"),
+            discord.SelectOption(label="Stats (TD/K/D)", value="stats"),
+            discord.SelectOption(label="VIP", value="vip"),
+        ]
+        super().__init__(placeholder="Choose a field to edit...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        field = self.values[0]
+        ev = self.edit_view
+
+        if field == "weapon":
+            view = WeaponTypeView(ev.original_message, None, edit_view=ev)
+            await interaction.response.edit_message(
+                content="**Step 1:** What type of weapon did you use?",
+                view=view
+            )
+        elif field == "map":
+            view = EditMapSelectView(ev)
+            await interaction.response.edit_message(
+                content="**Edit Map:** Which map were you on?",
+                view=view
+            )
+        elif field == "faction":
+            view = EditFactionSelectView(ev)
+            await interaction.response.edit_message(
+                content="**Edit Faction:** Which faction were you playing?",
+                view=view
+            )
+        elif field == "stats":
+            await interaction.response.send_modal(EditStatsModal(ev))
+        elif field == "vip":
+            view = EditVIPView(ev)
+            await interaction.response.edit_message(
+                content="**Edit VIP:** Were you a VIP?",
+                view=view
+            )
+
+
+class EditMapSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.add_item(EditMapSelect(edit_view))
+
+class EditMapSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        options = [discord.SelectOption(label=m) for m in sorted(MAPS)]
+        super().__init__(placeholder="Choose map...", options=options[:25])
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        ev.map_name = self.values[0]
+        await _apply_edit(interaction, ev)
+
+class EditFactionSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.add_item(EditFactionSelect(edit_view))
+
+class EditFactionSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        factions = MAP_FACTIONS.get(edit_view.map_name, {})
+        options = [discord.SelectOption(label=f) for f in factions.keys()] if factions else [
+            discord.SelectOption(label="Agatha"),
+            discord.SelectOption(label="Mason"),
+            discord.SelectOption(label="Tenosia"),
+        ]
+        super().__init__(placeholder="Choose faction...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        ev.faction = self.values[0]
+        await _apply_edit(interaction, ev)
+
+class EditStatsModal(discord.ui.Modal, title="Edit Stats"):
+    def __init__(self, edit_view):
+        super().__init__()
+        self.edit_view = edit_view
+        self.td = discord.ui.TextInput(label="Takedowns", default=str(edit_view.takedowns), required=True)
+        self.k = discord.ui.TextInput(label="Kills", default=str(edit_view.kills), required=True)
+        self.d = discord.ui.TextInput(label="Deaths", default=str(edit_view.deaths), required=True)
+        self.add_item(self.td)
+        self.add_item(self.k)
+        self.add_item(self.d)
+    async def on_submit(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        try:
+            ev.takedowns = int(self.td.value)
+            ev.kills = int(self.k.value)
+            ev.deaths = int(self.d.value)
+        except ValueError:
+            await interaction.response.send_message("Invalid numbers.", ephemeral=True)
+            return
+        await _apply_edit(interaction, ev)
+
+class EditVIPView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.edit_view = edit_view
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.edit_view.vip = True
+        await _apply_edit(interaction, self.edit_view)
+    @discord.ui.button(label='No', style=discord.ButtonStyle.red)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.edit_view.vip = False
+        await _apply_edit(interaction, self.edit_view)
+
+
+async def _apply_edit(interaction, ev):
+    """Write the updated submission back to the sheet and update the summary message."""
+    try:
+        if ev.submission_row:
+            vip_str = "Yes" if ev.vip else "No"
+            feats_str = ", ".join(ev.feats) if ev.feats else "None"
+            submissions_ws.update_cell(ev.submission_row, 4, ev.weapon)
+            submissions_ws.update_cell(ev.submission_row, 5, ev.cls)
+            submissions_ws.update_cell(ev.submission_row, 6, ev.map_name)
+            submissions_ws.update_cell(ev.submission_row, 7, ev.faction)
+            submissions_ws.update_cell(ev.submission_row, 8, ev.takedowns)
+            submissions_ws.update_cell(ev.submission_row, 9, ev.kills)
+            submissions_ws.update_cell(ev.submission_row, 10, ev.deaths)
+            submissions_ws.update_cell(ev.submission_row, 11, vip_str)
+            submissions_ws.update_cell(ev.submission_row, 12, feats_str)
+    except Exception as e:
+        print(f"Edit sheet update error: {e}")
+
+    # Rebuild summary
+    new_summary = (
+        f"⚔️ **Run Submitted** *(edited)*\n"
+        f"{ev.author.display_name}\n"
+        f"{ev.weapon} • {ev.cls}\n"
+        f"{ev.map_name} — {ev.faction}\n"
+        f"{ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
+        f"VIP: {'Yes' if ev.vip else 'No'}"
+    )
+    if ev.feats:
+        new_summary += f"\n{', '.join(ev.feats)}"
+
+    try:
+        await ev._message.edit(content=new_summary, view=None)
+    except Exception:
+        pass
+
+    await interaction.response.send_message("✅ Submission updated!", ephemeral=True)
+
+
 async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     feats = []
     if kills >= 100:
@@ -632,14 +831,9 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
     await interaction.response.edit_message(content="✅ Most impressive! Your run has been recorded.", view=None)
-    await original_message.reply(summary, mention_author=False)
-    await asyncio.sleep(1)
-    try:
-        await prompt_msg.delete()
-    except discord.NotFound:
-        pass
 
-    # Log to Google Sheets
+    # Log to Google Sheets first so we get the row index
+    submission_row = None
     try:
         log_submission(
             interaction.user.display_name,
@@ -655,8 +849,25 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
             feats,
             message_link
         )
+        # Row index is last row in submissions sheet
+        submission_row = len(submissions_ws.get_all_values())
     except Exception as e:
         print(f"Sheet logging error: {e}")
+
+    # Post summary with Edit button
+    edit_view = EditSubmissionView(
+        original_message, interaction.user,
+        submission_row, selected_weapon, selected_class,
+        selected_map, faction, takedowns, kills, deaths, vip, feats, message_link
+    )
+    summary_reply = await original_message.reply(summary, mention_author=False, view=edit_view)
+    edit_view._message = summary_reply
+
+    await asyncio.sleep(1)
+    try:
+        await prompt_msg.delete()
+    except discord.NotFound:
+        pass
 
     # React to the original screenshot
     await original_message.add_reaction("<:cigar:1444893851427803298>")
