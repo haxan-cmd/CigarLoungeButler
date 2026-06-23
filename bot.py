@@ -288,7 +288,7 @@ def get_classes_for_category(category):
 def get_weapons_for_class_and_category(selected_class, category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
+    return sorted([w for w in class_weapons if w in weapon_list])
 
 def upsert_player(discord_id, discord_name):
     try:
@@ -600,7 +600,7 @@ class ClassSelect(discord.ui.Select):
         self.pre_detected_weapon = pre_detected_weapon
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
         sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -616,10 +616,7 @@ class ClassSelect(discord.ui.Select):
                 view=view
             )
         else:
-            if selected_class == "Other":
-                weapons = sorted(WEAPONS_2H if self.category == "2h" else WEAPONS_1H) + ["Other"]
-            else:
-                weapons = get_weapons_for_class_and_category(selected_class, self.category)
+            weapons = get_weapons_for_class_and_category(selected_class, self.category)
             view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
             await interaction.response.edit_message(
                 content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
