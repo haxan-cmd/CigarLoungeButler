@@ -96,6 +96,21 @@ CLASS_WEAPON_MAP = {
     "Crusader": ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
 }
 
+SUBCLASS_PARENT = {
+    "Devastator": "Knight",
+    "Crusader": "Knight",
+    "Guardian": "Knight",
+    "Raider": "Vanguard",
+    "Ambusher": "Vanguard",
+    "Poleman": "Vanguard",
+    "Man-at-Arms": "Footman",
+    "Field Engineer": "Footman",
+    "Officer": "Footman",
+    "Longbowman": "Archer",
+    "Crossbowman": "Archer",
+    "Skirmisher": "Archer",
+}
+
 MAP_FACTIONS = {
     "Aberfell": ["Agatha", "Mason"],
     "Askandir": ["Mason", "Tenosia"],
@@ -315,7 +330,7 @@ class MarksmanSubclassSelect(discord.ui.Select):
     def __init__(self, original_message, prompt_msg):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
-        options = [discord.SelectOption(label=s) for s in MARKSMAN_SUBCLASSES.keys()]
+        options = [discord.SelectOption(label=s, description=SUBCLASS_PARENT.get(s)) for s in MARKSMAN_SUBCLASSES.keys()]
         super().__init__(placeholder="Choose your subclass...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -365,7 +380,7 @@ class ClassSelect(discord.ui.Select):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.category = category
-        options = [discord.SelectOption(label=c) for c in classes] + [discord.SelectOption(label="Other")]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in classes] + [discord.SelectOption(label="Other")]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
