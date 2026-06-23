@@ -1417,11 +1417,8 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if not matched_key:
         return False  # Weapon not on this bounty
 
-    # Increment master total if not already maxed
+    # Increment global participation counter (informational only — no cap)
     w = weapons[matched_key]
-    if w['current'] >= w['total']:
-        return False  # Already complete for this weapon
-
     w['current'] += 1
     weapons[matched_key] = w
 
@@ -1436,7 +1433,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             print(f"Bounty role assign error: {e}")
 
     # ── PLAYER PROGRESS ───────────────────────────────────────────────────────
-    player_row = get_player_bounty_progress(bounty['title'], player_id)
+    player_row = get_player_bounty_progress(bounty['title'], str(player_id))
     if player_row:
         player_progress = player_row['progress']
         forum_post_id = player_row['forum_post_id']
@@ -1445,7 +1442,9 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
         forum_post_id = None
 
     # Increment player's personal count for this weapon
-    player_progress[matched_key] = player_progress.get(matched_key, 0) + 1
+    raw = player_progress.get(matched_key, 0)
+    cur = raw['current'] if isinstance(raw, dict) else int(raw)
+    player_progress[matched_key] = cur + 1
 
     # Get or create the player's forum post
     forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
