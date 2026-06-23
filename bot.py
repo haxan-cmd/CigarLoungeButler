@@ -2016,18 +2016,34 @@ def calculate_butler_stats():
     low_lethality = [f"{p} ({sum(qualified_dominant[p])/len(qualified_dominant[p]):.2f})" for p in dominant_ranked[:5]]
     most_lethal_top5 = high_lethality  # keep for return dict compat
 
-    # Also check LeaderboardData 100 Kills board for historical entries missing from Submissions
+    # Backfill run counts and best scores from LeaderboardData for legacy entries
+    ld_player_boards = {}  # player -> set of board names they appear on (to count unique runs)
     for row in ld:
         if len(row) < 4:
             continue
-        if row[0].strip() == '100 Kills':
-            player = row[1].strip()
-            try:
-                score = int(row[3])
-            except ValueError:
-                continue
-            if score > top_kills[0]:
-                top_kills = (score, player)
+        lb_name = row[0].strip()
+        player = row[1].strip()
+        if not player:
+            continue
+        try:
+            score = int(row[3])
+        except (ValueError, IndexError):
+            score = 0
+        # Count each unique board entry as a run for busiest
+        ld_player_boards.setdefault(player, set()).add(lb_name)
+        # Backfill best TD and kills scores from their respective boards
+        if lb_name == '200 Takedowns':
+            td_scores_sub[player] = max(td_scores_sub.get(player, 0), score)
+        elif lb_name == '100 Kills':
+            kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), score)
+    # Add LeaderboardData board counts to player_counts (only boards not already in submissions)
+    for player, boards in ld_player_boards.items():
+        players_set.add(player)
+        player_counts[player] = player_counts.get(player, 0) + len(boards)
+    # Recalculate sorted lists after backfill
+    top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # Title calculations from LeaderboardData
     # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
