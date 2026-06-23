@@ -1967,6 +1967,8 @@ def calculate_butler_stats():
     map_counts = {}
     top_td = (0, "")
     top_kills = (0, "")
+    td_scores_sub = {}
+    kills_scores_sub = {}
     players_set = set()
     lethal_ratios = {}    # player -> [kills/td ratios] — High Lethality
     dominant_ratios = {} # player -> [td/kills ratios] — Low Lethality
@@ -1987,10 +1989,8 @@ def calculate_butler_stats():
         weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
         map_counts[map_name] = map_counts.get(map_name, 0) + 1
         players_set.add(player)
-        if td > top_td[0]:
-            top_td = (td, player)
-        if kills > top_kills[0]:
-            top_kills = (kills, player)
+        td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
+        kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
         # Track lethality ratios
         if kills > 0 and td > 0:
             lethal_ratios.setdefault(player, []).append(kills / td)   # kills/td — High Lethality
@@ -1999,6 +1999,9 @@ def calculate_butler_stats():
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     top_maps = sorted(map_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # High Lethality — pure avg kills/td ratio, min 5 (fewer subs tiebreak)
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
@@ -2120,9 +2123,9 @@ def calculate_butler_stats():
     butcher = best_score_title(td_scores)
 
     return {
-        'most_active': f"{most_active} — {player_counts.get(most_active, 0)} runs",
-        'top_td': f"{top_td[1]} — {top_td[0]} TD",
-        'top_kills': f"{top_kills[1]} — {top_kills[0]} K",
+        'top_busiest': top_busiest,
+        'top_td_list': top_td_list,
+        'top_kills_list': top_kills_list,
         'top_weapons': [(w, c) for w, c in top_weapons],
         'top_maps': [(m, c) for m, c in top_maps],
         'total_runs': len(subs),
@@ -2138,20 +2141,21 @@ def calculate_butler_stats():
 
 
 def build_favourites_embed(stats):
+    def fmt_list(items, suffix):
+        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items))
+
     return (
-        f"**📋 The Butler's Favourites**\n"
+        f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
         f"\n"
-        f"**Busiest**\n{stats['most_active']}\n"
+        f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
-        f"**Highest Takedowns**\n{stats['top_td']}\n"
+        f"**Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
         f"\n"
-        f"**Most Kills**\n{stats['top_kills']}\n"
+        f"**Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
         f"\n"
-        "**Top Weapons**\n" + "\n".join(f"{i+1}. {w} — {c} runs" for i, (w, c) in enumerate(stats['top_weapons'])) + "\n"
+        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
         f"\n"
-        "**Top Maps**\n" + "\n".join(f"{i+1}. {m} — {c} runs" for i, (m, c) in enumerate(stats['top_maps'])) + "\n"
-        f"\n"
-        f"**Total Runs:** {stats['total_runs']} | **Total Players:** {stats['total_players']}\n"
+        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
         f"\n"
         f"─────────────────────\n"
         f"🏆 **Grand Marshal** — {stats['grand_marshal']}\n"
@@ -2160,8 +2164,8 @@ def build_favourites_embed(stats):
         f"💀 **Headhunter** — {stats['headhunter']}\n"
         f"🩸 **Butcher** — {stats['butcher']}\n"
         f"\n"
-        f"**High Lethality** *(kills/takedowns ratio)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
-        f"\n\n**Low Lethality** *(takedowns/kills ratio)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
+        f"**High Lethality** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
+        f"\n\n**Low Lethality** *(td/kills)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
     )
 
 
