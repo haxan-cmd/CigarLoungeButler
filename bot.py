@@ -173,6 +173,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # Middle finger at the bot = middle finger back
+    if bot.user in message.mentions and '\U0001f595' in message.content:
+        await message.channel.send('\U0001f595')
+        return
+
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
     # Check if this is an art post in the active bounty channel
