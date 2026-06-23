@@ -2044,9 +2044,9 @@ def calculate_butler_stats():
     for p, v in non_weapon_feat_placements.items():
         combined.setdefault(p, []).extend(v)
 
-    grand_marshal = best_placement_title(combined, min_boards=30, breadth_first=True)
-    weapons_master = best_placement_title(weapon_placements, min_boards=6, breadth_first=True)
-    campaign_master = best_placement_title(map_placements, min_boards=4, breadth_first=True)
+    grand_marshal = best_placement_title(combined, min_boards=15, breadth_first=True)
+    weapons_master = best_placement_title(weapon_placements, min_boards=9, breadth_first=True)
+    campaign_master = best_placement_title(map_placements, min_boards=6, breadth_first=True)
 
     # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
     # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
