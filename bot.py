@@ -2020,11 +2020,21 @@ def calculate_butler_stats():
                 # Regular weapon boards + Mallet/Knife count toward Weapons Master
                 weapon_placements.setdefault(player, []).append(placement)
 
-    def best_placement_title(d):
-        """Return player with best avg placement; tiebreak on most boards."""
+    def best_placement_title(d, min_boards=1, breadth_first=False):
+        """Return player with best placement title.
+        breadth_first=True: most boards wins, avg placement as tiebreaker.
+        breadth_first=False: best avg wins, most boards as tiebreaker.
+        min_boards: minimum boards required to qualify.
+        """
         if not d:
             return None
-        return min(d.keys(), key=lambda p: (sum(d[p]) / len(d[p]), -len(d[p])))
+        qualified = {p: v for p, v in d.items() if len(v) >= min_boards}
+        if not qualified:
+            return None
+        if breadth_first:
+            return min(qualified.keys(), key=lambda p: (-len(qualified[p]), sum(qualified[p]) / len(qualified[p])))
+        else:
+            return min(qualified.keys(), key=lambda p: (sum(qualified[p]) / len(qualified[p]), -len(qualified[p])))
 
     combined = {}
     for p, v in weapon_placements.items():
@@ -2034,9 +2044,9 @@ def calculate_butler_stats():
     for p, v in non_weapon_feat_placements.items():
         combined.setdefault(p, []).extend(v)
 
-    grand_marshal = best_placement_title(combined)
-    weapons_master = best_placement_title(weapon_placements)
-    campaign_master = best_placement_title(map_placements)
+    grand_marshal = best_placement_title(combined, min_boards=30, breadth_first=True)
+    weapons_master = best_placement_title(weapon_placements, min_boards=6, breadth_first=True)
+    campaign_master = best_placement_title(map_placements, min_boards=4, breadth_first=True)
 
     # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
     # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
