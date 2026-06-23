@@ -1968,6 +1968,7 @@ def calculate_butler_stats():
     top_td = (0, "")
     top_kills = (0, "")
     players_set = set()
+    lethality_ratios = {}  # player -> [td/kills ratios]
 
     for row in subs:
         if len(row) < 9:
@@ -1989,10 +1990,23 @@ def calculate_butler_stats():
             top_td = (td, player)
         if kills > top_kills[0]:
             top_kills = (kills, player)
+        # Track lethality (takedowns / kills) per player
+        if kills > 0:
+            lethality_ratios.setdefault(player, []).append(td / kills)
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     fav_weapon = max(weapon_counts, key=weapon_counts.get) if weapon_counts else "N/A"
     fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
+
+    # Most Lethal — top 5 players by avg takedowns/kills ratio, min 3 submissions
+    qualified_lethal = {p: v for p, v in lethality_ratios.items() if len(v) >= 3}
+    lethal_ranked = sorted(qualified_lethal.keys(),
+        key=lambda p: sum(qualified_lethal[p]) / len(qualified_lethal[p]),
+        reverse=True)
+    most_lethal_top5 = []
+    for p in lethal_ranked[:5]:
+        avg_ratio = sum(qualified_lethal[p]) / len(qualified_lethal[p])
+        most_lethal_top5.append(f"{p} ({avg_ratio:.2f})")
 
     # Also check LeaderboardData 100 Kills board for historical entries missing from Submissions
     for row in ld:
@@ -2113,6 +2127,7 @@ def calculate_butler_stats():
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
+        'most_lethal': most_lethal_top5 if most_lethal_top5 else ["N/A"],
     }
 
 
@@ -2137,7 +2152,9 @@ def build_favourites_embed(stats):
         f"⚔️ **Weapons Master** — {stats['weapons_master']}\n"
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
         f"💀 **Headhunter** — {stats['headhunter']}\n"
-        f"🩸 **Butcher** — {stats['butcher']}"
+        f"🩸 **Butcher** — {stats['butcher']}\n"
+        f"\n"
+        f"**Most Lethal**\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['most_lethal']))
     )
 
 
