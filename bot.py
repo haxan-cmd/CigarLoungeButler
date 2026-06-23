@@ -1697,6 +1697,7 @@ async def bounty_refresh_card(interaction: discord.Interaction, member: discord.
     try:
         forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
         player_progress = player_row['progress']
+        print(f"[REFRESH] player_progress={json.dumps(player_progress)}")
         card_text = build_player_bounty_card(bounty, player_progress)
         messages = []
         async for msg in forum_thread.history(limit=2, oldest_first=True):
