@@ -1968,7 +1968,8 @@ def calculate_butler_stats():
     top_td = (0, "")
     top_kills = (0, "")
     players_set = set()
-    lethality_ratios = {}  # player -> [td/kills ratios]
+    lethal_ratios = {}    # player -> [kills/td ratios] — High Lethality
+    dominant_ratios = {} # player -> [td/kills ratios] — Low Lethality
 
     for row in subs:
         if len(row) < 9:
@@ -1990,23 +1991,27 @@ def calculate_butler_stats():
             top_td = (td, player)
         if kills > top_kills[0]:
             top_kills = (kills, player)
-        # Track lethality (takedowns / kills) per player
-        if kills > 0:
-            lethality_ratios.setdefault(player, []).append(td / kills)
+        # Track lethality ratios
+        if kills > 0 and td > 0:
+            lethal_ratios.setdefault(player, []).append(kills / td)   # kills/td — High Lethality
+            dominant_ratios.setdefault(player, []).append(td / kills) # td/kills — Low Lethality
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     fav_weapon = max(weapon_counts, key=weapon_counts.get) if weapon_counts else "N/A"
     fav_map = max(map_counts, key=map_counts.get) if map_counts else "N/A"
 
-    # Most Lethal — top 5 players by avg takedowns/kills ratio, min 3 submissions
-    qualified_lethal = {p: v for p, v in lethality_ratios.items() if len(v) >= 3}
+    # High Lethality — pure avg kills/td ratio, min 5 (fewer subs tiebreak)
+    qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
     lethal_ranked = sorted(qualified_lethal.keys(),
-        key=lambda p: sum(qualified_lethal[p]) / len(qualified_lethal[p]),
-        reverse=True)
-    most_lethal_top5 = []
-    for p in lethal_ranked[:5]:
-        avg_ratio = sum(qualified_lethal[p]) / len(qualified_lethal[p])
-        most_lethal_top5.append(f"{p} ({avg_ratio:.2f})")
+        key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
+    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in lethal_ranked[:5]]
+
+    # Low Lethality — pure avg td/kills ratio, min 5 (fewer subs tiebreak)
+    qualified_dominant = {p: v for p, v in dominant_ratios.items() if len(v) >= 5}
+    dominant_ranked = sorted(qualified_dominant.keys(),
+        key=lambda p: (-sum(qualified_dominant[p]) / len(qualified_dominant[p]), len(qualified_dominant[p])))
+    low_lethality = [f"{p} ({sum(qualified_dominant[p])/len(qualified_dominant[p]):.2f})" for p in dominant_ranked[:5]]
+    most_lethal_top5 = high_lethality  # keep for return dict compat
 
     # Also check LeaderboardData 100 Kills board for historical entries missing from Submissions
     for row in ld:
@@ -2127,7 +2132,8 @@ def calculate_butler_stats():
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
-        'most_lethal': most_lethal_top5 if most_lethal_top5 else ["N/A"],
+        'high_lethality': high_lethality if high_lethality else ["N/A"],
+        'low_lethality': low_lethality if low_lethality else ["N/A"],
     }
 
 
@@ -2135,7 +2141,7 @@ def build_favourites_embed(stats):
     return (
         f"**📋 The Butler's Favourites**\n"
         f"\n"
-        f"**Most Active Knight**\n{stats['most_active']}\n"
+        f"**Busiest**\n{stats['most_active']}\n"
         f"\n"
         f"**Highest Takedowns**\n{stats['top_td']}\n"
         f"\n"
@@ -2154,7 +2160,8 @@ def build_favourites_embed(stats):
         f"💀 **Headhunter** — {stats['headhunter']}\n"
         f"🩸 **Butcher** — {stats['butcher']}\n"
         f"\n"
-        f"**Most Lethal**\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['most_lethal']))
+        f"**High Lethality** *(kills/takedowns ratio)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
+        f"\n\n**Low Lethality** *(takedowns/kills ratio)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
     )
 
 
