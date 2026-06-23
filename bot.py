@@ -1598,9 +1598,10 @@ async def bounty_status(interaction: discord.Interaction):
     if not bounty:
         await interaction.response.send_message("No active bounty right now.", ephemeral=True)
         return
-    player_data = get_player_bounty_progress(bounty['title'], interaction.user.id)
-    player_progress = player_data['progress'] if player_data else {}
-    card = build_player_bounty_card(bounty, player_progress)
+    card = build_bounty_card(
+        bounty['title'], bounty['theme_emoji'], bounty['weapons'],
+        bounty['special_challenge'], bounty['special_done'], bounty['completions']
+    )
     await interaction.response.send_message(card, ephemeral=True)
 
 
@@ -2293,7 +2294,7 @@ async def butlers_report(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
-@app_commands.checks.has_role(NULL_MOD_ROLE_ID)
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def title_guide(interaction: discord.Interaction):
     channel = bot.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
     if not channel:
