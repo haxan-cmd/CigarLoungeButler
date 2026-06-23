@@ -1385,7 +1385,8 @@ def build_player_bounty_card(bounty, player_progress):
 
     for weapon, data in weapons.items():
         tot = data['total']
-        cur = player_progress.get(weapon, 0)
+        raw = player_progress.get(weapon, 0)
+        cur = raw['current'] if isinstance(raw, dict) else int(raw)
         label = f"~~{weapon}~~" if cur >= tot else weapon
         progress = f"{cur}/{tot}"
         lines.append(f"▸ {label:<22} {progress:>4}")
