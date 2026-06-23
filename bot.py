@@ -466,10 +466,10 @@ class ParseConfirmView(discord.ui.View):
                 view=view
             )
         elif weapon:
-            # Have weapon, still need class
+            # Have weapon, still need class — pass weapon so class select skips weapon step
             category = "2h" if weapon in WEAPONS_2H else "1h"
             classes = get_classes_for_category(category)
-            view = ClassSelectView(self.original_message, self.prompt_msg, category, classes)
+            view = ClassSelectView(self.original_message, self.prompt_msg, category, classes, pre_detected_weapon=weapon)
             await interaction.response.edit_message(
                 content=f"**Step 2 of 6:** Weapon: `{weapon}`\nWhich class were you playing?",
                 view=view
@@ -584,16 +584,19 @@ class RangedWeaponSelect(discord.ui.Select):
 
 
 class ClassSelectView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, category, classes):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None):
         super().__init__(timeout=300)
-        self.add_item(ClassSelect(original_message, prompt_msg, category, classes))
+        self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon))
 
 class ClassSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg, category, classes):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.category = category
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in classes] + [discord.SelectOption(label="Other")]
+        self.pre_detected_weapon = pre_detected_weapon
+        CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
+        sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -601,15 +604,23 @@ class ClassSelect(discord.ui.Select):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
         selected_class = self.values[0]
-        if selected_class == "Other":
-            weapons = sorted(WEAPONS_2H if self.category == "2h" else WEAPONS_1H) + ["Other"]
+        if self.pre_detected_weapon:
+            # Weapon already confirmed — skip straight to map
+            view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon)
+            await interaction.response.edit_message(
+                content=f"**Step 4 of 6:** Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`\nWhich map were you on?",
+                view=view
+            )
         else:
-            weapons = get_weapons_for_class_and_category(selected_class, self.category)
-        view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
-        await interaction.response.edit_message(
-            content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
-            view=view
-        )
+            if selected_class == "Other":
+                weapons = sorted(WEAPONS_2H if self.category == "2h" else WEAPONS_1H) + ["Other"]
+            else:
+                weapons = get_weapons_for_class_and_category(selected_class, self.category)
+            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
+            await interaction.response.edit_message(
+                content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
+                view=view
+            )
 
 class WeaponSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, weapons):
