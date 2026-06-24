@@ -52,6 +52,13 @@ players_ws = sheet.worksheet('Players')
 leaderboards_ws = sheet.worksheet('Leaderboards')
 leaderboard_data_ws = sheet.worksheet('LeaderboardData')
 
+# SpecialOps sheet — columns: DiscordID, PlayerName, Achievement
+try:
+    special_ops_ws = sheet.worksheet('SpecialOps')
+except gspread.exceptions.WorksheetNotFound:
+    special_ops_ws = sheet.add_worksheet(title='SpecialOps', rows=500, cols=3)
+    special_ops_ws.append_row(['DiscordID', 'PlayerName', 'Achievement'])
+
 # RegistryCards sheet — columns: DiscordID, PlayerName, ForumThreadID
 try:
     registry_ws = sheet.worksheet('RegistryCards')
@@ -665,6 +672,21 @@ def get_special_ops_for_player(discord_id, cached_data=None):
             link = row[12].strip() if len(row) > 12 else ''
             if weapon not in special_ops:
                 special_ops[weapon] = link
+
+    # Also check SpecialOps sheet for manually awarded achievements
+    try:
+        rows = special_ops_ws.get_all_values()[1:]
+        for row in rows:
+            if len(row) < 3 or row[0].strip() != discord_id_str:
+                continue
+            achievement = row[2].strip()
+            if achievement == 'KnifeOp' and 'Knife' not in special_ops:
+                special_ops['Knife'] = ''
+            elif achievement == 'FistAndShieldOp' and 'Fist and Shield' not in special_ops:
+                special_ops['Fist and Shield'] = ''
+    except Exception as e:
+        print(f"SpecialOps sheet read error: {e}")
+
     return special_ops
 
 def get_feats_for_player(discord_id, cached_data=None):
