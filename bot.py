@@ -1313,16 +1313,15 @@ async def update_archive_index(guild):
                 except Exception:
                     continue
 
-        result = await forum.create_thread(name="📋 Player Index", content=content)
-        msg_id = None
-        async for msg in result.thread.history(limit=1, oldest_first=True):
-            await msg.pin()
-            msg_id = msg.id
+        result = await forum.create_thread(name="📋 Player Index", content="➜ GUIDANCE HERE")
+        await asyncio.sleep(0.5)
+        index_msg = await result.thread.send(content)
+        msg_id = index_msg.id
 
         if existing_row_idx:
             index_posts_ws.update_cell(existing_row_idx, 3, str(msg_id))
         else:
-            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(msg_id or '')])
+            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(msg_id)])
         print("Archive index created")
 
     except Exception as e:
