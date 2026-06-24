@@ -3059,16 +3059,16 @@ def calculate_butler_stats():
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # High Lethality — highest avg kills/td ratio, min 5 subs
+    # Lethality Rating — highest avg kills/td ratio shown as %, min 5 subs
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
     lethal_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in lethal_ranked[:5]]
+    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p])*100:.0f}% Kill Rate)" for p in lethal_ranked[:5]]
 
-    # Warlord — lowest avg kills/td ratio (damage spread, assists, battlefield presence), min 5 subs
+    # Warlord — lowest avg kills/td ratio shown as TD/Kill, min 5 subs
     low_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    low_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in low_ranked[:5]]
+    low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
     most_lethal_top5 = high_lethality
 
     # Backfill run counts and best scores from LeaderboardData for legacy entries
@@ -3235,8 +3235,8 @@ def build_favourites_embed(stats):
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
         f"\n"
-        f"**High Lethality** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
-        f"\n\n**Warlord** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
+        f"**Lethality Rating** *(Kills/TD)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
+        f"\n\n**Warlord** *(TD/Kill)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
     )
 
 
@@ -3675,16 +3675,6 @@ async def refresh_card(interaction: discord.Interaction):
 
 
 CHALLENGE_RULES_CHANNEL_ID = 1460713024082935930
-CHALLENGE_RULES_MESSAGE_IDS = [
-    1460713224155693209,  # intro + weapon ranks
-    1460713420792791103,  # earning weapon marks
-    1460713496785195130,  # subclass & class progression
-    1460713555165974705,  # subclass ranks
-    1460713630159994881,  # class ranks
-    1460713689501012121,  # overall player titles
-    1460713736313634898,  # feats of legend
-    1460713776654455077,  # bounties
-]
 
 CHALLENGE_RULES_CONTENT = [
     # 1. Intro + weapon ranks
@@ -3810,8 +3800,60 @@ Additionally, you can earn <:hhanded:1430199468246044772> **The Hundred-Handed**
     # 8. Bounties
     """\
 🎯 **BOUNTIES**
-Players may complete **bounties**, which are tracked on separate bounty cards.  Completing these objectives is how you rank up in this server. Bounties are **time-limited**.""",
+Players may complete **bounties**, which are tracked on separate bounty cards. Completing these objectives is how you rank up in this server. Bounties are **time-limited**.""",
 ]
+
+
+def get_challenge_rules_message_ids():
+    """Get stored challenge rules message IDs from sheet."""
+    try:
+        ws = sheet.worksheet('ChallengeRules')
+        rows = ws.get_all_values()[1:]
+        return [int(r[0]) for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+def save_challenge_rules_message_ids(msg_ids):
+    """Save challenge rules message IDs to sheet."""
+    try:
+        try:
+            ws = sheet.worksheet('ChallengeRules')
+            ws.clear()
+        except Exception:
+            ws = sheet.add_worksheet(title='ChallengeRules', rows=20, cols=2)
+        ws.append_row(['MessageID', 'Section'])
+        labels = ['Intro + Weapon Ranks', 'Earning Marks', 'Subclass & Class Progression',
+                  'Subclass Ranks', 'Class Ranks', 'Player Titles', 'Feats of Legend', 'Bounties']
+        for msg_id, label in zip(msg_ids, labels):
+            ws.append_row([str(msg_id), label])
+    except Exception as e:
+        print(f"ChallengeRules sheet save error: {e}")
+
+
+@bot.tree.command(name="post_challenge_rules", description="Post the challenge rules to the challenge-rules channel (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def post_challenge_rules(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        channel = bot.get_channel(CHALLENGE_RULES_CHANNEL_ID)
+        if not channel:
+            await interaction.followup.send("Could not find challenge-rules channel.", ephemeral=True)
+            return
+
+        msg_ids = []
+        for i, content in enumerate(CHALLENGE_RULES_CONTENT):
+            if i > 0:
+                await channel.send(file=discord.File(DECORATION_BOTTOM))
+                await asyncio.sleep(0.5)
+            msg = await channel.send(content)
+            msg_ids.append(msg.id)
+            await asyncio.sleep(0.5)
+
+        await channel.send(file=discord.File(DECORATION_BOTTOM))
+        save_challenge_rules_message_ids(msg_ids)
+        await interaction.followup.send(f"Posted {len(msg_ids)} challenge rules messages.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="update_challenge_rules", description="Update the challenge rules channel with current info (admin only).")
@@ -3824,8 +3866,13 @@ async def update_challenge_rules(interaction: discord.Interaction):
             await interaction.followup.send("Could not find challenge-rules channel.", ephemeral=True)
             return
 
+        msg_ids = get_challenge_rules_message_ids()
+        if not msg_ids:
+            await interaction.followup.send("No challenge rules messages found — run /post_challenge_rules first.", ephemeral=True)
+            return
+
         updated = 0
-        for msg_id, content in zip(CHALLENGE_RULES_MESSAGE_IDS, CHALLENGE_RULES_CONTENT):
+        for msg_id, content in zip(msg_ids, CHALLENGE_RULES_CONTENT):
             try:
                 msg = await channel.fetch_message(msg_id)
                 await msg.edit(content=content)
@@ -3834,9 +3881,10 @@ async def update_challenge_rules(interaction: discord.Interaction):
             except Exception as e:
                 print(f"Error updating message {msg_id}: {e}")
 
-        await interaction.followup.send(f"Updated {updated}/{len(CHALLENGE_RULES_MESSAGE_IDS)} challenge rules messages.", ephemeral=True)
+        await interaction.followup.send(f"Updated {updated}/{len(msg_ids)} challenge rules messages.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
 
 
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
