@@ -404,8 +404,8 @@ FEAT_EMOJIS = {
 SPECIAL_OPS_EMOJIS = {
     "Fist and Shield": "<a:captain_america:1366801668041211934>",
     "Healing Horn":    "<a:passive:1365531248268673086>",
-    "Mallet":          "<a:predator:1366794896081555567>",
-    "Knife":           "<a:100kill:1361412390339608686>",
+    "Mallet":          "🔨",
+    "Knife":           "🔪",
 }
 
 WEAPON_RANK_THRESHOLDS = [
@@ -684,6 +684,8 @@ def get_special_ops_for_player(discord_id, cached_data=None):
                 special_ops['Knife'] = ''
             elif achievement == 'FistAndShieldOp' and 'Fist and Shield' not in special_ops:
                 special_ops['Fist and Shield'] = ''
+            elif achievement == 'MalletOp' and 'Mallet' not in special_ops:
+                special_ops['Mallet'] = ''
     except Exception as e:
         print(f"SpecialOps sheet read error: {e}")
 
