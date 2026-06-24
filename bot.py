@@ -55,9 +55,13 @@ leaderboard_data_ws = sheet.worksheet('LeaderboardData')
 # SpecialOps sheet — columns: DiscordID, PlayerName, Achievement
 try:
     special_ops_ws = sheet.worksheet('SpecialOps')
-except gspread.exceptions.WorksheetNotFound:
-    special_ops_ws = sheet.add_worksheet(title='SpecialOps', rows=500, cols=3)
-    special_ops_ws.append_row(['DiscordID', 'PlayerName', 'Achievement'])
+except Exception:
+    try:
+        special_ops_ws = sheet.add_worksheet(title='SpecialOps', rows=500, cols=3)
+        special_ops_ws.append_row(['DiscordID', 'PlayerName', 'Achievement'])
+    except Exception as e:
+        print(f"SpecialOps sheet init error: {e}")
+        special_ops_ws = None
 
 # RegistryCards sheet — columns: DiscordID, PlayerName, ForumThreadID
 try:
@@ -675,7 +679,8 @@ def get_special_ops_for_player(discord_id, cached_data=None):
 
     # Also check SpecialOps sheet for manually awarded achievements
     try:
-        rows = special_ops_ws.get_all_values()[1:]
+        if special_ops_ws:
+            rows = special_ops_ws.get_all_values()[1:]
         for row in rows:
             if len(row) < 3 or row[0].strip() != discord_id_str:
                 continue
