@@ -26,6 +26,7 @@ def gspread_retry(func, *args, retries=5, **kwargs):
 
 # Per-guild submission lock to prevent concurrent submission conflicts
 _submission_locks = {}
+_registry_lock = asyncio.Lock()
 
 def get_submission_lock(guild_id):
     if guild_id not in _submission_locks:
@@ -2120,7 +2121,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             n = int(m.group(1)) + 1
                             return f"**+{n} mark{'s' if n != 1 else ''}**"
                         return _re.sub(r'\*\*\+(\d+) marks?\*\*', replacer, content)
-                    new_content = increment_marks(msg.content) + f"\n<:highscore:1360312918545269057> +1 High Score"
+                    new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
                     await msg.edit(content=new_content)
                     break
         except Exception as e:
@@ -4137,38 +4138,42 @@ async def create_card(interaction: discord.Interaction, member: discord.Member):
 @bot.tree.command(name="refresh_card", description="Refresh your registry card.")
 async def refresh_card(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    try:
-        discord_id_str = str(interaction.user.id)
+    if _registry_lock.locked():
+        await interaction.followup.send("Patience please — someone else is mucking about in the archives. Try again in a moment.", ephemeral=True)
+        return
+    async with _registry_lock:
+        try:
+            discord_id_str = str(interaction.user.id)
 
-        # Check player is registered
-        rows = players_ws.get_all_values()[1:]
-        registered = any(row and row[0].strip() == discord_id_str for row in rows)
-        if not registered:
-            await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
-            return
+            # Check player is registered
+            rows = players_ws.get_all_values()[1:]
+            registered = any(row and row[0].strip() == discord_id_str for row in rows)
+            if not registered:
+                await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
+                return
 
-        # Delete existing thread if it exists
-        thread_id = get_registry_thread_id(interaction.user.id)
-        if thread_id:
-            try:
-                thread = interaction.guild.get_thread(thread_id)
-                if not thread:
-                    thread = await interaction.guild.fetch_channel(thread_id)
-                await thread.delete()
-            except Exception as e:
-                print(f"refresh_card thread delete error: {e}")
-            # Clear thread ID from RegistryCards so a fresh one gets created
-            registry_rows = registry_ws.get_all_values()
-            for i, row in enumerate(registry_rows[1:], start=2):
-                if row and row[0].strip() == discord_id_str:
-                    registry_ws.update_cell(i, 3, '')
-                    break
+            # Delete existing thread if it exists
+            thread_id = get_registry_thread_id(interaction.user.id)
+            if thread_id:
+                try:
+                    thread = interaction.guild.get_thread(thread_id)
+                    if not thread:
+                        thread = await interaction.guild.fetch_channel(thread_id)
+                    await thread.delete()
+                except Exception as e:
+                    print(f"refresh_card thread delete error: {e}")
+                # Clear thread ID from RegistryCards so a fresh one gets created
+                registry_rows = registry_ws.get_all_values()
+                for i, row in enumerate(registry_rows[1:], start=2):
+                    if row and row[0].strip() == discord_id_str:
+                        registry_ws.update_cell(i, 3, '')
+                        break
 
-        # Create fresh card
-        await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
-        await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"Error: {e}", ephemeral=True)
+            # Create fresh card
+            await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
+            await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
 
 CHALLENGE_RULES_CHANNEL_ID = 1460713024082935930
