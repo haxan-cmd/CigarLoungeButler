@@ -3214,7 +3214,7 @@ async def import_registry(interaction: discord.Interaction):
 
 
 async def _process_registry_thread(guild, thread):
-    """Parse an old registry thread and create/update a card in butlers-archive."""
+    """Parse an old registry thread and extract weapon marks into LegacyMarks sheet."""
     import re
     player_name = thread.name.strip()
 
@@ -3226,44 +3226,54 @@ async def _process_registry_thread(guild, thread):
 
     full_text = "\n".join(messages)
 
-    # Parse weapon marks from diamond format [♦♦♦◇◇]
-    # Each ♦ = 1 mark
-    # Format: "WeaponName: [♦♦◇◇]" or "WeaponName: [♦♦♦♦♦◇] ★☆"
-    legacy_marks = {}  # (weapon, subclass) -> marks
+    # Parse weapon marks from lines like:
+    # • :level3_6: Battle Axe: [✦✦✧]
+    # The emoji encodes the current rank threshold: level{tier}_{threshold}
+    # total marks = threshold + count of ✦ in bracket
+    legacy_marks = {}  # weapon_name -> marks
 
-    # Find current subclass context as we parse
     current_subclass = None
-    subclass_pattern = re.compile(r'(?:^|\n)[^\n]*?([A-Za-z-]+):\s*(?:Initiate|Veteran|Master|Grandmaster|Champion|Paragon|Apex)')
-    weapon_pattern = re.compile(r'•\s*[^\n]*?([A-Za-z\' -]+?):\s*\[([♦◇]+)\]')
 
     for line in full_text.split("\n"):
         line = line.strip()
 
-        # Detect subclass header
+        # Detect subclass header: "Devastator: Grandmaster [▰▰▰▱▱▱]"
         for subclass in REGISTRY_WEAPON_MAP.keys():
-            if subclass + ":" in line and any(r in line for r in ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex"]):
+            if re.search(rf'\b{re.escape(subclass)}\s*:', line) and any(
+                r in line for r in ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex", "Novice"]
+            ):
                 current_subclass = subclass
                 break
 
-        # Detect weapon marks
-        m = weapon_pattern.search(line)
-        if m and current_subclass:
-            weapon_raw = m.group(1).strip()
-            diamonds = m.group(2)
-            marks = diamonds.count("♦")
-            if marks > 0:
-                # Match weapon name to known weapons
+        if not current_subclass:
+            continue
+
+        # Detect weapon line: • :levelX_N: WeaponName: [✦✦✧]
+        emoji_match = re.search(r':level\d+_(\d+):', line)
+        bracket_match = re.search(r'\[([✦✧]+)\]', line)
+
+        if emoji_match and bracket_match:
+            current_threshold = int(emoji_match.group(1))
+            inner = bracket_match.group(1)
+            filled = inner.count('✦')
+            total_marks = current_threshold + filled
+
+            # Extract weapon name between emoji and colon before bracket
+            name_match = re.search(r':level\d+_\d+:\s*(.+?):\s*\[', line)
+            if name_match:
+                weapon_raw = name_match.group(1).strip()
+                # Match to known weapon names
                 for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
                     if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
-                        key = (w, current_subclass)
-                        legacy_marks[key] = legacy_marks.get(key, 0) + marks
+                        if total_marks > 0:
+                            legacy_marks[w] = max(legacy_marks.get(w, 0), total_marks)
                         break
 
     if not legacy_marks:
         print(f"No legacy marks found for {player_name}, skipping")
         return
 
-    # Store legacy marks in LegacyMarks sheet
+    # Store in LegacyMarks sheet (flat: weapon -> marks, subclass left blank)
     await _save_legacy_marks(player_name, guild, legacy_marks)
 
     # Find discord ID from Players sheet
@@ -3281,7 +3291,7 @@ async def _process_registry_thread(guild, thread):
         await create_or_update_registry_card(guild, discord_id, player_name)
         print(f"Registry card created for {player_name} (discord_id={discord_id})")
     else:
-        print(f"No Discord ID found for {player_name}, card not created")
+        print(f"No Discord ID found for {player_name}, skipping card creation")
 
 
 async def _save_legacy_marks(player_name, guild, legacy_marks):
@@ -3290,16 +3300,18 @@ async def _save_legacy_marks(player_name, guild, legacy_marks):
         try:
             legacy_ws = sheet.worksheet('LegacyMarks')
         except Exception:
-            legacy_ws = sheet.add_worksheet(title='LegacyMarks', rows=1000, cols=5)
+            legacy_ws = sheet.add_worksheet(title='LegacyMarks', rows=1000, cols=4)
             legacy_ws.append_row(['PlayerName', 'Weapon', 'Subclass', 'Marks'])
 
         existing = legacy_ws.get_all_values()[1:]
-        existing_keys = {(r[0].strip(), r[1].strip(), r[2].strip()) for r in existing if len(r) >= 3}
+        existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
 
-        for (weapon, subclass), marks in legacy_marks.items():
-            key = (player_name, weapon, subclass)
+        for weapon, marks in legacy_marks.items():
+            key = (player_name, weapon)
             if key not in existing_keys:
-                legacy_ws.append_row([player_name, weapon, subclass, marks])
+                legacy_ws.append_row([player_name, weapon, '', marks])
+    except Exception as e:
+        print(f"Legacy marks save error for {player_name}: {e}")
     except Exception as e:
         print(f"Legacy marks save error for {player_name}: {e}")
 
