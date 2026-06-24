@@ -822,23 +822,27 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread — emoji only as first post (clean preview)
+        # Create new thread — 🗂️ emoji as first post (clean preview)
         thread_with_msg = await forum.create_thread(
             name=player_name,
             content='🗂️',
         )
         thread = thread_with_msg.thread
 
-        # Message 1: header accolades
+        # Top spacer
+        if has_top:
+            await thread.send(file=discord.File(top_path))
+
+        # Header accolades
         await thread.send(messages[0])
 
-        # Messages 2-5: top spacer before each class, bottom spacer after
-        for msg_text in messages[1:]:
-            if has_top:
-                await thread.send(file=discord.File(top_path))
+        # Class sections: bottom spacer after each, top spacer before next
+        for i, msg_text in enumerate(messages[1:]):
             await thread.send(msg_text)
             if has_bot:
                 await thread.send(file=discord.File(bot_path))
+            if i < len(messages) - 2 and has_top:
+                await thread.send(file=discord.File(top_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
@@ -858,7 +862,7 @@ def get_classes_for_category(category):
 def get_weapons_for_class_and_category(selected_class, category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w in weapon_list])
+    return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
 
 def upsert_player(discord_id, discord_name):
     try:
@@ -1171,7 +1175,7 @@ class ClassSelect(discord.ui.Select):
         self.pre_detected_weapon = pre_detected_weapon
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
         sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
