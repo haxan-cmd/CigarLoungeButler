@@ -119,6 +119,17 @@ except Exception:
         print(f"Snapshots sheet init error: {e}")
         snapshots_ws = None
 
+# IndexPosts sheet — tracks pinned index post message IDs per forum
+try:
+    index_posts_ws = sheet.worksheet('IndexPosts')
+except Exception:
+    try:
+        index_posts_ws = sheet.add_worksheet(title='IndexPosts', rows=50, cols=3)
+        index_posts_ws.append_row(['ForumName', 'ChannelID', 'MessageID'])
+    except Exception as e:
+        print(f"IndexPosts sheet init error: {e}")
+        index_posts_ws = None
+
 REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654  # butlers-archive forum
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
@@ -1235,6 +1246,89 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
     except Exception as e:
         print(f"Registry sheet save error: {e}")
 
+
+async def update_archive_index(guild):
+    """Build or update the pinned index post in butlers-archive."""
+    if not index_posts_ws:
+        return
+    try:
+        forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
+        if not forum:
+            return
+
+        rows = registry_ws.get_all_values()[1:]
+        entries = []
+        for row in rows:
+            if len(row) < 3 or not row[2].strip():
+                continue
+            player_name = row[1].strip()
+            thread_id = int(row[2].strip())
+            entries.append((player_name, thread_id))
+
+        entries.sort(key=lambda x: x[0].lower())
+
+        groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+        lines = ["📋 **Player Registry Index**", "*Jump to a player’s card*", ""]
+        for group_name, start, end in groups:
+            group_entries = [(n, t) for n, t in entries if n and start <= n[0].upper() <= end]
+            if not group_entries:
+                continue
+            lines.append(f"**{group_name}**")
+            links = ' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{tid})" for name, tid in group_entries)
+            lines.append(links)
+            lines.append("")
+        other = [(n, t) for n, t in entries if not n or not n[0].upper().isalpha()]
+        if other:
+            lines.append("**#**")
+            lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{tid})" for name, tid in other))
+
+        content = "\n".join(lines).strip()
+        if len(content) > 1900:
+            content = content[:1897] + "…"
+
+        index_rows = index_posts_ws.get_all_values()[1:]
+        existing_msg_id = None
+        existing_row_idx = None
+        for i, row in enumerate(index_rows, start=2):
+            if len(row) >= 2 and row[1].strip() == str(REGISTRY_FORUM_CHANNEL_ID):
+                existing_msg_id = int(row[2]) if len(row) > 2 and row[2].strip() else None
+                existing_row_idx = i
+                break
+
+        if existing_msg_id:
+            for thread in list(forum.threads):
+                try:
+                    msg = await thread.fetch_message(existing_msg_id)
+                    await msg.edit(content=content)
+                    print("Archive index updated")
+                    return
+                except Exception:
+                    continue
+            async for thread in forum.archived_threads(limit=20):
+                try:
+                    msg = await thread.fetch_message(existing_msg_id)
+                    await msg.edit(content=content)
+                    print("Archive index updated")
+                    return
+                except Exception:
+                    continue
+
+        result = await forum.create_thread(name="📋 Player Index", content=content)
+        msg_id = None
+        async for msg in result.thread.history(limit=1, oldest_first=True):
+            await msg.pin()
+            msg_id = msg.id
+
+        if existing_row_idx:
+            index_posts_ws.update_cell(existing_row_idx, 3, str(msg_id))
+        else:
+            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(msg_id or '')])
+        print("Archive index created")
+
+    except Exception as e:
+        print(f"Archive index error: {e}")
+
+
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
@@ -1291,6 +1385,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
                 save_registry_thread_id(discord_id, player_name, thread.id)
                 print(f"Registry card updated for {player_name}")
+                asyncio.create_task(update_archive_index(guild))
                 return
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
@@ -1338,6 +1433,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
+        asyncio.create_task(update_archive_index(guild))
 
     except Exception as e:
         print(f"Registry card error for {player_name}: {e}")
@@ -4034,6 +4130,14 @@ async def purge_archive(interaction: discord.Interaction):
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="update_index", description="Rebuild the player index post in butlers-archive (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def update_index(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    await update_archive_index(interaction.guild)
+    await interaction.followup.send("Index updated.", ephemeral=True)
 
 
 @bot.tree.command(name="purge_blank_cards", description="Delete registry cards for players with no marks data (admin only).")
