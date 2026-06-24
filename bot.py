@@ -1256,26 +1256,47 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
 
         if thread_id:
-            # Delete existing thread and recreate fresh
+            # Edit existing thread in place
             try:
                 thread = guild.get_thread(thread_id)
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
-                await thread.delete()
-            except Exception as e:
-                print(f"Registry thread delete error for {player_name}: {e}")
-            # Clear thread ID so a fresh one gets created
-            try:
-                rows = registry_ws.get_all_values()
-                discord_id_str = str(discord_id)
-                for i, row in enumerate(rows[1:], start=2):
-                    if row and row[0].strip() == discord_id_str:
-                        registry_ws.update_cell(i, 3, '')
-                        break
-            except Exception as e:
-                print(f"Registry thread ID clear error for {player_name}: {e}")
 
-        # Create new thread — 🗂️ emoji as first post (clean preview)
+                # Collect existing text messages (skip image-only messages)
+                existing = []
+                async for msg in thread.history(limit=30, oldest_first=True):
+                    existing.append(msg)
+                text_msgs = [m for m in existing if m.content and m.content != '🗂️']
+
+                # Edit existing text messages
+                for i, new_text in enumerate(messages):
+                    if i < len(text_msgs):
+                        if text_msgs[i].content != new_text:
+                            await text_msgs[i].edit(content=new_text)
+                    else:
+                        # New message needed — send it
+                        await asyncio.sleep(0.5)
+                        await thread.send(new_text)
+
+                # Clear any extra messages beyond what we need
+                for extra_msg in text_msgs[len(messages):]:
+                    try:
+                        await extra_msg.edit(content='\u200b')
+                    except Exception:
+                        pass
+
+                # Update player name in thread if changed
+                if thread.name != player_name:
+                    await thread.edit(name=player_name)
+
+                save_registry_thread_id(discord_id, player_name, thread.id)
+                print(f"Registry card updated for {player_name}")
+                return
+            except Exception as e:
+                print(f"Registry thread edit error for {player_name}: {e}")
+                # Fall through to create new thread
+
+        # Create new thread
         thread_with_msg = await forum.create_thread(
             name=player_name,
             content='🗂️',
@@ -1285,26 +1306,21 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         has_top = os.path.exists(top_path)
         has_bot = os.path.exists(bot_path)
 
-        # Top spacer once at the very top
         if has_top:
             await asyncio.sleep(0.5)
             await thread.send(file=discord.File(top_path))
 
-        # Header
         await asyncio.sleep(0.5)
         await thread.send(messages[0])
 
-        # Each class: bottom spacer before, then class message
         for msg_text in messages[1:]:
             if has_bot:
                 await asyncio.sleep(0.5)
                 await thread.send(file=discord.File(bot_path))
             await asyncio.sleep(0.5)
-            # Split if over Discord's 2000 char limit
             if len(msg_text) <= 1900:
                 await thread.send(msg_text)
             else:
-                # Split on double newlines (subclass boundaries)
                 chunks = []
                 current = ""
                 for block in msg_text.split("\n\n"):
@@ -4465,24 +4481,6 @@ async def refresh_card(interaction: discord.Interaction):
             await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
             return
 
-        # Delete existing thread if it exists
-        thread_id = get_registry_thread_id(interaction.user.id)
-        if thread_id:
-            try:
-                thread = interaction.guild.get_thread(thread_id)
-                if not thread:
-                    thread = await interaction.guild.fetch_channel(thread_id)
-                await thread.delete()
-            except Exception as e:
-                print(f"refresh_card thread delete error: {e}")
-            # Clear thread ID from RegistryCards so a fresh one gets created
-            registry_rows = registry_ws.get_all_values()
-            for i, row in enumerate(registry_rows[1:], start=2):
-                if row and row[0].strip() == discord_id_str:
-                    registry_ws.update_cell(i, 3, '')
-                    break
-
-        # Create fresh card
         await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
         await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
     except Exception as e:
