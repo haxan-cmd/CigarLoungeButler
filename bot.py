@@ -3641,6 +3641,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
             messages.append(msg.content)
 
     full_text = "\n".join(messages)
+    print(f"DEBUG {player_name} full_text preview: {repr(full_text[:500])}")
 
     # --- Parse weapon marks ---
     # Actual format:
@@ -3696,6 +3697,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 break
 
     # --- Parse legacy bounty completions ---
+    print(f"DEBUG {player_name} legacy_marks found: {legacy_marks}")
     KNOWN_SECTIONS = ["Feats of Legend", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
     legacy_bounties = []
     in_bounties_section = False
