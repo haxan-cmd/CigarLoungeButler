@@ -827,6 +827,47 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
 
     return [w for w, c in weapon_counts.items() if c >= 100]
 
+def get_best_placements_for_player(discord_id, top_n=5):
+    """Get top N best leaderboard placements for a player across all boards."""
+    discord_id_str = str(discord_id)
+    try:
+        all_rows = leaderboard_data_ws.get_all_values()[1:]
+    except Exception:
+        return []
+
+    # Build board -> all scores, and find player's score on each board
+    board_scores = {}   # board_name -> sorted list of scores (desc)
+    player_scores = {}  # board_name -> player's score
+
+    for row in all_rows:
+        if len(row) < 4 or not row[3]:
+            continue
+        lb_name = row[0].strip()
+        try:
+            score = int(row[3])
+        except ValueError:
+            continue
+        board_scores.setdefault(lb_name, []).append(score)
+        if row[2].strip() == discord_id_str:
+            # Keep personal best per board
+            if lb_name not in player_scores or score > player_scores[lb_name]:
+                player_scores[lb_name] = score
+
+    # Calculate placement for each board the player is on
+    placements = []
+    for lb_name, player_score in player_scores.items():
+        scores = sorted(board_scores.get(lb_name, []), reverse=True)
+        # Find rank (1-indexed)
+        pos = next((i + 1 for i, s in enumerate(scores) if s <= player_score), len(scores))
+        is_map = ' - ' in lb_name
+        emoji = '🏆' if is_map else '<:weapon_hs:1350656128635375698>'
+        placements.append((pos, lb_name, emoji))
+
+    # Sort by placement (best first), then return top N
+    placements.sort(key=lambda x: x[0])
+    return placements[:top_n]
+
+
 def get_bounty_completions_for_player(discord_id):
     """Return list of (bounty_name, placement) tuples completed by player, including legacy."""
     try:
@@ -952,6 +993,7 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
     mastered = get_mastered_weapons_for_player(discord_id, cached_data)
     named_feats, feat_submissions = get_feats_for_player(discord_id, cached_data)
     special_ops = get_special_ops_for_player(discord_id, cached_data)
+    best_placements = get_best_placements_for_player(discord_id)
 
     try:
         butler_stats = calculate_butler_stats()
@@ -1056,6 +1098,12 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
             suffix = f" ×{count}" if count > 1 else ""
             display_emojis = feat_display.get(normalized, normalized)
             lines.append(f"• {display_emojis}{suffix} {label_str}")
+        lines.append("")
+
+    if best_placements:
+        lines.append("**Best Placements:**")
+        for pos, lb_name, emoji in best_placements:
+            lines.append(f"• {emoji} {lb_name} — #{pos}")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
