@@ -49,10 +49,24 @@ google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
 creds = Credentials.from_service_account_info(json.loads(google_creds_json), scopes=SCOPES)
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key(SHEET_ID)
-submissions_ws = sheet.worksheet('Submissions')
-players_ws = sheet.worksheet('Players')
-leaderboards_ws = sheet.worksheet('Leaderboards')
-leaderboard_data_ws = sheet.worksheet('LeaderboardData')
+
+def _init_worksheet(name):
+    for attempt in range(5):
+        try:
+            return sheet.worksheet(name)
+        except Exception as e:
+            if attempt < 4:
+                import time as _time
+                wait = 5 * (2 ** attempt)
+                print(f"Sheet '{name}' init error, retrying in {wait}s: {e}")
+                _time.sleep(wait)
+            else:
+                raise
+
+submissions_ws = _init_worksheet('Submissions')
+players_ws = _init_worksheet('Players')
+leaderboards_ws = _init_worksheet('Leaderboards')
+leaderboard_data_ws = _init_worksheet('LeaderboardData')
 
 # SpecialOps sheet — columns: DiscordID, PlayerName, Achievement
 try:
