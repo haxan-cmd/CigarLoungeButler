@@ -1311,6 +1311,11 @@ def get_weapons_for_class_and_category(selected_class, category):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
     return sorted([w for w in class_weapons if w in weapon_list])
 
+def get_all_weapons_for_class(selected_class):
+    """Return all weapons for a subclass regardless of 1H/2H category."""
+    class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
+    return sorted([w for w in class_weapons if w not in FEAT_WEAPONS])
+
 def upsert_player(discord_id, discord_name):
     try:
         rows = players_ws.get_all_values()
@@ -1600,9 +1605,10 @@ class SubmitView(discord.ui.View):
                 ephemeral=True
             )
         else:
-            view = WeaponTypeView(self.original_message, self.prompt_msg)
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
             await interaction.response.send_message(
-                content="**Step 1 of 6:** What type of weapon did you use?",
+                content="**Step 1 of 5:** Which class were you playing?",
                 view=view,
                 ephemeral=True
             )
@@ -1645,7 +1651,7 @@ class ParseConfirmView(discord.ui.View):
             category = "2h" if weapon in WEAPONS_2H else "1h"
             view = MapSelectView(self.original_message, self.prompt_msg, subclass, weapon)
             await interaction.response.edit_message(
-                content=f"**Step 4 of 6:** Class: `{subclass}` | Weapon: `{weapon}`\nWhich map were you on?",
+                content=f"**Step 3 of 5:** Class: `{subclass}` | Weapon: `{weapon}`\nWhich map were you on?",
                 view=view
             )
         elif weapon:
@@ -1654,14 +1660,15 @@ class ParseConfirmView(discord.ui.View):
             classes = get_classes_for_category(category)
             view = ClassSelectView(self.original_message, self.prompt_msg, category, classes, pre_detected_weapon=weapon)
             await interaction.response.edit_message(
-                content=f"**Step 2 of 6:** Weapon: `{weapon}`\nWhich class were you playing?",
+                content=f"**Step 1 of 5:** Weapon: `{weapon}`\nWhich class were you playing?",
                 view=view
             )
         elif subclass:
-            # Have class, still need weapon
-            view = WeaponTypeView(self.original_message, self.prompt_msg)
+            # Have class, still need weapon — skip straight to class select
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
             await interaction.response.edit_message(
-                content=f"**Step 1 of 6:** Class: `{subclass}`\nWhat type of weapon did you use?",
+                content=f"**Step 1 of 5:** Class: `{subclass}`\nWhich class were you playing?",
                 view=view
             )
 
@@ -1670,9 +1677,10 @@ class ParseConfirmView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        view = WeaponTypeView(self.original_message, self.prompt_msg)
+        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
         await interaction.response.edit_message(
-            content="**Step 1 of 6:** What type of weapon did you use?",
+            content="**Step 1 of 5:** Which class were you playing?",
             view=view
         )
 
@@ -1682,27 +1690,15 @@ class WeaponTypeView(discord.ui.View):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
 
-    @discord.ui.button(label='Two-Handed', style=discord.ButtonStyle.blurple, emoji='⚔️')
-    async def two_handed(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label='Melee', style=discord.ButtonStyle.blurple, emoji='⚔️')
+    async def melee(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        classes = get_classes_for_category("2h")
-        view = ClassSelectView(self.original_message, self.prompt_msg, "2h", classes)
+        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
         await interaction.response.edit_message(
-            content="**Step 2 of 6:** Which class were you playing?",
-            view=view
-        )
-
-    @discord.ui.button(label='One-Handed', style=discord.ButtonStyle.blurple, emoji='🗡️')
-    async def one_handed(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.original_message.author.id:
-            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
-            return
-        classes = get_classes_for_category("1h")
-        view = ClassSelectView(self.original_message, self.prompt_msg, "1h", classes)
-        await interaction.response.edit_message(
-            content="**Step 2 of 6:** Which class were you playing?",
+            content="**Step 1 of 5:** Which class were you playing?",
             view=view
         )
 
@@ -1713,7 +1709,7 @@ class WeaponTypeView(discord.ui.View):
             return
         view = MarksmanSubclassView(self.original_message, self.prompt_msg)
         await interaction.response.edit_message(
-            content="**Step 2 of 6:** Class: `Marksman`\nWhich subclass were you playing?",
+            content="**Step 2 of 5:** Class: `Marksman`\nWhich subclass were you playing?",
             view=view
         )
 
@@ -1737,7 +1733,7 @@ class MarksmanSubclassSelect(discord.ui.Select):
         weapons = sorted(MARKSMAN_SUBCLASSES[subclass])
         view = RangedWeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons)
         await interaction.response.edit_message(
-            content=f"**Step 3 of 6:** Class: `Marksman` | Subclass: `{subclass}`\nWhich weapon did you use?",
+            content=f"**Step 2 of 5:** Class: `Marksman` | Subclass: `{subclass}`\nWhich weapon did you use?",
             view=view
         )
 
@@ -1761,7 +1757,7 @@ class RangedWeaponSelect(discord.ui.Select):
         selected_weapon = self.values[0]
         view = MapSelectView(self.original_message, self.prompt_msg, f"Marksman ({self.subclass})", selected_weapon)
         await interaction.response.edit_message(
-            content=f"**Step 4 of 6:** Class: `Marksman ({self.subclass})` | Weapon: `{selected_weapon}`\nWhich map were you on?",
+            content=f"**Step 3 of 5:** Class: `Marksman ({self.subclass})` | Weapon: `{selected_weapon}`\nWhich map were you on?",
             view=view
         )
 
@@ -1791,14 +1787,14 @@ class ClassSelect(discord.ui.Select):
             # Weapon already confirmed — skip straight to map
             view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon)
             await interaction.response.edit_message(
-                content=f"**Step 4 of 6:** Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`\nWhich map were you on?",
+                content=f"**Step 3 of 5:** Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`\nWhich map were you on?",
                 view=view
             )
         else:
-            weapons = get_weapons_for_class_and_category(selected_class, self.category)
+            weapons = get_all_weapons_for_class(selected_class)
             view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
             await interaction.response.edit_message(
-                content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
+                content=f"**Step 3 of 5:** Class: `{selected_class}`\nWhich weapon did you use?",
                 view=view
             )
 
@@ -1822,7 +1818,7 @@ class WeaponSelect(discord.ui.Select):
         selected_weapon = self.values[0]
         view = MapSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon)
         await interaction.response.edit_message(
-            content=f"**Step 4 of 6:** Class: `{self.selected_class}` | Weapon: `{selected_weapon}`\nWhich map were you on?",
+            content=f"**Step 3 of 5:** Class: `{self.selected_class}` | Weapon: `{selected_weapon}`\nWhich map were you on?",
             view=view
         )
 
@@ -1847,7 +1843,7 @@ class MapSelect(discord.ui.Select):
         selected_map = self.values[0]
         view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map)
         await interaction.response.edit_message(
-            content=f"**Step 5 of 6:** Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}`\nWhich faction were you playing as?",
+            content=f"**Step 4 of 5:** Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}`\nWhich faction were you playing as?",
             view=view
         )
 
@@ -2119,9 +2115,10 @@ class EditFieldSelect(discord.ui.Select):
         ev = self.edit_view
 
         if field == "weapon":
-            view = WeaponTypeView(ev.original_message, None, edit_view=ev)
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(ev.original_message, None, "all", all_melee_classes)
             await interaction.response.edit_message(
-                content="**Step 1:** What type of weapon did you use?",
+                content="**Edit weapon:** Which class were you playing?",
                 view=view
             )
         elif field == "map":
