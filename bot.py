@@ -921,7 +921,24 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         for msg_text in messages[1:]:
             if has_bot:
                 await thread.send(file=discord.File(bot_path))
-            await thread.send(msg_text)
+            # Split if over Discord's 2000 char limit
+            if len(msg_text) <= 1900:
+                await thread.send(msg_text)
+            else:
+                # Split on double newlines (subclass boundaries)
+                chunks = []
+                current = ""
+                for block in msg_text.split("\n\n"):
+                    if len(current) + len(block) + 2 > 1900:
+                        if current:
+                            chunks.append(current.strip())
+                        current = block
+                    else:
+                        current += ("\n\n" if current else "") + block
+                if current:
+                    chunks.append(current.strip())
+                for chunk in chunks:
+                    await thread.send(chunk)
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
@@ -3304,6 +3321,17 @@ async def import_registry(interaction: discord.Interaction):
         imported = 0
         skipped = 0
 
+        # Pre-load all sheet data once to avoid rate limits during import
+        print("Pre-loading sheet data...")
+        cached_data = {
+            'players': players_ws.get_all_values()[1:],
+            'submissions': submissions_ws.get_all_values()[1:],
+            'leaderboard_data': leaderboard_data_ws.get_all_values()[1:],
+            'bounty_players': bounty_players_ws.get_all_values()[1:],
+            'bounty': bounty_ws.get_all_values()[1:] if bounty_ws else [],
+        }
+        await asyncio.sleep(2)
+
         all_threads = list(old_forum.threads)
         async for thread in old_forum.archived_threads(limit=200):
             all_threads.append(thread)
@@ -3311,9 +3339,9 @@ async def import_registry(interaction: discord.Interaction):
         for thread in all_threads:
             player_name = thread.name.strip()
             if player_name.lower() in players_with_subs:
-                await _process_registry_thread(interaction.guild, thread)
+                await _process_registry_thread(interaction.guild, thread, cached_data)
                 imported += 1
-                await asyncio.sleep(2)  # avoid Google Sheets rate limit
+                await asyncio.sleep(5)  # avoid Google Sheets rate limit
             else:
                 skipped += 1
                 print(f"Skipping {player_name} — no submissions")
@@ -3325,7 +3353,7 @@ async def import_registry(interaction: discord.Interaction):
         await interaction.followup.send(f"Import error: {e}", ephemeral=True)
 
 
-async def _process_registry_thread(guild, thread):
+async def _process_registry_thread(guild, thread, cached_data=None):
     """Parse an old registry thread and extract weapon marks and bounty completions."""
     import re
     player_name = thread.name.strip()
@@ -3410,10 +3438,10 @@ async def _process_registry_thread(guild, thread):
         await _save_legacy_bounties(player_name, legacy_bounties)
         await asyncio.sleep(1)
 
-    # Find discord ID from Players sheet
+    # Find discord ID from Players sheet (use cache if available)
     discord_id = None
-    rows = players_ws.get_all_values()[1:]
-    for row in rows:
+    player_rows_data = (cached_data or {}).get('players') or players_ws.get_all_values()[1:]
+    for row in player_rows_data:
         if len(row) > 1 and row[1].strip().lower() == player_name.lower():
             try:
                 discord_id = int(row[0].strip())
