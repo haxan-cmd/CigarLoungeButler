@@ -196,6 +196,16 @@ MAP_FACTIONS = {
 MAPS = sorted(MAP_FACTIONS.keys())
 FEAT_WEAPONS = ["Mallet", "Knife", "Healing Horn", "Fist and Shield"]
 
+# Map+faction combos that have a VIP role
+VIP_MAPS = {
+    ("Trayan Citadel", "Agatha"),
+    ("Trayan Citadel", "Mason"),
+    ("Thayic Stronghold", "Agatha"),
+    ("Falmire", "Agatha"),
+    ("Rudhelm", "Mason"),
+    ("Darkforest", "Agatha"),
+}
+
 MARKSMAN_SUBCLASSES = {
     "Longbowman": ["Bow", "War Bow"],
     "Crossbowman": ["Crossbow", "Siege Crossbow"],
@@ -1933,18 +1943,37 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
             )
             return
 
-        view = VIPView(
-            self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-            self.selected_map, self.faction, takedowns, kills, deaths
-        )
-        await interaction.response.send_message(
-            "**Almost done!** Were you playing as VIP?",
-            view=view,
-            ephemeral=True
-        )
+        # Check 20k score first if potential triple, then VIP if applicable
+        needs_vip = (self.selected_map, self.faction) in VIP_MAPS
+        if takedowns >= 150 and kills >= 100:
+            view = TripleCheckView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip
+            )
+            await interaction.response.send_message(
+                "Was your score over 20,000 points?",
+                view=view,
+                ephemeral=True
+            )
+        elif needs_vip:
+            view = VIPView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths
+            )
+            await interaction.response.send_message(
+                "**Almost done!** Were you playing as VIP?",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            await finalise_submission(
+                interaction, self.original_message, self.prompt_msg,
+                self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths, False, False
+            )
 
 class VIPView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, score_over_20k=False):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
@@ -1955,7 +1984,7 @@ class VIPView(discord.ui.View):
         self.takedowns = takedowns
         self.kills = kills
         self.deaths = deaths
-
+        self.score_over_20k = score_over_20k
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.red)
     async def vip_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1972,24 +2001,14 @@ class VIPView(discord.ui.View):
         await self.handle_vip(interaction, False)
 
     async def handle_vip(self, interaction, vip):
-        if self.takedowns >= 150 and self.kills >= 100:
-            view = TripleCheckView(
-                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-                self.selected_map, self.faction, self.takedowns, self.kills, self.deaths, vip
-            )
-            await interaction.response.edit_message(
-                content="Was your score over 20,000 points?",
-                view=view
-            )
-        else:
-            await finalise_submission(
-                interaction, self.original_message, self.prompt_msg, self.selected_class,
-                self.selected_weapon, self.selected_map, self.faction,
-                self.takedowns, self.kills, self.deaths, vip, False
-            )
+        await finalise_submission(
+            interaction, self.original_message, self.prompt_msg, self.selected_class,
+            self.selected_weapon, self.selected_map, self.faction,
+            self.takedowns, self.kills, self.deaths, vip, self.score_over_20k
+        )
 
 class TripleCheckView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip=False, needs_vip=False):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
@@ -2001,29 +2020,40 @@ class TripleCheckView(discord.ui.View):
         self.kills = kills
         self.deaths = deaths
         self.vip = vip
+        self.needs_vip = needs_vip
 
+    async def _after_triple_check(self, interaction, score_over_20k):
+        if self.needs_vip:
+            view = VIPView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, self.takedowns, self.kills, self.deaths,
+                score_over_20k=score_over_20k
+            )
+            await interaction.response.send_message(
+                "**Almost done!** Were you playing as VIP?",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            await finalise_submission(
+                interaction, self.original_message, self.prompt_msg, self.selected_class,
+                self.selected_weapon, self.selected_map, self.faction,
+                self.takedowns, self.kills, self.deaths, self.vip, score_over_20k
+            )
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
     async def score_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        await finalise_submission(
-            interaction, self.original_message, self.prompt_msg, self.selected_class,
-            self.selected_weapon, self.selected_map, self.faction,
-            self.takedowns, self.kills, self.deaths, self.vip, True
-        )
+        await self._after_triple_check(interaction, True)
 
     @discord.ui.button(label='No', style=discord.ButtonStyle.red)
     async def score_no(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        await finalise_submission(
-            interaction, self.original_message, self.prompt_msg, self.selected_class,
-            self.selected_weapon, self.selected_map, self.faction,
-            self.takedowns, self.kills, self.deaths, self.vip, False
-        )
+        await self._after_triple_check(interaction, False)
 
 
 class EditSubmissionView(discord.ui.View):
