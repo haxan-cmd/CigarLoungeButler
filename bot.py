@@ -4238,6 +4238,61 @@ async def rebuild_archive(interaction: discord.Interaction):
 
 
 
+@bot.tree.command(name="import_single", description="Import one player's legacy registry data by name (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(thread_name="Exact thread name in the-registry (e.g. 'Massive Eggplant')")
+async def import_single(interaction: discord.Interaction, thread_name: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        old_forum = interaction.guild.get_channel(1362435483061195022)
+        if not old_forum:
+            await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
+            return
+
+        player_rows = players_ws.get_all_values()[1:]
+        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
+        name_to_id = {row[1].strip().lower(): row[0].strip() for row in player_rows if len(row) > 1}
+
+        cached_data = {
+            'players': player_rows,
+            'submissions': submissions_ws.get_all_values()[1:],
+            'leaderboard_data': leaderboard_data_ws.get_all_values()[1:],
+            'bounty_players': bounty_players_ws.get_all_values()[1:],
+            'bounty': bounty_ws.get_all_values()[1:] if bounty_ws else [],
+        }
+
+        # Find matching thread
+        all_threads = list(old_forum.threads)
+        async for thread in old_forum.archived_threads(limit=200):
+            all_threads.append(thread)
+
+        target = None
+        for thread in all_threads:
+            if thread.name.strip().lower() == thread_name.strip().lower():
+                target = thread
+                break
+
+        if not target:
+            await interaction.followup.send(f"No thread found named '{thread_name}' in the-registry.", ephemeral=True)
+            return
+
+        resolved_name = id_to_name.get(name_to_id.get(thread_name.strip().lower(), ''), thread_name.strip())
+        discord_id = None
+        id_str = name_to_id.get(thread_name.strip().lower())
+        if id_str:
+            try:
+                discord_id = int(id_str)
+            except ValueError:
+                pass
+
+        await _process_registry_thread(interaction.guild, target, cached_data, resolved_name, discord_id)
+        await interaction.followup.send(f"Import complete for **{resolved_name}**.", ephemeral=True)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def import_registry(interaction: discord.Interaction):
