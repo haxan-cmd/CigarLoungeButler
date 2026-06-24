@@ -1238,89 +1238,95 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
-    async with _registry_lock:
-        try:
-            forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
-            if not forum:
-                print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
-                return
+    try:
+        await asyncio.wait_for(_registry_lock.acquire(), timeout=60)
+    except asyncio.TimeoutError:
+        print(f"Registry lock timeout for {player_name} — skipping card update")
+        return
+    try:
+        forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
+        if not forum:
+            print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
+            return
 
-            messages = build_registry_messages(player_name, discord_id, cached_data)
-            thread_id = get_registry_thread_id(discord_id)
+        messages = build_registry_messages(player_name, discord_id, cached_data)
+        thread_id = get_registry_thread_id(discord_id)
 
-            top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
-            bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
+        top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
+        bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
 
-            if thread_id:
-                # Delete existing thread and recreate fresh
-                try:
-                    thread = guild.get_thread(thread_id)
-                    if not thread:
-                        thread = await guild.fetch_channel(thread_id)
-                    await thread.delete()
-                except Exception as e:
-                    print(f"Registry thread delete error for {player_name}: {e}")
-                # Clear thread ID so a fresh one gets created
-                try:
-                    rows = registry_ws.get_all_values()
-                    discord_id_str = str(discord_id)
-                    for i, row in enumerate(rows[1:], start=2):
-                        if row and row[0].strip() == discord_id_str:
-                            registry_ws.update_cell(i, 3, '')
-                            break
-                except Exception as e:
-                    print(f"Registry thread ID clear error for {player_name}: {e}")
+        if thread_id:
+            # Delete existing thread and recreate fresh
+            try:
+                thread = guild.get_thread(thread_id)
+                if not thread:
+                    thread = await guild.fetch_channel(thread_id)
+                await thread.delete()
+            except Exception as e:
+                print(f"Registry thread delete error for {player_name}: {e}")
+            # Clear thread ID so a fresh one gets created
+            try:
+                rows = registry_ws.get_all_values()
+                discord_id_str = str(discord_id)
+                for i, row in enumerate(rows[1:], start=2):
+                    if row and row[0].strip() == discord_id_str:
+                        registry_ws.update_cell(i, 3, '')
+                        break
+            except Exception as e:
+                print(f"Registry thread ID clear error for {player_name}: {e}")
 
-            # Create new thread — 🗂️ emoji as first post (clean preview)
-            thread_with_msg = await forum.create_thread(
-                name=player_name,
-                content='🗂️',
-            )
-            thread = thread_with_msg.thread
+        # Create new thread — 🗂️ emoji as first post (clean preview)
+        thread_with_msg = await forum.create_thread(
+            name=player_name,
+            content='🗂️',
+        )
+        thread = thread_with_msg.thread
 
-            has_top = os.path.exists(top_path)
-            has_bot = os.path.exists(bot_path)
+        has_top = os.path.exists(top_path)
+        has_bot = os.path.exists(bot_path)
 
-            # Top spacer once at the very top
-            if has_top:
-                await asyncio.sleep(0.5)
-                await thread.send(file=discord.File(top_path))
-
-            # Header
+        # Top spacer once at the very top
+        if has_top:
             await asyncio.sleep(0.5)
-            await thread.send(messages[0])
+            await thread.send(file=discord.File(top_path))
 
-            # Each class: bottom spacer before, then class message
-            for msg_text in messages[1:]:
-                if has_bot:
-                    await asyncio.sleep(0.5)
-                    await thread.send(file=discord.File(bot_path))
+        # Header
+        await asyncio.sleep(0.5)
+        await thread.send(messages[0])
+
+        # Each class: bottom spacer before, then class message
+        for msg_text in messages[1:]:
+            if has_bot:
                 await asyncio.sleep(0.5)
-                # Split if over Discord's 2000 char limit
-                if len(msg_text) <= 1900:
-                    await thread.send(msg_text)
-                else:
-                    # Split on double newlines (subclass boundaries)
-                    chunks = []
-                    current = ""
-                    for block in msg_text.split("\n\n"):
-                        if len(current) + len(block) + 2 > 1900:
-                            if current:
-                                chunks.append(current.strip())
-                            current = block
-                        else:
-                            current += ("\n\n" if current else "") + block
-                    if current:
-                        chunks.append(current.strip())
-                    for chunk in chunks:
-                        await asyncio.sleep(0.5)
-                        await thread.send(chunk)
+                await thread.send(file=discord.File(bot_path))
+            await asyncio.sleep(0.5)
+            # Split if over Discord's 2000 char limit
+            if len(msg_text) <= 1900:
+                await thread.send(msg_text)
+            else:
+                # Split on double newlines (subclass boundaries)
+                chunks = []
+                current = ""
+                for block in msg_text.split("\n\n"):
+                    if len(current) + len(block) + 2 > 1900:
+                        if current:
+                            chunks.append(current.strip())
+                        current = block
+                    else:
+                        current += ("\n\n" if current else "") + block
+                if current:
+                    chunks.append(current.strip())
+                for chunk in chunks:
+                    await asyncio.sleep(0.5)
+                    await thread.send(chunk)
 
-            save_registry_thread_id(discord_id, player_name, thread.id)
-            print(f"Registry card created for {player_name}")
+        save_registry_thread_id(discord_id, player_name, thread.id)
+        print(f"Registry card created for {player_name}")
 
-        except Exception as e:
-            print(f"Registry card error for {player_name}: {e}")
+    except Exception as e:
+        print(f"Registry card error for {player_name}: {e}")
+    finally:
+        _registry_lock.release()
 
 
 def get_classes_for_category(category):
