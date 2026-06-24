@@ -452,7 +452,7 @@ def get_player_title(bounties_completed):
     idx = min(bounties_completed, len(PLAYER_TITLES) - 1)
     return PLAYER_TITLES[idx]
 
-def calculate_weapon_marks_for_player(discord_id):
+def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     """
     Count weapon marks per weapon for a player.
     Sources: Submissions sheet + LeaderboardData sheet + LegacyMarks sheet.
@@ -464,7 +464,7 @@ def calculate_weapon_marks_for_player(discord_id):
     weapon_marks = {}
 
     # --- Source 1: Submissions sheet ---
-    subs = submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     for row in subs:
         if len(row) < 13:
             continue
@@ -497,7 +497,7 @@ def calculate_weapon_marks_for_player(discord_id):
 
     # --- Source 2: LeaderboardData sheet (historical entries, 1 mark each) ---
     try:
-        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        ld_rows = (cached_data or {}).get('leaderboard_data') or leaderboard_data_ws.get_all_values()[1:]
         for row in ld_rows:
             if len(row) < 6:
                 continue
@@ -540,9 +540,9 @@ def calculate_weapon_marks_for_player(discord_id):
 
     return weapon_marks
 
-def calculate_registry_stats(discord_id):
+def calculate_registry_stats(discord_id, cached_data=None):
     """Calculate all progression stats for a player."""
-    weapon_marks = calculate_weapon_marks_for_player(discord_id)
+    weapon_marks = calculate_weapon_marks_for_player(discord_id, cached_data)
 
     class_stats = {}
     for cls, subclasses in REGISTRY_CLASS_MAP.items():
@@ -642,9 +642,9 @@ def get_butler_titles_for_player(discord_id, stats):
             titles.append(label)
     return titles
 
-def get_special_ops_for_player(discord_id):
+def get_special_ops_for_player(discord_id, cached_data=None):
     """Find qualifying Special Ops submissions (feat weapons with 100+ TD)."""
-    subs = submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     special_ops = {}  # weapon -> best submission link
     feat_weapons = {"Fist and Shield", "Healing Horn", "Mallet", "Knife"}
@@ -666,9 +666,9 @@ def get_special_ops_for_player(discord_id):
                 special_ops[weapon] = link
     return special_ops
 
-def get_feats_for_player(discord_id):
+def get_feats_for_player(discord_id, cached_data=None):
     """Get all feat submissions (200TD, 100K, Triple, Predator, Flawless) with links."""
-    subs = submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     feats = []  # list of (feat_combo_emojis, link)
     named_feats = set()
@@ -701,7 +701,7 @@ def get_feats_for_player(discord_id):
         'Flawless':      FEAT_EMOJIS['Flawless'],
     }
     try:
-        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        ld_rows = (cached_data or {}).get('leaderboard_data') or leaderboard_data_ws.get_all_values()[1:]
         for row in ld_rows:
             if len(row) < 5 or row[2].strip() != discord_id_str:
                 continue
@@ -715,11 +715,33 @@ def get_feats_for_player(discord_id):
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
 
+    # Also pull from LegacyFeats sheet
+    try:
+        legacy_feats_ws = sheet.worksheet('LegacyFeats')
+        lf_rows = legacy_feats_ws.get_all_values()[1:]
+        player_rows = players_ws.get_all_values()[1:]
+        player_name = None
+        for row in player_rows:
+            if row and row[0].strip() == discord_id_str:
+                player_name = row[1].strip() if len(row) > 1 else None
+                break
+        if player_name:
+            for row in lf_rows:
+                if len(row) < 2 or row[0].strip().lower() != player_name.lower():
+                    continue
+                emojis = row[1].strip()
+                link = row[2].strip() if len(row) > 2 else ''
+                entry = (emojis, link)
+                if emojis and entry not in feats:
+                    feats.append(entry)
+    except Exception as e:
+        print(f"LegacyFeats read error: {e}")
+
     return named_feats, feats[:10]
 
-def get_mastered_weapons_for_player(discord_id):
+def get_mastered_weapons_for_player(discord_id, cached_data=None):
     """Weapons with 100+ submissions with 100+ takedowns."""
-    subs = submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     weapon_counts = {}
     for row in subs:
@@ -851,14 +873,14 @@ def format_weapon_marks(marks):
         return str(marks)        # plain for Bronze/Silver
 
 
-def build_registry_messages(player_name, discord_id):
+def build_registry_messages(player_name, discord_id, cached_data=None):
     """Build list of message strings for a player's registry card (one per class + header)."""
-    class_stats, weapon_marks = calculate_registry_stats(discord_id)
+    class_stats, weapon_marks = calculate_registry_stats(discord_id, cached_data)
     bounties_done = get_bounty_completions_for_player(discord_id)
     player_title = get_player_title(len(bounties_done))
-    mastered = get_mastered_weapons_for_player(discord_id)
-    named_feats, feat_submissions = get_feats_for_player(discord_id)
-    special_ops = get_special_ops_for_player(discord_id)
+    mastered = get_mastered_weapons_for_player(discord_id, cached_data)
+    named_feats, feat_submissions = get_feats_for_player(discord_id, cached_data)
+    special_ops = get_special_ops_for_player(discord_id, cached_data)
 
     try:
         butler_stats = calculate_butler_stats()
@@ -970,7 +992,7 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
     except Exception as e:
         print(f"Registry sheet save error: {e}")
 
-async def create_or_update_registry_card(guild, discord_id, player_name):
+async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
     try:
@@ -979,7 +1001,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
             return
 
-        messages = build_registry_messages(player_name, discord_id)
+        messages = build_registry_messages(player_name, discord_id, cached_data)
         thread_id = get_registry_thread_id(discord_id)
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
@@ -3666,7 +3688,36 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 if bounty_name:
                     legacy_bounties.append((bounty_name, placement))
 
-    if not legacy_marks:
+    # --- Parse legacy feats of legend ---
+    legacy_feats = []
+    in_feats_section = False
+    FEAT_STOP_SECTIONS = ["Mastered Weapons", "Special Ops", "Bounties Completed", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
+    for line in full_text.split("\n"):
+        line = line.strip()
+        if "Feats of Legend" in line:
+            in_feats_section = True
+            continue
+        if in_feats_section:
+            if any(s in line for s in FEAT_STOP_SECTIONS):
+                in_feats_section = False
+                continue
+            if not line:
+                continue
+            if line.startswith("•") or line.startswith("*") or line.startswith("-"):
+                feat_line = re.sub(r'^[•*\-]\s*', '', line).strip()
+                if not feat_line or feat_line.lower() == "none":
+                    continue
+                # Extract link
+                link_match = re.search(r'\[.*?\]\((https?://[^\)]+)\)', feat_line)
+                link = link_match.group(1) if link_match else ''
+                # Extract emoji string (custom discord emojis + unicode emojis before the dash/link)
+                emoji_part = re.split(r'—|\[', feat_line)[0].strip()
+                # Keep only discord custom emoji tags and unicode emoji
+                emojis = ''.join(re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emoji_part))
+                if emojis:
+                    legacy_feats.append((emojis, link))
+
+
         print(f"No legacy marks found for {player_name}, skipping")
         return
 
@@ -3676,6 +3727,11 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
     # Save legacy bounties
     if legacy_bounties:
         await _save_legacy_bounties(player_name, legacy_bounties)
+        await asyncio.sleep(1)
+
+    # Save legacy feats
+    if legacy_feats:
+        await _save_legacy_feats(player_name, legacy_feats)
         await asyncio.sleep(1)
 
     # Use passed discord_id, or fall back to name lookup
@@ -3690,7 +3746,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 break
 
     if discord_id:
-        await create_or_update_registry_card(guild, discord_id, player_name)
+        await create_or_update_registry_card(guild, discord_id, player_name, cached_data)
         print(f"Registry card created for {player_name} (discord_id={discord_id})")
     else:
         print(f"No Discord ID found for {player_name}, skipping card creation")
@@ -3742,6 +3798,27 @@ async def _save_legacy_bounties(player_name, legacy_bounties):
                 gspread_retry(lb_ws.append_row, [player_name, clean_name, placement or ''])
     except Exception as e:
         print(f"Legacy bounties save error for {player_name}: {e}")
+
+
+async def _save_legacy_feats(player_name, legacy_feats):
+    """Save legacy feats of legend to LegacyFeats sheet, avoiding duplicates."""
+    try:
+        try:
+            feats_ws = sheet.worksheet('LegacyFeats')
+        except Exception:
+            feats_ws = sheet.add_worksheet(title='LegacyFeats', rows=500, cols=3)
+            gspread_retry(feats_ws.append_row, ['PlayerName', 'Emojis', 'Link'])
+
+        existing = gspread_retry(feats_ws.get_all_values)[1:]
+        existing_keys = {(r[0].strip(), r[2].strip()) for r in existing if len(r) >= 3}
+
+        for emojis, link in legacy_feats:
+            key = (player_name, link)
+            if key not in existing_keys:
+                gspread_retry(feats_ws.append_row, [player_name, emojis, link])
+    except Exception as e:
+        print(f"Legacy feats save error for {player_name}: {e}")
+
 
 @bot.tree.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
