@@ -1976,16 +1976,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # Build marks breakdown
     marks_earned = 1
-    marks_lines = ["• +1 submission"]
+    marks_lines = ["*+1 submission*"]
     if '200 Takedowns' in feats:
         marks_earned += 1
-        marks_lines.append(f"• <a:200tkd:1363648828414230538> +1 Takedowns")
+        marks_lines.append(f"*<a:200tkd:1363648828414230538> +1 Takedowns*")
     if '100 Kills' in feats:
         marks_earned += 1
-        marks_lines.append(f"• <a:100kill:1361412390339608686> +1 Kills")
+        marks_lines.append(f"*<a:100kill:1361412390339608686> +1 Kills*")
     if 'Triple' in feats:
         marks_earned += 1
-        marks_lines.append(f"• <a:triple:1365532698260668466> +1 Triple")
+        marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     marks_summary = f"\n**+{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
@@ -2083,7 +2083,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         try:
             async for msg in original_message.channel.history(limit=10, after=original_message):
                 if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                    await msg.edit(content=msg.content + f"\n• <:highscore:1360312918545269057> +1 High Score")
+                    # Increment the marks total in the message
+                    import re as _re
+                    def increment_marks(content):
+                        def replacer(m):
+                            n = int(m.group(1)) + 1
+                            return f"**+{n} mark{'s' if n != 1 else ''}**"
+                        return _re.sub(r'\*\*\+(\d+) marks?\*\*', replacer, content)
+                    new_content = increment_marks(msg.content) + f"\n*<:highscore:1360312918545269057> +1 High Score*"
+                    await msg.edit(content=new_content)
                     break
         except Exception as e:
             print(f"Highscore mark edit error: {e}")
@@ -2761,7 +2769,7 @@ async def bounty_end(interaction: discord.Interaction):
             await role.delete(reason=f"Bounty ended: {bounty['title']}")
 
 
-def build_progress_board(bounty, top_n=5):
+def build_progress_board(bounty, top_n=10):
     """Build a top-N hunters board from BountyPlayers, excluding completed players."""
     completed_ids = {str(c['id']) for c in bounty['completions']}
     rows = bounty_players_ws.get_all_values()
@@ -2814,6 +2822,42 @@ async def update_progress_board(bounty, bounty_channel):
         print(f"[PROGRESS_BOARD] Update error: {e}")
 
 
+@bot.tree.command(name="bounty_post_progress", description="Post or repost the live TOP HUNTERS board in the bounty channel (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def bounty_post_progress(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        bounty = get_active_bounty()
+        if not bounty:
+            await interaction.followup.send("No active bounty.", ephemeral=True)
+            return
+
+        bounty_channel = interaction.guild.get_channel(bounty['channel_id'])
+        if not bounty_channel:
+            await interaction.followup.send("Could not find bounty channel.", ephemeral=True)
+            return
+
+        # Delete old progress message if it exists
+        if bounty.get('progress_msg_id'):
+            try:
+                old_msg = await bounty_channel.fetch_message(bounty['progress_msg_id'])
+                await old_msg.delete()
+            except Exception:
+                pass
+
+        # Post fresh progress board
+        content = build_progress_board(bounty, top_n=10)
+        msg = await bounty_channel.send(content)
+
+        # Save new message ID to Bounty sheet
+        bounty_ws.update_cell(bounty['row'], 14, str(msg.id))
+        await interaction.followup.send("Progress board posted.", ephemeral=True)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="bounty_status", description="Show the current active bounty card")
 async def bounty_status(interaction: discord.Interaction):
     bounty = get_active_bounty()
@@ -2833,7 +2877,7 @@ async def bounty_hunt(interaction: discord.Interaction):
     if not bounty:
         await interaction.response.send_message("No active bounty right now.", ephemeral=True)
         return
-    board = build_progress_board(bounty, top_n=5)
+    board = build_progress_board(bounty, top_n=10)
     await interaction.response.send_message(board)
 
 
