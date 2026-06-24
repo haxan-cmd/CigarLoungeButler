@@ -3563,16 +3563,19 @@ async def import_registry(interaction: discord.Interaction):
         async for thread in old_forum.archived_threads(limit=200):
             all_threads.append(thread)
 
+        processed_ids = set()
+
         for thread in all_threads:
             owner_id_str = str(thread.owner_id)
-            if owner_id_str in players_with_subs:
+            if owner_id_str in players_with_subs and owner_id_str not in processed_ids:
+                processed_ids.add(owner_id_str)
                 resolved_name = id_to_name.get(owner_id_str, thread.name.strip())
                 await _process_registry_thread(interaction.guild, thread, cached_data, resolved_name, thread.owner_id)
                 imported += 1
                 await asyncio.sleep(15)
             else:
                 skipped += 1
-                print(f"Skipping thread '{thread.name}' (owner_id={thread.owner_id}) — no submissions")
+                print(f"Skipping thread '{thread.name}' (owner_id={thread.owner_id}) — already processed or no submissions")
 
         await interaction.followup.send(f"Import complete — {imported} cards created, {skipped} skipped (no submissions).", ephemeral=True)
     except Exception as e:
