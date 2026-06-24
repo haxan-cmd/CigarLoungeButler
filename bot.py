@@ -3643,40 +3643,51 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
     full_text = "\n".join(messages)
 
     # --- Parse weapon marks ---
+    # Old format:
+    #   Subclass header: "Devastator: Champion [■□□□□□]"
+    #   Weapon line:     "• Battle Axe: [✦✧✧✧✧]"
+    #   With overflow:   "• Greatsword: [✦✦✦✦✦] ☆☆"  (each ☆ = 5 extra marks)
     legacy_marks = {}
     current_subclass = None
 
     for line in full_text.split("\n"):
         line = line.strip()
 
-        for subclass in REGISTRY_WEAPON_MAP.keys():
-            if re.search(rf'\b{re.escape(subclass)}\s*:', line) and any(
-                r in line for r in ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex", "Novice"]
-            ):
-                current_subclass = subclass
-                break
+        # Detect subclass header: "SubclassName: RankName [...]"
+        subclass_header = re.match(r'^([A-Za-z\-]+):\s+(?:' + '|'.join(SUBCLASS_RANKS) + r')\b', line)
+        if subclass_header:
+            candidate = subclass_header.group(1).strip()
+            if candidate in REGISTRY_WEAPON_MAP:
+                current_subclass = candidate
+            continue
 
         if not current_subclass:
             continue
 
-        emoji_match = re.search(r':level\d+_(\d+):', line)
-        bracket_match = re.search(r'\[([✦✧]+)\]', line)
+        # Detect weapon line: "• WeaponName: [✦✧...] optional ☆☆..."
+        weapon_match = re.match(r'^[•\-\*]\s*(.+?):\s*\[([✦✧]*)\](.*)', line)
+        if not weapon_match:
+            continue
 
-        if emoji_match and bracket_match:
-            current_threshold = int(emoji_match.group(1))
-            inner = bracket_match.group(1)
-            filled = inner.count('✦')
-            total_marks = current_threshold + filled
+        weapon_raw = weapon_match.group(1).strip()
+        # Strip leading emoji (discord custom emoji or unicode) from weapon name
+        weapon_raw = re.sub(r'^(<[^>]+>|[\U0001F000-\U0010FFFF])\s*', '', weapon_raw).strip()
+        bracket_inner = weapon_match.group(2)
+        after_bracket = weapon_match.group(3)
 
-            name_match = re.search(r':level\d+_\d+:\s*(.+?):\s*\[', line)
-            if name_match:
-                weapon_raw = name_match.group(1).strip()
-                for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
-                    if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
-                        if total_marks > 0:
-                            key = (w, current_subclass)
-                            legacy_marks[key] = max(legacy_marks.get(key, 0), total_marks)
-                        break
+        filled = bracket_inner.count('✦')
+        stars = after_bracket.count('☆')
+        total_marks = filled + (stars * 5)
+
+        if total_marks == 0:
+            continue
+
+        # Match weapon name to known weapons in current subclass
+        for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
+            if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
+                key = (w, current_subclass)
+                legacy_marks[key] = max(legacy_marks.get(key, 0), total_marks)
+                break
 
     # --- Parse legacy bounty completions ---
     KNOWN_SECTIONS = ["Feats of Legend", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
