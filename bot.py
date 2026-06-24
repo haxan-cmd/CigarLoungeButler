@@ -3,6 +3,7 @@ import os
 import asyncio
 import gspread
 import json
+import re
 import time
 from google.oauth2.service_account import Credentials
 from discord.ext import commands
