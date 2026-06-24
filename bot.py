@@ -830,16 +830,16 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         has_top = os.path.exists(top_path)
         has_bot = os.path.exists(bot_path)
 
-        # Top spacer as second message
+        # Top spacer
         if has_top:
             await thread.send(file=discord.File(top_path))
 
         # Header accolades
         await thread.send(messages[0])
 
-        # Class sections: top spacer before each (except first), bottom spacer after each
-        for i, msg_text in enumerate(messages[1:]):
-            if i > 0 and has_top:
+        # Each class: top spacer, class message, bottom spacer
+        for msg_text in messages[1:]:
+            if has_top:
                 await thread.send(file=discord.File(top_path))
             await thread.send(msg_text)
             if has_bot:
@@ -1192,10 +1192,7 @@ class ClassSelect(discord.ui.Select):
                 view=view
             )
         else:
-            if selected_class == "Other":
-                weapons = sorted(WEAPONS_2H if self.category == "2h" else WEAPONS_1H) + ["Other"]
-            else:
-                weapons = get_weapons_for_class_and_category(selected_class, self.category)
+            weapons = get_weapons_for_class_and_category(selected_class, self.category)
             view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
             await interaction.response.edit_message(
                 content=f"**Step 3 of 6:** Class: `{selected_class}`\nWhich weapon did you use?",
