@@ -1195,6 +1195,7 @@ async def on_ready():
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
+    await bot.tree.sync()  # also sync globally to clear stale cache
     print(f'Logged in as {bot.user}')
 
 
