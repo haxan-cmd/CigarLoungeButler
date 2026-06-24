@@ -1011,15 +1011,19 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         # Top spacer once at the very top
         if has_top:
+            await asyncio.sleep(0.5)
             await thread.send(file=discord.File(top_path))
 
         # Header
+        await asyncio.sleep(0.5)
         await thread.send(messages[0])
 
         # Each class: bottom spacer before, then class message
         for msg_text in messages[1:]:
             if has_bot:
+                await asyncio.sleep(0.5)
                 await thread.send(file=discord.File(bot_path))
+            await asyncio.sleep(0.5)
             # Split if over Discord's 2000 char limit
             if len(msg_text) <= 1900:
                 await thread.send(msg_text)
@@ -1037,6 +1041,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
                 if current:
                     chunks.append(current.strip())
                 for chunk in chunks:
+                    await asyncio.sleep(0.5)
                     await thread.send(chunk)
 
         save_registry_thread_id(discord_id, player_name, thread.id)
