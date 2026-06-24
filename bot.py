@@ -431,42 +431,55 @@ def get_player_title(bounties_completed):
 
 def calculate_weapon_marks_for_player(discord_id):
     """
-    Count weapon marks per weapon for a player from Submissions sheet.
+    Count weapon marks per weapon for a player.
+    Sources: Submissions sheet + LeaderboardData sheet + LegacyMarks sheet.
     1 mark per submission + 1 bonus for 200 Takedowns feat + 1 for 100 Kills + 1 for Triple.
+    LeaderboardData entries count as 1 mark each (historical pre-Submissions data).
     Returns dict: weapon_name -> total_marks
     """
-    subs = submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     weapon_marks = {}
 
+    # --- Source 1: Submissions sheet ---
+    subs = submissions_ws.get_all_values()[1:]
     for row in subs:
         if len(row) < 13:
             continue
-        row_discord_id = row[2].strip() if len(row) > 2 else ''
-        if row_discord_id != discord_id_str:
+        if row[2].strip() != discord_id_str:
             continue
         weapon = row[3].strip() if len(row) > 3 else ''
         feats_str = row[11].strip() if len(row) > 11 else ''
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
-
         if not weapon or weapon == 'Other':
             continue
-
-        marks = 1  # base mark per submission
+        marks = 1
         if '200 Takedowns' in feats:
             marks += 1
         if '100 Kills' in feats:
             marks += 1
         if 'Triple' in feats:
             marks += 1
-
         weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
 
-    # Merge with legacy marks from LegacyMarks sheet
+    # --- Source 2: LeaderboardData sheet (historical entries, 1 mark each) ---
+    try:
+        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        for row in ld_rows:
+            if len(row) < 6:
+                continue
+            if row[2].strip() != discord_id_str:
+                continue
+            weapon = row[5].strip() if len(row) > 5 else ''
+            if not weapon or weapon == 'Other':
+                continue
+            weapon_marks[weapon] = weapon_marks.get(weapon, 0) + 1
+    except Exception as e:
+        print(f"LeaderboardData mark read error: {e}")
+
+    # --- Source 3: LegacyMarks sheet ---
     try:
         legacy_ws = sheet.worksheet('LegacyMarks')
         legacy_rows = legacy_ws.get_all_values()[1:]
-        # Find player name from discord_id
         player_rows = players_ws.get_all_values()[1:]
         player_name = None
         for row in player_rows:
@@ -484,7 +497,7 @@ def calculate_weapon_marks_for_player(discord_id):
                     continue
                 weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
     except Exception:
-        pass  # LegacyMarks sheet may not exist yet
+        pass
 
     return weapon_marks
 
@@ -769,9 +782,11 @@ def build_registry_messages(player_name, discord_id):
             sub_emoji = SUBCLASS_RANK_EMOJIS.get(sdata['rank'], '')
             num_weapons = sdata['num_weapons']
 
-            # Subclass meter: one block per weapon, filled when weapon has ≥1 mark
-            weapons_with_marks = sum(1 for wdata in sdata['weapons'].values() if wdata['marks'] > 0)
-            meter = '▰' * weapons_with_marks + '▱' * (num_weapons - weapons_with_marks)
+            # Subclass meter: tracks weapon rank-ups toward next subclass level-up
+            # Each weapon rank-up = 1 subclass mark; meter fills when marks = num_weapons
+            subclass_marks = sdata['marks']
+            progress_in_current_level = subclass_marks % num_weapons if num_weapons else 0
+            meter = '▰' * progress_in_current_level + '▱' * (num_weapons - progress_in_current_level)
             lines.append(f"**{sub_emoji} {subclass}: {sdata['rank']}** `[{meter}]`")
 
             for w, wdata in sdata['weapons'].items():
@@ -854,20 +869,18 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         has_top = os.path.exists(top_path)
         has_bot = os.path.exists(bot_path)
 
-        # Top spacer
+        # Top spacer once at the very top
         if has_top:
             await thread.send(file=discord.File(top_path))
 
-        # Header accolades
+        # Header
         await thread.send(messages[0])
 
-        # Each class: top spacer, class message, bottom spacer
+        # Each class: bottom spacer before, then class message
         for msg_text in messages[1:]:
-            if has_top:
-                await thread.send(file=discord.File(top_path))
-            await thread.send(msg_text)
             if has_bot:
                 await thread.send(file=discord.File(bot_path))
+            await thread.send(msg_text)
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
@@ -1684,6 +1697,20 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
     if feats_str:
         summary += f"\n{feats_str}"
 
+    # Build marks breakdown
+    marks_earned = 1
+    marks_lines = ["• +1 submission"]
+    if '200 Takedowns' in feats:
+        marks_earned += 1
+        marks_lines.append(f"• <a:200tkd:1363648828414230538> +1 Takedowns")
+    if '100 Kills' in feats:
+        marks_earned += 1
+        marks_lines.append(f"• <a:100kill:1361412390339608686> +1 Kills")
+    if 'Triple' in feats:
+        marks_earned += 1
+        marks_lines.append(f"• <a:triple:1365532698260668466> +1 Triple")
+    marks_summary = f"\n**+{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
     await interaction.response.edit_message(content="✅ Most impressive! Your run has been recorded.", view=None)
@@ -1716,7 +1743,7 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
         submission_row, selected_weapon, selected_class,
         selected_map, faction, takedowns, kills, deaths, vip, feats, message_link
     )
-    summary_reply = await original_message.reply(summary, mention_author=False, view=edit_view)
+    summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
     edit_view._message = summary_reply
 
     await asyncio.sleep(1)
@@ -1775,6 +1802,14 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
 
     if any_updated:
         await original_message.add_reaction("<a:highscore:1360312918545269057>")
+        # Edit summary to add highscore bonus mark
+        try:
+            async for msg in original_message.channel.history(limit=10, after=original_message):
+                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                    await msg.edit(content=msg.content + f"\n• <:highscore:1360312918545269057> +1 High Score")
+                    break
+        except Exception as e:
+            print(f"Highscore mark edit error: {e}")
 
     # Bounty check (skip for ranged submissions)
     if not is_ranged:
@@ -3021,9 +3056,9 @@ def build_favourites_embed(stats):
         f"\n"
         f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
-        f"**Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
+        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
         f"\n"
-        f"**Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
+        f"**<a:topkill:1360314538364240024> Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
         f"\n"
         f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
         f"\n"
