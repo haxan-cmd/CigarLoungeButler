@@ -992,7 +992,15 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         # Flawless shows with link as PB; everything else groups with ×N count
         flawless_emoji = FEAT_EMOJIS['Flawless']
         flawless_entry = None
-        feat_counts = {}
+        feat_counts = {}  # normalized_key -> count
+        feat_display = {}  # normalized_key -> display emoji string
+        # Preferred display order for known combos
+        FEAT_DISPLAY_ORDER = [
+            FEAT_EMOJIS['200 Takedowns'],
+            FEAT_EMOJIS['100 Kills'],
+            FEAT_EMOJIS['Triple'],
+            FEAT_EMOJIS['Predator'],
+        ]
         for emojis, link in feat_submissions:
             parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
             normalized = ''.join(sorted(parts))
@@ -1000,7 +1008,17 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
                 if flawless_entry is None:
                     flawless_entry = (emojis, link)
                 continue
+            # Skip incomplete Triple combos — must have all three: 200TD, 100K, Triple emoji
+            if FEAT_EMOJIS['Triple'] in normalized:
+                if not (FEAT_EMOJIS['200 Takedowns'] in normalized and FEAT_EMOJIS['100 Kills'] in normalized):
+                    continue
             feat_counts[normalized] = feat_counts.get(normalized, 0) + 1
+            if normalized not in feat_display:
+                # Build display string in preferred order
+                ordered = [e for e in FEAT_DISPLAY_ORDER if e in normalized]
+                # Add any remaining emojis not in the order list
+                remaining = [p for p in parts if p not in FEAT_DISPLAY_ORDER]
+                feat_display[normalized] = ''.join(ordered + remaining)
 
         # Label map: normalized emoji string -> display label
         _e = FEAT_EMOJIS
@@ -1011,7 +1029,6 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
             ''.join(sorted([_e['Predator']])):                                               "Predator",
             ''.join(sorted([_e['200 Takedowns'], _e['100 Kills']])):                         "200 TD / 100 Kills",
             ''.join(sorted([_e['200 Takedowns'], _e['Triple']])):                            "Triple",
-            ''.join(sorted([_e['100 Kills'], _e['Triple']])):                                "Triple",
             ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple']])):           "Triple",
             ''.join(sorted([_e['200 Takedowns'], _e['Predator']])):                          "Predator",
             ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Predator']])):         "Predator",
@@ -1037,7 +1054,8 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
             else:
                 label_str = f"*{label}*"
             suffix = f" ×{count}" if count > 1 else ""
-            lines.append(f"• {normalized}{suffix} {label_str}")
+            display_emojis = feat_display.get(normalized, normalized)
+            lines.append(f"• {display_emojis}{suffix} {label_str}")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
