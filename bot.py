@@ -299,7 +299,7 @@ REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654
 REGISTRY_WEAPON_MAP = {
     # Knight
     "Officer":       ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
-    "Guardian":      ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
+    "Guardian":      ["Axe", "Falchion", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
     "Crusader":      ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
     # Vanguard
     "Devastator":    ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
@@ -829,7 +829,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         )
         thread = thread_with_msg.thread
 
-        # Top spacer
+        # Top spacer as second message
         if has_top:
             await thread.send(file=discord.File(top_path))
 
@@ -862,7 +862,7 @@ def get_classes_for_category(category):
 def get_weapons_for_class_and_category(selected_class, category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
+    return sorted([w for w in class_weapons if w in weapon_list])
 
 def upsert_player(discord_id, discord_name):
     try:
@@ -1175,7 +1175,7 @@ class ClassSelect(discord.ui.Select):
         self.pre_detected_weapon = pre_detected_weapon
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
         sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
