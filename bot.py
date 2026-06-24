@@ -800,6 +800,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
+        has_top = os.path.exists(top_path)
+        has_bot = os.path.exists(bot_path)
 
         if thread_id:
             # Edit existing messages in order
@@ -820,22 +822,23 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread with top spacer as first message
-        top_file = discord.File(top_path) if os.path.exists(top_path) else None
+        # Create new thread — emoji only as first post (clean preview)
         thread_with_msg = await forum.create_thread(
             name=player_name,
-            content=messages[0],
-            file=top_file,
+            content='🗂️',
         )
         thread = thread_with_msg.thread
 
-        # Post remaining class messages
-        for msg_text in messages[1:]:
-            await thread.send(msg_text)
+        # Message 1: header accolades
+        await thread.send(messages[0])
 
-        # Post bottom spacer
-        if os.path.exists(bot_path):
-            await thread.send(file=discord.File(bot_path))
+        # Messages 2-5: top spacer before each class, bottom spacer after
+        for msg_text in messages[1:]:
+            if has_top:
+                await thread.send(file=discord.File(top_path))
+            await thread.send(msg_text)
+            if has_bot:
+                await thread.send(file=discord.File(bot_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
@@ -855,7 +858,7 @@ def get_classes_for_category(category):
 def get_weapons_for_class_and_category(selected_class, category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w in weapon_list]) + ["Other"]
+    return sorted([w for w in class_weapons if w in weapon_list])
 
 def upsert_player(discord_id, discord_name):
     try:
@@ -1168,7 +1171,7 @@ class ClassSelect(discord.ui.Select):
         self.pre_detected_weapon = pre_detected_weapon
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
         sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes] + [discord.SelectOption(label="Other")]
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
