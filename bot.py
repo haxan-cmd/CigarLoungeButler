@@ -672,6 +672,7 @@ def get_feats_for_player(discord_id, cached_data=None):
     subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     feats = []  # list of (feat_combo_emojis, link)
+    seen_links = set()  # deduplicate across all sources by link
     named_feats = set()
 
     # Check for Hundred-Handed (200TD + 100K + Triple + Flawless + no deaths)
@@ -693,6 +694,8 @@ def get_feats_for_player(discord_id, cached_data=None):
         link = row[12].strip() if len(row) > 12 else ''
         feat_emojis = ''.join(FEAT_EMOJIS[f] for f in ['200 Takedowns', '100 Kills', 'Triple', 'Predator', 'Flawless'] if f in row_feats)
         if feat_emojis:
+            if link and link not in seen_links:
+                seen_links.add(link)
             feats.append((feat_emojis, link))
 
     # Also pull legacy feat entries from LeaderboardData
@@ -709,10 +712,12 @@ def get_feats_for_player(discord_id, cached_data=None):
             lb_name = row[0].strip()
             if lb_name in FEAT_BOARD_EMOJIS:
                 link = row[4].strip() if len(row) > 4 else ''
+                if link and link in seen_links:
+                    continue
                 emoji = FEAT_BOARD_EMOJIS[lb_name]
-                entry = (emoji, link)
-                if entry not in feats:
-                    feats.append(entry)
+                if link:
+                    seen_links.add(link)
+                feats.append((emoji, link))
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
 
@@ -732,9 +737,12 @@ def get_feats_for_player(discord_id, cached_data=None):
                     continue
                 emojis = row[1].strip()
                 link = row[2].strip() if len(row) > 2 else ''
-                entry = (emojis, link)
-                if emojis and entry not in feats:
-                    feats.append(entry)
+                if link and link in seen_links:
+                    continue
+                if emojis:
+                    if link:
+                        seen_links.add(link)
+                    feats.append((emojis, link))
     except Exception as e:
         print(f"LegacyFeats read error: {e}")
 
