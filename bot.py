@@ -551,6 +551,7 @@ def get_player_bounties_completed(discord_id):
         rows = bounty_players_ws.get_all_values()[1:]
         discord_id_str = str(discord_id)
         completed = set()
+        bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
         for row in rows:
             if len(row) < 5:
                 continue
@@ -558,8 +559,17 @@ def get_player_bounties_completed(discord_id):
                 progress_str = row[4].strip() if len(row) > 4 else '{}'
                 try:
                     progress = json.loads(progress_str)
-                    # Count as completed if any weapon hit its target
-                    if any(v >= 1 for v in progress.values()):
+                    # Find target for this bounty
+                    target = {}
+                    for brow in bounty_rows:
+                        if brow and brow[0].strip() == row[0].strip() and len(brow) > 4 and brow[4]:
+                            try:
+                                target = json.loads(brow[4])
+                            except Exception:
+                                pass
+                            break
+                    # Complete only if ALL weapons hit their target
+                    if target and all(progress.get(w, 0) >= t for w, t in target.items()):
                         completed.add(row[0].strip())
                 except Exception:
                     pass
@@ -668,13 +678,13 @@ def get_mastered_weapons_for_player(discord_id):
     return [w for w, c in weapon_counts.items() if c >= 100]
 
 def get_bounty_completions_for_player(discord_id):
-    """Return list of (bounty_name, emoji, is_first) tuples."""
+    """Return list of bounty names completed by player, including legacy completions."""
     try:
         rows = bounty_players_ws.get_all_values()[1:]
         discord_id_str = str(discord_id)
         completions = []
-        # Get all bounty data to check #1 placement
         bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
+
         for row in rows:
             if len(row) < 5 or row[1].strip() != discord_id_str:
                 continue
@@ -682,10 +692,41 @@ def get_bounty_completions_for_player(discord_id):
             progress_str = row[4].strip() if len(row) > 4 else '{}'
             try:
                 progress = json.loads(progress_str)
-                if any(v >= 1 for v in progress.values()):
+                target = {}
+                for brow in bounty_rows:
+                    if brow and brow[0].strip() == bounty_title and len(brow) > 4 and brow[4]:
+                        try:
+                            target = json.loads(brow[4])
+                        except Exception:
+                            pass
+                        break
+                if target and all(progress.get(w, 0) >= t for w, t in target.items()):
                     completions.append(bounty_title)
             except Exception:
                 pass
+
+        # Also pull from LegacyBounties sheet
+        try:
+            lb_ws = sheet.worksheet('LegacyBounties')
+            lb_rows = lb_ws.get_all_values()[1:]
+            player_rows = players_ws.get_all_values()[1:]
+            player_name = None
+            for r in player_rows:
+                if r and r[0].strip() == discord_id_str:
+                    player_name = r[1].strip() if len(r) > 1 else None
+                    break
+            if player_name:
+                existing_titles = {c.lower() for c in completions}
+                for r in lb_rows:
+                    if len(r) < 2 or r[0].strip().lower() != player_name.lower():
+                        continue
+                    bounty_name = r[1].strip()
+                    if bounty_name.lower() not in existing_titles:
+                        completions.append(bounty_name)
+                        existing_titles.add(bounty_name.lower())
+        except Exception:
+            pass
+
         return completions
     except Exception:
         return []
@@ -3284,7 +3325,7 @@ async def import_registry(interaction: discord.Interaction):
 
 
 async def _process_registry_thread(guild, thread):
-    """Parse an old registry thread and extract weapon marks into LegacyMarks sheet."""
+    """Parse an old registry thread and extract weapon marks and bounty completions."""
     import re
     player_name = thread.name.strip()
 
@@ -3296,18 +3337,13 @@ async def _process_registry_thread(guild, thread):
 
     full_text = "\n".join(messages)
 
-    # Parse weapon marks from lines like:
-    # • :level3_6: Battle Axe: [✦✦✧]
-    # The emoji encodes the current rank threshold: level{tier}_{threshold}
-    # total marks = threshold + count of ✦ in bracket
-    legacy_marks = {}  # weapon_name -> marks
-
+    # --- Parse weapon marks ---
+    legacy_marks = {}
     current_subclass = None
 
     for line in full_text.split("\n"):
         line = line.strip()
 
-        # Detect subclass header: "Devastator: Grandmaster [▰▰▰▱▱▱]"
         for subclass in REGISTRY_WEAPON_MAP.keys():
             if re.search(rf'\b{re.escape(subclass)}\s*:', line) and any(
                 r in line for r in ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex", "Novice"]
@@ -3318,7 +3354,6 @@ async def _process_registry_thread(guild, thread):
         if not current_subclass:
             continue
 
-        # Detect weapon line: • :levelX_N: WeaponName: [✦✦✧]
         emoji_match = re.search(r':level\d+_(\d+):', line)
         bracket_match = re.search(r'\[([✦✧]+)\]', line)
 
@@ -3328,23 +3363,49 @@ async def _process_registry_thread(guild, thread):
             filled = inner.count('✦')
             total_marks = current_threshold + filled
 
-            # Extract weapon name between emoji and colon before bracket
             name_match = re.search(r':level\d+_\d+:\s*(.+?):\s*\[', line)
             if name_match:
                 weapon_raw = name_match.group(1).strip()
-                # Match to known weapon names
                 for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
                     if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
                         if total_marks > 0:
                             legacy_marks[w] = max(legacy_marks.get(w, 0), total_marks)
                         break
 
+    # --- Parse legacy bounty completions ---
+    # Format: "• BountyName #1" or "• BountyName" in Bounties Completed section
+    legacy_bounties = []
+    in_bounties_section = False
+    for line in full_text.split("\n"):
+        line = line.strip()
+        if "Bounties Completed" in line:
+            in_bounties_section = True
+            continue
+        if in_bounties_section:
+            if line.startswith("**") or (line == "" and len(legacy_bounties) > 0):
+                # Hit next section header or blank line after entries
+                if line.startswith("**"):
+                    in_bounties_section = False
+                continue
+            if line.startswith("•") or line.startswith("*") or line.startswith("-"):
+                bounty_line = re.sub(r'^[•*\-]\s*', '', line).strip()
+                if bounty_line and bounty_line.lower() != "none":
+                    # Extract placement if present (#1, #2 etc)
+                    placement_match = re.search(r'#(\d+)', bounty_line)
+                    placement = int(placement_match.group(1)) if placement_match else None
+                    bounty_name = re.sub(r'\s*#\d+\s*$', '', bounty_line).strip()
+                    if bounty_name:
+                        legacy_bounties.append((bounty_name, placement))
+
     if not legacy_marks:
         print(f"No legacy marks found for {player_name}, skipping")
         return
 
-    # Store in LegacyMarks sheet (flat: weapon -> marks, subclass left blank)
     await _save_legacy_marks(player_name, guild, legacy_marks)
+
+    # Save legacy bounties
+    if legacy_bounties:
+        await _save_legacy_bounties(player_name, legacy_bounties)
 
     # Find discord ID from Players sheet
     discord_id = None
@@ -3382,8 +3443,26 @@ async def _save_legacy_marks(player_name, guild, legacy_marks):
                 legacy_ws.append_row([player_name, weapon, '', marks])
     except Exception as e:
         print(f"Legacy marks save error for {player_name}: {e}")
+
+
+async def _save_legacy_bounties(player_name, legacy_bounties):
+    """Save legacy bounty completions to LegacyBounties sheet, avoiding duplicates."""
+    try:
+        try:
+            lb_ws = sheet.worksheet('LegacyBounties')
+        except Exception:
+            lb_ws = sheet.add_worksheet(title='LegacyBounties', rows=500, cols=3)
+            lb_ws.append_row(['PlayerName', 'BountyTitle', 'Placement'])
+
+        existing = lb_ws.get_all_values()[1:]
+        existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
+
+        for bounty_name, placement in legacy_bounties:
+            key = (player_name, bounty_name)
+            if key not in existing_keys:
+                lb_ws.append_row([player_name, bounty_name, placement or ''])
     except Exception as e:
-        print(f"Legacy marks save error for {player_name}: {e}")
+        print(f"Legacy bounties save error for {player_name}: {e}")
 
 @bot.tree.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
