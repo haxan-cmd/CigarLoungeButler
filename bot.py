@@ -2700,13 +2700,18 @@ def build_progress_board(bounty, top_n=5):
 
 async def update_progress_board(bounty, bounty_channel):
     """Edit the TOP HUNTERS message in the bounty channel."""
-    if not bounty_channel or not bounty.get('progress_msg_id'):
+    if not bounty.get('progress_msg_id'):
+        print(f"[PROGRESS_BOARD] Skipped — no progress_msg_id in bounty row")
+        return
+    if not bounty_channel:
+        print(f"[PROGRESS_BOARD] bounty_channel was None — skipped")
         return
     try:
         msg = await bounty_channel.fetch_message(bounty['progress_msg_id'])
         await msg.edit(content=build_progress_board(bounty))
+        print(f"[PROGRESS_BOARD] Updated successfully")
     except Exception as e:
-        print(f"Progress board update error: {e}")
+        print(f"[PROGRESS_BOARD] Update error: {e}")
 
 
 @bot.tree.command(name="bounty_status", description="Show the current active bounty card")
@@ -2819,6 +2824,11 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
 
     # Assign the bounty role to the player if not already assigned
     bounty_channel = guild.get_channel(bounty['channel_id'])
+    if not bounty_channel and bounty['channel_id']:
+        try:
+            bounty_channel = await guild.fetch_channel(bounty['channel_id'])
+        except Exception as e:
+            print(f"[BOUNTY] Could not fetch bounty channel: {e}")
     bounty_role = guild.get_role(bounty['role_id']) if bounty['role_id'] else None
     member = guild.get_member(player_id)
     if member and bounty_role and bounty_role not in member.roles:
