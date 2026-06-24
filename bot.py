@@ -3679,7 +3679,7 @@ CHALLENGE_RULES_CHANNEL_ID = 1460713024082935930
 CHALLENGE_RULES_CONTENT = [
     # 1. Intro + weapon ranks
     """\
-🍃 **CIGAR LOUNGE**
+<:cigar:1444893851427803298> **CIGAR LOUNGE**
 Cigar Lounge is a place where 100-bombers pursue long-term weapon mastery, complete bounties, and compete for high scores against their peers.
 
 This is not about one-off games.
