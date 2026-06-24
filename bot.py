@@ -525,11 +525,16 @@ def calculate_weapon_marks_for_player(discord_id):
                 if len(row) < 4 or row[0].strip().lower() != player_name.lower():
                     continue
                 weapon = row[1].strip()
+                subclass = row[2].strip() if len(row) > 2 else ''
                 try:
                     marks = int(row[3])
                 except ValueError:
                     continue
-                weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
+                if subclass:
+                    key = (weapon, subclass)
+                else:
+                    key = weapon
+                weapon_marks[key] = weapon_marks.get(key, 0) + marks
     except Exception:
         pass
 
@@ -3524,15 +3529,17 @@ async def import_registry(interaction: discord.Interaction):
             await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
             return
 
-        # Build set of player names who have at least one submission
+        # Build set of discord IDs who have at least one submission
         subs = submissions_ws.get_all_values()[1:]
         players_with_subs = set()
-        player_rows = players_ws.get_all_values()[1:]
-        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
         for row in subs:
             discord_id = row[2].strip() if len(row) > 2 else ''
-            if discord_id and discord_id in id_to_name:
-                players_with_subs.add(id_to_name[discord_id].lower())
+            if discord_id:
+                players_with_subs.add(discord_id)
+
+        # Build ID → name map from Players sheet
+        player_rows = players_ws.get_all_values()[1:]
+        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
 
         imported = 0
         skipped = 0
@@ -3540,8 +3547,8 @@ async def import_registry(interaction: discord.Interaction):
         # Pre-load all sheet data once to avoid rate limits during import
         print("Pre-loading sheet data...")
         cached_data = {
-            'players': players_ws.get_all_values()[1:],
-            'submissions': submissions_ws.get_all_values()[1:],
+            'players': player_rows,
+            'submissions': subs,
             'leaderboard_data': leaderboard_data_ws.get_all_values()[1:],
             'bounty_players': bounty_players_ws.get_all_values()[1:],
             'bounty': bounty_ws.get_all_values()[1:] if bounty_ws else [],
@@ -3553,14 +3560,15 @@ async def import_registry(interaction: discord.Interaction):
             all_threads.append(thread)
 
         for thread in all_threads:
-            player_name = thread.name.strip()
-            if player_name.lower() in players_with_subs:
-                await _process_registry_thread(interaction.guild, thread, cached_data)
+            owner_id_str = str(thread.owner_id)
+            if owner_id_str in players_with_subs:
+                resolved_name = id_to_name.get(owner_id_str, thread.name.strip())
+                await _process_registry_thread(interaction.guild, thread, cached_data, resolved_name, thread.owner_id)
                 imported += 1
-                await asyncio.sleep(15)  # avoid Google Sheets rate limit
+                await asyncio.sleep(15)
             else:
                 skipped += 1
-                print(f"Skipping {player_name} — no submissions")
+                print(f"Skipping thread '{thread.name}' (owner_id={thread.owner_id}) — no submissions")
 
         await interaction.followup.send(f"Import complete — {imported} cards created, {skipped} skipped (no submissions).", ephemeral=True)
     except Exception as e:
@@ -3569,10 +3577,11 @@ async def import_registry(interaction: discord.Interaction):
         await interaction.followup.send(f"Import error: {e}", ephemeral=True)
 
 
-async def _process_registry_thread(guild, thread, cached_data=None):
+async def _process_registry_thread(guild, thread, cached_data=None, player_name=None, discord_id=None):
     """Parse an old registry thread and extract weapon marks and bounty completions."""
     import re
-    player_name = thread.name.strip()
+    if player_name is None:
+        player_name = thread.name.strip()
 
     # Read all messages in the thread
     messages = []
@@ -3614,7 +3623,8 @@ async def _process_registry_thread(guild, thread, cached_data=None):
                 for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
                     if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
                         if total_marks > 0:
-                            legacy_marks[w] = max(legacy_marks.get(w, 0), total_marks)
+                            key = (w, current_subclass)
+                            legacy_marks[key] = max(legacy_marks.get(key, 0), total_marks)
                         break
 
     # --- Parse legacy bounty completions ---
@@ -3661,16 +3671,16 @@ async def _process_registry_thread(guild, thread, cached_data=None):
         await _save_legacy_bounties(player_name, legacy_bounties)
         await asyncio.sleep(1)
 
-    # Find discord ID from Players sheet (use cache if available)
-    discord_id = None
-    player_rows_data = (cached_data or {}).get('players') or players_ws.get_all_values()[1:]
-    for row in player_rows_data:
-        if len(row) > 1 and row[1].strip().lower() == player_name.lower():
-            try:
-                discord_id = int(row[0].strip())
-            except ValueError:
-                pass
-            break
+    # Use passed discord_id, or fall back to name lookup
+    if discord_id is None:
+        player_rows_data = (cached_data or {}).get('players') or players_ws.get_all_values()[1:]
+        for row in player_rows_data:
+            if len(row) > 1 and row[1].strip().lower() == player_name.lower():
+                try:
+                    discord_id = int(row[0].strip())
+                except ValueError:
+                    pass
+                break
 
     if discord_id:
         await create_or_update_registry_card(guild, discord_id, player_name)
@@ -3691,10 +3701,10 @@ async def _save_legacy_marks(player_name, guild, legacy_marks):
         existing = gspread_retry(legacy_ws.get_all_values)[1:]
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
 
-        for weapon, marks in legacy_marks.items():
+        for (weapon, subclass), marks in legacy_marks.items():
             key = (player_name, weapon)
             if key not in existing_keys:
-                gspread_retry(legacy_ws.append_row, [player_name, weapon, '', marks])
+                gspread_retry(legacy_ws.append_row, [player_name, weapon, subclass, marks])
     except Exception as e:
         print(f"Legacy marks save error for {player_name}: {e}")
 
