@@ -12,14 +12,15 @@ from datetime import datetime, timezone, timedelta
 
 
 def gspread_retry(func, *args, retries=5, **kwargs):
-    """Call a gspread function with exponential backoff on 429 rate limit errors."""
+    """Call a gspread function with exponential backoff on 429 and 503 errors."""
     for attempt in range(retries):
         try:
             return func(*args, **kwargs)
         except gspread.exceptions.APIError as e:
-            if '429' in str(e) and attempt < retries - 1:
+            err_str = str(e)
+            if ('429' in err_str or '503' in err_str) and attempt < retries - 1:
                 wait = 10 * (2 ** attempt)  # 10, 20, 40, 80, 160 seconds
-                print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/{retries})")
+                print(f"Sheets error ({err_str[:10]}), retrying in {wait}s (attempt {attempt + 1}/{retries})")
                 time.sleep(wait)
             else:
                 raise
@@ -877,7 +878,6 @@ def get_best_placements_for_player(discord_id, top_n=5):
             continue
         board_scores.setdefault(lb_name, []).append(score)
         if row[2].strip() == discord_id_str:
-            # Keep personal best per board
             if lb_name not in player_scores or score > player_scores[lb_name]:
                 player_scores[lb_name] = score
 
@@ -885,14 +885,24 @@ def get_best_placements_for_player(discord_id, top_n=5):
     placements = []
     for lb_name, player_score in player_scores.items():
         scores = sorted(board_scores.get(lb_name, []), reverse=True)
-        # Find rank (1-indexed)
         pos = next((i + 1 for i, s in enumerate(scores) if s <= player_score), len(scores))
         is_map = ' - ' in lb_name
         emoji = '🏆' if is_map else '<:weapon_hs:1350656128635375698>'
-        placements.append((pos, lb_name, emoji))
+        # Calculate gap to #2 if player is #1
+        gap = None
+        if pos == 1 and len(scores) >= 2:
+            second = scores[1]
+            gap = player_score - second
+        placements.append((pos, lb_name, emoji, gap))
 
-    # Sort by placement (best first), then return top N
-    placements.sort(key=lambda x: x[0])
+    # Sort: #1 entries by gap descending (bigger gap = more dominant), others by placement
+    def sort_key(p):
+        pos, _, _, gap = p
+        if pos == 1:
+            return (0, -(gap or 0))  # #1 first, sorted by gap desc
+        return (1, pos)              # others sorted by placement
+
+    placements.sort(key=sort_key)
     return placements[:top_n]
 
 
@@ -1130,8 +1140,9 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
 
     if best_placements:
         lines.append("**Best Placements:**")
-        for pos, lb_name, emoji in best_placements:
-            lines.append(f"• {emoji} {lb_name} — #{pos}")
+        for pos, lb_name, emoji, gap in best_placements:
+            gap_str = f" (+{gap})" if gap is not None else ""
+            lines.append(f"• {emoji} {lb_name} — #{pos}{gap_str}")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
