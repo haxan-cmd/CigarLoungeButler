@@ -742,7 +742,7 @@ def build_registry_messages(player_name, discord_id):
     for cls, cdata in class_stats.items():
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines = []
-        lines.append(f"**{cls}: {cls_emoji} — {cdata['rank']}**")
+        lines.append(f"### {cls}: {cls_emoji} — {cdata['rank']}")
         lines.append("")
 
         for subclass, sdata in cdata['subclasses'].items():
@@ -800,8 +800,6 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
-        has_top = os.path.exists(top_path)
-        has_bot = os.path.exists(bot_path)
 
         if thread_id:
             # Edit existing messages in order
@@ -829,6 +827,9 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         )
         thread = thread_with_msg.thread
 
+        has_top = os.path.exists(top_path)
+        has_bot = os.path.exists(bot_path)
+
         # Top spacer as second message
         if has_top:
             await thread.send(file=discord.File(top_path))
@@ -836,13 +837,13 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
         # Header accolades
         await thread.send(messages[0])
 
-        # Class sections: bottom spacer after each, top spacer before next
+        # Class sections: top spacer before each (except first), bottom spacer after each
         for i, msg_text in enumerate(messages[1:]):
+            if i > 0 and has_top:
+                await thread.send(file=discord.File(top_path))
             await thread.send(msg_text)
             if has_bot:
                 await thread.send(file=discord.File(bot_path))
-            if i < len(messages) - 2 and has_top:
-                await thread.send(file=discord.File(top_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
