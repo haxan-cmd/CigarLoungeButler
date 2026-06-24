@@ -379,19 +379,22 @@ SPECIAL_OPS_EMOJIS = {
 
 WEAPON_RANK_THRESHOLDS = [
     (1,   "Bronze"),
-    (3,   "Silver"),
-    (6,   "Gold"),
-    (9,   "Emerald"),
-    (12,  "Diamond"),
-    (15,  "Crimson"),
-    (20,  "Prestige Bronze"),
-    (30,  "Prestige Silver"),
-    (40,  "Prestige Gold"),
-    (55,  "Prestige Emerald"),
-    (70,  "Prestige Diamond"),
-    (85,  "Prestige Crimson"),
-    (100, "Iridescent"),
+    (5,   "Silver"),
+    (12,  "Gold"),
+    (25,  "Emerald"),
+    (40,  "Diamond"),
+    (60,  "Crimson"),
+    (80,  "Prestige Bronze"),
+    (100, "Prestige Silver"),
+    (115, "Prestige Gold"),
+    (125, "Prestige Emerald"),
+    (133, "Prestige Diamond"),
+    (141, "Prestige Crimson"),
+    (150, "Iridescent"),
 ]
+
+# Prestige thresholds past Iridescent (exponential)
+PRESTIGE_THRESHOLDS = [175, 210, 260, 335, 460]
 
 SUBCLASS_RANKS = ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex"]
 CLASS_RANKS    = ["Sworn", "Trusted", "Proven", "Honored", "Esteemed", "Exalted", "Ascended"]
@@ -674,44 +677,22 @@ def get_bounty_completions_for_player(discord_id):
     except Exception:
         return []
 
-def get_weapon_bracket(marks):
-    """
-    Return the bracket string for a weapon given its total marks.
-    Capped at 5 visible slots; shows fraction if the actual delta is wider.
-    At Iridescent (100+): 5-slot bracket cycles, ×N counts rank-ups.
-    """
-    PRESTIGE_INTERVAL = 5
-    MAX_SLOTS = 5
-
-    if marks >= 100:
-        marks_past = marks - 100
-        prestige = marks_past // PRESTIGE_INTERVAL
-        filled = marks_past % PRESTIGE_INTERVAL
-        empty = PRESTIGE_INTERVAL - filled
+def format_weapon_marks(marks):
+    """Format mark count with emphasis based on rank tier, ×N prestige past Iridescent."""
+    # Check prestige level past Iridescent
+    if marks >= 150:
+        prestige = 0
+        for threshold in PRESTIGE_THRESHOLDS:
+            if marks >= threshold:
+                prestige += 1
         prestige_str = f" ×**{prestige}**" if prestige > 0 else ""
-        return f"[{'✦' * filled}{'✧' * empty}]{prestige_str}"
-
-    # Find current and next threshold
-    current_threshold = 0
-    next_threshold = None
-    for threshold, _ in WEAPON_RANK_THRESHOLDS:
-        if marks >= threshold:
-            current_threshold = threshold
-        else:
-            next_threshold = threshold
-            break
-
-    delta = next_threshold - current_threshold
-    filled = marks - current_threshold
-    empty = delta - filled
-
-    if delta > MAX_SLOTS:
-        # Cap display at 5 slots, show fraction for context
-        display_filled = min(filled, MAX_SLOTS)
-        display_empty = MAX_SLOTS - display_filled
-        return f"[{'✦' * display_filled}{'✧' * display_empty}] {filled}/{delta}"
+        return f"***{marks}***{prestige_str}"
+    elif marks >= 60:
+        return f"***{marks}***"  # bold italic for Crimson+
+    elif marks >= 12:
+        return f"**{marks}**"    # bold for Gold+
     else:
-        return f"[{'✦' * filled}{'✧' * empty}]"
+        return str(marks)        # plain for Bronze/Silver
 
 
 def build_registry_messages(player_name, discord_id):
@@ -795,8 +776,8 @@ def build_registry_messages(player_name, discord_id):
 
             for w, wdata in sdata['weapons'].items():
                 w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], WEAPON_RANK_EMOJIS['Unranked'])
-                bracket = get_weapon_bracket(wdata['marks'])
-                lines.append(f"• {w_emoji} {w}: {bracket}")
+                mark_str = format_weapon_marks(wdata['marks'])
+                lines.append(f"• {w_emoji} {w} — {mark_str}")
             lines.append("")
 
         messages.append("\n".join(lines))
