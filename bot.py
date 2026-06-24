@@ -3,10 +3,25 @@ import os
 import asyncio
 import gspread
 import json
+import time
 from google.oauth2.service_account import Credentials
 from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
+
+
+def gspread_retry(func, *args, retries=5, **kwargs):
+    """Call a gspread function with exponential backoff on 429 rate limit errors."""
+    for attempt in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            if '429' in str(e) and attempt < retries - 1:
+                wait = 10 * (2 ** attempt)  # 10, 20, 40, 80, 160 seconds
+                print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/{retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -3341,7 +3356,7 @@ async def import_registry(interaction: discord.Interaction):
             if player_name.lower() in players_with_subs:
                 await _process_registry_thread(interaction.guild, thread, cached_data)
                 imported += 1
-                await asyncio.sleep(5)  # avoid Google Sheets rate limit
+                await asyncio.sleep(15)  # avoid Google Sheets rate limit
             else:
                 skipped += 1
                 print(f"Skipping {player_name} — no submissions")
@@ -3471,7 +3486,7 @@ async def _save_legacy_marks(player_name, guild, legacy_marks):
         for weapon, marks in legacy_marks.items():
             key = (player_name, weapon)
             if key not in existing_keys:
-                legacy_ws.append_row([player_name, weapon, '', marks])
+                gspread_retry(legacy_ws.append_row, [player_name, weapon, '', marks])
     except Exception as e:
         print(f"Legacy marks save error for {player_name}: {e}")
 
@@ -3491,7 +3506,7 @@ async def _save_legacy_bounties(player_name, legacy_bounties):
         for bounty_name, placement in legacy_bounties:
             key = (player_name, bounty_name)
             if key not in existing_keys:
-                lb_ws.append_row([player_name, bounty_name, placement or ''])
+                gspread_retry(lb_ws.append_row, [player_name, bounty_name, placement or ''])
     except Exception as e:
         print(f"Legacy bounties save error for {player_name}: {e}")
 
