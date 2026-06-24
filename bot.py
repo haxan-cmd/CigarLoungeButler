@@ -3713,6 +3713,7 @@ async def rebuild_archive(interaction: discord.Interaction):
 
 
 
+@bot.tree.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def import_registry(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
