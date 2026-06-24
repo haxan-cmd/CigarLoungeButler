@@ -597,11 +597,11 @@ def get_butler_titles_for_player(discord_id, stats):
     discord_id_str = str(discord_id)
     titles = []
     title_checks = [
-        ('grand_marshal', '🏆 Grand Marshal'),
-        ('weapons_master', '⚔️ Weapons Master'),
+        ('grand_marshal', '<:Grand_Marshall:1467680882490998979> Grand Marshal'),
+        ('weapons_master', '<:Weapons_Master:1467727674117193870> Weapons Master'),
         ('campaign_master', '🗺️ Campaign Master'),
-        ('headhunter', '💀 Headhunter'),
-        ('butcher', '🩸 Butcher'),
+        ('headhunter', '<a:topkill:1360314538364240024> Headhunter'),
+        ('butcher', '<a:toptkd:1360312666475728958> Butcher'),
     ]
     # stats dict uses display names not IDs — match by display name via players sheet
     rows = players_ws.get_all_values()[1:]
@@ -3138,11 +3138,11 @@ def build_favourites_embed(stats):
         f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
         f"\n"
         f"─────────────────────\n"
-        f"🏆 **Grand Marshal** — {stats['grand_marshal']}\n"
-        f"⚔️ **Weapons Master** — {stats['weapons_master']}\n"
+        f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** — {stats['grand_marshal']}\n"
+        f"<:Weapons_Master:1467727674117193870> **Weapons Master** — {stats['weapons_master']}\n"
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
-        f"💀 **Headhunter** — {stats['headhunter']}\n"
-        f"🩸 **Butcher** — {stats['butcher']}\n"
+        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
+        f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
         f"\n"
         f"**High Lethality** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
         f"\n\n**Low Lethality** *(td/kills)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
@@ -3417,7 +3417,7 @@ async def _process_registry_thread(guild, thread, cached_data=None):
                         break
 
     # --- Parse legacy bounty completions ---
-    # Format: "• BountyName #1" or "• BountyName" in Bounties Completed section
+    KNOWN_SECTIONS = ["Feats of Legend", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
     legacy_bounties = []
     in_bounties_section = False
     for line in full_text.split("\n"):
@@ -3426,20 +3426,27 @@ async def _process_registry_thread(guild, thread, cached_data=None):
             in_bounties_section = True
             continue
         if in_bounties_section:
-            if line.startswith("**") or (line == "" and len(legacy_bounties) > 0):
-                # Hit next section header or blank line after entries
-                if line.startswith("**"):
-                    in_bounties_section = False
+            # Stop at any known next section
+            if any(s in line for s in KNOWN_SECTIONS):
+                in_bounties_section = False
+                continue
+            if not line:
                 continue
             if line.startswith("•") or line.startswith("*") or line.startswith("-"):
                 bounty_line = re.sub(r'^[•*\-]\s*', '', line).strip()
-                if bounty_line and bounty_line.lower() != "none":
-                    # Extract placement if present (#1, #2 etc)
-                    placement_match = re.search(r'#(\d+)', bounty_line)
-                    placement = int(placement_match.group(1)) if placement_match else None
-                    bounty_name = re.sub(r'\s*#\d+\s*$', '', bounty_line).strip()
-                    if bounty_name:
-                        legacy_bounties.append((bounty_name, placement))
+                # Skip weapon lines (contain bracket pattern like [✦✧] or emoji patterns)
+                if not bounty_line or bounty_line.lower() == "none":
+                    continue
+                if re.search(r'\[.*\]|:level\d+', bounty_line):
+                    continue
+                # Extract placement if present (#1, #2 etc)
+                placement_match = re.search(r'#(\d+)', bounty_line)
+                placement = int(placement_match.group(1)) if placement_match else None
+                bounty_name = re.sub(r'\s*#\d+\s*$', '', bounty_line).strip()
+                # Remove any trailing emoji/discord formatting
+                bounty_name = re.sub(r'<[^>]+>', '', bounty_name).strip()
+                if bounty_name:
+                    legacy_bounties.append((bounty_name, placement))
 
     if not legacy_marks:
         print(f"No legacy marks found for {player_name}, skipping")
