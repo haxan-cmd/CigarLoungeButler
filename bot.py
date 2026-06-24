@@ -3551,9 +3551,14 @@ async def import_registry(interaction: discord.Interaction):
             await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
             return
 
-        # Build set of discord IDs who have at least one submission
+        # Anyone in the Players sheet is eligible
+        player_rows = players_ws.get_all_values()[1:]
+        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
+
+        players_with_subs = set(id_to_name.keys())  # all registered players
+
+        # Also add anyone with submissions even if not in Players sheet
         subs = submissions_ws.get_all_values()[1:]
-        players_with_subs = set()
         for row in subs:
             discord_id = row[2].strip() if len(row) > 2 else ''
             if discord_id:
@@ -3562,10 +3567,6 @@ async def import_registry(interaction: discord.Interaction):
         # Always import these players regardless of submission history
         LEGACY_IMPORT_WHITELIST = {"781236037912494131"}
         players_with_subs.update(LEGACY_IMPORT_WHITELIST)
-
-        # Build ID → name map from Players sheet
-        player_rows = players_ws.get_all_values()[1:]
-        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
 
         imported = 0
         skipped = 0
