@@ -1139,9 +1139,19 @@ async def on_message(message):
             try:
                 comp_msg = await message.channel.send(completions_placeholder)
                 bonus_msg = await message.channel.send(bonus_placeholder)
-                # Save message IDs to sheet (cols 12 & 13)
+                progress_placeholder = (
+                    f"```\n"
+                    f"╭──────────────────────────────╮\n"
+                    f"  {bounty['theme_emoji']} TOP HUNTERS {bounty['theme_emoji']}\n"
+                    f"╰──────────────────────────────╯\n"
+                    f"No submissions yet.\n"
+                    f"```"
+                )
+                progress_msg = await message.channel.send(progress_placeholder)
+                # Save message IDs to sheet (cols 12, 13, 14)
                 bounty_ws.update_cell(bounty['row'], 12, str(comp_msg.id))
                 bounty_ws.update_cell(bounty['row'], 13, str(bonus_msg.id))
+                bounty_ws.update_cell(bounty['row'], 14, str(progress_msg.id))
             except Exception as e:
                 print(f"Bounty placeholder post error: {e}")
         return
@@ -2436,6 +2446,7 @@ def get_active_bounty():
                 'forum_channel_id': int(row[10]) if len(row) > 10 and row[10] else None,
                 'completions_msg_id': int(row[11]) if len(row) > 11 and row[11] else None,
                 'bonus_msg_id': int(row[12]) if len(row) > 12 and row[12] else None,
+                'progress_msg_id': int(row[13]) if len(row) > 13 and row[13] else None,
             }
     return None
 
@@ -2650,6 +2661,54 @@ async def bounty_end(interaction: discord.Interaction):
             await role.delete(reason=f"Bounty ended: {bounty['title']}")
 
 
+def build_progress_board(bounty, top_n=5):
+    """Build a top-N hunters board from BountyPlayers, excluding completed players."""
+    completed_ids = {str(c['id']) for c in bounty['completions']}
+    rows = bounty_players_ws.get_all_values()
+    entries = []
+    for row in rows[1:]:
+        if len(row) < 5 or row[0] != bounty['title']:
+            continue
+        discord_id = row[1]
+        if discord_id in completed_ids:
+            continue
+        player_name = row[2]
+        progress = json.loads(row[4]) if row[4] else {}
+        total_submissions = sum(
+            (v['current'] if isinstance(v, dict) else int(v))
+            for k, v in progress.items() if k != '__special__'
+        )
+        if total_submissions > 0:
+            entries.append((player_name, total_submissions))
+    entries.sort(key=lambda x: x[1], reverse=True)
+    top = entries[:top_n]
+
+    lines = [f"```"]
+    lines.append(f"╭──────────────────────────────╮")
+    lines.append(f"  {bounty['theme_emoji']} TOP HUNTERS {bounty['theme_emoji']}")
+    lines.append(f"╰──────────────────────────────╯")
+    if top:
+        medals = ["🥇", "🥈", "🥉", "4.", "5."]
+        for i, (name, count) in enumerate(top):
+            medal = medals[i] if i < len(medals) else f"{i+1}."
+            lines.append(f"{medal} {name:<20} {count} runs")
+    else:
+        lines.append("No active hunters yet.")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+async def update_progress_board(bounty, bounty_channel):
+    """Edit the TOP HUNTERS message in the bounty channel."""
+    if not bounty_channel or not bounty.get('progress_msg_id'):
+        return
+    try:
+        msg = await bounty_channel.fetch_message(bounty['progress_msg_id'])
+        await msg.edit(content=build_progress_board(bounty))
+    except Exception as e:
+        print(f"Progress board update error: {e}")
+
+
 @bot.tree.command(name="bounty_status", description="Show the current active bounty card")
 async def bounty_status(interaction: discord.Interaction):
     bounty = get_active_bounty()
@@ -2661,6 +2720,30 @@ async def bounty_status(interaction: discord.Interaction):
         bounty['special_challenge'], bounty['special_done'], bounty['completions']
     )
     await interaction.response.send_message(card, ephemeral=True)
+
+
+@bot.tree.command(name="bounty_hunt", description="Show the top 5 hunters for the active bounty")
+async def bounty_hunt(interaction: discord.Interaction):
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+        return
+    board = build_progress_board(bounty, top_n=5)
+    await interaction.response.send_message(board)
+
+
+@bot.tree.command(name="my_bounty", description="Show your personal progress on the active bounty")
+async def my_bounty(interaction: discord.Interaction):
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+        return
+    player_row = get_player_bounty_progress(bounty['title'], str(interaction.user.id))
+    if not player_row:
+        await interaction.response.send_message("You have no submissions for this bounty yet.", ephemeral=True)
+        return
+    card = build_player_bounty_card(bounty, player_row['progress'])
+    await interaction.response.send_message(card)
 
 
 
@@ -2684,29 +2767,34 @@ def save_player_bounty_progress(row_idx, player_name, forum_post_id, progress):
     bounty_players_ws.update_cell(row_idx, 5, json.dumps(progress))
 
 def build_player_bounty_card(bounty, player_progress):
-    """Build a personal bounty card for a player showing only their own progress."""
+    """Build a personal bounty card. Uses plain text so Discord strikethrough renders."""
     weapons = bounty['weapons']
     lines = []
-    lines.append("╭──────────────────────────────╮")
-    lines.append(f"     😼 {bounty['title']} ◈")
-    lines.append("╰──────────────────────────────╯")
+    lines.append(f"```")
+    lines.append(f"  {bounty['theme_emoji']} {bounty['title']}")
+    lines.append(f"```")
 
     for weapon, data in weapons.items():
         tot = data['total']
         raw = player_progress.get(weapon, 0)
         cur = raw['current'] if isinstance(raw, dict) else int(raw)
-        label = f"~~{weapon}~~" if cur >= tot else weapon
         progress = f"{cur}/{tot}"
-        lines.append(f"▸ {label:<22} {progress:>4}")
+        if cur >= tot:
+            lines.append(f"~~`▸ {weapon:<22} {progress:>4}`~~")
+        else:
+            lines.append(f"`▸ {weapon:<22} {progress:>4}`")
 
-    lines.append("╭──────────────────────────────╮")
-    lines.append(f"      {bounty['theme_emoji']} SPECIAL CHALLENGE {bounty['theme_emoji']}")
-    lines.append("╰──────────────────────────────╯")
     sc_cur = player_progress.get('__special__', 0)
     sc_progress = f"{sc_cur}/1"
-    lines.append(f"▸ {bounty['special_challenge']:<22} {sc_progress:>4}")
+    lines.append(f"```")
+    lines.append(f"  {bounty['theme_emoji']} SPECIAL CHALLENGE")
+    lines.append(f"```")
+    if sc_cur >= 1:
+        lines.append(f"~~`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`~~")
+    else:
+        lines.append(f"`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`")
 
-    return "```\n" + "\n".join(lines) + "\n```"
+    return "\n".join(lines)
 
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched."""
@@ -2838,6 +2926,9 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             await comp_msg.edit(content=comp_text)
         except Exception as e:
             print(f"Completions board update error: {e}")
+
+    # Update top hunters progress board
+    await update_progress_board(bounty, bounty_channel)
 
     return True
 
