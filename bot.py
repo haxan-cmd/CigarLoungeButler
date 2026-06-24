@@ -3541,7 +3541,59 @@ async def purge_archive(interaction: discord.Interaction):
         await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="rebuild_archive", description="Rebuild all registry cards for every registered player (admin only).")
+@bot.tree.command(name="purge_blank_cards", description="Delete registry cards for players with no marks data (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def purge_blank_cards(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        forum = interaction.guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
+        if not forum:
+            await interaction.followup.send("Could not find butlers-archive channel.", ephemeral=True)
+            return
+
+        rows = registry_ws.get_all_values()[1:]
+        deleted = 0
+        skipped = 0
+
+        for i, row in enumerate(rows, start=2):
+            if len(row) < 3 or not row[0].strip() or not row[2].strip():
+                continue
+            try:
+                discord_id = int(row[0].strip())
+            except ValueError:
+                continue
+            thread_id = int(row[2].strip())
+
+            weapon_marks = calculate_weapon_marks_for_player(discord_id)
+            if weapon_marks:
+                skipped += 1
+                continue
+
+            # No marks — delete the thread and clear the registry row
+            try:
+                thread = guild_obj = interaction.guild.get_thread(thread_id)
+                if not thread:
+                    thread = await interaction.guild.fetch_channel(thread_id)
+                await thread.delete()
+            except Exception as e:
+                print(f"Could not delete thread {thread_id}: {e}")
+
+            registry_ws.update_cell(i, 3, '')
+            deleted += 1
+            print(f"Purged blank card for {row[1].strip()} (discord_id={discord_id})")
+            await asyncio.sleep(1)
+
+        await interaction.followup.send(
+            f"Purge complete — {deleted} blank cards deleted, {skipped} cards kept.",
+            ephemeral=True
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
+
+
+
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def rebuild_archive(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -3564,6 +3616,10 @@ async def rebuild_archive(interaction: discord.Interaction):
             player_name = row[1].strip()
 
             try:
+                weapon_marks = calculate_weapon_marks_for_player(discord_id)
+                if not weapon_marks:
+                    print(f"Skipping {player_name} — no marks data")
+                    continue
                 await create_or_update_registry_card(interaction.guild, discord_id, player_name)
                 total += 1
                 print(f"Rebuilt card for {player_name}")
