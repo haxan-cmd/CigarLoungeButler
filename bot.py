@@ -3719,6 +3719,7 @@ async def import_registry(interaction: discord.Interaction):
         # Name aliases for players who have renamed since their registry thread was created
         NAME_ALIASES = {
             "makeitrainwater": "Rainwater",
+            "[legacy] shieldy": "Shieldy",
         }
 
         # Build name -> discord_id map from Players sheet (lowercase for matching)
