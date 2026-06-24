@@ -3189,7 +3189,7 @@ async def butlers_report(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="purge_archive", description="Delete all threads in butlers-archive and clear RegistryCards sheet (admin only).")
+@bot.tree.command(name="purge_archive", description="Delete all threads in butlers-archive (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def purge_archive(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
