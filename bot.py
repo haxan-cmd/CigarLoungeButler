@@ -749,7 +749,7 @@ def get_feats_for_player(discord_id, cached_data=None):
     return named_feats, feats
 
 def get_mastered_weapons_for_player(discord_id, cached_data=None):
-    """Weapons with 100+ submissions with 100+ takedowns."""
+    """Weapons with 100+ submissions. Checks Submissions sheet and LegacyMarks."""
     subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     weapon_counts = {}
@@ -763,6 +763,32 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
             continue
         if td >= 100:
             weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
+
+    # Also check LegacyMarks — 100+ marks = 100+ submissions
+    try:
+        legacy_ws = sheet.worksheet('LegacyMarks')
+        legacy_rows = legacy_ws.get_all_values()[1:]
+        player_rows = players_ws.get_all_values()[1:]
+        player_name = None
+        for row in player_rows:
+            if row and row[0].strip() == discord_id_str:
+                player_name = row[1].strip() if len(row) > 1 else None
+                break
+        if player_name:
+            for row in legacy_rows:
+                if len(row) < 4 or row[0].strip().lower() != player_name.lower():
+                    continue
+                weapon = row[1].strip()
+                try:
+                    marks = int(row[3])
+                except ValueError:
+                    continue
+                if marks >= 100:
+                    # Use max of legacy marks and submission count
+                    weapon_counts[weapon] = max(weapon_counts.get(weapon, 0), marks)
+    except Exception as e:
+        print(f"LegacyMarks mastered check error: {e}")
+
     return [w for w, c in weapon_counts.items() if c >= 100]
 
 def get_bounty_completions_for_player(discord_id):
