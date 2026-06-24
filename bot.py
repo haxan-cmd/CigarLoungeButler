@@ -982,16 +982,46 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         lines.append("**Feats of Legend:**")
         if 'hhanded' in named_feats:
             lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
-        # Group by emoji combo and show count
+        # Flawless shows with link as PB; everything else groups with ×N count
+        flawless_emoji = FEAT_EMOJIS['Flawless']
+        flawless_entry = None
         feat_counts = {}
         for emojis, link in feat_submissions:
-            # Normalize order so <200td><triple> and <triple><200td> group together
             parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
             normalized = ''.join(sorted(parts))
+            if normalized == flawless_emoji:
+                if flawless_entry is None:
+                    flawless_entry = (emojis, link)
+                continue
             feat_counts[normalized] = feat_counts.get(normalized, 0) + 1
-        for emojis, count in feat_counts.items():
+
+        # Label map: normalized emoji string -> display label
+        _e = FEAT_EMOJIS
+        FEAT_LABELS = {
+            ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
+            ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",
+            ''.join(sorted([_e['Triple']])):                                                 "Triple",
+            ''.join(sorted([_e['Predator']])):                                               "Predator",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills']])):                         "200 TD / 100 Kills",
+            ''.join(sorted([_e['200 Takedowns'], _e['Triple']])):                            "Triple",
+            ''.join(sorted([_e['100 Kills'], _e['Triple']])):                                "Triple",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple']])):           "Triple",
+            ''.join(sorted([_e['200 Takedowns'], _e['Predator']])):                          "Predator",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Predator']])):         "Predator",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Predator']])): "Triple + Predator",
+        }
+
+        if flawless_entry:
+            emojis, link = flawless_entry
+            lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
+        for normalized, count in feat_counts.items():
+            label = FEAT_LABELS.get(normalized, "Feat")
+            if count >= 5:
+                label_str = f"**{label}**"
+            else:
+                label_str = f"*{label}*"
             suffix = f" ×{count}" if count > 1 else ""
-            lines.append(f"• {emojis}{suffix}")
+            lines.append(f"• {normalized}{suffix} {label_str}")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
@@ -1986,7 +2016,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
-    marks_summary = f"\n**+{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+    marks_summary = f"\n**{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
@@ -2090,7 +2120,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             n = int(m.group(1)) + 1
                             return f"**+{n} mark{'s' if n != 1 else ''}**"
                         return _re.sub(r'\*\*\+(\d+) marks?\*\*', replacer, content)
-                    new_content = increment_marks(msg.content) + f"\n*<:highscore:1360312918545269057> +1 High Score*"
+                    new_content = increment_marks(msg.content) + f"\n<:highscore:1360312918545269057> +1 High Score"
                     await msg.edit(content=new_content)
                     break
         except Exception as e:
@@ -2113,7 +2143,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # Edit the summary reply to include placements
     if placements:
-        placement_lines = "\n".join(f"🏆 {lb} — #{pos}" for lb, pos in placements)
+        placement_lines = "\n".join(
+            f"{'🏆' if ' - ' in lb else '<:weapon_hs:1350656128635375698>'} {lb} — #{pos}"
+            for lb, pos in placements
+        )
         try:
             # Find the reply we sent and edit it
             async for msg in original_message.channel.history(limit=10, after=original_message):
@@ -2773,6 +2806,13 @@ def build_progress_board(bounty, top_n=10):
     """Build a top-N hunters board from BountyPlayers, excluding completed players."""
     completed_ids = {str(c['id']) for c in bounty['completions']}
     rows = bounty_players_ws.get_all_values()
+
+    # Calculate total target runs across all weapons
+    total_target = sum(
+        v.get('total', 0) if isinstance(v, dict) else 0
+        for v in bounty['weapons'].values()
+    )
+
     entries = []
     for row in rows[1:]:
         if len(row) < 5 or row[0] != bounty['title']:
@@ -2791,17 +2831,22 @@ def build_progress_board(bounty, top_n=10):
     entries.sort(key=lambda x: x[1], reverse=True)
     top = entries[:top_n]
 
+    emoji = bounty['theme_emoji']
     lines = [f"```"]
-    lines.append(f"╭──────────────────────────────╮")
-    lines.append(f"  {bounty['theme_emoji']} TOP HUNTERS {bounty['theme_emoji']}")
-    lines.append(f"╰──────────────────────────────╯")
+    lines.append(f"╭────────────────────────────────╮")
+    lines.append(f"  {emoji} LIVE SCOREBOARD {emoji}")
+    lines.append(f"╰────────────────────────────────╯")
     if top:
-        medals = ["🥇", "🥈", "🥉", "4.", "5."]
+        medals = ["🥇", "🥈", "🥉"]
         for i, (name, count) in enumerate(top):
-            medal = medals[i] if i < len(medals) else f"{i+1}."
-            lines.append(f"{medal} {name:<20} {count} runs")
+            if i < 3:
+                medal = medals[i]
+            else:
+                medal = f"{i+1}. "
+            suffix = f"/ {total_target}" if total_target else ""
+            lines.append(f"{medal} {name:<20} {count} {suffix}")
     else:
-        lines.append("No active hunters yet.")
+        lines.append("  No active hunters yet.")
     lines.append("```")
     return "\n".join(lines)
 
