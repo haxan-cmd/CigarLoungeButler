@@ -1142,8 +1142,14 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
 
             for w, wdata in sdata['weapons'].items():
                 w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], WEAPON_RANK_EMOJIS['Unranked'])
-                mark_str = format_weapon_marks(wdata['marks'])
-                lines.append(f"• {w_emoji} {w} — {mark_str}")
+                marks = wdata['marks']
+                _, _, next_threshold = get_weapon_rank(marks)
+                mark_str = format_weapon_marks(marks)
+                if next_threshold:
+                    progress_str = f"{mark_str}/{next_threshold}"
+                else:
+                    progress_str = mark_str  # Iridescent — just show marks
+                lines.append(f"• {w_emoji} {w} — {progress_str}")
             lines.append("")
 
         messages.append("\n".join(lines))
@@ -1309,6 +1315,20 @@ async def on_ready():
     await bot.tree.sync(guild=guild)
     await bot.tree.sync()  # also sync globally to clear stale cache
     print(f'Logged in as {bot.user}')
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    if isinstance(error, discord.app_commands.CommandOnCooldown):
+        retry = int(error.retry_after)
+        minutes, seconds = divmod(retry, 60)
+        time_str = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+        await interaction.response.send_message(
+            f"Easy — your card was just refreshed. Try again in {time_str}.",
+            ephemeral=True
+        )
+    else:
+        raise error
 
 
 @bot.event
@@ -4217,6 +4237,7 @@ async def create_card(interaction: discord.Interaction, member: discord.Member):
 
 
 @bot.tree.command(name="refresh_card", description="Refresh your registry card.")
+@discord.app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
 async def refresh_card(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     if _registry_lock.locked():
