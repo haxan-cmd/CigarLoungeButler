@@ -28,6 +28,13 @@ players_ws = sheet.worksheet('Players')
 leaderboards_ws = sheet.worksheet('Leaderboards')
 leaderboard_data_ws = sheet.worksheet('LeaderboardData')
 
+# RegistryCards sheet — columns: DiscordID, PlayerName, ForumThreadID
+try:
+    registry_ws = sheet.worksheet('RegistryCards')
+except gspread.exceptions.WorksheetNotFound:
+    registry_ws = sheet.add_worksheet(title='RegistryCards', rows=500, cols=5)
+    registry_ws.append_row(['DiscordID', 'PlayerName', 'ForumThreadID'])
+
 # BountyPlayers sheet — columns: BountyTitle, DiscordID, PlayerName, ForumPostID, Progress (JSON)
 try:
     bounty_players_ws = sheet.worksheet('BountyPlayers')
@@ -42,6 +49,8 @@ try:
 except gspread.exceptions.WorksheetNotFound:
     bounty_ws = sheet.add_worksheet(title='Bounty', rows=100, cols=20)
     bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID','CompletionsMsgID','BonusMsgID'])
+
+REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654  # butlers-archive forum
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
@@ -280,6 +289,316 @@ def parse_submission_text(text):
 
     return detected_weapon, detected_subclass
 
+# ---------------------------------------------------------------------------
+# Registry / Player Card System
+# ---------------------------------------------------------------------------
+
+REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654
+
+# Weapon lists per subclass (feat weapons excluded)
+REGISTRY_WEAPON_MAP = {
+    # Knight
+    "Officer":       ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
+    "Guardian":      ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
+    "Crusader":      ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
+    # Vanguard
+    "Devastator":    ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
+    "Raider":        ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
+    "Ambusher":      ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
+    # Footman
+    "Poleman":       ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
+    "Man-at-Arms":   ["Falchion", "Heavy Cavalry Sword", "Mace", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
+    "Field Engineer":["Goedendag", "Pick Axe", "Shovel", "Sledge Hammer"],
+    # Archer
+    "Longbowman":    ["Bow", "War Bow"],
+    "Crossbowman":   ["Crossbow", "Siege Crossbow"],
+    "Skirmisher":    ["Javelin", "Throwing Axe"],
+}
+
+REGISTRY_CLASS_MAP = {
+    "Knight":   ["Officer", "Guardian", "Crusader"],
+    "Vanguard": ["Devastator", "Raider", "Ambusher"],
+    "Footman":  ["Poleman", "Man-at-Arms", "Field Engineer"],
+    "Archer":   ["Longbowman", "Crossbowman", "Skirmisher"],
+}
+
+WEAPON_RANK_THRESHOLDS = [
+    (1,   "Bronze"),
+    (3,   "Silver"),
+    (6,   "Gold"),
+    (9,   "Emerald"),
+    (12,  "Diamond"),
+    (15,  "Crimson"),
+    (20,  "Prestige Bronze"),
+    (30,  "Prestige Silver"),
+    (40,  "Prestige Gold"),
+    (55,  "Prestige Emerald"),
+    (70,  "Prestige Diamond"),
+    (85,  "Prestige Crimson"),
+    (100, "Iridescent"),
+]
+
+SUBCLASS_RANKS = ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex"]
+CLASS_RANKS    = ["Sworn", "Trusted", "Proven", "Honored", "Esteemed", "Exalted", "Ascended"]
+PLAYER_TITLES  = ["Unbound", "Proven", "Respected", "Distinguished", "Renowned", "Illustrious", "Exemplar", "Legend"]
+
+def get_weapon_rank(marks):
+    """Return (rank_name, marks_for_current_tier, marks_for_next_tier) for a weapon."""
+    rank = None
+    current_threshold = 0
+    for threshold, name in WEAPON_RANK_THRESHOLDS:
+        if marks >= threshold:
+            rank = name
+            current_threshold = threshold
+        else:
+            next_threshold = threshold
+            return rank or "Unranked", current_threshold, next_threshold
+    return WEAPON_RANK_THRESHOLDS[-1][1], current_threshold, None  # Iridescent
+
+def get_subclass_rank(subclass_marks, num_weapons):
+    """Return (rank_name, level) based on how many times the meter filled."""
+    if num_weapons == 0:
+        return SUBCLASS_RANKS[0], 0
+    level = min(subclass_marks // num_weapons, len(SUBCLASS_RANKS) - 1)
+    return SUBCLASS_RANKS[level], level
+
+def get_class_rank(class_marks):
+    """Class rank advances every 3 subclass level-ups."""
+    level = min(class_marks // 3, len(CLASS_RANKS) - 1)
+    return CLASS_RANKS[level], level
+
+def get_player_title(bounties_completed):
+    idx = min(bounties_completed, len(PLAYER_TITLES) - 1)
+    return PLAYER_TITLES[idx]
+
+def calculate_weapon_marks_for_player(discord_id):
+    """
+    Count weapon marks per weapon for a player from Submissions sheet.
+    1 mark per submission + 1 bonus for 200 Takedowns feat + 1 for 100 Kills + 1 for Triple.
+    Returns dict: weapon_name -> total_marks
+    """
+    subs = submissions_ws.get_all_values()[1:]
+    discord_id_str = str(discord_id)
+    weapon_marks = {}
+
+    for row in subs:
+        if len(row) < 13:
+            continue
+        row_discord_id = row[2].strip() if len(row) > 2 else ''
+        if row_discord_id != discord_id_str:
+            continue
+        weapon = row[3].strip() if len(row) > 3 else ''
+        feats_str = row[11].strip() if len(row) > 11 else ''
+        feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
+
+        if not weapon or weapon == 'Other':
+            continue
+
+        marks = 1  # base mark per submission
+        if '200 Takedowns' in feats:
+            marks += 1
+        if '100 Kills' in feats:
+            marks += 1
+        if 'Triple' in feats:
+            marks += 1
+
+        weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
+
+    return weapon_marks
+
+def calculate_registry_stats(discord_id):
+    """Calculate all progression stats for a player."""
+    weapon_marks = calculate_weapon_marks_for_player(discord_id)
+
+    class_stats = {}
+    for cls, subclasses in REGISTRY_CLASS_MAP.items():
+        subclass_stats = {}
+        class_marks_total = 0
+
+        for subclass in subclasses:
+            weapons = REGISTRY_WEAPON_MAP.get(subclass, [])
+            num_weapons = len(weapons)
+
+            # Count subclass marks = sum of weapon rank-ups across all weapons in subclass
+            subclass_marks = 0
+            weapon_details = {}
+            for w in weapons:
+                marks = weapon_marks.get(w, 0)
+                rank_name, _, _ = get_weapon_rank(marks) if marks > 0 else ("Unranked", 0, 1)
+                # Count how many rank tiers this weapon has achieved
+                tiers_achieved = sum(1 for threshold, _ in WEAPON_RANK_THRESHOLDS if marks >= threshold)
+                subclass_marks += tiers_achieved
+                weapon_details[w] = {'marks': marks, 'rank': rank_name, 'tiers': tiers_achieved}
+
+            sub_rank, sub_level = get_subclass_rank(subclass_marks, num_weapons)
+            class_marks_total += sub_level
+
+            subclass_stats[subclass] = {
+                'rank': sub_rank,
+                'level': sub_level,
+                'marks': subclass_marks,
+                'num_weapons': num_weapons,
+                'weapons': weapon_details,
+            }
+
+        cls_rank, _ = get_class_rank(class_marks_total)
+        class_stats[cls] = {
+            'rank': cls_rank,
+            'class_marks': class_marks_total,
+            'subclasses': subclass_stats,
+        }
+
+    return class_stats, weapon_marks
+
+def get_player_bounties_completed(discord_id):
+    """Count distinct bounties completed by player."""
+    try:
+        rows = bounty_players_ws.get_all_values()[1:]
+        discord_id_str = str(discord_id)
+        completed = set()
+        for row in rows:
+            if len(row) < 5:
+                continue
+            if row[1].strip() == discord_id_str:
+                progress_str = row[4].strip() if len(row) > 4 else '{}'
+                try:
+                    progress = json.loads(progress_str)
+                    # Count as completed if any weapon hit its target
+                    if any(v >= 1 for v in progress.values()):
+                        completed.add(row[0].strip())
+                except Exception:
+                    pass
+        return len(completed)
+    except Exception:
+        return 0
+
+def get_butler_titles_for_player(discord_id, stats):
+    """Return list of Butler's Favourites titles held by this player."""
+    discord_id_str = str(discord_id)
+    titles = []
+    title_checks = [
+        ('grand_marshal', '🏆 Grand Marshal'),
+        ('weapons_master', '⚔️ Weapons Master'),
+        ('campaign_master', '🗺️ Campaign Master'),
+        ('headhunter', '💀 Headhunter'),
+        ('butcher', '🩸 Butcher'),
+    ]
+    # stats dict uses display names not IDs — match by display name via players sheet
+    rows = players_ws.get_all_values()[1:]
+    player_name = None
+    for row in rows:
+        if row and row[0] == discord_id_str:
+            player_name = row[1] if len(row) > 1 else None
+            break
+    if not player_name:
+        return []
+    for key, label in title_checks:
+        if stats.get(key) == player_name:
+            titles.append(label)
+    return titles
+
+def build_registry_card_text(player_name, discord_id):
+    """Build the full registry card text for a player."""
+    class_stats, weapon_marks = calculate_registry_stats(discord_id)
+    bounties_done = get_player_bounties_completed(discord_id)
+    player_title = get_player_title(bounties_done)
+
+    try:
+        butler_stats = calculate_butler_stats()
+        butler_titles = get_butler_titles_for_player(discord_id, butler_stats)
+    except Exception:
+        butler_titles = []
+
+    lines = []
+    lines.append(f"**{player_name}**")
+    lines.append(f"🏅 **{player_title}** *(Bounties: {bounties_done})*")
+    lines.append("")
+
+    if butler_titles:
+        lines.append("**Butler's Favourites:**")
+        for t in butler_titles:
+            lines.append(f"• {t}")
+        lines.append("")
+
+    for cls, cdata in class_stats.items():
+        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"**{cls}: {cdata['rank']}** *(Class marks: {cdata['class_marks']})*")
+        lines.append("")
+        for subclass, sdata in cdata['subclasses'].items():
+            meter_filled = sdata['marks'] % sdata['num_weapons'] if sdata['num_weapons'] else 0
+            meter = '█' * meter_filled + '□' * (sdata['num_weapons'] - meter_filled)
+            lines.append(f"**{subclass}: {sdata['rank']}** `[{meter}]`")
+            for w, wdata in sdata['weapons'].items():
+                if wdata['marks'] > 0:
+                    lines.append(f"• {w}: {wdata['rank']} *(×{wdata['marks']})*")
+                else:
+                    lines.append(f"• {w}: —")
+            lines.append("")
+
+    return "\n".join(lines)
+
+def get_registry_thread_id(discord_id):
+    """Get existing forum thread ID for player, or None."""
+    try:
+        rows = registry_ws.get_all_values()[1:]
+        discord_id_str = str(discord_id)
+        for row in rows:
+            if row and row[0] == discord_id_str:
+                return int(row[2]) if len(row) > 2 and row[2] else None
+    except Exception:
+        return None
+    return None
+
+def save_registry_thread_id(discord_id, player_name, thread_id):
+    """Save or update the thread ID in RegistryCards sheet."""
+    try:
+        rows = registry_ws.get_all_values()
+        discord_id_str = str(discord_id)
+        for i, row in enumerate(rows[1:], start=2):
+            if row and row[0] == discord_id_str:
+                registry_ws.update_cell(i, 2, player_name)
+                registry_ws.update_cell(i, 3, str(thread_id))
+                return
+        registry_ws.append_row([discord_id_str, player_name, str(thread_id)])
+    except Exception as e:
+        print(f"Registry sheet save error: {e}")
+
+async def create_or_update_registry_card(guild, discord_id, player_name):
+    """Create or update a player's registry card in the butlers-archive forum."""
+    try:
+        forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
+        if not forum:
+            print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
+            return
+
+        card_text = build_registry_card_text(player_name, discord_id)
+        thread_id = get_registry_thread_id(discord_id)
+
+        if thread_id:
+            # Try to find and edit the existing thread's first message
+            try:
+                thread = guild.get_thread(thread_id)
+                if not thread:
+                    thread = await guild.fetch_channel(thread_id)
+                async for msg in thread.history(limit=1, oldest_first=True):
+                    await msg.edit(content=card_text)
+                    return
+            except Exception as e:
+                print(f"Registry thread edit error for {player_name}: {e}")
+                # Fall through to create new
+
+        # Create new thread
+        thread_with_msg = await forum.create_thread(
+            name=player_name,
+            content=card_text,
+        )
+        save_registry_thread_id(discord_id, player_name, thread_with_msg.thread.id)
+        print(f"Registry card created for {player_name}")
+
+    except Exception as e:
+        print(f"Registry card error for {player_name}: {e}")
+
+
 def get_classes_for_category(category):
     weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
     result = []
@@ -326,6 +645,13 @@ async def on_ready():
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
     print(f'Logged in as {bot.user}')
+    # One-time emoji dump — remove after use
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        print("=== GUILD EMOJIS ===")
+        for emoji in guild.emojis:
+            print(f"{emoji.name}: <{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>")
+        print("=== END EMOJIS ===")
 
 @bot.event
 async def on_message(message):
@@ -1225,6 +1551,14 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
                 await update_title_roles(interaction.guild, stats)
     except Exception as e:
         print(f"Butler favourites update error: {e}")
+
+    # Update registry card
+    try:
+        await create_or_update_registry_card(
+            interaction.guild, interaction.user.id, interaction.user.display_name
+        )
+    except Exception as e:
+        print(f"Registry card update error: {e}")
 
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
@@ -2565,6 +2899,18 @@ async def butlers_report(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
+
+
+@bot.tree.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(member="The player to create/refresh a card for")
+async def create_card(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        await create_or_update_registry_card(interaction.guild, member.id, member.display_name)
+        await interaction.followup.send(f"Registry card created/updated for {member.display_name}.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
