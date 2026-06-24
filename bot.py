@@ -676,15 +676,13 @@ def get_bounty_completions_for_player(discord_id):
 
 def get_weapon_bracket(marks):
     """
-    Return the bracket string [✦✦✧✧] for a weapon given its total marks.
-    Slots = delta between current rank threshold and next rank threshold.
-    Filled (✦) = marks earned above current threshold.
-    Empty (✧) = marks still needed to reach next threshold.
-    At Iridescent (100+) show prestige as roman numerals every 25 marks.
+    Return the bracket string for a weapon given its total marks.
+    Capped at 5 visible slots; shows fraction if the actual delta is wider.
+    At Iridescent (100+): 5-slot bracket cycles, ×N counts rank-ups.
     """
-    PRESTIGE_INTERVAL = 5  # compact 5-slot bracket at Iridescent, ×N counts rank-ups
+    PRESTIGE_INTERVAL = 5
+    MAX_SLOTS = 5
 
-    # Count prestige levels and get position within current interval
     if marks >= 100:
         marks_past = marks - 100
         prestige = marks_past // PRESTIGE_INTERVAL
@@ -706,7 +704,14 @@ def get_weapon_bracket(marks):
     delta = next_threshold - current_threshold
     filled = marks - current_threshold
     empty = delta - filled
-    return f"[{'✦' * filled}{'✧' * empty}]"
+
+    if delta > MAX_SLOTS:
+        # Cap display at 5 slots, show fraction for context
+        display_filled = min(filled, MAX_SLOTS)
+        display_empty = MAX_SLOTS - display_filled
+        return f"[{'✦' * display_filled}{'✧' * display_empty}] {filled}/{delta}"
+    else:
+        return f"[{'✦' * filled}{'✧' * empty}]"
 
 
 def build_registry_messages(player_name, discord_id):
@@ -3184,6 +3189,41 @@ async def butlers_report(interaction: discord.Interaction):
 
 
 
+@bot.tree.command(name="purge_archive", description="Delete all threads in butlers-archive and clear RegistryCards sheet (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def purge_archive(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        forum = interaction.guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
+        if not forum:
+            await interaction.followup.send("Could not find butlers-archive channel.", ephemeral=True)
+            return
+
+        deleted = 0
+
+        # Delete active threads
+        for thread in list(forum.threads):
+            try:
+                await thread.delete()
+                deleted += 1
+            except Exception as e:
+                print(f"Error deleting thread {thread.name}: {e}")
+
+        # Delete archived threads
+        async for thread in forum.archived_threads(limit=200):
+            try:
+                await thread.delete()
+                deleted += 1
+            except Exception as e:
+                print(f"Error deleting archived thread {thread.name}: {e}")
+
+        await interaction.followup.send(f"Purge complete — deleted {deleted} threads.", ephemeral=True)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def import_registry(interaction: discord.Interaction):
@@ -3194,19 +3234,33 @@ async def import_registry(interaction: discord.Interaction):
             await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
             return
 
+        # Build set of player names who have at least one submission
+        subs = submissions_ws.get_all_values()[1:]
+        players_with_subs = set()
+        player_rows = players_ws.get_all_values()[1:]
+        id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
+        for row in subs:
+            discord_id = row[2].strip() if len(row) > 2 else ''
+            if discord_id and discord_id in id_to_name:
+                players_with_subs.add(id_to_name[discord_id].lower())
+
         imported = 0
         skipped = 0
 
-        async for thread in old_forum.archived_threads(limit=100):
-            await _process_registry_thread(interaction.guild, thread)
-            imported += 1
+        all_threads = list(old_forum.threads)
+        async for thread in old_forum.archived_threads(limit=200):
+            all_threads.append(thread)
 
-        # Also check active threads
-        for thread in old_forum.threads:
-            await _process_registry_thread(interaction.guild, thread)
-            imported += 1
+        for thread in all_threads:
+            player_name = thread.name.strip()
+            if player_name.lower() in players_with_subs:
+                await _process_registry_thread(interaction.guild, thread)
+                imported += 1
+            else:
+                skipped += 1
+                print(f"Skipping {player_name} — no submissions")
 
-        await interaction.followup.send(f"Import complete — processed {imported} registry cards.", ephemeral=True)
+        await interaction.followup.send(f"Import complete — {imported} cards created, {skipped} skipped (no submissions).", ephemeral=True)
     except Exception as e:
         import traceback
         traceback.print_exc()
