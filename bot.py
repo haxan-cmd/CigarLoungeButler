@@ -921,7 +921,10 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         # Group by emoji combo and show count
         feat_counts = {}
         for emojis, link in feat_submissions:
-            feat_counts[emojis] = feat_counts.get(emojis, 0) + 1
+            # Normalize order so <200td><triple> and <triple><200td> group together
+            parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
+            normalized = ''.join(sorted(parts))
+            feat_counts[normalized] = feat_counts.get(normalized, 0) + 1
         for emojis, count in feat_counts.items():
             suffix = f" ×{count}" if count > 1 else ""
             lines.append(f"• {emojis}{suffix}")
