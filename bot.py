@@ -3696,8 +3696,12 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 legacy_marks[key] = max(legacy_marks.get(key, 0), total_marks)
                 break
 
-    # --- Parse legacy bounty completions ---
     print(f"DEBUG {player_name} legacy_marks found: {legacy_marks}")
+    if not legacy_marks:
+        print(f"No legacy marks found for {player_name}, skipping")
+        return
+
+    # --- Parse legacy bounty completions ---
     KNOWN_SECTIONS = ["Feats of Legend", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
     legacy_bounties = []
     in_bounties_section = False
@@ -3757,10 +3761,6 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 emojis = ''.join(re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emoji_part))
                 if emojis:
                     legacy_feats.append((emojis, link))
-
-
-        print(f"No legacy marks found for {player_name}, skipping")
-        return
 
     await _save_legacy_marks(player_name, guild, legacy_marks)
     await asyncio.sleep(1)
