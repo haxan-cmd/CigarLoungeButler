@@ -727,7 +727,7 @@ def build_registry_messages(player_name, discord_id):
 
     # --- Message 1: Header card ---
     lines = []
-    lines.append(f"🏅 *{player_title}*")
+    lines.append(f"*{player_title}*")
     lines.append("")
     lines.append("**Titles:**")
     for cls, cdata in class_stats.items():
