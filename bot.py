@@ -737,7 +737,7 @@ def get_feats_for_player(discord_id, cached_data=None):
     except Exception as e:
         print(f"LegacyFeats read error: {e}")
 
-    return named_feats, feats[:10]
+    return named_feats, feats
 
 def get_mastered_weapons_for_player(discord_id, cached_data=None):
     """Weapons with 100+ submissions with 100+ takedowns."""
@@ -918,8 +918,13 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         lines.append("**Feats of Legend:**")
         if 'hhanded' in named_feats:
             lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
+        # Group by emoji combo and show count
+        feat_counts = {}
         for emojis, link in feat_submissions:
-            lines.append(f"• {emojis} —[Link]({link})" if link else f"• {emojis}")
+            feat_counts[emojis] = feat_counts.get(emojis, 0) + 1
+        for emojis, count in feat_counts.items():
+            suffix = f" ×{count}" if count > 1 else ""
+            lines.append(f"• {emojis}{suffix}")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
