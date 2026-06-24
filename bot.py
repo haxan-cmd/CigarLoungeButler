@@ -666,23 +666,19 @@ def get_feats_for_player(discord_id):
     subs = submissions_ws.get_all_values()[1:]
     discord_id_str = str(discord_id)
     feats = []  # list of (feat_combo_emojis, link)
-    named_feats = set()  # track named feats like Hundred-Handed
+    named_feats = set()
 
     # Check for Hundred-Handed (200TD + 100K + Triple + Flawless + no deaths)
-    hundred_handed = False
     for row in subs:
         if len(row) < 13 or row[2].strip() != discord_id_str:
             continue
         feats_str = row[11].strip() if len(row) > 11 else ''
         row_feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
         if all(f in row_feats for f in ['200 Takedowns', '100 Kills', 'Triple', 'Flawless']):
-            hundred_handed = True
+            named_feats.add('hhanded')
             break
 
-    if hundred_handed:
-        named_feats.add('hhanded')
-
-    # Collect feat submissions
+    # Collect feat submissions from Submissions sheet
     for row in subs:
         if len(row) < 13 or row[2].strip() != discord_id_str:
             continue
@@ -693,7 +689,28 @@ def get_feats_for_player(discord_id):
         if feat_emojis:
             feats.append((feat_emojis, link))
 
-    return named_feats, feats[:10]  # cap at 10 entries
+    # Also pull legacy feat entries from LeaderboardData
+    FEAT_BOARD_EMOJIS = {
+        '200 Takedowns': FEAT_EMOJIS['200 Takedowns'],
+        '100 Kills':     FEAT_EMOJIS['100 Kills'],
+        'Flawless':      FEAT_EMOJIS['Flawless'],
+    }
+    try:
+        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        for row in ld_rows:
+            if len(row) < 5 or row[2].strip() != discord_id_str:
+                continue
+            lb_name = row[0].strip()
+            if lb_name in FEAT_BOARD_EMOJIS:
+                link = row[4].strip() if len(row) > 4 else ''
+                emoji = FEAT_BOARD_EMOJIS[lb_name]
+                entry = (emoji, link)
+                if entry not in feats:
+                    feats.append(entry)
+    except Exception as e:
+        print(f"LeaderboardData feats read error: {e}")
+
+    return named_feats, feats[:10]
 
 def get_mastered_weapons_for_player(discord_id):
     """Weapons with 100+ submissions with 100+ takedowns."""
@@ -713,12 +730,18 @@ def get_mastered_weapons_for_player(discord_id):
     return [w for w, c in weapon_counts.items() if c >= 100]
 
 def get_bounty_completions_for_player(discord_id):
-    """Return list of bounty names completed by player, including legacy completions."""
+    """Return list of (bounty_name, placement) tuples completed by player, including legacy."""
     try:
         rows = bounty_players_ws.get_all_values()[1:]
         discord_id_str = str(discord_id)
-        completions = []
+        completions = []  # list of (title, placement)
         bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
+
+        # Build emoji lookup from Bounty sheet
+        bounty_emoji = {}
+        for brow in bounty_rows:
+            if brow and len(brow) > 3:
+                bounty_emoji[brow[0].strip()] = brow[3].strip()
 
         for row in rows:
             if len(row) < 5 or row[1].strip() != discord_id_str:
@@ -736,7 +759,18 @@ def get_bounty_completions_for_player(discord_id):
                             pass
                         break
                 if target and all(progress.get(w, 0) >= t for w, t in target.items()):
-                    completions.append(bounty_title)
+                    placement = None
+                    for brow in bounty_rows:
+                        if brow and brow[0].strip() == bounty_title and len(brow) > 7 and brow[7]:
+                            try:
+                                comp_list = json.loads(brow[7])
+                                if discord_id_str in comp_list:
+                                    placement = comp_list.index(discord_id_str) + 1
+                            except Exception:
+                                pass
+                            break
+                    emoji = bounty_emoji.get(bounty_title, '')
+                    completions.append((bounty_title, placement, emoji))
             except Exception:
                 pass
 
@@ -751,21 +785,41 @@ def get_bounty_completions_for_player(discord_id):
                     player_name = r[1].strip() if len(r) > 1 else None
                     break
             if player_name:
-                existing_titles = {c.lower() for c in completions}
+                existing_titles = {t.lower() for t, _, _ in completions}
+                # Build emoji lookup from bounty sheet
+                bounty_emoji_lookup = {}
+                for brow in bounty_rows:
+                    if brow and len(brow) > 3:
+                        bounty_emoji_lookup[brow[0].strip().lower()] = brow[3].strip()
                 for r in lb_rows:
                     if len(r) < 2 or r[0].strip().lower() != player_name.lower():
                         continue
-                    bounty_name = r[1].strip()
-                    # Clean up emoji prefixes, bold formatting, placement numbers
+                    raw_title = r[1].strip()
                     import re as _re
-                    bounty_name = _re.sub(r'<[^>]+>', '', bounty_name)  # remove discord emoji
-                    bounty_name = _re.sub(r'\*+', '', bounty_name)      # remove bold/italic
-                    bounty_name = _re.sub(r'#\d+', '', bounty_name)     # remove #N placement
-                    bounty_name = _re.sub(r'[\U00010000-\U0010ffff]', '', bounty_name)  # remove unicode emoji
+                    # Extract discord emoji if present
+                    discord_emoji_match = _re.search(r'<a?:[^:]+:\d+>', raw_title)
+                    extracted_emoji = discord_emoji_match.group(0) if discord_emoji_match else ''
+                    # Extract unicode emoji if no discord emoji
+                    if not extracted_emoji:
+                        unicode_match = _re.match(r'([\U00010000-\U0010ffff])', raw_title)
+                        if unicode_match:
+                            extracted_emoji = unicode_match.group(1)
+                    # Clean the name
+                    bounty_name = _re.sub(r'<[^>]+>', '', raw_title)
+                    bounty_name = _re.sub(r'\*+', '', bounty_name)
+                    bounty_name = _re.sub(r'#\d+', '', bounty_name)
+                    bounty_name = _re.sub(r'[\U00010000-\U0010ffff]', '', bounty_name)
                     bounty_name = bounty_name.strip()
                     if not bounty_name or bounty_name.lower() in existing_titles:
                         continue
-                    completions.append(bounty_name)
+                    placement = None
+                    try:
+                        placement = int(r[2]) if len(r) > 2 and r[2] else None
+                    except (ValueError, TypeError):
+                        pass
+                    # Use extracted emoji, fall back to bounty sheet lookup
+                    emoji = extracted_emoji or bounty_emoji_lookup.get(bounty_name.lower(), '')
+                    completions.append((bounty_name, placement, emoji))
                     existing_titles.add(bounty_name.lower())
         except Exception:
             pass
@@ -827,8 +881,10 @@ def build_registry_messages(player_name, discord_id):
 
     if bounties_done:
         lines.append("**Bounties Completed:**")
-        for b in bounties_done:
-            lines.append(f"• {b}")
+        for b, placement, emoji in bounties_done:
+            placement_str = f" **#{placement}**" if placement else ""
+            prefix = f"{emoji} " if emoji else ""
+            lines.append(f"• {prefix}{b}{placement_str}")
         lines.append("")
 
     if named_feats or feat_submissions:
