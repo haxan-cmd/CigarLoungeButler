@@ -322,6 +322,61 @@ REGISTRY_CLASS_MAP = {
     "Archer":   ["Longbowman", "Crossbowman", "Skirmisher"],
 }
 
+# ---------------------------------------------------------------------------
+# Registry emoji maps
+# ---------------------------------------------------------------------------
+WEAPON_RANK_EMOJIS = {
+    "Unranked":        "<:level0_0:1361479473375219832>",
+    "Bronze":          "<:level1_1:1361419350665461820>",
+    "Silver":          "<:level2_3:1361419398841106442>",
+    "Gold":            "<:level3_6:1361419489635209396>",
+    "Emerald":         "<:level4_9:1368656036784771212>",
+    "Diamond":         "<:level5_12:1368656100764942432>",
+    "Crimson":         "<:level6_15:1430203489757302924>",
+    "Prestige Bronze": "<:level7_20:1430216503919120537>",
+    "Prestige Silver": "<:level8_30:1430216636006137876>",
+    "Prestige Gold":   "<:level9_40:1430216748329599046>",
+    "Prestige Emerald":"<:level10_55:1430216819787956265>",
+    "Prestige Diamond":"<:level11_70:1430217739586240624>",
+    "Prestige Crimson":"<:level12_85:1430217099648962651>",
+    "Iridescent":      "<:level13_100:1459253823481712895>",
+}
+
+SUBCLASS_RANK_EMOJIS = {
+    "Initiate":    "<:subclass0:1361423009256308808>",
+    "Veteran":     "<:veteran2:1430199755094360194>",
+    "Master":      "<:master3:1430199983675670619>",
+    "Grandmaster": "<:grandmaster4:1430199858635210752>",
+    "Champion":    "<:champion5:1430199893363789934>",
+    "Paragon":     "<:paragon6:1430199955385094235>",
+    "Apex":        "<:apex7:1430199916126408754>",
+}
+
+CLASS_RANK_EMOJIS = {
+    "Sworn":     "<:class0_0:1446622044698443969>",
+    "Trusted":   "<:class1_3:1446620360186269726>",
+    "Proven":    "<:class2_6:1446620614096846988>",
+    "Honored":   "<:class3_9:1446620700189266182>",
+    "Esteemed":  "<:class4_12:1446620991777407128>",
+    "Exalted":   "<:class5_15:1446621127605620826>",
+    "Ascended":  "<:class6_18:1446621258430025791>",
+}
+
+FEAT_EMOJIS = {
+    "200 Takedowns": "<a:200tkd:1363648828414230538>",
+    "100 Kills":     "<a:100kill:1361412390339608686>",
+    "Triple":        "<a:triple:1365532698260668466>",
+    "Predator":      "<a:predator:1366794896081555567>",
+    "Flawless":      "<a:flawless:1360358300834599062>",
+}
+
+SPECIAL_OPS_EMOJIS = {
+    "Fist and Shield": "<a:captain_america:1366801668041211934>",
+    "Healing Horn":    "<a:passive:1365531248268673086>",
+    "Mallet":          "<a:predator:1366794896081555567>",
+    "Knife":           "<a:100kill:1361412390339608686>",
+}
+
 WEAPON_RANK_THRESHOLDS = [
     (1,   "Bronze"),
     (3,   "Silver"),
@@ -497,11 +552,112 @@ def get_butler_titles_for_player(discord_id, stats):
             titles.append(label)
     return titles
 
-def build_registry_card_text(player_name, discord_id):
-    """Build the full registry card text for a player."""
+def get_special_ops_for_player(discord_id):
+    """Find qualifying Special Ops submissions (feat weapons with 100+ TD)."""
+    subs = submissions_ws.get_all_values()[1:]
+    discord_id_str = str(discord_id)
+    special_ops = {}  # weapon -> best submission link
+    feat_weapons = {"Fist and Shield", "Healing Horn", "Mallet", "Knife"}
+    for row in subs:
+        if len(row) < 13:
+            continue
+        if row[2].strip() != discord_id_str:
+            continue
+        weapon = row[3].strip()
+        if weapon not in feat_weapons:
+            continue
+        try:
+            td = int(row[7])
+        except (ValueError, IndexError):
+            continue
+        if td >= 100:
+            link = row[12].strip() if len(row) > 12 else ''
+            if weapon not in special_ops:
+                special_ops[weapon] = link
+    return special_ops
+
+def get_feats_for_player(discord_id):
+    """Get all feat submissions (200TD, 100K, Triple, Predator, Flawless) with links."""
+    subs = submissions_ws.get_all_values()[1:]
+    discord_id_str = str(discord_id)
+    feats = []  # list of (feat_combo_emojis, link)
+    named_feats = set()  # track named feats like Hundred-Handed
+
+    # Check for Hundred-Handed (200TD + 100K + Triple + Flawless + no deaths)
+    hundred_handed = False
+    for row in subs:
+        if len(row) < 13 or row[2].strip() != discord_id_str:
+            continue
+        feats_str = row[11].strip() if len(row) > 11 else ''
+        row_feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
+        if all(f in row_feats for f in ['200 Takedowns', '100 Kills', 'Triple', 'Flawless']):
+            hundred_handed = True
+            break
+
+    if hundred_handed:
+        named_feats.add('hhanded')
+
+    # Collect feat submissions
+    for row in subs:
+        if len(row) < 13 or row[2].strip() != discord_id_str:
+            continue
+        feats_str = row[11].strip() if len(row) > 11 else ''
+        row_feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
+        link = row[12].strip() if len(row) > 12 else ''
+        feat_emojis = ''.join(FEAT_EMOJIS[f] for f in ['200 Takedowns', '100 Kills', 'Triple', 'Predator', 'Flawless'] if f in row_feats)
+        if feat_emojis:
+            feats.append((feat_emojis, link))
+
+    return named_feats, feats[:10]  # cap at 10 entries
+
+def get_mastered_weapons_for_player(discord_id):
+    """Weapons with 100+ submissions with 100+ takedowns."""
+    subs = submissions_ws.get_all_values()[1:]
+    discord_id_str = str(discord_id)
+    weapon_counts = {}
+    for row in subs:
+        if len(row) < 9 or row[2].strip() != discord_id_str:
+            continue
+        weapon = row[3].strip()
+        try:
+            td = int(row[7])
+        except (ValueError, IndexError):
+            continue
+        if td >= 100:
+            weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
+    return [w for w, c in weapon_counts.items() if c >= 100]
+
+def get_bounty_completions_for_player(discord_id):
+    """Return list of (bounty_name, emoji, is_first) tuples."""
+    try:
+        rows = bounty_players_ws.get_all_values()[1:]
+        discord_id_str = str(discord_id)
+        completions = []
+        # Get all bounty data to check #1 placement
+        bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
+        for row in rows:
+            if len(row) < 5 or row[1].strip() != discord_id_str:
+                continue
+            bounty_title = row[0].strip()
+            progress_str = row[4].strip() if len(row) > 4 else '{}'
+            try:
+                progress = json.loads(progress_str)
+                if any(v >= 1 for v in progress.values()):
+                    completions.append(bounty_title)
+            except Exception:
+                pass
+        return completions
+    except Exception:
+        return []
+
+def build_registry_messages(player_name, discord_id):
+    """Build list of message strings for a player's registry card (one per class + header)."""
     class_stats, weapon_marks = calculate_registry_stats(discord_id)
-    bounties_done = get_player_bounties_completed(discord_id)
-    player_title = get_player_title(bounties_done)
+    bounties_done = get_bounty_completions_for_player(discord_id)
+    player_title = get_player_title(len(bounties_done))
+    mastered = get_mastered_weapons_for_player(discord_id)
+    named_feats, feat_submissions = get_feats_for_player(discord_id)
+    special_ops = get_special_ops_for_player(discord_id)
 
     try:
         butler_stats = calculate_butler_stats()
@@ -509,9 +665,18 @@ def build_registry_card_text(player_name, discord_id):
     except Exception:
         butler_titles = []
 
+    messages = []
+
+    # --- Message 1: Header card ---
     lines = []
-    lines.append(f"**{player_name}**")
-    lines.append(f"🏅 **{player_title}** *(Bounties: {bounties_done})*")
+    lines.append(f"### {player_name}")
+    lines.append(f"🏅 **{player_title}** *(Bounties: {len(bounties_done)})*")
+    lines.append("")
+
+    # Class ranks summary
+    for cls, cdata in class_stats.items():
+        cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
+        lines.append(f"⌞{cls}: {cls_emoji} — {cdata['rank']}⌝")
     lines.append("")
 
     if butler_titles:
@@ -520,22 +685,67 @@ def build_registry_card_text(player_name, discord_id):
             lines.append(f"• {t}")
         lines.append("")
 
-    for cls, cdata in class_stats.items():
-        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append(f"**{cls}: {cdata['rank']}** *(Class marks: {cdata['class_marks']})*")
+    if bounties_done:
+        lines.append("**Bounties Completed:**")
+        for b in bounties_done:
+            lines.append(f"• {b}")
         lines.append("")
+
+    if named_feats or feat_submissions:
+        lines.append("**Feats of Legend:**")
+        if 'hhanded' in named_feats:
+            lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
+        for emojis, link in feat_submissions:
+            lines.append(f"• {emojis} —[Link]({link})" if link else f"• {emojis}")
+        lines.append("")
+
+    lines.append("**Mastered Weapons:**")
+    if mastered:
+        for w in mastered:
+            lines.append(f"• {w}")
+    else:
+        lines.append("• None")
+    lines.append("")
+
+    if special_ops:
+        lines.append(f"<:special_ops:1361410852686921788> **Special Ops**")
+        for w, link in special_ops.items():
+            emoji = SPECIAL_OPS_EMOJIS.get(w, '')
+            lines.append(f"• {emoji} {w}: [★]—[Link]({link})" if link else f"• {emoji} {w}: [★]")
+
+    messages.append("\n".join(lines))
+
+    # --- Messages 2-5: One per class ---
+    for cls, cdata in class_stats.items():
+        cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
+        lines = []
+        lines.append(f"### {cls}: {cls_emoji} — {cdata['rank']}")
+        lines.append("")
+
         for subclass, sdata in cdata['subclasses'].items():
+            sub_emoji = SUBCLASS_RANK_EMOJIS.get(sdata['rank'], '')
             meter_filled = sdata['marks'] % sdata['num_weapons'] if sdata['num_weapons'] else 0
             meter = '█' * meter_filled + '□' * (sdata['num_weapons'] - meter_filled)
-            lines.append(f"**{subclass}: {sdata['rank']}** `[{meter}]`")
+            lines.append(f"**{sub_emoji} {subclass}: {sdata['rank']}** `[{meter}]`")
+
+            played = []
+            unplayed = []
             for w, wdata in sdata['weapons'].items():
                 if wdata['marks'] > 0:
-                    lines.append(f"• {w}: {wdata['rank']} *(×{wdata['marks']})*")
+                    w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], '')
+                    played.append(f"• {w_emoji} {w}: {wdata['rank']} *(×{wdata['marks']})*")
                 else:
-                    lines.append(f"• {w}: —")
+                    unplayed.append(w)
+
+            for p in played:
+                lines.append(p)
+            if unplayed:
+                lines.append(f"*Unused: {', '.join(unplayed)}*")
             lines.append("")
 
-    return "\n".join(lines)
+        messages.append("\n".join(lines))
+
+    return messages
 
 def get_registry_thread_id(discord_id):
     """Get existing forum thread ID for player, or None."""
@@ -565,34 +775,56 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
 
 async def create_or_update_registry_card(guild, discord_id, player_name):
     """Create or update a player's registry card in the butlers-archive forum."""
+    import os
     try:
         forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
         if not forum:
             print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
             return
 
-        card_text = build_registry_card_text(player_name, discord_id)
+        messages = build_registry_messages(player_name, discord_id)
         thread_id = get_registry_thread_id(discord_id)
 
+        top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
+        bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
+
         if thread_id:
-            # Try to find and edit the existing thread's first message
+            # Edit existing messages in order
             try:
                 thread = guild.get_thread(thread_id)
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
-                async for msg in thread.history(limit=1, oldest_first=True):
-                    await msg.edit(content=card_text)
-                    return
+                existing = []
+                async for msg in thread.history(limit=20, oldest_first=True):
+                    existing.append(msg)
+
+                # Update each message in order (skip image-only messages)
+                text_msgs = [m for m in existing if m.content]
+                for i, (text, msg) in enumerate(zip(messages, text_msgs)):
+                    await msg.edit(content=text)
+                print(f"Registry card updated for {player_name}")
+                return
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
-                # Fall through to create new
 
-        # Create new thread
+        # Create new thread with top spacer as first message
+        top_file = discord.File(top_path) if os.path.exists(top_path) else None
         thread_with_msg = await forum.create_thread(
             name=player_name,
-            content=card_text,
+            content=messages[0],
+            file=top_file,
         )
-        save_registry_thread_id(discord_id, player_name, thread_with_msg.thread.id)
+        thread = thread_with_msg.thread
+
+        # Post remaining class messages
+        for msg_text in messages[1:]:
+            await thread.send(msg_text)
+
+        # Post bottom spacer
+        if os.path.exists(bot_path):
+            await thread.send(file=discord.File(bot_path))
+
+        save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
 
     except Exception as e:
@@ -645,13 +877,7 @@ async def on_ready():
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
     print(f'Logged in as {bot.user}')
-    # One-time emoji dump — remove after use
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        print("=== GUILD EMOJIS ===")
-        for emoji in guild.emojis:
-            print(f"{emoji.name}: <{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>")
-        print("=== END EMOJIS ===")
+
 
 @bot.event
 async def on_message(message):
