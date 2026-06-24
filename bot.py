@@ -370,16 +370,6 @@ FEAT_EMOJIS = {
     "Flawless":      "<a:flawless:1360358300834599062>",
 }
 
-BOUNTY_EMOJIS = {
-    "Meowy Massacre Bounty": "🐱",
-    "Off-Meta-Menace": "🦷",
-    "Sauce's Seven": "<:sauces_seven:1494334060346998834>",
-    "Easy Breezy Steezy": "<:steezy_bounty:1473026743659925697>",
-    "Nildain's Execution Kit": "<:nildain_bounty:1462562562531917968>",
-    "Blood Bounty": "<:blood_bounty:1449622360897486859>",
-    "Plague": "🦠",
-}
-
 SPECIAL_OPS_EMOJIS = {
     "Fist and Shield": "<a:captain_america:1366801668041211934>",
     "Healing Horn":    "<a:passive:1365531248268673086>",
@@ -468,6 +458,32 @@ def calculate_weapon_marks_for_player(discord_id):
             marks += 1
 
         weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
+
+    # Merge with legacy marks from LegacyMarks sheet
+    try:
+        legacy_ws = sheet.worksheet('LegacyMarks')
+        legacy_rows = legacy_ws.get_all_values()[1:]
+        # Find player name from discord_id
+        player_rows = players_ws.get_all_values()[1:]
+        player_name = None
+        for row in player_rows:
+            if row and row[0].strip() == discord_id_str:
+                player_name = row[1].strip() if len(row) > 1 else None
+                break
+        if player_name:
+            for row in legacy_rows:
+                if len(row) < 4 or row[0].strip().lower() != player_name.lower():
+                    continue
+                weapon = row[1].strip()
+                subclass = row[2].strip()
+                try:
+                    marks = int(row[3])
+                except ValueError:
+                    continue
+                key = (weapon, subclass)
+                weapon_marks[key] = weapon_marks.get(key, 0) + marks
+    except Exception:
+        pass  # LegacyMarks sheet may not exist yet
 
     return weapon_marks
 
@@ -692,14 +708,11 @@ def build_registry_messages(player_name, discord_id):
             lines.append(f"• {t}")
         lines.append("")
 
-    lines.append("**Bounties Completed:**")
     if bounties_done:
+        lines.append("**Bounties Completed:**")
         for b in bounties_done:
-            emoji = BOUNTY_EMOJIS.get(b, "🏅")
-            lines.append(f"• {emoji} {b}")
-    else:
-        lines.append("• None")
-    lines.append("")
+            lines.append(f"• {b}")
+        lines.append("")
 
     if named_feats or feat_submissions:
         lines.append("**Feats of Legend:**")
@@ -787,8 +800,6 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
-        has_top = os.path.exists(top_path)
-        has_bot = os.path.exists(bot_path)
 
         if thread_id:
             # Edit existing messages in order
@@ -809,23 +820,22 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread — emoji only as first post (clean preview)
+        # Create new thread with top spacer as first message
+        top_file = discord.File(top_path) if os.path.exists(top_path) else None
         thread_with_msg = await forum.create_thread(
             name=player_name,
-            content='🗂️',
+            content=messages[0],
+            file=top_file,
         )
         thread = thread_with_msg.thread
 
-        # Message 1: header accolades
-        await thread.send(messages[0])
-
-        # Messages 2-5: each class sandwiched between spacers
+        # Post remaining class messages
         for msg_text in messages[1:]:
-            if has_top:
-                await thread.send(file=discord.File(top_path))
             await thread.send(msg_text)
-            if has_bot:
-                await thread.send(file=discord.File(bot_path))
+
+        # Post bottom spacer
+        if os.path.exists(bot_path):
+            await thread.send(file=discord.File(bot_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
@@ -3129,6 +3139,126 @@ async def butlers_report(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
 
+
+
+@bot.tree.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def import_registry(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        old_forum = interaction.guild.get_channel(1362435483061195022)  # the-registry
+        if not old_forum:
+            await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
+            return
+
+        imported = 0
+        skipped = 0
+
+        async for thread in old_forum.archived_threads(limit=100):
+            await _process_registry_thread(interaction.guild, thread)
+            imported += 1
+
+        # Also check active threads
+        for thread in old_forum.threads:
+            await _process_registry_thread(interaction.guild, thread)
+            imported += 1
+
+        await interaction.followup.send(f"Import complete — processed {imported} registry cards.", ephemeral=True)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Import error: {e}", ephemeral=True)
+
+
+async def _process_registry_thread(guild, thread):
+    """Parse an old registry thread and create/update a card in butlers-archive."""
+    import re
+    player_name = thread.name.strip()
+
+    # Read all messages in the thread
+    messages = []
+    async for msg in thread.history(limit=50, oldest_first=True):
+        if msg.content:
+            messages.append(msg.content)
+
+    full_text = "\n".join(messages)
+
+    # Parse weapon marks from diamond format [♦♦♦◇◇]
+    # Each ♦ = 1 mark
+    # Format: "WeaponName: [♦♦◇◇]" or "WeaponName: [♦♦♦♦♦◇] ★☆"
+    legacy_marks = {}  # (weapon, subclass) -> marks
+
+    # Find current subclass context as we parse
+    current_subclass = None
+    subclass_pattern = re.compile(r'(?:^|\n)[^\n]*?([A-Za-z-]+):\s*(?:Initiate|Veteran|Master|Grandmaster|Champion|Paragon|Apex)')
+    weapon_pattern = re.compile(r'•\s*[^\n]*?([A-Za-z\' -]+?):\s*\[([♦◇]+)\]')
+
+    for line in full_text.split("\n"):
+        line = line.strip()
+
+        # Detect subclass header
+        for subclass in REGISTRY_WEAPON_MAP.keys():
+            if subclass + ":" in line and any(r in line for r in ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex"]):
+                current_subclass = subclass
+                break
+
+        # Detect weapon marks
+        m = weapon_pattern.search(line)
+        if m and current_subclass:
+            weapon_raw = m.group(1).strip()
+            diamonds = m.group(2)
+            marks = diamonds.count("♦")
+            if marks > 0:
+                # Match weapon name to known weapons
+                for w in REGISTRY_WEAPON_MAP.get(current_subclass, []):
+                    if w.lower() in weapon_raw.lower() or weapon_raw.lower() in w.lower():
+                        key = (w, current_subclass)
+                        legacy_marks[key] = legacy_marks.get(key, 0) + marks
+                        break
+
+    if not legacy_marks:
+        print(f"No legacy marks found for {player_name}, skipping")
+        return
+
+    # Store legacy marks in LegacyMarks sheet
+    await _save_legacy_marks(player_name, guild, legacy_marks)
+
+    # Find discord ID from Players sheet
+    discord_id = None
+    rows = players_ws.get_all_values()[1:]
+    for row in rows:
+        if len(row) > 1 and row[1].strip().lower() == player_name.lower():
+            try:
+                discord_id = int(row[0].strip())
+            except ValueError:
+                pass
+            break
+
+    if discord_id:
+        await create_or_update_registry_card(guild, discord_id, player_name)
+        print(f"Registry card created for {player_name} (discord_id={discord_id})")
+    else:
+        print(f"No Discord ID found for {player_name}, card not created")
+
+
+async def _save_legacy_marks(player_name, guild, legacy_marks):
+    """Save legacy weapon marks to LegacyMarks sheet, avoiding duplicates."""
+    try:
+        try:
+            legacy_ws = sheet.worksheet('LegacyMarks')
+        except Exception:
+            legacy_ws = sheet.add_worksheet(title='LegacyMarks', rows=1000, cols=5)
+            legacy_ws.append_row(['PlayerName', 'Weapon', 'Subclass', 'Marks'])
+
+        existing = legacy_ws.get_all_values()[1:]
+        existing_keys = {(r[0].strip(), r[1].strip(), r[2].strip()) for r in existing if len(r) >= 3}
+
+        for (weapon, subclass), marks in legacy_marks.items():
+            key = (player_name, weapon, subclass)
+            if key not in existing_keys:
+                legacy_ws.append_row([player_name, weapon, subclass, marks])
+    except Exception as e:
+        print(f"Legacy marks save error for {player_name}: {e}")
 
 @bot.tree.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
