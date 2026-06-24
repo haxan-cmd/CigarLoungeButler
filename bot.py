@@ -475,13 +475,11 @@ def calculate_weapon_marks_for_player(discord_id):
                 if len(row) < 4 or row[0].strip().lower() != player_name.lower():
                     continue
                 weapon = row[1].strip()
-                subclass = row[2].strip()
                 try:
                     marks = int(row[3])
                 except ValueError:
                     continue
-                key = (weapon, subclass)
-                weapon_marks[key] = weapon_marks.get(key, 0) + marks
+                weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
     except Exception:
         pass  # LegacyMarks sheet may not exist yet
 
@@ -676,6 +674,41 @@ def get_bounty_completions_for_player(discord_id):
     except Exception:
         return []
 
+def get_weapon_bracket(marks):
+    """
+    Return the bracket string [✦✦✧✧] for a weapon given its total marks.
+    Slots = delta between current rank threshold and next rank threshold.
+    Filled (✦) = marks earned above current threshold.
+    Empty (✧) = marks still needed to reach next threshold.
+    At Iridescent (100+) show prestige as roman numerals every 25 marks.
+    """
+    PRESTIGE_INTERVAL = 5  # compact 5-slot bracket at Iridescent, ×N counts rank-ups
+
+    # Count prestige levels and get position within current interval
+    if marks >= 100:
+        marks_past = marks - 100
+        prestige = marks_past // PRESTIGE_INTERVAL
+        filled = marks_past % PRESTIGE_INTERVAL
+        empty = PRESTIGE_INTERVAL - filled
+        prestige_str = f" ×**{prestige}**" if prestige > 0 else ""
+        return f"[{'✦' * filled}{'✧' * empty}]{prestige_str}"
+
+    # Find current and next threshold
+    current_threshold = 0
+    next_threshold = None
+    for threshold, _ in WEAPON_RANK_THRESHOLDS:
+        if marks >= threshold:
+            current_threshold = threshold
+        else:
+            next_threshold = threshold
+            break
+
+    delta = next_threshold - current_threshold
+    filled = marks - current_threshold
+    empty = delta - filled
+    return f"[{'✦' * filled}{'✧' * empty}]"
+
+
 def build_registry_messages(player_name, discord_id):
     """Build list of message strings for a player's registry card (one per class + header)."""
     class_stats, weapon_marks = calculate_registry_stats(discord_id)
@@ -700,7 +733,8 @@ def build_registry_messages(player_name, discord_id):
     lines.append("**Titles:**")
     for cls, cdata in class_stats.items():
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
-        lines.append(f"• ⌞{cls}: {cls_emoji} — {cdata['rank']}⌝")
+        lines.append(f"• {cls}: {cls_emoji} — {cdata['rank']}")
+    lines.append("")
 
     if butler_titles:
         lines.append("**Butler's Favourites:**")
@@ -734,7 +768,7 @@ def build_registry_messages(player_name, discord_id):
         lines.append(f"<:special_ops:1361410852686921788> **Special Ops**")
         for w, link in special_ops.items():
             emoji = SPECIAL_OPS_EMOJIS.get(w, '')
-            lines.append(f"• {emoji} {w}: [★]—[Link]({link})" if link else f"• {emoji} {w}: [★]")
+            lines.append(f"• {emoji} {w} —[Link]({link})" if link else f"• {emoji} {w}")
 
     messages.append("\n".join(lines))
 
@@ -742,18 +776,22 @@ def build_registry_messages(player_name, discord_id):
     for cls, cdata in class_stats.items():
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines = []
-        lines.append(f"### {cls}: {cls_emoji} — {cdata['rank']}")
+        lines.append(f"## {cls}: {cls_emoji} — {cdata['rank']}")
         lines.append("")
 
         for subclass, sdata in cdata['subclasses'].items():
             sub_emoji = SUBCLASS_RANK_EMOJIS.get(sdata['rank'], '')
-            meter_filled = sdata['marks'] % sdata['num_weapons'] if sdata['num_weapons'] else 0
-            meter = '█' * meter_filled + '□' * (sdata['num_weapons'] - meter_filled)
+            num_weapons = sdata['num_weapons']
+
+            # Subclass meter: one block per weapon, filled when weapon has ≥1 mark
+            weapons_with_marks = sum(1 for wdata in sdata['weapons'].values() if wdata['marks'] > 0)
+            meter = '▰' * weapons_with_marks + '▱' * (num_weapons - weapons_with_marks)
             lines.append(f"**{sub_emoji} {subclass}: {sdata['rank']}** `[{meter}]`")
 
             for w, wdata in sdata['weapons'].items():
                 w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], WEAPON_RANK_EMOJIS['Unranked'])
-                lines.append(f"• {w_emoji} {w}: {wdata['marks']}")
+                bracket = get_weapon_bracket(wdata['marks'])
+                lines.append(f"• {w_emoji} {w}: {bracket}")
             lines.append("")
 
         messages.append("\n".join(lines))
