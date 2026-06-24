@@ -3541,7 +3541,49 @@ async def purge_archive(interaction: discord.Interaction):
         await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
+@bot.tree.command(name="rebuild_archive", description="Rebuild all registry cards for every registered player (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def rebuild_archive(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        player_rows = players_ws.get_all_values()[1:]
+        if not player_rows:
+            await interaction.followup.send("No players found in Players sheet.", ephemeral=True)
+            return
+
+        total = 0
+        failed = 0
+
+        for row in player_rows:
+            if len(row) < 2 or not row[0].strip() or not row[1].strip():
+                continue
+            try:
+                discord_id = int(row[0].strip())
+            except ValueError:
+                continue
+            player_name = row[1].strip()
+
+            try:
+                await create_or_update_registry_card(interaction.guild, discord_id, player_name)
+                total += 1
+                print(f"Rebuilt card for {player_name}")
+            except Exception as e:
+                failed += 1
+                print(f"Failed to rebuild card for {player_name}: {e}")
+
+            await asyncio.sleep(15)  # avoid rate limits
+
+        await interaction.followup.send(
+            f"Rebuild complete — {total} cards created/updated, {failed} failed.",
+            ephemeral=True
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Rebuild error: {e}", ephemeral=True)
+
+
+
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def import_registry(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -3641,7 +3683,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
             messages.append(msg.content)
 
     full_text = "\n".join(messages)
-    print(f"DEBUG {player_name} full_text preview: {repr(full_text[:500])}")
+
 
     # --- Parse weapon marks ---
     # Actual format:
@@ -3696,7 +3738,6 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 legacy_marks[key] = max(legacy_marks.get(key, 0), total_marks)
                 break
 
-    print(f"DEBUG {player_name} legacy_marks found: {legacy_marks}")
     if not legacy_marks:
         print(f"No legacy marks found for {player_name}, skipping")
         return
