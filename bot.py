@@ -1494,6 +1494,11 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
             f"Easy — your card was just refreshed. Try again in {time_str}.",
             ephemeral=True
         )
+    elif isinstance(error, discord.app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "You don't have permission to use this command.",
+            ephemeral=True
+        )
     else:
         raise error
 
