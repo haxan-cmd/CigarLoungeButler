@@ -745,8 +745,7 @@ def get_feats_for_player(discord_id, cached_data=None):
                 if link and link in seen_links:
                     continue
                 emoji = FEAT_BOARD_EMOJIS[lb_name]
-                if link:
-                    seen_links.add(link)
+                # Don't add to seen_links — LegacyFeats may have a richer combo for same game
                 feats.append((emoji, link))
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
@@ -767,14 +766,21 @@ def get_feats_for_player(discord_id, cached_data=None):
                     continue
                 emojis = row[1].strip()
                 link = row[2].strip() if len(row) > 2 else ''
-                if link and link in seen_links:
-                    continue
                 if emojis:
-                    if link:
-                        seen_links.add(link)
                     feats.append((emojis, link))
     except Exception as e:
         print(f"LegacyFeats read error: {e}")
+
+    # Deduplicate by link — keep the entry with the most emojis (richest combo) per link
+    link_to_best = {}  # link -> (emojis, link)
+    no_link_feats = []
+    for emojis, link in feats:
+        if not link:
+            no_link_feats.append((emojis, link))
+            continue
+        if link not in link_to_best or len(emojis) > len(link_to_best[link][0]):
+            link_to_best[link] = (emojis, link)
+    feats = list(link_to_best.values()) + no_link_feats
 
     return named_feats, feats
 
@@ -1010,13 +1016,22 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
             ''.join(sorted([_e['200 Takedowns'], _e['Predator']])):                          "Predator",
             ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Predator']])):         "Predator",
             ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Predator']])): "Triple + Predator",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless']])): "Hundred-Handed",
+            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless'], _e['Predator']])): "Hundred-Handed + Predator",
         }
 
         if flawless_entry:
             emojis, link = flawless_entry
             lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
         for normalized, count in feat_counts.items():
-            label = FEAT_LABELS.get(normalized, "Feat")
+            # Strip hhanded emoji before label lookup
+            hhanded_emoji = "<:hhanded:1430199468246044772>"
+            has_hhanded = hhanded_emoji in normalized
+            lookup_key = normalized.replace(hhanded_emoji, '')
+            if has_hhanded:
+                label = "Hundred-Handed"
+            else:
+                label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
             if count >= 5:
                 label_str = f"**{label}**"
             else:
