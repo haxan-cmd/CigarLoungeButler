@@ -3551,22 +3551,30 @@ async def import_registry(interaction: discord.Interaction):
             await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
             return
 
-        # Anyone in the Players sheet is eligible
+        # Name aliases for players who have renamed since their registry thread was created
+        NAME_ALIASES = {
+            "makeitrainwater": "Rainwater",
+        }
+
+        # Build name -> discord_id map from Players sheet (lowercase for matching)
         player_rows = players_ws.get_all_values()[1:]
         id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
+        name_to_id = {row[1].strip().lower(): row[0].strip() for row in player_rows if len(row) > 1}
 
-        players_with_subs = set(id_to_name.keys())  # all registered players
+        # All registered player names are eligible
+        players_eligible = set(name_to_id.keys())
 
         # Also add anyone with submissions even if not in Players sheet
         subs = submissions_ws.get_all_values()[1:]
         for row in subs:
             discord_id = row[2].strip() if len(row) > 2 else ''
-            if discord_id:
-                players_with_subs.add(discord_id)
+            name = row[1].strip().lower() if len(row) > 1 else ''
+            if discord_id and name:
+                players_eligible.add(name)
 
-        # Always import these players regardless of submission history
-        LEGACY_IMPORT_WHITELIST = {"781236037912494131"}
-        players_with_subs.update(LEGACY_IMPORT_WHITELIST)
+        # Add alias names as eligible
+        for alias in NAME_ALIASES:
+            players_eligible.add(alias.lower())
 
         imported = 0
         skipped = 0
@@ -3586,19 +3594,32 @@ async def import_registry(interaction: discord.Interaction):
         async for thread in old_forum.archived_threads(limit=200):
             all_threads.append(thread)
 
-        processed_ids = set()
+        processed_names = set()
 
         for thread in all_threads:
-            owner_id_str = str(thread.owner_id)
-            if owner_id_str in players_with_subs and owner_id_str not in processed_ids:
-                processed_ids.add(owner_id_str)
-                resolved_name = id_to_name.get(owner_id_str, thread.name.strip())
-                await _process_registry_thread(interaction.guild, thread, cached_data, resolved_name, thread.owner_id)
+            thread_name = thread.name.strip()
+            thread_name_lower = thread_name.lower()
+
+            # Resolve alias to current name if applicable
+            resolved_name = NAME_ALIASES.get(thread_name_lower, thread_name)
+            resolved_name_lower = resolved_name.lower()
+
+            if resolved_name_lower in players_eligible and resolved_name_lower not in processed_names:
+                processed_names.add(resolved_name_lower)
+                # Look up discord_id from Players sheet by resolved name
+                discord_id = None
+                resolved_id_str = name_to_id.get(resolved_name_lower)
+                if resolved_id_str:
+                    try:
+                        discord_id = int(resolved_id_str)
+                    except ValueError:
+                        pass
+                await _process_registry_thread(interaction.guild, thread, cached_data, resolved_name, discord_id)
                 imported += 1
                 await asyncio.sleep(15)
             else:
                 skipped += 1
-                print(f"Skipping thread '{thread.name}' (owner_id={thread.owner_id}) — already processed or no submissions")
+                print(f"Skipping thread '{thread_name}' — already processed or not eligible")
 
         await interaction.followup.send(f"Import complete — {imported} cards created, {skipped} skipped (no submissions).", ephemeral=True)
     except Exception as e:
