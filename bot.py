@@ -3537,6 +3537,10 @@ async def import_registry(interaction: discord.Interaction):
             if discord_id:
                 players_with_subs.add(discord_id)
 
+        # Always import these players regardless of submission history
+        LEGACY_IMPORT_WHITELIST = {"781236037912494131"}
+        players_with_subs.update(LEGACY_IMPORT_WHITELIST)
+
         # Build ID → name map from Players sheet
         player_rows = players_ws.get_all_values()[1:]
         id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
