@@ -3674,6 +3674,171 @@ async def refresh_card(interaction: discord.Interaction):
         await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
 
+CHALLENGE_RULES_CHANNEL_ID = 1460713024082935930
+CHALLENGE_RULES_MESSAGE_IDS = [
+    1460713224155693209,  # intro + weapon ranks
+    1460713420792791103,  # earning weapon marks
+    1460713496785195130,  # subclass & class progression
+    1460713555165974705,  # subclass ranks
+    1460713630159994881,  # class ranks
+    1460713689501012121,  # overall player titles
+    1460713736313634898,  # feats of legend
+    1460713776654455077,  # bounties
+]
+
+CHALLENGE_RULES_CONTENT = [
+    # 1. Intro + weapon ranks
+    """\
+🍃 **CIGAR LOUNGE**
+Cigar Lounge is a place where 100-bombers pursue long-term weapon mastery, complete bounties, and compete for high scores against their peers.
+
+This is not about one-off games.
+This is about consistency, discipline, and mastery.
+
+<:level1_1:1361419350665461820> — **Bronze**
+• 1 weapon mark (1 total)
+<:level2_3:1361419398841106442> — **Silver**
+• +4 weapon marks (5 total)
+<:level3_6:1361419489635209396> — **Gold**
+• +7 weapon marks (12 total)
+<:level4_9:1368656036784771212> — **Emerald**
+• +13 weapon marks (25 total)
+<:level5_12:1368656100764942432> — **Diamond**
+• +15 weapon marks (40 total)
+<:level6_15:1430203489757302924> — **Crimson**
+• +20 weapon marks (60 total)
+<:level7_20:1430216503919120537> — **Prestige Bronze**
+• +20 weapon marks (80 total)
+<:level8_30:1430216636006137876> — **Prestige Silver**
+• +20 weapon marks (100 total)
+<:level9_40:1430216748329599046> — **Prestige Gold**
+• +15 weapon marks (115 total)
+<:level10_55:1430216819787956265> — **Prestige Emerald**
+• +10 weapon marks (125 total)
+<:level11_70:1430217739586240624> — **Prestige Diamond**
+• +8 weapon marks (133 total)
+<:level12_85:1430217099648962651> — **Prestige Crimson**
+• +8 weapon marks (141 total)
+<:level13_100:1459253823481712895> — **Iridescent**
+• +9 weapon marks (150 total)""",
+
+    # 2. Earning weapon marks
+    """\
+🎯 **EARNING WEAPON MARKS**
+A weapon mark is earned by completing a **100 takedown game** with the following conditions:
+
+• Same loadout for the entire match
+• **No catapult usage**
+• Match must be submitted in <#1328832440927518920>
+
+**Submission must include:**
+• Class or Subclass
+• Weapon used
+• VIP used or not
+
+**Bonus marks per submission:**
+• <a:200tkd:1363648828414230538> +1 for 200 Takedowns
+• <a:100kill:1361412390339608686> +1 for 100 Kills
+• <a:triple:1365532698260668466> +1 for Triple
+• <:highscore:1360312918545269057> +1 for Leaderboard High Score
+
+**Note:**
+Goedendag counts for Polearms and Engineer (Footman).
+
+Weapon marks are added to your **Player Card**, which is created with your first valid submission.""",
+
+    # 3. Subclass & class progression
+    """\
+🧩 **SUBCLASS & CLASS PROGRESSION**
+Each time a weapon badge is upgraded:
+• You earn **1 subclass mark**
+
+Subclasses vary in length depending on how many primary weapons they contain.
+A progress meter is shown next to each subclass.
+
+When a subclass meter fills:
+• You earn **1 class mark**""",
+
+    # 4. Subclass ranks
+    """\
+⚔️ **SUBCLASS RANKS**
+<:subclass0:1361423009256308808> — Initiate
+<:veteran2:1430199755094360194> — Veteran
+<:master3:1430199983675670619> — Master
+<:grandmaster4:1430199858635210752> — Grandmaster
+<:champion5:1430199893363789934> — Champion
+<:paragon6:1430199955385094235> — Paragon
+<:apex7:1430199916126408754> — Apex""",
+
+    # 5. Class ranks
+    """\
+🛡️ **CLASS RANKS**
+<:class0_0:1446622044698443969> — Sworn
+<:class1_3:1446620360186269726> — Trusted
+<:class2_6:1446620614096846988> — Proven
+<:class3_9:1446620700189266182> — Honored
+<:class4_12:1446620991777407128> — Esteemed
+<:class5_15:1446621127605620826> — Exalted
+<:class6_18:1446621258430025791> — Ascended""",
+
+    # 6. Overall player titles
+    """\
+🏆 **OVERALL PLAYER TITLES**
+Earned by completing monthly bounties. This is how you rank up on this server.
+
+0 — Unbound
+1 — Proven
+2 — Respected
+3 — Distinguished
+4 — Renowned
+5 — Illustrious
+6 — Exemplar
+7 — Legend""",
+
+    # 7. Feats of legend
+    """\
+💀 **Feats of Legend**
+Additional marks may be earned by completing a valid **100 takedown game** plus one of the following:
+
+• <a:100kill:1361412390339608686> — 100 kills
+• <a:triple:1365532698260668466> — 150 takedowns, 100 kills, and 20,000 points (**Triple**)
+• <a:200tkd:1363648828414230538> — 200 takedowns
+• <a:predator:1366794896081555567> — 150 takedowns without dying
+
+Additionally, you can earn <:hhanded:1430199468246044772> **The Hundred-Handed** feat by getting a 100 with every primary weapon (archer excluded)""",
+
+    # 8. Bounties
+    """\
+🎯 **BOUNTIES**
+Players may complete **bounties**, which are tracked on separate bounty cards.  Completing these objectives is how you rank up in this server. Bounties are **time-limited**.""",
+]
+
+
+@bot.tree.command(name="update_challenge_rules", description="Update the challenge rules channel with current info (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def update_challenge_rules(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        channel = bot.get_channel(CHALLENGE_RULES_CHANNEL_ID)
+        if not channel:
+            await interaction.followup.send("Could not find challenge-rules channel.", ephemeral=True)
+            return
+
+        updated = 0
+        for msg_id, content in zip(CHALLENGE_RULES_MESSAGE_IDS, CHALLENGE_RULES_CONTENT):
+            try:
+                msg = await channel.fetch_message(msg_id)
+                await msg.edit(content=content)
+                updated += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"Error updating message {msg_id}: {e}")
+
+        await interaction.followup.send(f"Updated {updated}/{len(CHALLENGE_RULES_MESSAGE_IDS)} challenge rules messages.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def title_guide(interaction: discord.Interaction):
