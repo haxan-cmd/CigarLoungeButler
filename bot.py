@@ -756,9 +756,17 @@ def get_bounty_completions_for_player(discord_id):
                     if len(r) < 2 or r[0].strip().lower() != player_name.lower():
                         continue
                     bounty_name = r[1].strip()
-                    if bounty_name.lower() not in existing_titles:
-                        completions.append(bounty_name)
-                        existing_titles.add(bounty_name.lower())
+                    # Clean up emoji prefixes, bold formatting, placement numbers
+                    import re as _re
+                    bounty_name = _re.sub(r'<[^>]+>', '', bounty_name)  # remove discord emoji
+                    bounty_name = _re.sub(r'\*+', '', bounty_name)      # remove bold/italic
+                    bounty_name = _re.sub(r'#\d+', '', bounty_name)     # remove #N placement
+                    bounty_name = _re.sub(r'[\U00010000-\U0010ffff]', '', bounty_name)  # remove unicode emoji
+                    bounty_name = bounty_name.strip()
+                    if not bounty_name or bounty_name.lower() in existing_titles:
+                        continue
+                    completions.append(bounty_name)
+                    existing_titles.add(bounty_name.lower())
         except Exception:
             pass
 
@@ -2996,7 +3004,7 @@ def calculate_butler_stats():
         key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
     high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in lethal_ranked[:5]]
 
-    # Low Lethality — lowest avg kills/td ratio (most assists/dominant), min 5 subs
+    # Warlord — lowest avg kills/td ratio (damage spread, assists, battlefield presence), min 5 subs
     low_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
     low_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in low_ranked[:5]]
@@ -3167,7 +3175,7 @@ def build_favourites_embed(stats):
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
         f"\n"
         f"**High Lethality** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
-        f"\n\n**Low Lethality** *(td/kills)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
+        f"\n\n**Warlord** *(kills/td)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
     )
 
 
@@ -3542,9 +3550,17 @@ async def _save_legacy_bounties(player_name, legacy_bounties):
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
 
         for bounty_name, placement in legacy_bounties:
-            key = (player_name, bounty_name)
+            import re as _re
+            clean_name = _re.sub(r'<[^>]+>', '', bounty_name)
+            clean_name = _re.sub(r'\*+', '', clean_name)
+            clean_name = _re.sub(r'#\d+', '', clean_name)
+            clean_name = _re.sub(r'[\U00010000-\U0010ffff]', '', clean_name)
+            clean_name = clean_name.strip()
+            if not clean_name:
+                continue
+            key = (player_name, clean_name)
             if key not in existing_keys:
-                gspread_retry(lb_ws.append_row, [player_name, bounty_name, placement or ''])
+                gspread_retry(lb_ws.append_row, [player_name, clean_name, placement or ''])
     except Exception as e:
         print(f"Legacy bounties save error for {player_name}: {e}")
 
@@ -3564,13 +3580,33 @@ async def create_card(interaction: discord.Interaction, member: discord.Member):
 async def refresh_card(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     try:
+        discord_id_str = str(interaction.user.id)
+
         # Check player is registered
         rows = players_ws.get_all_values()[1:]
-        discord_id_str = str(interaction.user.id)
         registered = any(row and row[0].strip() == discord_id_str for row in rows)
         if not registered:
             await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
             return
+
+        # Delete existing thread if it exists
+        thread_id = get_registry_thread_id(interaction.user.id)
+        if thread_id:
+            try:
+                thread = interaction.guild.get_thread(thread_id)
+                if not thread:
+                    thread = await interaction.guild.fetch_channel(thread_id)
+                await thread.delete()
+            except Exception as e:
+                print(f"refresh_card thread delete error: {e}")
+            # Clear thread ID from RegistryCards so a fresh one gets created
+            registry_rows = registry_ws.get_all_values()
+            for i, row in enumerate(registry_rows[1:], start=2):
+                if row and row[0].strip() == discord_id_str:
+                    registry_ws.update_cell(i, 3, '')
+                    break
+
+        # Create fresh card
         await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
         await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
     except Exception as e:
