@@ -370,6 +370,16 @@ FEAT_EMOJIS = {
     "Flawless":      "<a:flawless:1360358300834599062>",
 }
 
+BOUNTY_EMOJIS = {
+    "Meowy Massacre Bounty": "🐱",
+    "Off-Meta-Menace": "🦷",
+    "Sauce's Seven": "<:sauces_seven:1494334060346998834>",
+    "Easy Breezy Steezy": "<:steezy_bounty:1473026743659925697>",
+    "Nildain's Execution Kit": "<:nildain_bounty:1462562562531917968>",
+    "Blood Bounty": "<:blood_bounty:1449622360897486859>",
+    "Plague": "🦠",
+}
+
 SPECIAL_OPS_EMOJIS = {
     "Fist and Shield": "<a:captain_america:1366801668041211934>",
     "Healing Horn":    "<a:passive:1365531248268673086>",
@@ -682,11 +692,14 @@ def build_registry_messages(player_name, discord_id):
             lines.append(f"• {t}")
         lines.append("")
 
+    lines.append("**Bounties Completed:**")
     if bounties_done:
-        lines.append("**Bounties Completed:**")
         for b in bounties_done:
-            lines.append(f"• {b}")
-        lines.append("")
+            emoji = BOUNTY_EMOJIS.get(b, "🏅")
+            lines.append(f"• {emoji} {b}")
+    else:
+        lines.append("• None")
+    lines.append("")
 
     if named_feats or feat_submissions:
         lines.append("**Feats of Legend:**")
@@ -774,8 +787,6 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
-        has_top = os.path.exists(top_path)
-        has_bot = os.path.exists(bot_path)
 
         if thread_id:
             # Edit existing messages in order
@@ -796,23 +807,22 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread — title = player name, first post = emoji only (clean preview)
+        # Create new thread with top spacer as first message
+        top_file = discord.File(top_path) if os.path.exists(top_path) else None
         thread_with_msg = await forum.create_thread(
             name=player_name,
-            content='🗂️',
+            content=messages[0],
+            file=top_file,
         )
         thread = thread_with_msg.thread
 
-        # Message 1: header accolades
-        await thread.send(messages[0])
-
-        # Messages 2-5: each class sandwiched between spacers
+        # Post remaining class messages
         for msg_text in messages[1:]:
-            if has_top:
-                await thread.send(file=discord.File(top_path))
             await thread.send(msg_text)
-            if has_bot:
-                await thread.send(file=discord.File(bot_path))
+
+        # Post bottom spacer
+        if os.path.exists(bot_path):
+            await thread.send(file=discord.File(bot_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
