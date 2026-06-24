@@ -667,16 +667,12 @@ def build_registry_messages(player_name, discord_id):
 
     messages = []
 
-    # --- Message 1: Header card ---
+    # --- Message 1: Header card (pure text, no attachments) ---
     lines = []
-    lines.append(f"### {player_name}")
-    lines.append(f"🏅 **{player_title}** *(Bounties: {len(bounties_done)})*")
-    lines.append("")
-
-    # Class ranks summary
+    lines.append("**Titles:**")
     for cls, cdata in class_stats.items():
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
-        lines.append(f"⌞{cls}: {cls_emoji} — {cdata['rank']}⌝")
+        lines.append(f"• ⌞{cls}: {cls_emoji} — {cdata['rank']}⌝")
     lines.append("")
 
     if butler_titles:
@@ -685,19 +681,23 @@ def build_registry_messages(player_name, discord_id):
             lines.append(f"• {t}")
         lines.append("")
 
+    lines.append("**Bounties Completed:**")
     if bounties_done:
-        lines.append("**Bounties Completed:**")
         for b in bounties_done:
             lines.append(f"• {b}")
-        lines.append("")
+    else:
+        lines.append("• None")
+    lines.append("")
 
+    lines.append("**Feats of Legend:**")
     if named_feats or feat_submissions:
-        lines.append("**Feats of Legend:**")
         if 'hhanded' in named_feats:
             lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
         for emojis, link in feat_submissions:
             lines.append(f"• {emojis} —[Link]({link})" if link else f"• {emojis}")
-        lines.append("")
+    else:
+        lines.append("• None")
+    lines.append("")
 
     lines.append("**Mastered Weapons:**")
     if mastered:
@@ -719,7 +719,7 @@ def build_registry_messages(player_name, discord_id):
     for cls, cdata in class_stats.items():
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines = []
-        lines.append(f"### {cls}: {cls_emoji} — {cdata['rank']}")
+        lines.append(f"**{cls}: {cls_emoji} — {cdata['rank']}**")
         lines.append("")
 
         for subclass, sdata in cdata['subclasses'].items():
@@ -727,20 +727,10 @@ def build_registry_messages(player_name, discord_id):
             meter_filled = sdata['marks'] % sdata['num_weapons'] if sdata['num_weapons'] else 0
             meter = '█' * meter_filled + '□' * (sdata['num_weapons'] - meter_filled)
             lines.append(f"**{sub_emoji} {subclass}: {sdata['rank']}** `[{meter}]`")
-
-            played = []
-            unplayed = []
             for w, wdata in sdata['weapons'].items():
-                if wdata['marks'] > 0:
-                    w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], '')
-                    played.append(f"• {w_emoji} {w}: {wdata['rank']} *(×{wdata['marks']})*")
-                else:
-                    unplayed.append(w)
-
-            for p in played:
-                lines.append(p)
-            if unplayed:
-                lines.append(f"*Unused: {', '.join(unplayed)}*")
+                w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], WEAPON_RANK_EMOJIS['Unranked'])
+                marks = wdata['marks']
+                lines.append(f"• {w_emoji} {w}: {marks}")
             lines.append("")
 
         messages.append("\n".join(lines))
@@ -807,22 +797,22 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread with top spacer as first message
-        top_file = discord.File(top_path) if os.path.exists(top_path) else None
+        # Create new thread — first message is pure text (no attachment, keeps preview clean)
         thread_with_msg = await forum.create_thread(
-            name=player_name,
+            name=f"🗂️ {player_name}",
             content=messages[0],
-            file=top_file,
         )
         thread = thread_with_msg.thread
 
-        # Post remaining class messages
+        # Post top spacer after first message
+        if os.path.exists(top_path):
+            await thread.send(file=discord.File(top_path))
+
+        # Post class messages with bottom spacer between each
         for msg_text in messages[1:]:
             await thread.send(msg_text)
-
-        # Post bottom spacer
-        if os.path.exists(bot_path):
-            await thread.send(file=discord.File(bot_path))
+            if os.path.exists(bot_path):
+                await thread.send(file=discord.File(bot_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
