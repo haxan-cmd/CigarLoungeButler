@@ -774,6 +774,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
 
         top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
+        has_top = os.path.exists(top_path)
+        has_bot = os.path.exists(bot_path)
 
         if thread_id:
             # Edit existing messages in order
@@ -794,22 +796,23 @@ async def create_or_update_registry_card(guild, discord_id, player_name):
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
 
-        # Create new thread with top spacer as first message
-        top_file = discord.File(top_path) if os.path.exists(top_path) else None
+        # Create new thread — title = player name, first post = emoji only (clean preview)
         thread_with_msg = await forum.create_thread(
             name=player_name,
-            content=messages[0],
-            file=top_file,
+            content='🗂️',
         )
         thread = thread_with_msg.thread
 
-        # Post remaining class messages
-        for msg_text in messages[1:]:
-            await thread.send(msg_text)
+        # Message 1: header accolades
+        await thread.send(messages[0])
 
-        # Post bottom spacer
-        if os.path.exists(bot_path):
-            await thread.send(file=discord.File(bot_path))
+        # Messages 2-5: each class sandwiched between spacers
+        for msg_text in messages[1:]:
+            if has_top:
+                await thread.send(file=discord.File(top_path))
+            await thread.send(msg_text)
+            if has_bot:
+                await thread.send(file=discord.File(bot_path))
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
