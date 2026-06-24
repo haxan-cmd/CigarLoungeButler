@@ -3313,6 +3313,7 @@ async def import_registry(interaction: discord.Interaction):
             if player_name.lower() in players_with_subs:
                 await _process_registry_thread(interaction.guild, thread)
                 imported += 1
+                await asyncio.sleep(2)  # avoid Google Sheets rate limit
             else:
                 skipped += 1
                 print(f"Skipping {player_name} — no submissions")
@@ -3402,10 +3403,12 @@ async def _process_registry_thread(guild, thread):
         return
 
     await _save_legacy_marks(player_name, guild, legacy_marks)
+    await asyncio.sleep(1)
 
     # Save legacy bounties
     if legacy_bounties:
         await _save_legacy_bounties(player_name, legacy_bounties)
+        await asyncio.sleep(1)
 
     # Find discord ID from Players sheet
     discord_id = None
