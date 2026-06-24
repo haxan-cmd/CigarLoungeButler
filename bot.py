@@ -23,6 +23,14 @@ def gspread_retry(func, *args, retries=5, **kwargs):
             else:
                 raise
 
+# Per-guild submission lock to prevent concurrent submission conflicts
+_submission_locks = {}
+
+def get_submission_lock(guild_id):
+    if guild_id not in _submission_locks:
+        _submission_locks[guild_id] = asyncio.Lock()
+    return _submission_locks[guild_id]
+
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 SHEET_ID = '1aT7MbBa3qZxx9ZyaFvlgmbjvCDe2kkQMt5Qsnq_6lzY'
@@ -463,6 +471,7 @@ def calculate_weapon_marks_for_player(discord_id):
         if row[2].strip() != discord_id_str:
             continue
         weapon = row[3].strip() if len(row) > 3 else ''
+        submitted_class = row[4].strip() if len(row) > 4 else ''
         feats_str = row[11].strip() if len(row) > 11 else ''
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
         if not weapon or weapon == 'Other':
@@ -474,7 +483,17 @@ def calculate_weapon_marks_for_player(discord_id):
             marks += 1
         if 'Triple' in feats:
             marks += 1
-        weapon_marks[weapon] = weapon_marks.get(weapon, 0) + marks
+
+        # Use submitted subclass to disambiguate shared weapons (e.g. Messer in Raider vs Crusader)
+        # Key: (weapon, subclass) if subclass known, else plain weapon name
+        subclass_key = None
+        if submitted_class:
+            for subclass, weapons in REGISTRY_WEAPON_MAP.items():
+                if weapon in weapons and submitted_class == subclass:
+                    subclass_key = (weapon, subclass)
+                    break
+        key = subclass_key if subclass_key else weapon
+        weapon_marks[key] = weapon_marks.get(key, 0) + marks
 
     # --- Source 2: LeaderboardData sheet (historical entries, 1 mark each) ---
     try:
@@ -533,7 +552,8 @@ def calculate_registry_stats(discord_id):
             subclass_marks = 0
             weapon_details = {}
             for w in weapons:
-                marks = weapon_marks.get(w, 0)
+                # Check subclass-specific key first, fall back to plain weapon name
+                marks = weapon_marks.get((w, subclass), weapon_marks.get(w, 0))
                 rank_name, _, _ = get_weapon_rank(marks) if marks > 0 else ("Unranked", 0, 1)
                 # Count how many rank tiers this weapon has achieved
                 tiers_achieved = sum(1 for threshold, _ in WEAPON_RANK_THRESHOLDS if marks >= threshold)
@@ -1742,6 +1762,11 @@ async def _apply_edit(interaction, ev):
 
 
 async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
+    async with get_submission_lock(interaction.guild.id):
+        await _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k)
+
+
+async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     feats = []
     if kills >= 100:
         feats.append("100 Kills")
@@ -2934,8 +2959,7 @@ def calculate_butler_stats():
     td_scores_sub = {}
     kills_scores_sub = {}
     players_set = set()
-    lethal_ratios = {}    # player -> [kills/td ratios] — High Lethality
-    dominant_ratios = {} # player -> [td/kills ratios] — Low Lethality
+    lethal_ratios = {}    # player -> [kills/td ratios]
 
     for row in subs:
         if len(row) < 9:
@@ -2955,10 +2979,9 @@ def calculate_butler_stats():
         players_set.add(player)
         td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
         kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
-        # Track lethality ratios
+        # Track lethality ratio: kills/td (higher = more lethal, lower = more dominant/assists)
         if kills > 0 and td > 0:
-            lethal_ratios.setdefault(player, []).append(kills / td)   # kills/td — High Lethality
-            dominant_ratios.setdefault(player, []).append(td / kills) # td/kills — Low Lethality
+            lethal_ratios.setdefault(player, []).append(kills / td)
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -2967,18 +2990,17 @@ def calculate_butler_stats():
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # High Lethality — pure avg kills/td ratio, min 5 (fewer subs tiebreak)
+    # High Lethality — highest avg kills/td ratio, min 5 subs
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
     lethal_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
     high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in lethal_ranked[:5]]
 
-    # Low Lethality — pure avg td/kills ratio, min 5 (fewer subs tiebreak)
-    qualified_dominant = {p: v for p, v in dominant_ratios.items() if len(v) >= 5}
-    dominant_ranked = sorted(qualified_dominant.keys(),
-        key=lambda p: (-sum(qualified_dominant[p]) / len(qualified_dominant[p]), len(qualified_dominant[p])))
-    low_lethality = [f"{p} ({sum(qualified_dominant[p])/len(qualified_dominant[p]):.2f})" for p in dominant_ranked[:5]]
-    most_lethal_top5 = high_lethality  # keep for return dict compat
+    # Low Lethality — lowest avg kills/td ratio (most assists/dominant), min 5 subs
+    low_ranked = sorted(qualified_lethal.keys(),
+        key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
+    low_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p]):.2f})" for p in low_ranked[:5]]
+    most_lethal_top5 = high_lethality
 
     # Backfill run counts and best scores from LeaderboardData for legacy entries
     ld_player_boards = {}  # player -> set of board names they appear on (to count unique runs)
@@ -3306,6 +3328,15 @@ async def purge_archive(interaction: discord.Interaction):
             except Exception as e:
                 print(f"Error deleting archived thread {thread.name}: {e}")
 
+        # Clear thread IDs from RegistryCards sheet so import doesn't get 404s
+        try:
+            rows = registry_ws.get_all_values()
+            for i, row in enumerate(rows[1:], start=2):
+                if len(row) > 2 and row[2]:
+                    registry_ws.update_cell(i, 3, '')
+        except Exception as e:
+            print(f"Error clearing RegistryCards thread IDs: {e}")
+
         await interaction.followup.send(f"Purge complete — deleted {deleted} threads.", ephemeral=True)
     except Exception as e:
         import traceback
@@ -3485,9 +3516,9 @@ async def _save_legacy_marks(player_name, guild, legacy_marks):
             legacy_ws = sheet.worksheet('LegacyMarks')
         except Exception:
             legacy_ws = sheet.add_worksheet(title='LegacyMarks', rows=1000, cols=4)
-            legacy_ws.append_row(['PlayerName', 'Weapon', 'Subclass', 'Marks'])
+            gspread_retry(legacy_ws.append_row, ['PlayerName', 'Weapon', 'Subclass', 'Marks'])
 
-        existing = legacy_ws.get_all_values()[1:]
+        existing = gspread_retry(legacy_ws.get_all_values)[1:]
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
 
         for weapon, marks in legacy_marks.items():
@@ -3505,9 +3536,9 @@ async def _save_legacy_bounties(player_name, legacy_bounties):
             lb_ws = sheet.worksheet('LegacyBounties')
         except Exception:
             lb_ws = sheet.add_worksheet(title='LegacyBounties', rows=500, cols=3)
-            lb_ws.append_row(['PlayerName', 'BountyTitle', 'Placement'])
+            gspread_retry(lb_ws.append_row, ['PlayerName', 'BountyTitle', 'Placement'])
 
-        existing = lb_ws.get_all_values()[1:]
+        existing = gspread_retry(lb_ws.get_all_values)[1:]
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
 
         for bounty_name, placement in legacy_bounties:
@@ -3525,6 +3556,23 @@ async def create_card(interaction: discord.Interaction, member: discord.Member):
     try:
         await create_or_update_registry_card(interaction.guild, member.id, member.display_name)
         await interaction.followup.send(f"Registry card created/updated for {member.display_name}.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="refresh_card", description="Refresh your registry card.")
+async def refresh_card(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        # Check player is registered
+        rows = players_ws.get_all_values()[1:]
+        discord_id_str = str(interaction.user.id)
+        registered = any(row and row[0].strip() == discord_id_str for row in rows)
+        if not registered:
+            await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
+            return
+        await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
+        await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
