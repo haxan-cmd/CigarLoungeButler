@@ -99,7 +99,7 @@ try:
     bounty_ws = sheet.worksheet('Bounty')
 except gspread.exceptions.WorksheetNotFound:
     bounty_ws = sheet.add_worksheet(title='Bounty', rows=100, cols=20)
-    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID','CompletionsMsgID','BonusMsgID'])
+    bounty_ws.append_row(['Title','ChannelID','MessageID','ThemeEmoji','Weapons','SpecialChallenge','SpecialDone','Completions','Active','RoleID','ForumChannelID','CompletionsMsgID','BonusMsgID','ProgressMsgID','StartDate'])
 
 # Snapshots sheet — weekly data for trend analysis
 try:
@@ -568,6 +568,8 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         weapon_marks[key] = weapon_marks.get(key, 0) + marks
 
     # --- Source 2: LeaderboardData sheet (historical entries, 1 mark each) ---
+    # Only add plain weapon key if no subclass-keyed entry already exists for this weapon
+    # (avoids double-counting shared weapons like Greatsword across Knight/Vanguard)
     try:
         ld_rows = (cached_data or {}).get('leaderboard_data') or leaderboard_data_ws.get_all_values()[1:]
         for row in ld_rows:
@@ -578,7 +580,13 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             weapon = row[5].strip() if len(row) > 5 else ''
             if not weapon or weapon == 'Other':
                 continue
-            weapon_marks[weapon] = weapon_marks.get(weapon, 0) + 1
+            # Skip plain key if any subclass-keyed entry exists for this weapon
+            has_subclass_key = any(
+                isinstance(k, tuple) and k[0] == weapon
+                for k in weapon_marks
+            )
+            if not has_subclass_key:
+                weapon_marks[weapon] = weapon_marks.get(weapon, 0) + 1
     except Exception as e:
         print(f"LeaderboardData mark read error: {e}")
 
@@ -3528,7 +3536,9 @@ async def bounty_create(
         str(bounty_role.id),
         str(forum_channel.id) if forum_channel else '',
         '',
-        ''
+        '',
+        '',
+        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     ])
 
     forum_mention = forum_channel.mention if forum_channel else f"*(forum creation failed: {forum_error})*"
