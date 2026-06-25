@@ -2445,20 +2445,18 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
                 self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
                 self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip
             )
-            await interaction.response.send_message(
-                "Was your score over 20,000 points?",
-                view=view,
-                ephemeral=True
+            await interaction.response.edit_message(
+                content="Was your score over 20,000 points?",
+                view=view
             )
         elif needs_vip:
             view = VIPView(
                 self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
                 self.selected_map, self.faction, takedowns, kills, deaths
             )
-            await interaction.response.send_message(
-                "**Almost done!** Were you playing as VIP?",
-                view=view,
-                ephemeral=True
+            await interaction.response.edit_message(
+                content="**Almost done!** Were you playing as VIP?",
+                view=view
             )
         else:
             await finalise_submission(
@@ -2524,10 +2522,9 @@ class TripleCheckView(discord.ui.View):
                 self.selected_map, self.faction, self.takedowns, self.kills, self.deaths,
                 score_over_20k=score_over_20k
             )
-            await interaction.response.send_message(
-                "**Almost done!** Were you playing as VIP?",
-                view=view,
-                ephemeral=True
+            await interaction.response.edit_message(
+                content="**Almost done!** Were you playing as VIP?",
+                view=view
             )
         else:
             await finalise_submission(
