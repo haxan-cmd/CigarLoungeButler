@@ -1268,9 +1268,23 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 threads.append(thread)
 
         threads.sort(key=lambda t: t.name.lower())
-        lines = [f"📋 **{index_label} Index**", ""]
-        for thread in threads:
-            lines.append(f"[{thread.name}](https://discord.com/channels/{guild.id}/{thread.id})")
+
+        # Build alphabetical groups with bullet separators, matching player index style
+        groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+        lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
+        for group_name, start, end in groups:
+            group_threads = [t for t in threads if t.name and start <= t.name[0].upper() <= end]
+            if not group_threads:
+                continue
+            lines.append(f"**{group_name}**")
+            links = ' • '.join(f"[{t.name}](https://discord.com/channels/{guild.id}/{t.id})" for t in group_threads)
+            lines.append(links)
+            lines.append("")
+        other = [t for t in threads if not t.name or not t.name[0].upper().isalpha()]
+        if other:
+            lines.append("**#**")
+            lines.append(' • '.join(f"[{t.name}](https://discord.com/channels/{guild.id}/{t.id})" for t in other))
+
         content = "\n".join(lines).strip()
 
         index_thread = None
@@ -1284,6 +1298,24 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                     index_thread = t
                     break
 
+        def _chunk(text):
+            if len(text) <= 1900:
+                return [text]
+            sections = text.split("\n\n")
+            result_chunks, current = [], ""
+            for section in sections:
+                if len(current) + len(section) + 2 > 1900:
+                    if current:
+                        result_chunks.append(current.strip())
+                    current = section
+                else:
+                    current += ("\n\n" if current else "") + section
+            if current:
+                result_chunks.append(current.strip())
+            return result_chunks
+
+        chunks = _chunk(content)
+
         if index_thread:
             msgs = []
             async for msg in index_thread.history(limit=50, oldest_first=True):
@@ -1294,13 +1326,16 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                     await asyncio.sleep(0.3)
                 except Exception:
                     pass
-            await asyncio.sleep(0.5)
-            await index_thread.send(content)
+            for chunk in chunks:
+                await asyncio.sleep(0.5)
+                await index_thread.send(chunk)
             print(f"Leaderboard index updated: {index_label}")
         else:
             result = await forum.create_thread(name=f"📋 {index_label} Index", content="**➜ INDEX**")
             await asyncio.sleep(0.5)
-            await result.thread.send(content)
+            for chunk in chunks:
+                await asyncio.sleep(0.5)
+                await result.thread.send(chunk)
             print(f"Leaderboard index created: {index_label}")
 
     except Exception as e:
@@ -4285,8 +4320,9 @@ async def purge_archive(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="update_index", description="Rebuild an index thread in a forum (admin only).")
-@discord.app_commands.describe(forum="Which forum to rebuild the index for")
+@discord.app_commands.describe(forum="Which forum to rebuild the index for (omit for all)")
 @discord.app_commands.choices(forum=[
+    discord.app_commands.Choice(name="all",             value="all"),
     discord.app_commands.Choice(name="butlers-archive", value="archive"),
     discord.app_commands.Choice(name="map-records",     value="map_records"),
     discord.app_commands.Choice(name="2h-weapons",      value="weapons_2h"),
@@ -4295,7 +4331,7 @@ async def purge_archive(interaction: discord.Interaction):
     discord.app_commands.Choice(name="bounty-cards",    value="bounty_cards"),
 ])
 @discord.app_commands.checks.has_permissions(administrator=True)
-async def update_index(interaction: discord.Interaction, forum: str = "archive"):
+async def update_index(interaction: discord.Interaction, forum: str = "all"):
     await interaction.response.defer(ephemeral=True)
     LEADERBOARD_FORUMS = {
         "map_records":  (MAP_RECORDS_FORUM_ID,  "Map Records"),
@@ -4304,7 +4340,11 @@ async def update_index(interaction: discord.Interaction, forum: str = "archive")
         "feats":        (FEATS_FORUM_ID,         "Feats of War"),
         "bounty_cards": (BOUNTY_CARDS_FORUM_ID,  "Bounty Cards"),
     }
-    if forum == "archive":
+    if forum == "all":
+        await update_archive_index(interaction.guild)
+        for channel_id, label in LEADERBOARD_FORUMS.values():
+            await update_leaderboard_index(interaction.guild, channel_id, label)
+    elif forum == "archive":
         await update_archive_index(interaction.guild)
     elif forum in LEADERBOARD_FORUMS:
         channel_id, label = LEADERBOARD_FORUMS[forum]
