@@ -1276,23 +1276,32 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             if thread.name != index_thread_name:
                 threads.append(thread)
 
-        threads.sort(key=lambda t: t.name.lower())
+        # Deduplicate map threads: "Map - Faction" → keep first occurrence per base name
+        seen_base_names = set()
+        deduped_threads = []
+        for t in sorted(threads, key=lambda t: t.name.lower()):
+            base = t.name.split(' - ')[0].strip() if ' - ' in t.name else t.name
+            if base not in seen_base_names:
+                seen_base_names.add(base)
+                deduped_threads.append((base, t))
+        deduped_threads.sort(key=lambda x: x[0].lower())
+        threads_for_index = deduped_threads  # list of (display_name, thread)
 
         # Build alphabetical groups with bullet separators, matching player index style
         groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
         lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
         for group_name, start, end in groups:
-            group_threads = [t for t in threads if t.name and start <= t.name[0].upper() <= end]
+            group_threads = [(name, t) for name, t in threads_for_index if name and start <= name[0].upper() <= end]
             if not group_threads:
                 continue
             lines.append(f"**{group_name}**")
-            links = ' • '.join(f"[{t.name}](https://discord.com/channels/{guild.id}/{t.id})" for t in group_threads)
+            links = ' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in group_threads)
             lines.append(links)
             lines.append("")
-        other = [t for t in threads if not t.name or not t.name[0].upper().isalpha()]
+        other = [(name, t) for name, t in threads_for_index if not name or not name[0].upper().isalpha()]
         if other:
             lines.append("**#**")
-            lines.append(' • '.join(f"[{t.name}](https://discord.com/channels/{guild.id}/{t.id})" for t in other))
+            lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in other))
             lines.append("")
         if blurb:
             lines.append("─────────────────────")
