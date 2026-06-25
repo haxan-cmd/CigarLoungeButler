@@ -1832,6 +1832,32 @@ async def weekly_snapshot():
             top_trending[0], top_trending[1], top_trending[2]
         ])
         print(f"Weekly snapshot written for {date_str}")
+
+        # Update Butler's Favourites with weekly stats
+        try:
+            guild = bot.get_guild(GUILD_ID)
+            if guild:
+                # Week window: last 7 days ending now
+                week_end_ts = now.timestamp()
+                week_start_ts = week_end_ts - 7 * 86400
+                week_start_dt = now - timedelta(days=7)
+                week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
+                weekly_stats = calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
+                weekly_stats['week_label'] = week_label
+                embed_text = build_favourites_embed(weekly_stats)
+                fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+                if fav_channel:
+                    async for msg in fav_channel.history(limit=5):
+                        if msg.author == guild.me:
+                            await msg.edit(content=embed_text)
+                            break
+                    else:
+                        await fav_channel.send(embed_text)
+                await update_title_roles(guild, weekly_stats)
+                print(f"Butler's Favourites updated for week of {week_label}")
+        except Exception as e:
+            print(f"Favourites weekly update error: {e}")
+
     except Exception as e:
         print(f"Weekly snapshot error: {e}")
 
@@ -1839,6 +1865,15 @@ async def weekly_snapshot():
 @weekly_snapshot.before_loop
 async def before_weekly_snapshot():
     await bot.wait_until_ready()
+    # Sleep until next Monday 12:00 UTC
+    now = datetime.now(timezone.utc)
+    days_until_monday = (7 - now.weekday()) % 7
+    next_monday = now.replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=days_until_monday)
+    if next_monday <= now:
+        next_monday += timedelta(weeks=1)
+    wait_seconds = (next_monday - now).total_seconds()
+    print(f"Weekly snapshot sleeping {wait_seconds:.0f}s until {next_monday.isoformat()}")
+    await asyncio.sleep(wait_seconds)
 
 
 @bot.tree.error
@@ -2949,7 +2984,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if BUTLERS_FAVOURITES_CHANNEL_ID:
             fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
             if fav_channel:
-                stats = calculate_butler_stats()
+                _now = datetime.now(timezone.utc)
+                # Current week window: Monday 12:00 UTC to now
+                days_since_monday = _now.weekday()
+                week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
+                if week_start_dt > _now:
+                    week_start_dt -= timedelta(weeks=1)
+                week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
+                stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                stats['week_label'] = week_label
                 embed_text = build_favourites_embed(stats)
                 async for msg in fav_channel.history(limit=5):
                     if msg.author == interaction.guild.me:
@@ -4150,10 +4193,29 @@ async def bounty_refresh_card(interaction: discord.Interaction, member: discord.
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-def calculate_butler_stats():
-    """Pull stats from Submissions and LeaderboardData sheets."""
-    subs = submissions_ws.get_all_values()[1:]
+def calculate_butler_stats(week_start=None, week_end=None):
+    """Pull stats from Submissions and LeaderboardData sheets.
+    If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
+    Titles always use all-time data regardless of window.
+    """
+    all_subs = submissions_ws.get_all_values()[1:]
     ld = leaderboard_data_ws.get_all_values()[1:]
+
+    # Filter subs to week window if provided
+    if week_start is not None and week_end is not None:
+        filtered = []
+        for row in all_subs:
+            if not row or not row[0].strip():
+                continue
+            try:
+                ts = datetime.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+                if week_start <= ts < week_end:
+                    filtered.append(row)
+            except Exception:
+                pass
+        subs = filtered
+    else:
+        subs = all_subs
 
     # Submission stats
     player_counts = {}
@@ -4351,8 +4413,15 @@ def build_favourites_embed(stats):
     def fmt_list(items, suffix):
         return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items))
 
-    return (
+    week_label = stats.get('week_label', '')
+    header = (
+        f"**📋 The Butler's Favourites** | {week_label}\n"
+        if week_label else
         f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
+    )
+
+    return (
+        header +
         f"\n"
         f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
@@ -4364,15 +4433,15 @@ def build_favourites_embed(stats):
         f"\n"
         f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
         f"\n"
-        f"─────────────────────\n"
+        f"**Lethality Rating** *(Kills/TD)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
+        f"\n\n**Warlord** *(TD/Kill)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality'])) +
+        f"\n\n─────────────────────\n"
+        f"*All-Time Titles*\n"
         f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** — {stats['grand_marshal']}\n"
         f"<:Weapons_Master:1467727674117193870> **Weapons Master** — {stats['weapons_master']}\n"
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
-        f"\n"
-        f"**Lethality Rating** *(Kills/TD)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
-        f"\n\n**Warlord** *(TD/Kill)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality']))
     )
 
 
@@ -4474,7 +4543,14 @@ async def butlers_report(interaction: discord.Interaction):
     await interaction.response.defer()
 
     try:
-        stats = calculate_butler_stats()
+        _now = datetime.now(timezone.utc)
+        days_since_monday = _now.weekday()
+        week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
+        if week_start_dt > _now:
+            week_start_dt -= timedelta(weeks=1)
+        week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
+        stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+        stats['week_label'] = week_label
         embed_text = build_favourites_embed(stats)
 
         # Post publicly in the channel
