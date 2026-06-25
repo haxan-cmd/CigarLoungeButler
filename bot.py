@@ -131,6 +131,11 @@ except Exception:
         index_posts_ws = None
 
 REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654  # butlers-archive forum
+MAP_RECORDS_FORUM_ID     = 1460730790559092888  # map-records forum
+WEAPONS_2H_FORUM_ID      = 1456639902077812868  # 2h-weapons forum
+WEAPONS_1H_FORUM_ID      = 1486118387800346768  # 1h-weapons forum
+FEATS_FORUM_ID           = 1486143184542105680  # feats-of-war forum
+BOUNTY_CARDS_FORUM_ID    = 1518657580174676021  # bounty cards forum
 
 SUBMISSIONS_CHANNEL_ID = 1328832440927518920
 BOUNTY_FORUM_CHANNEL_ID = 1456640264004435978  # The Ledger forum for player bounty cards
@@ -1246,6 +1251,60 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
     except Exception as e:
         print(f"Registry sheet save error: {e}")
 
+
+
+
+async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str):
+    """Build or update a pinned index thread in a leaderboard forum."""
+    try:
+        forum = guild.get_channel(forum_channel_id)
+        if not forum:
+            print(f"Leaderboard index: forum {forum_channel_id} not found")
+            return
+
+        threads = list(forum.threads)
+        async for thread in forum.archived_threads(limit=None):
+            if thread.name != f"D83dDccb {index_label} Index":
+                threads.append(thread)
+
+        threads.sort(key=lambda t: t.name.lower())
+        lines = [f"D83dDccb **{index_label} Index**", ""]
+        for thread in threads:
+            lines.append(f"[{thread.name}](https://discord.com/channels/{guild.id}/{thread.id})")
+        content = "\n".join(lines).strip()
+
+        index_thread = None
+        for t in forum.threads:
+            if t.name == f"D83dDccb {index_label} Index":
+                index_thread = t
+                break
+        if not index_thread:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == f"D83dDccb {index_label} Index":
+                    index_thread = t
+                    break
+
+        if index_thread:
+            msgs = []
+            async for msg in index_thread.history(limit=50, oldest_first=True):
+                msgs.append(msg)
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+            await index_thread.send(content)
+            print(f"Leaderboard index updated: {index_label}")
+        else:
+            result = await forum.create_thread(name=f"D83dDccb {index_label} Index", content="**279e INDEX**")
+            await asyncio.sleep(0.5)
+            await result.thread.send(content)
+            print(f"Leaderboard index created: {index_label}")
+
+    except Exception as e:
+        print(f"Leaderboard index error ({index_label}): {e}")
 
 async def update_archive_index(guild):
     """Build or update the pinned index post in butlers-archive."""
@@ -4225,11 +4284,31 @@ async def purge_archive(interaction: discord.Interaction):
         await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="update_index", description="Rebuild the player index post in butlers-archive (admin only).")
+@bot.tree.command(name="update_index", description="Rebuild an index thread in a forum (admin only).")
+@discord.app_commands.describe(forum="Which forum to rebuild the index for")
+@discord.app_commands.choices(forum=[
+    discord.app_commands.Choice(name="butlers-archive", value="archive"),
+    discord.app_commands.Choice(name="map-records",     value="map_records"),
+    discord.app_commands.Choice(name="2h-weapons",      value="weapons_2h"),
+    discord.app_commands.Choice(name="1h-weapons",      value="weapons_1h"),
+    discord.app_commands.Choice(name="feats-of-war",    value="feats"),
+    discord.app_commands.Choice(name="bounty-cards",    value="bounty_cards"),
+])
 @discord.app_commands.checks.has_permissions(administrator=True)
-async def update_index(interaction: discord.Interaction):
+async def update_index(interaction: discord.Interaction, forum: str = "archive"):
     await interaction.response.defer(ephemeral=True)
-    await update_archive_index(interaction.guild)
+    LEADERBOARD_FORUMS = {
+        "map_records":  (MAP_RECORDS_FORUM_ID,  "Map Records"),
+        "weapons_2h":   (WEAPONS_2H_FORUM_ID,   "2H Weapons"),
+        "weapons_1h":   (WEAPONS_1H_FORUM_ID,   "1H Weapons"),
+        "feats":        (FEATS_FORUM_ID,         "Feats of War"),
+        "bounty_cards": (BOUNTY_CARDS_FORUM_ID,  "Bounty Cards"),
+    }
+    if forum == "archive":
+        await update_archive_index(interaction.guild)
+    elif forum in LEADERBOARD_FORUMS:
+        channel_id, label = LEADERBOARD_FORUMS[forum]
+        await update_leaderboard_index(interaction.guild, channel_id, label)
     await interaction.followup.send("Index updated.", ephemeral=True)
 
 
