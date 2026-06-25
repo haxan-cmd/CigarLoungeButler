@@ -1264,23 +1264,23 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
 
         threads = list(forum.threads)
         async for thread in forum.archived_threads(limit=None):
-            if thread.name != f"D83dDccb {index_label} Index":
+            if thread.name != f"📋 {index_label} Index":
                 threads.append(thread)
 
         threads.sort(key=lambda t: t.name.lower())
-        lines = [f"D83dDccb **{index_label} Index**", ""]
+        lines = [f"📋 **{index_label} Index**", ""]
         for thread in threads:
             lines.append(f"[{thread.name}](https://discord.com/channels/{guild.id}/{thread.id})")
         content = "\n".join(lines).strip()
 
         index_thread = None
         for t in forum.threads:
-            if t.name == f"D83dDccb {index_label} Index":
+            if t.name == f"📋 {index_label} Index":
                 index_thread = t
                 break
         if not index_thread:
             async for t in forum.archived_threads(limit=None):
-                if t.name == f"D83dDccb {index_label} Index":
+                if t.name == f"📋 {index_label} Index":
                     index_thread = t
                     break
 
@@ -1298,7 +1298,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             await index_thread.send(content)
             print(f"Leaderboard index updated: {index_label}")
         else:
-            result = await forum.create_thread(name=f"D83dDccb {index_label} Index", content="**279e INDEX**")
+            result = await forum.create_thread(name=f"📋 {index_label} Index", content="**➜ INDEX**")
             await asyncio.sleep(0.5)
             await result.thread.send(content)
             print(f"Leaderboard index created: {index_label}")
