@@ -689,9 +689,15 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
 
     # --- Source 3: LegacyMarks sheet ---
     try:
-        legacy_ws = sheet.worksheet('LegacyMarks')
-        legacy_rows = legacy_ws.get_all_values()[1:]
-        player_rows = players_ws.get_all_values()[1:]
+        if cached_data and 'legacy_marks' in cached_data:
+            legacy_rows = cached_data['legacy_marks']
+        else:
+            legacy_ws = sheet.worksheet('LegacyMarks')
+            legacy_rows = legacy_ws.get_all_values()[1:]
+        if cached_data and 'players' in cached_data:
+            player_rows = cached_data['players']
+        else:
+            player_rows = players_ws.get_all_values()[1:]
         player_name = None
         for row in player_rows:
             if row and row[0].strip() == discord_id_str:
@@ -3129,7 +3135,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             last_submission = player_subs[-1][0] if player_subs else ''
             # Weapon marks summary
             weapon_marks_data = calculate_weapon_marks_for_player(_user_id)
-            weapon_marks_str = ', '.join(f"{w}: {int(v)}" for w, v in sorted(weapon_marks_data.items(), key=lambda x: -x[1]) if v > 0) if weapon_marks_data else ''
+            # Flatten tuple keys to weapon name only for display
+            flat_marks = {}
+            for k, v in weapon_marks_data.items():
+                w = k[0] if isinstance(k, tuple) else k
+                flat_marks[w] = flat_marks.get(w, 0) + v
+            weapon_marks_str = ', '.join(f"{w}: {int(v)}" for w, v in sorted(flat_marks.items(), key=lambda x: -x[1]) if v > 0) if flat_marks else ''
             # Class marks summary (count submissions per base class)
             class_counts = {}
             for r in player_subs:
@@ -3139,7 +3150,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     class_counts[base] = class_counts.get(base, 0) + 1
             class_marks_str = ', '.join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
             # Total marks
-            total_marks = sum(weapon_marks_data.values()) if weapon_marks_data else 0
+            total_marks = sum(flat_marks.values()) if flat_marks else 0
             # Thread ID from registry
             reg_rows = registry_ws.get_all_values()[1:]
             thread_id = None
@@ -5817,6 +5828,12 @@ async def populate_butlers_archive(interaction: discord.Interaction):
         players = players_ws.get_all_values()[1:]
         subs = cached_submissions()
         reg_rows = registry_ws.get_all_values()[1:]
+        ld_rows = cached_leaderboard_data()
+        try:
+            legacy_rows = sheet.worksheet('LegacyMarks').get_all_values()[1:]
+        except Exception:
+            legacy_rows = []
+        cached_data = {'submissions': subs, 'leaderboard_data': ld_rows, 'legacy_marks': legacy_rows, 'players': players}
         total = 0
         failed = 0
         for player_row in players:
@@ -5828,8 +5845,13 @@ async def populate_butlers_archive(interaction: discord.Interaction):
                 player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
                 submission_count = len(player_subs)
                 last_submission = player_subs[-1][0] if player_subs else ""
-                weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str))
-                weapon_marks_str = ", ".join(f"{w}: {int(v)}" for w, v in sorted(weapon_marks_data.items(), key=lambda x: -x[1]) if v > 0) if weapon_marks_data else ""
+                weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str), cached_data=cached_data)
+                # Flatten tuple keys to weapon name only for display
+                flat_marks = {}
+                for k, v in weapon_marks_data.items():
+                    w = k[0] if isinstance(k, tuple) else k
+                    flat_marks[w] = flat_marks.get(w, 0) + v
+                weapon_marks_str = ", ".join(f"{w}: {int(v)}" for w, v in sorted(flat_marks.items(), key=lambda x: -x[1]) if v > 0) if flat_marks else ""
                 class_counts = {}
                 for r in player_subs:
                     if len(r) > 4:
@@ -5837,7 +5859,7 @@ async def populate_butlers_archive(interaction: discord.Interaction):
                         base = cls.split("(")[0].strip() if "(" in cls else cls
                         class_counts[base] = class_counts.get(base, 0) + 1
                 class_marks_str = ", ".join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
-                total_marks = sum(weapon_marks_data.values()) if weapon_marks_data else 0
+                total_marks = sum(flat_marks.values()) if flat_marks else 0
                 thread_id = None
                 for r in reg_rows:
                     if len(r) > 2 and r[0].strip() == discord_id_str:
