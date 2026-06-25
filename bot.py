@@ -63,10 +63,18 @@ _sheet_cache = SheetCache(ttl=60)
 # NOTE: cached_submissions/players/leaderboard_data/bounty/bounty_players
 # are defined after worksheet objects are initialised (see below)
 
-# Per-guild submission lock to prevent concurrent submission conflicts
-_submission_locks = {}
+# Per-guild submission queue — serialises concurrent submissions, 60s timeout
+_submission_queues = {}
+_submission_workers = {}
 _registry_lock = asyncio.Lock()
 
+def get_submission_queue(guild_id):
+    if guild_id not in _submission_queues:
+        _submission_queues[guild_id] = asyncio.Queue()
+    return _submission_queues[guild_id]
+
+# Legacy lock accessor retained for any callers still using it
+_submission_locks = {}
 def get_submission_lock(guild_id):
     if guild_id not in _submission_locks:
         _submission_locks[guild_id] = asyncio.Lock()
@@ -1858,6 +1866,30 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
 GUILD_ID = 1324379304544567356
 last_submission_time = None  # For dry spell detection
 
+BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
+
+PLAYER_COMMANDS = [
+    ("/refresh_card", "Refresh your registry card in butlers-archive."),
+    ("/butlers_report", "Summon the Butler's Favourites report."),
+    ("/bounty_status", "Show the current active bounty card."),
+    ("/bounty_hunt", "Show the top 5 hunters for the active bounty."),
+    ("/my_bounty", "Show your personal progress on the active bounty."),
+]
+
+def build_manual_content():
+    lines = [
+        "📖 **BUTLER'S MANUAL**",
+        "*A reference for registered players.*",
+        "",
+        "**Commands**",
+    ]
+    for cmd, desc in PLAYER_COMMANDS:
+        lines.append(f"`{cmd}` — {desc}")
+    lines.append("")
+    lines.append("*Submit a run by posting a screenshot in the submissions channel.*")
+    return "\n".join(lines)
+
+
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
@@ -1867,6 +1899,22 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     if not weekly_snapshot.is_running():
         weekly_snapshot.start()
+    # Update butlers-manual
+    try:
+        real_guild = bot.get_guild(GUILD_ID)
+        if real_guild:
+            manual_channel = real_guild.get_channel(BUTLERS_MANUAL_CHANNEL_ID) or await real_guild.fetch_channel(BUTLERS_MANUAL_CHANNEL_ID)
+            if manual_channel:
+                content = build_manual_content()
+                async for msg in manual_channel.history(limit=10):
+                    if msg.author == real_guild.me:
+                        await msg.edit(content=content)
+                        break
+                else:
+                    await manual_channel.send(content)
+                print("butlers-manual updated")
+    except Exception as e:
+        print(f"butlers-manual update error: {e}")
 
 
 
@@ -2825,9 +2873,42 @@ async def _apply_edit(interaction, ev):
     await interaction.response.send_message("✅ Submission updated!", ephemeral=True)
 
 
+async def _submission_worker(guild_id):
+    """Drain the submission queue for a guild, one at a time."""
+    queue = get_submission_queue(guild_id)
+    while True:
+        item = await queue.get()
+        interaction = item[0]
+        try:
+            _, original_message, prompt_msg, args = item
+            await asyncio.wait_for(
+                _do_finalise_submission(interaction, original_message, prompt_msg, *args),
+                timeout=60
+            )
+        except asyncio.TimeoutError:
+            print(f"Submission worker timeout for guild {guild_id}")
+            try:
+                await interaction.followup.send(
+                    "⚠️ Submission timed out during processing. Please try again.",
+                    ephemeral=True
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Submission worker error: {e}")
+        finally:
+            queue.task_done()
+
+
 async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
-    async with get_submission_lock(interaction.guild.id):
-        await _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k)
+    guild_id = interaction.guild.id
+    queue = get_submission_queue(guild_id)
+    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k)
+    await queue.put((interaction, original_message, prompt_msg, args))
+    # Ensure worker is running for this guild
+    worker = _submission_workers.get(guild_id)
+    if worker is None or worker.done():
+        _submission_workers[guild_id] = asyncio.create_task(_submission_worker(guild_id))
 
 
 
