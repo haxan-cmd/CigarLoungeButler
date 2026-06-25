@@ -4998,9 +4998,9 @@ async def progress_command(interaction: discord.Interaction, player: str = None)
 
     def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True):
         if resolved == holder_name:
-            return f"{emoji} {label} \u2713 ({player_val}{'b' if is_board else ''})"
+            return f"{emoji} {label} \u2713 ({player_val})"
         diff = holder_val - player_val
-        return f"{emoji} {label} \u2014 {player_val}{'b' if is_board else ''} / {holder_val}{'b' if is_board else ''} {holder_name} **(-{diff})**"
+        return f"{emoji} {label} \u2014 {player_val} / {holder_val} {holder_name} **(-{diff})**"
 
     title_lines = [
         fmt_title("<:Grand_Marshall:1467680882490998979>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name),
