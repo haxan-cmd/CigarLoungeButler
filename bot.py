@@ -4254,7 +4254,7 @@ async def rebuild_archive(interaction: discord.Interaction):
                 if not weapon_marks:
                     print(f"Skipping {player_name} — no marks data")
                     continue
-                await create_or_update_registry_card(interaction.guild, discord_id, player_name)
+                await create_or_update_registry_card(interaction.guild, discord_id, player_name, skip_index=True)
                 total += 1
                 print(f"Rebuilt card for {player_name}")
             except Exception as e:
@@ -4263,6 +4263,7 @@ async def rebuild_archive(interaction: discord.Interaction):
 
             await asyncio.sleep(15)  # avoid rate limits
 
+        await update_archive_index(interaction.guild)
         await interaction.followup.send(
             f"Rebuild complete — {total} cards created/updated, {failed} failed.",
             ephemeral=True
