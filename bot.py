@@ -1869,6 +1869,7 @@ last_submission_time = None  # For dry spell detection
 BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
 
 PLAYER_COMMANDS = [
+    ("/progress", "Show your title standings and weapon rank progress. Use /progress [name] for any player."),
     ("/refresh_card", "Refresh your registry card in butlers-archive."),
     ("/butlers_report", "Summon the Butler's Favourites report."),
     ("/bounty_status", "Show the current active bounty card."),
@@ -4856,6 +4857,185 @@ async def update_title_roles(guild, stats):
                 await main_channel.send(msg)
             except Exception as e:
                 print(f"Title announcement error: {e}")
+
+
+@bot.tree.command(name="progress", description="Show a player's title standings and weapon ranks.")
+@discord.app_commands.describe(player="Player name (leave blank for your own)")
+async def progress_command(interaction: discord.Interaction, player: str = None):
+    await interaction.response.defer()
+
+    # ── Resolve player ────────────────────────────────────────────────────────
+    all_players = players_ws.get_all_values()[1:]
+    discord_id_str = None
+    resolved_name = None
+
+    if player is None:
+        discord_id_str = str(interaction.user.id)
+        for row in all_players:
+            if row and row[0].strip() == discord_id_str:
+                resolved_name = row[1].strip() if len(row) > 1 else interaction.user.display_name
+                break
+        if not resolved_name:
+            resolved_name = interaction.user.display_name
+    else:
+        target = player.lower()
+        for row in all_players:
+            if len(row) > 1 and row[1].strip().lower() == target:
+                discord_id_str = row[0].strip()
+                resolved_name = row[1].strip()
+                break
+        if not discord_id_str:
+            await interaction.followup.send(f"Player **{player}** not found.", ephemeral=True)
+            return
+
+    # ── Weapon rank progress ──────────────────────────────────────────────────
+    weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str))
+    flat_marks = {}
+    for k, v in weapon_marks_data.items():
+        w = k[0] if isinstance(k, tuple) else k
+        flat_marks[w] = flat_marks.get(w, 0) + v
+
+    weapon_lines = []
+    for weapon, marks in sorted(flat_marks.items(), key=lambda x: -x[1]):
+        if marks <= 0:
+            continue
+        rank_name, _, next_thresh = get_weapon_rank(marks)
+        rank_emoji = WEAPON_RANK_EMOJIS.get(rank_name, "")
+        marks_fmt = format_weapon_marks(marks)
+        if next_thresh is None:
+            # Iridescent — check prestige
+            prestige = sum(1 for t in PRESTIGE_THRESHOLDS if marks >= t)
+            next_prestige = next((t for t in PRESTIGE_THRESHOLDS if marks < t), None)
+            if next_prestige:
+                delta = next_prestige - marks
+                weapon_lines.append(f"{rank_emoji} **{weapon}** — {marks_fmt} *(+{delta} to ×{prestige + 1})*")
+            else:
+                weapon_lines.append(f"{rank_emoji} **{weapon}** — {marks_fmt} *(max prestige)*")
+        else:
+            delta = next_thresh - marks
+            next_rank = next((name for thresh, name in WEAPON_RANK_THRESHOLDS if thresh == next_thresh), "")
+            weapon_lines.append(f"{rank_emoji} **{weapon}** — {marks_fmt} *(+{delta} to {next_rank})*")
+
+    # ── Title standings ───────────────────────────────────────────────────────
+    ld = cached_leaderboard_data()
+    SKIP_LB = {"100 Kills", "200 Takedowns"}
+    WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
+    NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn"}
+
+    lb_groups = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        lb_name = row[0].strip()
+        p_name = row[1].strip()
+        if lb_name not in lb_groups:
+            lb_groups[lb_name] = []
+        lb_groups[lb_name].append(p_name)
+
+    player_weapon_boards = 0
+    player_map_boards = 0
+    player_combined_boards = 0
+
+    holder_weapon = {}   # player -> count
+    holder_map = {}
+    holder_combined = {}
+
+    for lb_name, players_on_board in lb_groups.items():
+        if lb_name in SKIP_LB:
+            continue
+        is_map = " - " in lb_name
+        is_non_weapon_feat = lb_name in NON_WEAPON_FEAT_BOARDS
+        for i, p in enumerate(players_on_board[:10]):
+            if is_map:
+                holder_map[p] = holder_map.get(p, 0) + 1
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+            elif is_non_weapon_feat:
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+            else:
+                holder_weapon[p] = holder_weapon.get(p, 0) + 1
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+
+    player_weapon_boards = holder_weapon.get(resolved_name, 0)
+    player_map_boards = holder_map.get(resolved_name, 0)
+    player_combined_boards = holder_combined.get(resolved_name, 0)
+
+    # Current holders
+    def breadth_leader(d, min_boards):
+        qualified = {p: v for p, v in d.items() if v >= min_boards}
+        if not qualified:
+            return None, 0
+        top = max(qualified, key=lambda p: qualified[p])
+        return top, qualified[top]
+
+    gm_holder, gm_count = breadth_leader(holder_combined, 15)
+    wm_holder, wm_count = breadth_leader(holder_weapon, 9)
+    cm_holder, cm_count = breadth_leader(holder_map, 6)
+
+    # Headhunter / Butcher — best score from 100 Kills / 200 TD boards
+    kills_best = {}
+    td_best = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        lb_name = row[0].strip()
+        p_name = row[1].strip()
+        try:
+            score = int(row[3])
+        except (ValueError, IndexError):
+            continue
+        if lb_name == "100 Kills":
+            kills_best[p_name] = max(kills_best.get(p_name, 0), score)
+        elif lb_name == "200 Takedowns":
+            td_best[p_name] = max(td_best.get(p_name, 0), score)
+
+    hh_holder = max(kills_best, key=kills_best.get) if kills_best else None
+    hh_score = kills_best.get(hh_holder, 0) if hh_holder else 0
+    bt_holder = max(td_best, key=td_best.get) if td_best else None
+    bt_score = td_best.get(bt_holder, 0) if bt_holder else 0
+
+    player_kills_best = kills_best.get(resolved_name, 0)
+    player_td_best = td_best.get(resolved_name, 0)
+
+    def delta_str(player_val, holder_val, holder_name, resolved):
+        if resolved == holder_name:
+            return "**Current holder** ✓"
+        diff = holder_val - player_val
+        return f"{player_val} — holder: {holder_name} ({holder_val}) | **-{diff}**"
+
+    def board_delta(player_count, holder_name, holder_count, resolved):
+        if resolved == holder_name:
+            return f"{player_count} boards — **Current holder** ✓"
+        diff = holder_count - player_count
+        return f"{player_count} boards — holder: {holder_name} ({holder_count}) | **-{diff}**"
+
+    title_lines = [
+        f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** (15 boards) — {board_delta(player_combined_boards, gm_holder or 'N/A', gm_count, resolved_name)}",
+        f"<:Weapons_Master:1467727674117193870> **Weapons Master** (9 boards) — {board_delta(player_weapon_boards, wm_holder or 'N/A', wm_count, resolved_name)}",
+        f"🗺️ **Campaign Master** (6 boards) — {board_delta(player_map_boards, cm_holder or 'N/A', cm_count, resolved_name)}",
+        f"<a:topkill:1360314538364240024> **Headhunter** — {delta_str(player_kills_best, hh_score, hh_holder or 'N/A', resolved_name)}",
+        f"<a:toptkd:1360312666475728958> **Butcher** — {delta_str(player_td_best, bt_score, bt_holder or 'N/A', resolved_name)}",
+    ]
+
+    # ── Build output ──────────────────────────────────────────────────────────
+    lines = [f"**Progress — {resolved_name}**", ""]
+    lines.append("**Butler's Favourites**")
+    lines.extend(title_lines)
+    lines.append("")
+    if weapon_lines:
+        lines.append("**Weapon Ranks**")
+        lines.extend(weapon_lines)
+    else:
+        lines.append("*No weapon marks recorded yet.*")
+
+    output = "\n".join(lines)
+    # Chunk if needed
+    if len(output) > 1900:
+        await interaction.followup.send(output[:1900])
+        await interaction.followup.send(output[1900:2*1900] if len(output) > 1900 else "")
+    else:
+        await interaction.followup.send(output)
+
+
 
 
 @bot.tree.command(name="butlers_report", description="Summon the Butler's Favourites report")
