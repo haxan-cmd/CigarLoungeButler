@@ -2293,7 +2293,7 @@ class ClassSelect(discord.ui.Select):
             weapons = get_all_weapons_for_class(selected_class)
             view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
             await interaction.response.edit_message(
-                content=f"**Step 3 of 5:** Class: `{selected_class}`\nWhich weapon did you use?",
+                content=f"**Step 2 of 5:** Class: `{selected_class}`\nWhich weapon did you use?",
                 view=view
             )
 
@@ -3548,12 +3548,19 @@ def save_bounty_state(row_idx, weapons, special_done, completions, message_id=No
 
 async def check_bounty_completion(guild, bounty, player_name, player_id):
     """Check if player just completed the full bounty. Returns True if newly completed."""
-    weapons = bounty['weapons']
-    # All weapons maxed out
-    all_weapons_done = all(w['current'] >= w['total'] for w in weapons.values())
-    if not all_weapons_done:
+    # Check player's personal progress against per-weapon targets (not global counter)
+    player_row = get_player_bounty_progress(bounty['title'], str(player_id))
+    if not player_row:
         return False
-    # Check they're not already in completions
+    player_progress = player_row['progress']
+    weapons = bounty['weapons']
+    for weapon, data in weapons.items():
+        target = data['total']
+        raw = player_progress.get(weapon, 0)
+        cur = raw['current'] if isinstance(raw, dict) else int(raw)
+        if cur < target:
+            return False
+    # All weapons met — check not already in completions
     completions = bounty['completions']
     already = any(str(c.get('id')) == str(player_id) for c in completions)
     if already:
