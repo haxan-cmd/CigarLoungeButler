@@ -1283,8 +1283,7 @@ async def update_archive_index(guild):
             lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{tid})" for name, tid in other))
 
         content = "\n".join(lines).strip()
-        if len(content) > 1900:
-            content = content[:1897] + "…"
+        # content will be chunked on send if needed
 
         index_rows = index_posts_ws.get_all_values()[1:]
         existing_msg_id = None
@@ -1313,10 +1312,33 @@ async def update_archive_index(guild):
                 except Exception:
                     continue
 
-        result = await forum.create_thread(name="📋 Player Index", content="➜ GUIDANCE HERE")
+        result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
-        index_msg = await result.thread.send(content)
-        msg_id = index_msg.id
+
+        # Split index content into chunks if needed
+        chunks = []
+        if len(content) <= 1900:
+            chunks = [content]
+        else:
+            # Split by group sections
+            sections = content.split("\n\n")
+            current = ""
+            for section in sections:
+                if len(current) + len(section) + 2 > 1900:
+                    if current:
+                        chunks.append(current.strip())
+                    current = section
+                else:
+                    current += ("\n\n" if current else "") + section
+            if current:
+                chunks.append(current.strip())
+
+        index_msg = None
+        for chunk in chunks:
+            await asyncio.sleep(0.5)
+            index_msg = await result.thread.send(chunk)
+        msg_id = index_msg.id if index_msg else None
+
         await asyncio.sleep(0.5)
         readme = (
             "📌 **How Your Registry Card Works**\n\n"
