@@ -1262,9 +1262,10 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             print(f"Leaderboard index: forum {forum_channel_id} not found")
             return
 
-        threads = list(forum.threads)
+        index_thread_name = f"📋 {index_label} Index"
+        threads = [t for t in forum.threads if t.name != index_thread_name]
         async for thread in forum.archived_threads(limit=None):
-            if thread.name != f"📋 {index_label} Index":
+            if thread.name != index_thread_name:
                 threads.append(thread)
 
         threads.sort(key=lambda t: t.name.lower())
@@ -1272,9 +1273,6 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         # Build alphabetical groups with bullet separators, matching player index style
         groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
         lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
-        if blurb:
-            lines.append(blurb)
-            lines.append("")
         for group_name, start, end in groups:
             group_threads = [t for t in threads if t.name and start <= t.name[0].upper() <= end]
             if not group_threads:
@@ -1287,6 +1285,10 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         if other:
             lines.append("**#**")
             lines.append(' • '.join(f"[{t.name}](https://discord.com/channels/{guild.id}/{t.id})" for t in other))
+            lines.append("")
+        if blurb:
+            lines.append("─────────────────────")
+            lines.append(blurb)
 
         content = "\n".join(lines).strip()
 
