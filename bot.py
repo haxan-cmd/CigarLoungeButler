@@ -1300,41 +1300,96 @@ async def update_archive_index(guild):
                 if not thread:
                     thread = await guild.fetch_channel(existing_thread_id)
                 msgs = []
-                async for msg in thread.history(limit=10, oldest_first=True):
+                async for msg in thread.history(limit=50, oldest_first=True):
                     msgs.append(msg)
                 print(f"Archive index: found {len(msgs)} messages in index thread")
-                if len(msgs) >= 2:
-                    await msgs[1].edit(content=content)
-                    print("Archive index updated")
-                    return
-                elif len(msgs) == 1:
-                    # Only starter exists — send index as new message
+                # Delete all non-starter messages and resend fresh chunks
+                for msg in msgs[1:]:
+                    try:
+                        await msg.delete()
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+                _chunks = []
+                if len(content) <= 1900:
+                    _chunks = [content]
+                else:
+                    _sections = content.split("\n\n")
+                    _current = ""
+                    for _section in _sections:
+                        if len(_current) + len(_section) + 2 > 1900:
+                            if _current:
+                                _chunks.append(_current.strip())
+                            _current = _section
+                        else:
+                            _current += ("\n\n" if _current else "") + _section
+                    if _current:
+                        _chunks.append(_current.strip())
+                for chunk in _chunks:
                     await asyncio.sleep(0.5)
-                    await thread.send(content)
-                    print("Archive index sent to existing thread")
-                    return
+                    await thread.send(chunk)
+                print("Archive index updated")
+                return
             except Exception as e:
                 print(f"Index edit error: {e} — will create new thread")
 
-        result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
-        await asyncio.sleep(0.5)
+        # Check Discord directly before creating a new thread
+        existing_by_name = None
+        async for thread in forum.archived_threads(limit=None):
+            if thread.name == "📋 Player Index":
+                existing_by_name = thread
+                break
+        if not existing_by_name:
+            for thread in forum.threads:
+                if thread.name == "📋 Player Index":
+                    existing_by_name = thread
+                    break
 
-        # Split index content into chunks if needed
-        chunks = []
-        if len(content) <= 1900:
-            chunks = [content]
-        else:
-            sections = content.split("\n\n")
+        # Helper: split content into <=1900-char chunks on paragraph boundaries
+        def _chunk_content(text):
+            if len(text) <= 1900:
+                return [text]
+            sections = text.split("\n\n")
+            result_chunks = []
             current = ""
             for section in sections:
                 if len(current) + len(section) + 2 > 1900:
                     if current:
-                        chunks.append(current.strip())
+                        result_chunks.append(current.strip())
                     current = section
                 else:
                     current += ("\n\n" if current else "") + section
             if current:
-                chunks.append(current.strip())
+                result_chunks.append(current.strip())
+            return result_chunks
+
+        chunks = _chunk_content(content)
+
+        if existing_by_name:
+            # Recover the thread — update sheet and resend all content chunks
+            thread_id = existing_by_name.id
+            if existing_row_idx:
+                index_posts_ws.update_cell(existing_row_idx, 3, str(thread_id))
+            else:
+                index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(thread_id)])
+            msgs = []
+            async for msg in existing_by_name.history(limit=50, oldest_first=True):
+                msgs.append(msg)
+            # Delete all messages after the starter (index=0), then resend
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            for chunk in chunks:
+                await asyncio.sleep(0.5)
+                await existing_by_name.send(chunk)
+            print("Archive index recovered from Discord")
+            return
+
+        result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
+        await asyncio.sleep(0.5)
 
         for chunk in chunks:
             await asyncio.sleep(0.5)
