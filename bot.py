@@ -1397,13 +1397,14 @@ def detect_weapon_milestones(old_flat, new_flat):
 def build_milestone_message(player_name, weapon, threshold, rank_name):
     """Return a Butler-voiced announcement string for this milestone, or None."""
     if rank_name.startswith("Iridescent ×"):
-        n = rank_name.split("×")[1].strip()
-        return f"**{player_name}** — **{weapon}** ×{n}. The bald woman would be proud."
+        n = int(rank_name.split("×")[1].strip())
+        mark_count = PRESTIGE_THRESHOLDS[n - 1] if n <= len(PRESTIGE_THRESHOLDS) else PRESTIGE_THRESHOLDS[-1]
+        return f"**{player_name}** — **{weapon}** ×{n}. {mark_count} marks. The bald woman would be proud."
     messages = {
-        1:   f"*Noted.* **{player_name}** — **{weapon}**.",
-        60:  f"**{player_name}** has earned Crimson on the **{weapon}**. I approve. Quietly.",
-        80:  f"**{player_name}** enters Prestige with the **{weapon}**. I'll say nothing. That is the compliment.",
-        150: f"**{player_name}**. **{weapon}**. Iridescent. I'm pouring a drink.",
+        1:   f"*Noted.* **{player_name}** has drawn first blood with the **{weapon}**.",
+        60:  f"**{player_name}** has reached Crimson rank on the **{weapon}**. 60 marks. I approve. Quietly.",
+        80:  f"**{player_name}** has entered Prestige with the **{weapon}**. 80 marks. I'll say nothing. That is the compliment.",
+        150: f"**{player_name}** has gone Iridescent on the **{weapon}**. 150 marks. I'm pouring a drink.",
     }
     return messages.get(threshold)
 
