@@ -3042,38 +3042,43 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Placement edit error: {e}")
 
-    # Silently update Butler's Favourites pinned message
-    try:
-        if BUTLERS_FAVOURITES_CHANNEL_ID:
-            fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
-            if fav_channel:
-                _now = datetime.now(timezone.utc)
-                # Current week window: Monday 12:00 UTC to now
-                days_since_monday = _now.weekday()
-                week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
-                if week_start_dt > _now:
-                    week_start_dt -= timedelta(weeks=1)
-                week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-                stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
-                stats['week_label'] = week_label
-                embed_text = build_favourites_embed(stats)
-                async for msg in fav_channel.history(limit=5):
-                    if msg.author == interaction.guild.me:
-                        await msg.edit(content=embed_text)
-                        break
-                else:
-                    await fav_channel.send(embed_text)
-                await update_title_roles(interaction.guild, stats)
-    except Exception as e:
-        print(f"Butler favourites update error: {e}")
+    # Background tasks — run after confirmation is posted
+    _guild = interaction.guild
+    _user_id = interaction.user.id
+    _user_name = interaction.user.display_name
 
-    # Update registry card
-    try:
-        await create_or_update_registry_card(
-            interaction.guild, interaction.user.id, interaction.user.display_name
-        )
-    except Exception as e:
-        print(f"Registry card update error: {e}")
+    async def _bg_tasks():
+        # Update registry card
+        try:
+            await create_or_update_registry_card(_guild, _user_id, _user_name)
+        except Exception as e:
+            print(f"Registry card update error: {e}")
+
+        # Update Butler's Favourites
+        try:
+            if BUTLERS_FAVOURITES_CHANNEL_ID:
+                fav_channel = _guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+                if fav_channel:
+                    _now = datetime.now(timezone.utc)
+                    days_since_monday = _now.weekday()
+                    week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
+                    if week_start_dt > _now:
+                        week_start_dt -= timedelta(weeks=1)
+                    week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
+                    stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                    stats['week_label'] = week_label
+                    embed_text = build_favourites_embed(stats)
+                    async for msg in fav_channel.history(limit=5):
+                        if msg.author == _guild.me:
+                            await msg.edit(content=embed_text)
+                            break
+                    else:
+                        await fav_channel.send(embed_text)
+                    await update_title_roles(_guild, stats)
+        except Exception as e:
+            print(f"Butler favourites update error: {e}")
+
+    asyncio.create_task(_bg_tasks())
 
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
