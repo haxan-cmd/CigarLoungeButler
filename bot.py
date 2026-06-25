@@ -1299,18 +1299,22 @@ async def update_archive_index(guild):
                 thread = guild.get_thread(existing_thread_id)
                 if not thread:
                     thread = await guild.fetch_channel(existing_thread_id)
-                # Edit the second message (first is the guidance blurb)
                 msgs = []
                 async for msg in thread.history(limit=10, oldest_first=True):
                     msgs.append(msg)
-                # msgs[0] = starter blurb, msgs[1] = index content, msgs[2+] = readme
+                print(f"Archive index: found {len(msgs)} messages in index thread")
                 if len(msgs) >= 2:
                     await msgs[1].edit(content=content)
                     print("Archive index updated")
                     return
+                elif len(msgs) == 1:
+                    # Only starter exists — send index as new message
+                    await asyncio.sleep(0.5)
+                    await thread.send(content)
+                    print("Archive index sent to existing thread")
+                    return
             except Exception as e:
-                print(f"Index edit error: {e}")
-                # Fall through to create new thread
+                print(f"Index edit error: {e} — will create new thread")
 
         result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
