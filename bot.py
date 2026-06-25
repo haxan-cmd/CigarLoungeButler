@@ -1652,19 +1652,20 @@ def get_all_weapons_for_class(selected_class):
     return sorted([w for w in class_weapons if w not in FEAT_WEAPONS])
 
 def upsert_player(discord_id, discord_name):
+    """Returns True if this is a new player."""
     try:
         rows = players_ws.get_all_values()
         discord_id_str = str(discord_id)
         for i, row in enumerate(rows[1:], start=2):
             if row and row[0] == discord_id_str:
-                # Update name if changed
                 if len(row) < 2 or row[1] != discord_name:
                     players_ws.update_cell(i, 2, discord_name)
-                return
-        # Not found — append new row
+                return False
         players_ws.append_row([discord_id_str, discord_name, ""])
+        return True
     except Exception as e:
         print(f"Player upsert error: {e}")
+        return False
 
 def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
@@ -1674,9 +1675,10 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
     ])
-    upsert_player(discord_id, discord_name)
+    return upsert_player(discord_id, discord_name)
 
 GUILD_ID = 1324379304544567356
+last_submission_time = None  # For dry spell detection
 
 @bot.event
 async def on_ready():
@@ -1687,6 +1689,14 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     if not weekly_snapshot.is_running():
         weekly_snapshot.start()
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild:
+            notes = guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
+            if notes:
+                await notes.send("I have returned. Nobody asked, I'm sure.")
+    except Exception as e:
+        print(f"Startup message error: {e}")
 
 
 @tasks.loop(hours=168)  # 7 days
@@ -1846,6 +1856,27 @@ async def on_message(message):
     # Middle finger at the bot = middle finger back
     if bot.user in message.mentions and '\U0001f595' in message.content:
         await message.channel.send('\U0001f595')
+        return
+
+    # Butler personality — respond to pings in main
+    if bot.user in message.mentions and message.channel.id == MAIN_CHANNEL_ID:
+        msg = message.content.lower()
+        if any(x in msg for x in ['how do i submit', 'how to submit', 'how does submit', 'how does this work', 'how do i play']):
+            await message.reply("You take a screenshot. You post it in the submissions channel. The Butler handles the rest. You're welcome.")
+        elif any(x in msg for x in ["who's #1", "whos #1", "who is #1", "who's first", "whos first", "who is first", "who is number 1", "whos number 1"]):
+            await message.reply("Consult the leaderboard. It is pinned. It has always been pinned.")
+        elif any(x in msg for x in ['alive', 'awake', 'bot check', 'you there', 'are you there', 'working', 'hello']):
+            await message.reply("Demonstrably.")
+        elif any(x in msg for x in ['good bot', 'great bot', 'love you', 'thank you', 'thanks', 'well done', 'nice']):
+            await message.reply("The Butler does not require your approval. Though it is noted.")
+        elif any(x in msg for x in ['bad bot', 'useless', 'broken', 'hate you', 'stupid', 'dumb', 'trash', 'garbage']):
+            await message.reply("Noted. The Butler remains unbothered.")
+        elif any(x in msg for x in ['next bounty', 'when bounty', 'bounty when', 'new bounty']):
+            await message.reply("When it is ready. The Butler will make it known.")
+        elif any(x in msg for x in ['rules', 'challenge rules', 'how does it work', 'what are the rules']):
+            await message.reply("The rules exist in the challenge-rules channel. The Butler suggests reading them.")
+        else:
+            await message.reply("*Incoherent question. Seems like that is a* you *issue.*")
         return
 
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
@@ -2703,7 +2734,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Log to Google Sheets first so we get the row index
     submission_row = None
     try:
-        log_submission(
+        is_new_player = log_submission(
             interaction.user.display_name,
             interaction.user.id,
             selected_weapon,
@@ -2720,6 +2751,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # Row index is last row in submissions sheet
         submission_row = len(submissions_ws.get_all_values())
     except Exception as e:
+        is_new_player = False
         print(f"Sheet logging error: {e}")
 
     # Anomaly check — alert butlers-notes if stats look suspicious
@@ -2789,6 +2821,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Update leaderboards (skip for ranged submissions)
     any_updated = False
     placements = []
+    newly_completed = False
     if not is_ranged:
         try:
             any_updated, placements = await update_leaderboards(
@@ -2828,10 +2861,55 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
             if bounty_hit:
                 await original_message.add_reaction("🐱")
+                # Check if this run completed the bounty
+                _bounty = get_active_bounty()
+                if _bounty:
+                    newly_completed = await check_bounty_completion(
+                        interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
+                    )
         except Exception as e:
             import traceback
             print(f"Bounty update error: {e}")
             traceback.print_exc()
+
+    # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
+    try:
+        global last_submission_time
+        main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
+        now = datetime.now(timezone.utc)
+
+        if main_channel:
+            # Dry spell — first submission after 4+ hours of silence
+            if last_submission_time and (now - last_submission_time).total_seconds() > 14400:
+                await main_channel.send("Yes. Yes, I am awake.")
+
+            # New player first submission
+            if is_new_player:
+                await main_channel.send(f"*A new arrival. The Butler acknowledges you,* {interaction.user.display_name}.")
+
+            # New #1 on any leaderboard
+            new_firsts = [lb for lb, pos in placements if pos == 1]
+            if new_firsts:
+                await main_channel.send(f"On top. But for how long.")
+
+            # Bounty completion
+            if newly_completed:
+                await main_channel.send(
+                    f"The bounty is settled. **{interaction.user.display_name}** has seen to it. "
+                    f"The bald woman would have done it faster, I imagine."
+                )
+
+        # Flawless — reply in submissions channel
+        if deaths == 0:
+            await original_message.reply(
+                "*Immaculate. As flawless as the bald woman's head.*",
+                mention_author=False
+            )
+
+        last_submission_time = now
+
+    except Exception as e:
+        print(f"Butler personality error: {e}")
 
     # Edit the summary reply to include placements
     if placements:
