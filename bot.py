@@ -157,16 +157,6 @@ except Exception:
         print(f"Snapshots sheet init error: {e}")
         snapshots_ws = None
 
-# ButlersArchive sheet — player summary for ad hoc review and manual edits
-try:
-    butlers_archive_ws = sheet.worksheet('ButlersArchive')
-except gspread.exceptions.WorksheetNotFound:
-    butlers_archive_ws = sheet.add_worksheet(title='ButlersArchive', rows=500, cols=8)
-    butlers_archive_ws.append_row(['DiscordID','PlayerName','ThreadID','TotalMarks','Submissions','LastSubmission','WeaponMarks','ClassMarks'])
-except Exception as e:
-    print(f"ButlersArchive sheet init error: {e}")
-    butlers_archive_ws = None
-
 # IndexPosts sheet — tracks pinned index post message IDs per forum
 try:
     index_posts_ws = sheet.worksheet('IndexPosts')
@@ -177,33 +167,6 @@ except Exception:
     except Exception as e:
         print(f"IndexPosts sheet init error: {e}")
         index_posts_ws = None
-
-# ---------------------------------------------------------------------------
-# ButlersArchive updater
-# ---------------------------------------------------------------------------
-def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks, submission_count, last_submission, weapon_marks, class_marks):
-    """Upsert a player row in ButlersArchive sheet."""
-    if not butlers_archive_ws:
-        return
-    try:
-        discord_id_str = str(discord_id)
-        rows = butlers_archive_ws.get_all_values()
-        for i, row in enumerate(rows[1:], start=2):
-            if row and row[0].strip() == discord_id_str:
-                butlers_archive_ws.update(f'A{i}:H{i}', [[
-                    discord_id_str, player_name, str(thread_id) if thread_id else '',
-                    str(total_marks), str(submission_count), last_submission,
-                    weapon_marks, class_marks
-                ]])
-                return
-        # New row
-        butlers_archive_ws.append_row([
-            discord_id_str, player_name, str(thread_id) if thread_id else '',
-            str(total_marks), str(submission_count), last_submission,
-            weapon_marks, class_marks
-        ])
-    except Exception as e:
-        print(f"ButlersArchive update error: {e}")
 
 # ---------------------------------------------------------------------------
 # Cached sheet accessors — use these instead of bare get_all_values()
@@ -3117,10 +3080,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             bounty = get_active_bounty()
             if bounty:
                 bounty_blurb = (
-                    f"**What is this?** A roughly monthly community challenge. "
-                    f"Only submitted runs count, and only for the bounty's weapons.\n"
-                    f"**Current bounty:** {bounty['title']}\n"
-                    f"**Qualifying weapons:** {chr(44).join(bounty['weapons'].keys())}"
+                    f"[{bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
+                    f"A monthly bounty where select weapons qualify toward completion. Submit the required number of runs per weapon to complete the bounty. Often comes with a bonus challenge.\n\n"
+                    f"**Weapons & Requirements:**\n" +
+                    "\n".join(f"▸ {w}: {d['total']} runs" for w, d in bounty['weapons'].items())
                 )
                 await update_leaderboard_index(_guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards", bounty_blurb)
         except Exception as e:
@@ -4849,10 +4812,10 @@ async def update_index(interaction: discord.Interaction, forum: str = "all"):
         if active_bounty:
             weapon_list = ', '.join(active_bounty['weapons'].keys())
             bounty_blurb = (
-                f"**What is this?** A roughly monthly community challenge. "
-                f"Only submitted runs count, and only for the bounty's weapons.\n"
-                f"**Current bounty:** {active_bounty['title']}\n"
-                f"**Qualifying weapons:** {weapon_list}"
+                f"[{active_bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
+                f"A monthly bounty where select weapons qualify toward completion. Submit the required number of runs per weapon to complete the bounty. Often comes with a bonus challenge.\n\n"
+                f"**Weapons & Requirements:**\n" +
+                "\n".join(f"▸ {w}: {d['total']} runs" for w, d in active_bounty['weapons'].items())
             )
     except Exception as e:
         print(f"Bounty blurb fetch error: {e}")
