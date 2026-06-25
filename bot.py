@@ -5504,6 +5504,42 @@ async def remove_submission(interaction: discord.Interaction, message_link: str)
         await interaction.followup.send(f"❌ Error during removal: {e}", ephemeral=True)
 
 
+@bot.tree.command(name="bulk_refresh_cards", description="Refresh all player registry cards in-place (admin only).")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def bulk_refresh_cards(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        rows = registry_ws.get_all_values()[1:]
+        total = 0
+        failed = 0
+        for row in rows:
+            if len(row) < 3 or not row[0].strip() or not row[2].strip():
+                continue
+            try:
+                discord_id = int(row[0].strip())
+            except ValueError:
+                continue
+            player_name = row[1].strip()
+            try:
+                await create_or_update_registry_card(interaction.guild, discord_id, player_name, skip_index=True)
+                total += 1
+                await asyncio.sleep(1)  # Avoid rate limits
+            except Exception as e:
+                print(f"Bulk refresh error for {player_name}: {e}")
+                failed += 1
+
+        # Rebuild index once at the end
+        await update_archive_index(interaction.guild)
+
+        msg = f"✅ Bulk refresh complete — {total} cards updated."
+        if failed:
+            msg += f" {failed} failed (check logs)."
+        await interaction.followup.send(msg, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
 import traceback
 try:
     bot.run(TOKEN)
