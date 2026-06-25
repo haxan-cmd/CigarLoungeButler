@@ -168,6 +168,9 @@ except Exception:
         print(f"IndexPosts sheet init error: {e}")
         index_posts_ws = None
 
+# ButlersArchive snapshot data lives in the Players sheet (cols D–H)
+butlers_archive_ws = players_ws
+
 # ---------------------------------------------------------------------------
 # Cached sheet accessors — use these instead of bare get_all_values()
 # All worksheets are now initialised so these references are safe.
@@ -1326,6 +1329,75 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
         print(f"Registry sheet save error: {e}")
 
 
+def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks,
+                                submission_count, last_submission,
+                                weapon_marks_str, class_marks_str):
+    """Write snapshot columns D–H into the Players sheet row for this player."""
+    try:
+        discord_id_str = str(discord_id)
+        rows = players_ws.get_all_values()
+        for i, row in enumerate(rows[1:], start=2):
+            if row and row[0].strip() == discord_id_str:
+                players_ws.update(
+                    f'D{i}:H{i}',
+                    [[total_marks, submission_count, last_submission,
+                      weapon_marks_str, class_marks_str]]
+                )
+                if thread_id and (len(row) < 3 or not row[2].strip()):
+                    players_ws.update_cell(i, 3, str(thread_id))
+                _sheet_cache.invalidate(players_ws)
+                return
+        # New player not yet in sheet — append full row
+        players_ws.append_row([
+            discord_id_str, player_name,
+            str(thread_id) if thread_id else '',
+            total_marks, submission_count, last_submission,
+            weapon_marks_str, class_marks_str
+        ])
+        _sheet_cache.invalidate(players_ws)
+    except Exception as e:
+        print(f"update_butlers_archive_row error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Milestone detection
+# ---------------------------------------------------------------------------
+_MILESTONE_THRESHOLDS = {1, 60, 80, 150}
+
+def detect_weapon_milestones(old_flat, new_flat):
+    """Return list of (weapon, threshold, rank_name) for significant rank crossings.
+    old_flat / new_flat: dict of weapon_name -> int marks (plain weapon keys, not tuples).
+    """
+    milestones = []
+    for weapon in set(old_flat) | set(new_flat):
+        old = old_flat.get(weapon, 0)
+        new = new_flat.get(weapon, 0)
+        if new <= old:
+            continue
+        for threshold, rank_name in WEAPON_RANK_THRESHOLDS:
+            if threshold in _MILESTONE_THRESHOLDS and old < threshold <= new:
+                milestones.append((weapon, threshold, rank_name))
+        # Iridescent ×N — each prestige tier past 150
+        if old >= 150:
+            old_x = sum(1 for t in PRESTIGE_THRESHOLDS if old >= t)
+            new_x = sum(1 for t in PRESTIGE_THRESHOLDS if new >= t)
+            if new_x > old_x:
+                milestones.append((weapon, new, f"Iridescent ×{new_x}"))
+    return milestones
+
+
+def build_milestone_message(player_name, weapon, threshold, rank_name):
+    """Return a Butler-voiced announcement string for this milestone, or None."""
+    if rank_name.startswith("Iridescent ×"):
+        n = rank_name.split("×")[1].strip()
+        return f"**{player_name}** — **{weapon}** ×{n}. The bald woman would be proud."
+    messages = {
+        1:   f"*Noted.* **{player_name}** — **{weapon}**.",
+        60:  f"**{player_name}** has earned Crimson on the **{weapon}**. I approve. Quietly.",
+        80:  f"**{player_name}** enters Prestige with the **{weapon}**. I'll say nothing. That is the compliment.",
+        150: f"**{player_name}**. **{weapon}**. Iridescent. I'm pouring a drink.",
+    }
+    return messages.get(threshold)
 
 
 async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
@@ -3089,21 +3161,43 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Bounty cards index update error: {e}")
 
-        # Update ButlersArchive summary sheet
+        # Update ButlersArchive summary sheet + milestone detection
         try:
             subs = cached_submissions()
             discord_id_str = str(_user_id)
             player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
             submission_count = len(player_subs)
             last_submission = player_subs[-1][0] if player_subs else ''
-            # Weapon marks summary
+
+            # Read OLD weapon marks from Players sheet BEFORE updating — used for milestone diff
+            old_flat = {}
+            try:
+                p_rows = players_ws.get_all_values()
+                for p_row in p_rows[1:]:
+                    if p_row and p_row[0].strip() == discord_id_str:
+                        old_marks_str = p_row[6].strip() if len(p_row) > 6 else ''
+                        for part in old_marks_str.split(','):
+                            part = part.strip()
+                            if ':' in part:
+                                w, c = part.rsplit(':', 1)
+                                try:
+                                    old_flat[w.strip()] = int(c.strip())
+                                except ValueError:
+                                    pass
+                        break
+            except Exception as e:
+                print(f"Milestone: old marks read error: {e}")
+
+            # Compute new weapon marks
             weapon_marks_data = calculate_weapon_marks_for_player(_user_id)
-            # Flatten tuple keys to weapon name only for display
             flat_marks = {}
             for k, v in weapon_marks_data.items():
                 w = k[0] if isinstance(k, tuple) else k
                 flat_marks[w] = flat_marks.get(w, 0) + v
-            weapon_marks_str = ', '.join(f"{w}: {int(v)}" for w, v in sorted(flat_marks.items(), key=lambda x: -x[1]) if v > 0) if flat_marks else ''
+            weapon_marks_str = ', '.join(
+                f"{w}: {int(v)}" for w, v in sorted(flat_marks.items(), key=lambda x: -x[1]) if v > 0
+            ) if flat_marks else ''
+
             # Class marks summary (count submissions per base class)
             class_counts = {}
             for r in player_subs:
@@ -3112,8 +3206,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     base = cls.split('(')[0].strip() if '(' in cls else cls
                     class_counts[base] = class_counts.get(base, 0) + 1
             class_marks_str = ', '.join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
-            # Total marks
+
             total_marks = sum(flat_marks.values()) if flat_marks else 0
+
             # Thread ID from registry
             reg_rows = registry_ws.get_all_values()[1:]
             thread_id = None
@@ -3121,11 +3216,27 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if len(r) > 2 and r[0].strip() == discord_id_str:
                     thread_id = r[2].strip() or None
                     break
+
             update_butlers_archive_row(
                 _user_id, _user_name, thread_id,
                 total_marks, submission_count, last_submission,
                 weapon_marks_str, class_marks_str
             )
+
+            # ── MILESTONE ANNOUNCEMENTS ───────────────────────────────────
+            try:
+                milestones = detect_weapon_milestones(old_flat, flat_marks)
+                if milestones:
+                    main_ch = _guild.get_channel(MAIN_CHANNEL_ID) or await _guild.fetch_channel(MAIN_CHANNEL_ID)
+                    if main_ch:
+                        for weapon, threshold, rank_name in milestones:
+                            msg = build_milestone_message(_user_name, weapon, threshold, rank_name)
+                            if msg:
+                                await main_ch.send(msg)
+                                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"Milestone announcement error: {e}")
+
         except Exception as e:
             print(f"ButlersArchive bg update error: {e}")
 
