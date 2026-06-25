@@ -4996,44 +4996,61 @@ async def progress_command(interaction: discord.Interaction, player: str = None)
     player_kills_best = kills_best.get(resolved_name, 0)
     player_td_best = td_best.get(resolved_name, 0)
 
-    def delta_str(player_val, holder_val, holder_name, resolved):
+    def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True):
         if resolved == holder_name:
-            return "**Current holder** ✓"
+            return f"{emoji} {label} \u2713 ({player_val}{'b' if is_board else ''})"
         diff = holder_val - player_val
-        return f"{player_val} — holder: {holder_name} ({holder_val}) | **-{diff}**"
-
-    def board_delta(player_count, holder_name, holder_count, resolved):
-        if resolved == holder_name:
-            return f"{player_count} boards — **Current holder** ✓"
-        diff = holder_count - player_count
-        return f"{player_count} boards — holder: {holder_name} ({holder_count}) | **-{diff}**"
+        return f"{emoji} {label} \u2014 {player_val}{'b' if is_board else ''} / {holder_val}{'b' if is_board else ''} {holder_name} **(-{diff})**"
 
     title_lines = [
-        f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** (15 boards) — {board_delta(player_combined_boards, gm_holder or 'N/A', gm_count, resolved_name)}",
-        f"<:Weapons_Master:1467727674117193870> **Weapons Master** (9 boards) — {board_delta(player_weapon_boards, wm_holder or 'N/A', wm_count, resolved_name)}",
-        f"🗺️ **Campaign Master** (6 boards) — {board_delta(player_map_boards, cm_holder or 'N/A', cm_count, resolved_name)}",
-        f"<a:topkill:1360314538364240024> **Headhunter** — {delta_str(player_kills_best, hh_score, hh_holder or 'N/A', resolved_name)}",
-        f"<a:toptkd:1360312666475728958> **Butcher** — {delta_str(player_td_best, bt_score, bt_holder or 'N/A', resolved_name)}",
+        fmt_title("<:Grand_Marshall:1467680882490998979>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name),
+        fmt_title("<:Weapons_Master:1467727674117193870>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name),
+        fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name),
+        fmt_title("<a:topkill:1360314538364240024>", "Headhunter", player_kills_best, hh_holder or "N/A", hh_score, resolved_name, is_board=False),
+        fmt_title("<a:toptkd:1360312666475728958>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
     ]
 
-    # ── Build output ──────────────────────────────────────────────────────────
-    lines = [f"**Progress — {resolved_name}**", ""]
+    # Weapon ranks — Gold+ only, top 10
+    SHOW_RANKS = {"Gold", "Emerald", "Diamond", "Crimson", "Prestige Bronze", "Prestige Silver",
+                  "Prestige Gold", "Prestige Emerald", "Prestige Diamond", "Prestige Crimson", "Iridescent"}
+    weapon_lines_filtered = []
+    for weapon, marks in sorted(flat_marks.items(), key=lambda x: -x[1]):
+        if marks <= 0:
+            continue
+        rank_name, _, next_thresh = get_weapon_rank(marks)
+        if rank_name not in SHOW_RANKS:
+            continue
+        rank_emoji = WEAPON_RANK_EMOJIS.get(rank_name, "")
+        marks_fmt = format_weapon_marks(marks)
+        if next_thresh is None:
+            prestige = sum(1 for t in PRESTIGE_THRESHOLDS if marks >= t)
+            next_prestige = next((t for t in PRESTIGE_THRESHOLDS if marks < t), None)
+            if next_prestige:
+                delta = next_prestige - marks
+                weapon_lines_filtered.append(f"{rank_emoji} **{weapon}** \u2014 {marks_fmt} *(+{delta} to \xd7{prestige + 1})*")
+            else:
+                weapon_lines_filtered.append(f"{rank_emoji} **{weapon}** \u2014 {marks_fmt} *(max prestige)*")
+        else:
+            delta = next_thresh - marks
+            next_rank = next((name for thresh, name in WEAPON_RANK_THRESHOLDS if thresh == next_thresh), "")
+            weapon_lines_filtered.append(f"{rank_emoji} **{weapon}** \u2014 {marks_fmt} *(+{delta} to {next_rank})*")
+        if len(weapon_lines_filtered) >= 10:
+            break
+
+    # Build output
+    lines = [f"**Progress \u2014 {resolved_name}**", ""]
     lines.append("**Butler's Favourites**")
     lines.extend(title_lines)
-    lines.append("")
-    if weapon_lines:
-        lines.append("**Weapon Ranks**")
-        lines.extend(weapon_lines)
-    else:
+    if weapon_lines_filtered:
+        lines.append("")
+        lines.append("**Weapon Ranks** *(Gold+, top 10)*")
+        lines.extend(weapon_lines_filtered)
+    elif not flat_marks:
+        lines.append("")
         lines.append("*No weapon marks recorded yet.*")
 
     output = "\n".join(lines)
-    # Chunk if needed
-    if len(output) > 1900:
-        await interaction.followup.send(output[:1900])
-        await interaction.followup.send(output[1900:2*1900] if len(output) > 1900 else "")
-    else:
-        await interaction.followup.send(output)
+    await interaction.followup.send(output[:1900])
 
 
 
