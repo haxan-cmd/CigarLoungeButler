@@ -1286,31 +1286,31 @@ async def update_archive_index(guild):
         # content will be chunked on send if needed
 
         index_rows = index_posts_ws.get_all_values()[1:]
-        existing_msg_id = None
+        existing_thread_id = None
         existing_row_idx = None
         for i, row in enumerate(index_rows, start=2):
             if len(row) >= 2 and row[1].strip() == str(REGISTRY_FORUM_CHANNEL_ID):
-                existing_msg_id = int(row[2]) if len(row) > 2 and row[2].strip() else None
+                existing_thread_id = int(row[2]) if len(row) > 2 and row[2].strip() else None
                 existing_row_idx = i
                 break
 
-        if existing_msg_id:
-            for thread in list(forum.threads):
-                try:
-                    msg = await thread.fetch_message(existing_msg_id)
-                    await msg.edit(content=content)
+        if existing_thread_id:
+            try:
+                thread = guild.get_thread(existing_thread_id)
+                if not thread:
+                    thread = await guild.fetch_channel(existing_thread_id)
+                # Edit the second message (first is the guidance blurb)
+                msgs = []
+                async for msg in thread.history(limit=10, oldest_first=True):
+                    msgs.append(msg)
+                # msgs[0] = starter blurb, msgs[1] = index content, msgs[2+] = readme
+                if len(msgs) >= 2:
+                    await msgs[1].edit(content=content)
                     print("Archive index updated")
                     return
-                except Exception:
-                    continue
-            async for thread in forum.archived_threads(limit=20):
-                try:
-                    msg = await thread.fetch_message(existing_msg_id)
-                    await msg.edit(content=content)
-                    print("Archive index updated")
-                    return
-                except Exception:
-                    continue
+            except Exception as e:
+                print(f"Index edit error: {e}")
+                # Fall through to create new thread
 
         result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
@@ -1320,7 +1320,6 @@ async def update_archive_index(guild):
         if len(content) <= 1900:
             chunks = [content]
         else:
-            # Split by group sections
             sections = content.split("\n\n")
             current = ""
             for section in sections:
@@ -1333,11 +1332,11 @@ async def update_archive_index(guild):
             if current:
                 chunks.append(current.strip())
 
-        index_msg = None
         for chunk in chunks:
             await asyncio.sleep(0.5)
-            index_msg = await result.thread.send(chunk)
-        msg_id = index_msg.id if index_msg else None
+            await result.thread.send(chunk)
+
+        thread_id = result.thread.id
 
         await asyncio.sleep(0.5)
         readme = (
@@ -1353,9 +1352,9 @@ async def update_archive_index(guild):
         await result.thread.send(readme)
 
         if existing_row_idx:
-            index_posts_ws.update_cell(existing_row_idx, 3, str(msg_id))
+            index_posts_ws.update_cell(existing_row_idx, 3, str(thread_id))
         else:
-            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(msg_id)])
+            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(thread_id)])
         print("Archive index created")
 
     except Exception as e:
