@@ -25,6 +25,44 @@ def gspread_retry(func, *args, retries=5, **kwargs):
             else:
                 raise
 
+# ---------------------------------------------------------------------------
+# In-memory sheet cache — reduces Google Sheets API calls
+# ---------------------------------------------------------------------------
+class SheetCache:
+    """Simple TTL cache for gspread worksheet data.
+    Stores a snapshot per worksheet, refreshes after TTL seconds or on invalidation.
+    Writes should call invalidate() so the next read fetches fresh data.
+    """
+    def __init__(self, ttl=60):
+        self._ttl = ttl
+        self._cache = {}   # ws_name -> {'data': [...], 'ts': float}
+
+    def get(self, ws, fetch_fn):
+        """Return cached data or fetch fresh. fetch_fn is a callable e.g. lambda: ws.get_all_values()[1:]"""
+        name = ws.title
+        entry = self._cache.get(name)
+        now = time.time()
+        if entry and (now - entry['ts']) < self._ttl:
+            return entry['data']
+        data = fetch_fn()
+        self._cache[name] = {'data': data, 'ts': now}
+        return data
+
+    def invalidate(self, ws):
+        """Force next read to fetch fresh data for this worksheet."""
+        self._cache.pop(ws.title, None)
+
+    def invalidate_all(self):
+        self._cache.clear()
+
+_sheet_cache = SheetCache(ttl=60)
+
+# ---------------------------------------------------------------------------
+# Cached sheet accessors
+# ---------------------------------------------------------------------------
+# NOTE: cached_submissions/players/leaderboard_data/bounty/bounty_players
+# are defined after worksheet objects are initialised (see below)
+
 # Per-guild submission lock to prevent concurrent submission conflicts
 _submission_locks = {}
 _registry_lock = asyncio.Lock()
@@ -129,6 +167,28 @@ except Exception:
     except Exception as e:
         print(f"IndexPosts sheet init error: {e}")
         index_posts_ws = None
+
+# ---------------------------------------------------------------------------
+# Cached sheet accessors — use these instead of bare get_all_values()
+# All worksheets are now initialised so these references are safe.
+# Call _sheet_cache.invalidate(ws) after any write to that sheet.
+# ---------------------------------------------------------------------------
+def cached_submissions():
+    return _sheet_cache.get(submissions_ws, lambda: submissions_ws.get_all_values()[1:])
+
+def cached_players():
+    return _sheet_cache.get(players_ws, lambda: players_ws.get_all_values()[1:])
+
+def cached_leaderboard_data():
+    return _sheet_cache.get(leaderboard_data_ws, lambda: leaderboard_data_ws.get_all_values()[1:])
+
+def cached_bounty_ws():
+    if not bounty_ws:
+        return []
+    return _sheet_cache.get(bounty_ws, lambda: bounty_ws.get_all_values()[1:])
+
+def cached_bounty_players():
+    return _sheet_cache.get(bounty_players_ws, lambda: bounty_players_ws.get_all_values()[1:])
 
 REGISTRY_FORUM_CHANNEL_ID = 1519127645286170654  # butlers-archive forum
 MAP_RECORDS_FORUM_ID     = 1460730790559092888  # map-records forum
@@ -536,7 +596,7 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     weapon_marks = {}
 
     # --- Source 1: Submissions sheet ---
-    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
     for row in subs:
         if len(row) < 13:
             continue
@@ -571,7 +631,7 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     # Only add plain weapon key if no subclass-keyed entry already exists for this weapon
     # (avoids double-counting shared weapons like Greatsword across Knight/Vanguard)
     try:
-        ld_rows = (cached_data or {}).get('leaderboard_data') or leaderboard_data_ws.get_all_values()[1:]
+        ld_rows = (cached_data or {}).get('leaderboard_data') or cached_leaderboard_data()
         for row in ld_rows:
             if len(row) < 6:
                 continue
@@ -766,7 +826,7 @@ def get_special_ops_for_player(discord_id, cached_data=None):
 
 def get_feats_for_player(discord_id, cached_data=None):
     """Get all feat submissions (200TD, 100K, Triple, Predator, Flawless) with links."""
-    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
     discord_id_str = str(discord_id)
     feats = []  # list of (feat_combo_emojis, link)
     seen_links = set()  # deduplicate across all sources by link
@@ -802,7 +862,7 @@ def get_feats_for_player(discord_id, cached_data=None):
         'Flawless':      FEAT_EMOJIS['Flawless'],
     }
     try:
-        ld_rows = (cached_data or {}).get('leaderboard_data') or leaderboard_data_ws.get_all_values()[1:]
+        ld_rows = (cached_data or {}).get('leaderboard_data') or cached_leaderboard_data()
         for row in ld_rows:
             if len(row) < 5 or row[2].strip() != discord_id_str:
                 continue
@@ -853,7 +913,7 @@ def get_feats_for_player(discord_id, cached_data=None):
 
 def get_mastered_weapons_for_player(discord_id, cached_data=None):
     """Weapons with 100+ submissions. Checks Submissions sheet and LegacyMarks."""
-    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
     discord_id_str = str(discord_id)
     weapon_counts = {}
     for row in subs:
@@ -1673,14 +1733,16 @@ def get_all_weapons_for_class(selected_class):
 def upsert_player(discord_id, discord_name):
     """Returns True if this is a new player."""
     try:
-        rows = players_ws.get_all_values()
+        rows = cached_players()
         discord_id_str = str(discord_id)
-        for i, row in enumerate(rows[1:], start=2):
+        for i, row in enumerate(rows, start=2):
             if row and row[0] == discord_id_str:
                 if len(row) < 2 or row[1] != discord_name:
                     players_ws.update_cell(i, 2, discord_name)
+                    _sheet_cache.invalidate(players_ws)
                 return False
         players_ws.append_row([discord_id_str, discord_name, ""])
+        _sheet_cache.invalidate(players_ws)
         return True
     except Exception as e:
         print(f"Player upsert error: {e}")
@@ -1694,6 +1756,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
     ])
+    _sheet_cache.invalidate(submissions_ws)
     return upsert_player(discord_id, discord_name)
 
 GUILD_ID = 1324379304544567356
@@ -1723,7 +1786,7 @@ async def weekly_snapshot():
         if now.weekday() != 0:
             return
 
-        subs = submissions_ws.get_all_values()[1:]
+        subs = cached_submissions()
         total_submissions = len(subs)
 
         # Submissions in the last 7 days using timestamp column (col 0)
@@ -3401,7 +3464,9 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
 
 def get_active_bounty():
     """Return the active bounty row as a dict, or None."""
-    rows = bounty_ws.get_all_values()
+    if not bounty_ws:
+        return None
+    rows = [bounty_ws.row_values(1)] + cached_bounty_ws()  # header + cached data rows
     for i, row in enumerate(rows[1:], start=2):
         if len(row) >= 9 and row[8] == 'TRUE':
             return {
@@ -3457,6 +3522,7 @@ def save_bounty_state(row_idx, weapons, special_done, completions, message_id=No
     bounty_ws.update_cell(row_idx, 5, json.dumps(weapons))
     bounty_ws.update_cell(row_idx, 7, '1' if special_done else '0')
     bounty_ws.update_cell(row_idx, 8, json.dumps(completions))
+    _sheet_cache.invalidate(bounty_ws)
     if message_id:
         bounty_ws.update_cell(row_idx, 3, str(message_id))
 
@@ -3848,6 +3914,7 @@ def save_player_bounty_progress(row_idx, player_name, forum_post_id, progress):
     bounty_players_ws.update_cell(row_idx, 3, player_name)
     bounty_players_ws.update_cell(row_idx, 4, str(forum_post_id) if forum_post_id else '')
     bounty_players_ws.update_cell(row_idx, 5, json.dumps(progress))
+    _sheet_cache.invalidate(bounty_players_ws)
 
 def build_player_bounty_card(bounty, player_progress):
     """Build a personal bounty card. Uses plain text so Discord strikethrough renders."""
@@ -4198,8 +4265,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
     If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
     Titles always use all-time data regardless of window.
     """
-    all_subs = submissions_ws.get_all_values()[1:]
-    ld = leaderboard_data_ws.get_all_values()[1:]
+    all_subs = cached_submissions()
+    ld = cached_leaderboard_data()
 
     # Filter subs to week window if provided
     if week_start is not None and week_end is not None:
@@ -4257,8 +4324,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Lethality Rating — highest avg kills/td ratio shown as %, min 5 subs
-    qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 5}
+    # Lethality Rating — highest avg kills/td ratio shown as %, min 3 subs
+    qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
     lethal_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
     high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p])*100:.0f}% Kill Rate)" for p in lethal_ranked[:5]]
@@ -4410,8 +4477,11 @@ def calculate_butler_stats(week_start=None, week_end=None):
 
 
 def build_favourites_embed(stats):
-    def fmt_list(items, suffix):
-        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items))
+    def fmt_list(items, suffix, n=3):
+        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
+
+    def fmt_plain(items, n=3):
+        return "\n".join(f"{i+1}. {p}" for i, p in enumerate(items[:n]))
 
     week_label = stats.get('week_label', '')
     header = (
@@ -4433,8 +4503,8 @@ def build_favourites_embed(stats):
         f"\n"
         f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
         f"\n"
-        f"**Lethality Rating** *(Kills/TD)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['high_lethality'])) +
-        f"\n\n**Warlord** *(TD/Kill)*\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(stats['low_lethality'])) +
+        f"**Lethality Rating** *(Kills/TD, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) +
+        f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"
         f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** — {stats['grand_marshal']}\n"
@@ -4443,7 +4513,6 @@ def build_favourites_embed(stats):
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
     )
-
 
 async def update_title_roles(guild, stats):
     """Assign title roles and announce changes in #main."""
