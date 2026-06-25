@@ -2796,17 +2796,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         pass
 
     # React to the original screenshot
-    await original_message.add_reaction("<:cigar:1444893851427803298>")
+    async def safe_react(emoji):
+        try:
+            await original_message.add_reaction(emoji)
+        except Exception as e:
+            print(f"Reaction failed ({emoji}): {e}")
+
+    await safe_react("<:cigar:1444893851427803298>")
     if deaths == 0:
-        await original_message.add_reaction("<a:flawless:1360358300834599062>")
+        await safe_react("<a:flawless:1360358300834599062>")
     if kills >= 100:
-        await original_message.add_reaction("<a:100kill:1361412390339608686>")
+        await safe_react("<a:100kill:1361412390339608686>")
     if takedowns >= 200:
-        await original_message.add_reaction("<a:200tkd:1363648828414230538>")
+        await safe_react("<a:200tkd:1363648828414230538>")
     if takedowns >= 150 and deaths == 0:
-        await original_message.add_reaction("<a:predator:1366794896081555567>")
+        await safe_react("<a:predator:1366794896081555567>")
     if takedowns >= 150 and kills >= 100 and score_over_20k:
-        await original_message.add_reaction("<a:triple:1365532698260668466>")
+        await safe_react("<a:triple:1365532698260668466>")
 
     is_ranged = selected_class.startswith("Marksman")
 
@@ -2828,7 +2834,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         ]
         beats_personal_best = not player_existing or takedowns > max(player_existing)
         if qualifies_board and beats_personal_best:
-            await original_message.add_reaction("<:weapon_hs:1350656128635375698>")
+            await safe_react("<:weapon_hs:1350656128635375698>")
 
     # Update leaderboards (skip for ranged submissions)
     any_updated = False
@@ -2845,7 +2851,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"Leaderboard update error: {e}")
 
     if any_updated:
-        await original_message.add_reaction("<a:highscore:1360312918545269057>")
+        await safe_react("<a:highscore:1360312918545269057>")
         # Edit summary to add highscore bonus mark
         try:
             async for msg in original_message.channel.history(limit=10, after=original_message):
@@ -2872,7 +2878,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             )
             print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
             if bounty_hit:
-                await original_message.add_reaction("🐱")
+                await safe_react("🐱")
                 # Check if this run completed the bounty
                 _bounty = get_active_bounty()
                 if _bounty:
