@@ -1276,7 +1276,9 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             if thread.name != index_thread_name:
                 threads.append(thread)
 
-        # Deduplicate map threads: "Map - Faction" → keep first occurrence per base name
+        # Deduplicate threads by base name:
+        # - Map threads: "Map - Faction" → strip faction suffix, keep first per base name
+        # - Weapon threads: exact name, keep first occurrence (handles shared weapons across subclasses)
         seen_base_names = set()
         deduped_threads = []
         for t in sorted(threads, key=lambda t: t.name.lower()):
