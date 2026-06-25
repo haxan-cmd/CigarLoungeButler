@@ -1254,7 +1254,7 @@ def save_registry_thread_id(discord_id, player_name, thread_id):
 
 
 
-async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str):
+async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
     """Build or update a pinned index thread in a leaderboard forum."""
     try:
         forum = guild.get_channel(forum_channel_id)
@@ -1272,6 +1272,9 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         # Build alphabetical groups with bullet separators, matching player index style
         groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
         lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
+        if blurb:
+            lines.append(blurb)
+            lines.append("")
         for group_name, start, end in groups:
             group_threads = [t for t in threads if t.name and start <= t.name[0].upper() <= end]
             if not group_threads:
@@ -2591,6 +2594,63 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
         await _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k)
 
 
+
+async def check_submission_anomaly(guild, player_name, message_link, selected_weapon, selected_map, takedowns, kills):
+    """Flag suspicious submissions to butlers-notes if stats exceed 2x any server record."""
+    try:
+        notes_channel = guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
+        if not notes_channel:
+            return
+
+        flags = []
+
+        all_rows = submissions_ws.get_all_values()[1:]
+
+        # Server record: kills
+        all_kills = [int(r[8]) for r in all_rows if len(r) > 8 and r[8].strip().lstrip('-').isdigit() and int(r[8]) > 0]
+        if all_kills:
+            record_kills = max(all_kills)
+            if kills > record_kills * 2:
+                pct = int(((kills - record_kills) / record_kills) * 100)
+                flags.append(f"**Kills:** {kills} — server record is {record_kills} (+{pct}%)")
+
+        # Server record: takedowns
+        all_tds = [int(r[7]) for r in all_rows if len(r) > 7 and r[7].strip().lstrip('-').isdigit() and int(r[7]) > 0]
+        if all_tds:
+            record_tds = max(all_tds)
+            if takedowns > record_tds * 2:
+                pct = int(((takedowns - record_tds) / record_tds) * 100)
+                flags.append(f"**Takedowns:** {takedowns} — server record is {record_tds} (+{pct}%)")
+
+        # Weapon leaderboard: would this be 1st place by 20%+ gap?
+        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        weapon_scores = [int(r[3]) for r in ld_rows if r[0] == selected_weapon and len(r) > 3 and r[3].strip().isdigit()]
+        if weapon_scores:
+            current_best = max(weapon_scores)
+            if takedowns > current_best * 1.8:
+                pct = int(((takedowns - current_best) / current_best) * 100)
+                flags.append(f"**Weapon ({selected_weapon}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
+
+        # Map leaderboard: same check
+        map_scores = [int(r[3]) for r in ld_rows if r[0] == selected_map and len(r) > 3 and r[3].strip().isdigit()]
+        if map_scores:
+            current_best = max(map_scores)
+            if takedowns > current_best * 1.8:
+                pct = int(((takedowns - current_best) / current_best) * 100)
+                flags.append(f"**Map ({selected_map}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
+
+        if flags:
+            alert = (
+                f"⚠️ **Suspicious submission — {player_name}**\n"
+                + "\n".join(flags)
+                + f"\n{message_link}"
+            )
+            await notes_channel.send(alert)
+
+    except Exception as e:
+        print(f"Anomaly check error: {e}")
+
+
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     feats = []
     if kills >= 100:
@@ -2659,6 +2719,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         submission_row = len(submissions_ws.get_all_values())
     except Exception as e:
         print(f"Sheet logging error: {e}")
+
+    # Anomaly check — alert butlers-notes if stats look suspicious
+    try:
+        await check_submission_anomaly(
+            interaction.guild,
+            interaction.user.display_name,
+            message_link,
+            selected_weapon,
+            selected_map,
+            takedowns,
+            kills
+        )
+    except Exception as e:
+        print(f"Anomaly check call error: {e}")
 
     # Post summary with Edit button
     edit_view = EditSubmissionView(
@@ -3406,9 +3480,65 @@ async def bounty_end(interaction: discord.Interaction):
     # Mark inactive immediately so no new completions count
     bounty_ws.update_cell(bounty['row'], 9, 'FALSE')
 
+    guild = interaction.guild
+    closed_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    completed_ids = {str(c['id']) for c in bounty['completions']}
+
+    # ── ARCHIVE SNAPSHOT ─────────────────────────────────────────────────────
+    try:
+        try:
+            archive_ws = sheet.worksheet('BountyArchive')
+        except Exception:
+            archive_ws = sheet.add_worksheet(title='BountyArchive', rows=1000, cols=6)
+            gspread_retry(archive_ws.append_row, ['BountyTitle', 'PlayerID', 'PlayerName', 'Progress', 'Completed', 'ClosedDate'])
+
+        player_rows = gspread_retry(bounty_players_ws.get_all_values)[1:]
+        for row in player_rows:
+            if not row or len(row) < 5:
+                continue
+            if row[0].strip() != bounty['title']:
+                continue
+            player_id  = row[1].strip()
+            player_name = row[2].strip()
+            progress   = row[4].strip() if len(row) > 4 else '{}'
+            completed  = 'TRUE' if player_id in completed_ids else 'FALSE'
+            gspread_retry(archive_ws.append_row, [
+                bounty['title'], player_id, player_name, progress, completed, closed_date
+            ])
+        print(f"BountyArchive: snapshot saved for {bounty['title']}")
+    except Exception as e:
+        print(f"BountyArchive snapshot error: {e}")
+
+    # ── STAMP FORUM CARD THREADS AS CLOSED ───────────────────────────────────
+    forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+    try:
+        forum_channel = guild.get_channel(forum_channel_id)
+        if not forum_channel:
+            forum_channel = await guild.fetch_channel(forum_channel_id)
+        if forum_channel:
+            threads = list(forum_channel.threads)
+            async for t in forum_channel.archived_threads(limit=None):
+                threads.append(t)
+            for thread in threads:
+                try:
+                    msgs = []
+                    async for msg in thread.history(limit=1, oldest_first=True):
+                        msgs.append(msg)
+                    if msgs:
+                        original = msgs[0].content or ''
+                        if '🔒 CLOSED' not in original:
+                            stamp = f"🔒 **CLOSED — {bounty['title']}**"
+                            new_content = f"{stamp}\n\n{original}".strip()
+                            await msgs[0].edit(content=new_content)
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    print(f"Bounty card stamp error ({thread.name}): {e}")
+        print(f"Bounty cards stamped CLOSED for {bounty['title']}")
+    except Exception as e:
+        print(f"Bounty card stamp error: {e}")
+
     # Wait 24 hours then delete the channel and role
     await asyncio.sleep(86400)
-    guild = interaction.guild
     channel = guild.get_channel(bounty['channel_id'])
     if channel:
         await channel.delete(reason=f"Bounty ended: {bounty['title']}")
@@ -4333,22 +4463,47 @@ async def purge_archive(interaction: discord.Interaction):
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def update_index(interaction: discord.Interaction, forum: str = "all"):
     await interaction.response.defer(ephemeral=True)
+
+    # Build blurbs
+    weapons_blurb = (
+        "**What qualifies?** Your highest kill count with a given weapon on a single submitted run. "
+        "VIP map submissions do not count toward weapon high scores."
+    )
+    map_blurb = (
+        "**What qualifies?** Your highest raw takedown count on a single submitted run for each map."
+    )
+
+    # Bounty blurb — pull active bounty weapons dynamically
+    bounty_blurb = "**What is this?** A roughly monthly community challenge. Only specific weapons count for each bounty."
+    try:
+        active_bounty = get_active_bounty()
+        if active_bounty:
+            weapon_list = ', '.join(active_bounty['weapons'].keys())
+            bounty_blurb = (
+                f"**What is this?** A roughly monthly community challenge. "
+                f"Only submitted runs count, and only for the bounty's weapons.\n"
+                f"**Current bounty:** {active_bounty['title']}\n"
+                f"**Qualifying weapons:** {weapon_list}"
+            )
+    except Exception as e:
+        print(f"Bounty blurb fetch error: {e}")
+
     LEADERBOARD_FORUMS = {
-        "map_records":  (MAP_RECORDS_FORUM_ID,  "Map Records"),
-        "weapons_2h":   (WEAPONS_2H_FORUM_ID,   "2H Weapons"),
-        "weapons_1h":   (WEAPONS_1H_FORUM_ID,   "1H Weapons"),
-        "feats":        (FEATS_FORUM_ID,         "Feats of War"),
-        "bounty_cards": (BOUNTY_CARDS_FORUM_ID,  "Bounty Cards"),
+        "map_records":  (MAP_RECORDS_FORUM_ID,  "Map Records",  map_blurb),
+        "weapons_2h":   (WEAPONS_2H_FORUM_ID,   "2H Weapons",   weapons_blurb),
+        "weapons_1h":   (WEAPONS_1H_FORUM_ID,   "1H Weapons",   weapons_blurb),
+        "feats":        (FEATS_FORUM_ID,         "Feats of War", None),
+        "bounty_cards": (BOUNTY_CARDS_FORUM_ID,  "Bounty Cards", bounty_blurb),
     }
     if forum == "all":
         await update_archive_index(interaction.guild)
-        for channel_id, label in LEADERBOARD_FORUMS.values():
-            await update_leaderboard_index(interaction.guild, channel_id, label)
+        for channel_id, label, blurb in LEADERBOARD_FORUMS.values():
+            await update_leaderboard_index(interaction.guild, channel_id, label, blurb)
     elif forum == "archive":
         await update_archive_index(interaction.guild)
     elif forum in LEADERBOARD_FORUMS:
-        channel_id, label = LEADERBOARD_FORUMS[forum]
-        await update_leaderboard_index(interaction.guild, channel_id, label)
+        channel_id, label, blurb = LEADERBOARD_FORUMS[forum]
+        await update_leaderboard_index(interaction.guild, channel_id, label, blurb)
     await interaction.followup.send("Index updated.", ephemeral=True)
 
 
