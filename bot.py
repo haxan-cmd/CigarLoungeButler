@@ -5275,6 +5275,143 @@ async def title_guide(interaction: discord.Interaction):
     await interaction.response.send_message("Title guide posted.", ephemeral=True)
 
 
+
+@bot.tree.command(name="remove_submission", description="Remove a fake or erroneous submission and roll back all affected tables (admin only).")
+@discord.app_commands.describe(message_link="The Discord message link to the original submission")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def remove_submission(interaction: discord.Interaction, message_link: str):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    report = []
+
+    try:
+        # ── 1. FIND & DELETE FROM SUBMISSIONS ────────────────────────────────
+        sub_rows = submissions_ws.get_all_values()
+        sub_row_idx = None
+        sub_data = None
+        for i, row in enumerate(sub_rows[1:], start=2):
+            if len(row) >= 13 and row[12].strip() == message_link.strip():
+                sub_row_idx = i
+                sub_data = row
+                break
+
+        if not sub_data:
+            await interaction.followup.send("❌ No submission found with that message link.", ephemeral=True)
+            return
+
+        player_name = sub_data[1].strip()
+        discord_id  = sub_data[2].strip()
+        weapon      = sub_data[3].strip()
+        map_name    = sub_data[5].strip()
+        try:
+            takedowns = int(sub_data[7])
+        except Exception:
+            takedowns = 0
+
+        submissions_ws.delete_rows(sub_row_idx)
+        report.append(f"✅ Submissions: row deleted ({player_name}, {weapon}, {map_name})")
+
+        # ── 2. LEADERBOARDDATA — remove rows with this message link ──────────
+        ld_rows = leaderboard_data_ws.get_all_values()
+        ld_deleted = 0
+        affected_lb_names = set()
+        # Iterate in reverse so row deletion doesn't shift indices
+        for i in range(len(ld_rows) - 1, 0, -1):
+            row = ld_rows[i]
+            if len(row) >= 5 and row[4].strip() == message_link.strip():
+                affected_lb_names.add(row[0].strip())
+                leaderboard_data_ws.delete_rows(i + 1)
+                ld_deleted += 1
+        report.append(f"✅ LeaderboardData: {ld_deleted} row(s) deleted, affected boards: {', '.join(affected_lb_names) or 'none'}")
+
+        # ── 3. REBUILD AFFECTED LEADERBOARD DISCORD POSTS ────────────────────
+        if affected_lb_names:
+            all_lb_rows = leaderboards_ws.get_all_records()
+            rebuilt = []
+            for lb_name in affected_lb_names:
+                lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+                if not lb_row:
+                    continue
+                try:
+                    entries = get_leaderboard_entries(lb_name)
+                    entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                    overflow = 0
+                    if lb_name in ("100 Kills", "200 Takedowns"):
+                        overflow = max(0, len(entries) - 50)
+                        entries = entries[:50]
+                    chunks = format_leaderboard_text(entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
+                    thread_id = int(lb_row['Thread ID'])
+                    message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+                    thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                    packed = pack_chunks_into_slots(chunks, len(message_ids))
+                    for idx, mid in enumerate(message_ids):
+                        try:
+                            msg = await thread.fetch_message(mid)
+                            await msg.edit(content=packed[idx] if idx < len(packed) else "ᅠ")
+                        except Exception as e:
+                            print(f"Leaderboard msg edit error ({lb_name}): {e}")
+                    rebuilt.append(lb_name)
+                except Exception as e:
+                    print(f"Leaderboard rebuild error ({lb_name}): {e}")
+            report.append(f"✅ Leaderboards rebuilt: {', '.join(rebuilt) or 'none'}")
+
+        # ── 4. BOUNTY ROLLBACK ────────────────────────────────────────────────
+        bounty = get_active_bounty()
+        if bounty:
+            matched_key = next((k for k in bounty['weapons'] if k.lower() == weapon.lower()), None)
+            if matched_key and takedowns >= 100:
+                player_row = get_player_bounty_progress(bounty['title'], discord_id)
+                if player_row:
+                    progress = player_row['progress']
+                    raw = progress.get(matched_key, 0)
+                    cur = raw['current'] if isinstance(raw, dict) else int(raw)
+                    if cur > 0:
+                        progress[matched_key] = cur - 1
+                        save_player_bounty_progress(player_row['row'], player_name, player_row['forum_post_id'], progress)
+                        # Update bounty card in forum
+                        forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+                        forum_channel = guild.get_channel(forum_channel_id)
+                        if forum_channel and player_row['forum_post_id']:
+                            try:
+                                forum_thread = forum_channel.get_thread(player_row['forum_post_id']) or await guild.fetch_channel(player_row['forum_post_id'])
+                                msgs = []
+                                async for msg in forum_thread.history(limit=5, oldest_first=True):
+                                    msgs.append(msg)
+                                bot_msgs = [m for m in msgs if m.author.bot]
+                                if bot_msgs:
+                                    await bot_msgs[-1].edit(content=build_player_bounty_card(bounty, progress))
+                            except Exception as e:
+                                print(f"Bounty card rollback error: {e}")
+                        # Decrement global weapon counter
+                        weapons = bounty['weapons']
+                        if matched_key in weapons:
+                            weapons[matched_key]['current'] = max(0, weapons[matched_key]['current'] - 1)
+                            save_bounty_state(bounty['row'], weapons, bounty['special_done'], bounty['completions'])
+                        report.append(f"✅ Bounty: decremented {matched_key} for {player_name}")
+                    else:
+                        report.append(f"⚠️ Bounty: {player_name} already at 0 for {matched_key}, skipped")
+                else:
+                    report.append(f"ℹ️ Bounty: no progress row found for {player_name}")
+            else:
+                report.append(f"ℹ️ Bounty: weapon {weapon} not on active bounty or TDs < 100, skipped")
+
+        # ── 5. REFRESH REGISTRY CARD ──────────────────────────────────────────
+        try:
+            discord_id_int = int(discord_id)
+            await create_or_update_registry_card(guild, discord_id_int, player_name)
+            report.append(f"✅ Registry card refreshed for {player_name}")
+        except Exception as e:
+            report.append(f"⚠️ Registry card refresh failed: {e}")
+
+        summary = f"**Submission removed — {player_name}**\n" + "\n".join(report)
+        await interaction.followup.send(summary, ephemeral=True)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error during removal: {e}", ephemeral=True)
+
+
 import traceback
 try:
     bot.run(TOKEN)
