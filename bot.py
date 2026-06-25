@@ -1317,6 +1317,18 @@ async def update_archive_index(guild):
         await asyncio.sleep(0.5)
         index_msg = await result.thread.send(content)
         msg_id = index_msg.id
+        await asyncio.sleep(0.5)
+        readme = (
+            "📌 **How Your Registry Card Works**\n\n"
+            "Your card is built from your submitted runs. If something looks missing or outdated, run `/refresh_card` to regenerate it.\n\n"
+            "**Common reasons data may be missing:**\n"
+            "• Your run was never reacted to by a mod — unreacted posts are not logged\n"
+            "• You submitted before the bot was tracking that stat\n"
+            "• Your name changed since your legacy card was created\n\n"
+            "**Legacy data** (pre-bot runs) was imported from the old registry. If your legacy marks are missing or wrong, contact a mod.\n\n"
+            "**Special Ops** entries (Knife, Mallet, Fist and Shield) — some are awarded manually, some come from the leaderboards under Feats of War. Contact a mod if yours is missing."
+        )
+        await result.thread.send(readme)
 
         if existing_row_idx:
             index_posts_ws.update_cell(existing_row_idx, 3, str(msg_id))
@@ -1328,7 +1340,7 @@ async def update_archive_index(guild):
         print(f"Archive index error: {e}")
 
 
-async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None):
+async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None, skip_index=False):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
     try:
@@ -1384,7 +1396,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
                 save_registry_thread_id(discord_id, player_name, thread.id)
                 print(f"Registry card updated for {player_name}")
-                asyncio.create_task(update_archive_index(guild))
+                if not skip_index:
+                    asyncio.create_task(update_archive_index(guild))
                 return
             except Exception as e:
                 print(f"Registry thread edit error for {player_name}: {e}")
@@ -1432,7 +1445,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
         save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
-        asyncio.create_task(update_archive_index(guild))
+        if not skip_index:
+            asyncio.create_task(update_archive_index(guild))
 
     except Exception as e:
         print(f"Registry card error for {player_name}: {e}")
@@ -2380,7 +2394,7 @@ async def _apply_edit(interaction, ev):
 
     # Rebuild summary
     new_summary = (
-        f"⚔️ **Run Submitted** *(edited)*\n"
+        f"**Run Submitted** *(edited)*\n"
         f"{ev.author.display_name}\n"
         f"{ev.weapon} • {ev.cls}\n"
         f"{ev.map_name} — {ev.faction}\n"
@@ -2422,7 +2436,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     feats_str = ", ".join(feats) if feats else None
 
     summary = (
-        f"⚔️ **Run Submitted**\n"
+        f"**Run Submitted**\n"
         f"{interaction.user.display_name}\n"
         f"{selected_weapon} • {selected_class}\n"
         f"{selected_map} — {faction}\n"
@@ -4286,6 +4300,7 @@ async def import_single(interaction: discord.Interaction, thread_name: str):
                 pass
 
         await _process_registry_thread(interaction.guild, target, cached_data, resolved_name, discord_id)
+        await update_archive_index(interaction.guild)
         await interaction.followup.send(f"Import complete for **{resolved_name}**.", ephemeral=True)
     except Exception as e:
         import traceback
@@ -4374,6 +4389,7 @@ async def import_registry(interaction: discord.Interaction):
                 skipped += 1
                 print(f"Skipping thread '{thread_name}' — already processed or not eligible")
 
+        await update_archive_index(interaction.guild)
         await interaction.followup.send(f"Import complete — {imported} cards created, {skipped} skipped (no submissions).", ephemeral=True)
     except Exception as e:
         import traceback
@@ -4539,7 +4555,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
                 break
 
     if discord_id:
-        await create_or_update_registry_card(guild, discord_id, player_name, cached_data)
+        await create_or_update_registry_card(guild, discord_id, player_name, cached_data, skip_index=True)
         print(f"Registry card created for {player_name} (discord_id={discord_id})")
     else:
         print(f"No Discord ID found for {player_name}, skipping card creation")
