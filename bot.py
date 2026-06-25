@@ -157,6 +157,16 @@ except Exception:
         print(f"Snapshots sheet init error: {e}")
         snapshots_ws = None
 
+# ButlersArchive sheet — player summary for ad hoc review and manual edits
+try:
+    butlers_archive_ws = sheet.worksheet('ButlersArchive')
+except gspread.exceptions.WorksheetNotFound:
+    butlers_archive_ws = sheet.add_worksheet(title='ButlersArchive', rows=500, cols=8)
+    butlers_archive_ws.append_row(['DiscordID','PlayerName','ThreadID','TotalMarks','Submissions','LastSubmission','WeaponMarks','ClassMarks'])
+except Exception as e:
+    print(f"ButlersArchive sheet init error: {e}")
+    butlers_archive_ws = None
+
 # IndexPosts sheet — tracks pinned index post message IDs per forum
 try:
     index_posts_ws = sheet.worksheet('IndexPosts')
@@ -167,6 +177,33 @@ except Exception:
     except Exception as e:
         print(f"IndexPosts sheet init error: {e}")
         index_posts_ws = None
+
+# ---------------------------------------------------------------------------
+# ButlersArchive updater
+# ---------------------------------------------------------------------------
+def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks, submission_count, last_submission, weapon_marks, class_marks):
+    """Upsert a player row in ButlersArchive sheet."""
+    if not butlers_archive_ws:
+        return
+    try:
+        discord_id_str = str(discord_id)
+        rows = butlers_archive_ws.get_all_values()
+        for i, row in enumerate(rows[1:], start=2):
+            if row and row[0].strip() == discord_id_str:
+                butlers_archive_ws.update(f'A{i}:H{i}', [[
+                    discord_id_str, player_name, str(thread_id) if thread_id else '',
+                    str(total_marks), str(submission_count), last_submission,
+                    weapon_marks, class_marks
+                ]])
+                return
+        # New row
+        butlers_archive_ws.append_row([
+            discord_id_str, player_name, str(thread_id) if thread_id else '',
+            str(total_marks), str(submission_count), last_submission,
+            weapon_marks, class_marks
+        ])
+    except Exception as e:
+        print(f"ButlersArchive update error: {e}")
 
 # ---------------------------------------------------------------------------
 # Cached sheet accessors — use these instead of bare get_all_values()
@@ -3069,6 +3106,55 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Registry card update error: {e}")
 
+        # Update bounty cards index
+        try:
+            bounty = get_active_bounty()
+            if bounty:
+                bounty_blurb = (
+                    f"**What is this?** A roughly monthly community challenge. "
+                    f"Only submitted runs count, and only for the bounty's weapons.\n"
+                    f"**Current bounty:** {bounty['title']}\n"
+                    f"**Qualifying weapons:** {chr(44).join(bounty['weapons'].keys())}"
+                )
+                await update_leaderboard_index(_guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards", bounty_blurb)
+        except Exception as e:
+            print(f"Bounty cards index update error: {e}")
+
+        # Update ButlersArchive summary sheet
+        try:
+            subs = cached_submissions()
+            discord_id_str = str(_user_id)
+            player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
+            submission_count = len(player_subs)
+            last_submission = player_subs[-1][0] if player_subs else ''
+            # Weapon marks summary
+            weapon_marks_data = calculate_weapon_marks_for_player(_user_id)
+            weapon_marks_str = ', '.join(f"{w}: {int(v)}" for w, v in sorted(weapon_marks_data.items(), key=lambda x: -x[1]) if v > 0) if weapon_marks_data else ''
+            # Class marks summary (count submissions per base class)
+            class_counts = {}
+            for r in player_subs:
+                if len(r) > 4:
+                    cls = r[4].strip()
+                    base = cls.split('(')[0].strip() if '(' in cls else cls
+                    class_counts[base] = class_counts.get(base, 0) + 1
+            class_marks_str = ', '.join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
+            # Total marks
+            total_marks = sum(weapon_marks_data.values()) if weapon_marks_data else 0
+            # Thread ID from registry
+            reg_rows = registry_ws.get_all_values()[1:]
+            thread_id = None
+            for r in reg_rows:
+                if len(r) > 2 and r[0].strip() == discord_id_str:
+                    thread_id = r[2].strip() or None
+                    break
+            update_butlers_archive_row(
+                _user_id, _user_name, thread_id,
+                total_marks, submission_count, last_submission,
+                weapon_marks_str, class_marks_str
+            )
+        except Exception as e:
+            print(f"ButlersArchive bg update error: {e}")
+
         # Update Butler's Favourites
         try:
             if BUTLERS_FAVOURITES_CHANNEL_ID:
@@ -5714,6 +5800,63 @@ async def bulk_refresh_cards(interaction: discord.Interaction):
             msg += f" {failed} failed (check logs)."
         await interaction.followup.send(msg, ephemeral=True)
 
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="populate_butlers_archive", description="Pre-populate ButlersArchive sheet for all players (admin only).")
+async def populate_butlers_archive(interaction: discord.Interaction):
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if not butlers_archive_ws:
+            await interaction.followup.send("ButlersArchive sheet not found.", ephemeral=True)
+            return
+        players = players_ws.get_all_values()[1:]
+        subs = cached_submissions()
+        reg_rows = registry_ws.get_all_values()[1:]
+        total = 0
+        failed = 0
+        for player_row in players:
+            if not player_row or not player_row[0].strip():
+                continue
+            discord_id_str = player_row[0].strip()
+            player_name = player_row[1].strip() if len(player_row) > 1 else discord_id_str
+            try:
+                player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
+                submission_count = len(player_subs)
+                last_submission = player_subs[-1][0] if player_subs else ""
+                weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str))
+                weapon_marks_str = ", ".join(f"{w}: {int(v)}" for w, v in sorted(weapon_marks_data.items(), key=lambda x: -x[1]) if v > 0) if weapon_marks_data else ""
+                class_counts = {}
+                for r in player_subs:
+                    if len(r) > 4:
+                        cls = r[4].strip()
+                        base = cls.split("(")[0].strip() if "(" in cls else cls
+                        class_counts[base] = class_counts.get(base, 0) + 1
+                class_marks_str = ", ".join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
+                total_marks = sum(weapon_marks_data.values()) if weapon_marks_data else 0
+                thread_id = None
+                for r in reg_rows:
+                    if len(r) > 2 and r[0].strip() == discord_id_str:
+                        thread_id = r[2].strip() or None
+                        break
+                update_butlers_archive_row(
+                    discord_id_str, player_name, thread_id,
+                    total_marks, submission_count, last_submission,
+                    weapon_marks_str, class_marks_str
+                )
+                total += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"ButlersArchive prepop error for {player_name}: {e}")
+                failed += 1
+        msg = f"✅ ButlersArchive populated — {total} players."
+        if failed:
+            msg += f" {failed} failed (check logs)."
+        await interaction.followup.send(msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
