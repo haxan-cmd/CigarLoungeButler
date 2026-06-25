@@ -1697,14 +1697,7 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     if not weekly_snapshot.is_running():
         weekly_snapshot.start()
-    try:
-        guild = bot.get_guild(GUILD_ID)
-        if guild:
-            notes = guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
-            if notes:
-                await notes.send("I have returned. Nobody asked, I'm sure.")
-    except Exception as e:
-        print(f"Startup message error: {e}")
+
 
 
 @tasks.loop(hours=168)  # 7 days
