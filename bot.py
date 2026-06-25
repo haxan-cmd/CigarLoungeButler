@@ -3307,7 +3307,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
             # ── MILESTONE ANNOUNCEMENTS ───────────────────────────────────
             try:
+                is_first_submission = submission_count == 1
                 milestones = detect_weapon_milestones(old_flat, flat_marks)
+                # Suppress Bronze (threshold 1) unless this is the player's very first submission
+                milestones = [(w, t, r) for w, t, r in milestones if t != 1 or is_first_submission]
                 if milestones:
                     main_ch = _guild.get_channel(MAIN_CHANNEL_ID) or await _guild.fetch_channel(MAIN_CHANNEL_ID)
                     if main_ch:
