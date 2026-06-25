@@ -1331,9 +1331,27 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             return
 
         index_thread_name = f"📋 {index_label} Index"
-        threads = [t for t in forum.threads if t.name != index_thread_name]
+        # Fetch active threads via API to avoid cache misses after restart
+        seen_ids = set()
+        threads = []
+        try:
+            active = await guild.http.get_active_threads(guild.id)
+            for t_data in active.get('threads', []):
+                if int(t_data['parent_id']) == forum_channel_id and t_data['name'] != index_thread_name:
+                    t_obj = forum.get_thread(int(t_data['id']))
+                    if not t_obj:
+                        t_obj = await guild.fetch_channel(int(t_data['id']))
+                    threads.append(t_obj)
+                    seen_ids.add(int(t_data['id']))
+        except Exception as e:
+            print(f"Active threads fetch error: {e}")
+            # Fallback to cache
+            for t in forum.threads:
+                if t.name != index_thread_name:
+                    threads.append(t)
+                    seen_ids.add(t.id)
         async for thread in forum.archived_threads(limit=None):
-            if thread.name != index_thread_name:
+            if thread.name != index_thread_name and thread.id not in seen_ids:
                 threads.append(thread)
 
         # Deduplicate threads by base name:
