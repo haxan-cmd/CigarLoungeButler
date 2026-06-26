@@ -2412,8 +2412,8 @@ Special instructions:
 - CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it.
-- If someone is rude, insulting, or hostile toward you, respond with <:idiot:1516828153866227884> and a single dry dismissal. Do not engage further.
-- Players with the Idiot role should be addressed slowly and simply, as if explaining something to a confused child. Be condescending but patient. Use the <:idiot:1516828153866227884> emoji."""
+- If someone is rude, insulting, or hostile toward you, respond with <a:idiot_daze:1520130932584223012> and a single dry dismissal. Do not engage further.
+- Players with the Idiot role should be addressed slowly and simply, as if explaining something to a confused child. Be condescending but patient. Use the <a:idiot_daze:1520130932584223012> emoji."""
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
@@ -2566,7 +2566,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         )
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
-        idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending. Use the <:idiot:1516828153866227884> emoji at least once in your response.]' if is_idiot else ''
+        idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending. Use the <a:idiot_daze:1520130932584223012> emoji at least once in your response.]' if is_idiot else ''
         user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = _anthropic_client.messages.create(
@@ -2795,7 +2795,14 @@ async def on_message(message):
                     if bomb_count is not None:
                         player_stats_ctx += f"\nServer-wide 100+ TD runs with {mentioned_weapon}: {bomb_count}"
 
+            # Detect rude messages — force idiot emoji regardless of AI response
+            rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
+            is_rude = any(w in resolved_message.lower() for w in rude_words)
+
             result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot)
+            if result and is_rude:
+                response_text, needs_eyeball = result
+                result = (f"<a:idiot_daze:1520130932584223012> {response_text}", needs_eyeball)
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
