@@ -2358,52 +2358,50 @@ async def on_message(message):
 
     channel_id = message.channel.id
     is_main = channel_id == MAIN_CHANNEL_ID
-    is_feedback = channel_id == BUTLER_FEEDBACK_CHANNEL_ID
     is_pinged = bot.user in message.mentions
 
-    # ── AI-powered Butler responses ───────────────────────────────────────────
-    if (is_main or is_feedback or is_pinged) and _anthropic_client:
-        msg_words = message.content.split()
-        # Skip very short messages unless pinged or feedback
-        if len(msg_words) >= 5 or is_pinged or is_feedback:
-            # Only respond to registered players
-            discord_id_str = str(message.author.id)
-            is_registered = any(
-                row and row[0].strip() == discord_id_str
-                for row in players_ws.get_all_values()[1:]
-            )
-            if not is_registered:
-                return
+    content_lower = message.content.lower()
+    mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
 
-            now_ts = time.time()
-            last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
-            if now_ts - last > BUTLER_AI_COOLDOWN_SECONDS:
-                ctx_messages = []
-                try:
-                    async for msg in message.channel.history(limit=7, before=message):
-                        if not msg.author.bot:
-                            ctx_messages.insert(0, {
-                                'author': msg.author.display_name,
-                                'content': msg.content[:200]
-                            })
-                except Exception:
-                    pass
-                player_name = message.author.display_name
-                channel_type = 'feedback' if is_feedback else 'main'
-                result = await call_butler_ai(message.content, ctx_messages, player_name, channel_type)
-                if result:
-                    response_text, needs_eyeball = result
-                    BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
-                    if is_pinged:
-                        sent = await message.reply(response_text)
-                    else:
-                        sent = await message.channel.send(response_text)
-                    if needs_eyeball:
-                        try:
-                            await message.add_reaction('👁️')
-                        except Exception:
-                            pass
-                    return
+    # ── Main — only respond if pinged or butler/clanker mentioned ─────────────
+    should_respond = is_pinged or (is_main and mentions_butler)
+    if should_respond and _anthropic_client:
+        # Bald Female only gets a response if she pings or uses keyword
+        bald_female_id = '131581203256967168'
+        if str(message.author.id) == bald_female_id and not is_pinged and not mentions_butler:
+            return
+
+        discord_id_str = str(message.author.id)
+        is_registered = any(
+            row and row[0].strip() == discord_id_str
+            for row in players_ws.get_all_values()[1:]
+        )
+        if not is_registered:
+            return
+
+        now_ts = time.time()
+        last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
+        if now_ts - last > BUTLER_AI_COOLDOWN_SECONDS:
+            ctx_messages = []
+            try:
+                async for msg in message.channel.history(limit=7, before=message):
+                    if not msg.author.bot:
+                        ctx_messages.insert(0, {
+                            'author': msg.author.display_name,
+                            'content': msg.content[:200]
+                        })
+            except Exception:
+                pass
+            player_name = message.author.display_name
+            result = await call_butler_ai(message.content, ctx_messages, player_name, 'main')
+            if result:
+                response_text, needs_eyeball = result
+                BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
+                if is_pinged:
+                    await message.reply(response_text)
+                else:
+                    await message.channel.send(response_text)
+                return
 
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
