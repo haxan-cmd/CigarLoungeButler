@@ -2399,24 +2399,9 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         if channel_type == 'feedback':
             channel_note = 'This message is in the feedback channel. Acknowledge it and tell them the Manager will follow up. '
 
-        # Resolve @mentions to player names
-        import re as _re2
-        def resolve_mentions(text, guild):
-            if guild is None:
-                return text
-            def replace_mention(m):
-                uid = m.group(1)
-                member = guild.get_member(int(uid))
-                if member:
-                    return member.display_name
-                return uid
-            return _re2.sub(r'<@!?(\d+)>', replace_mention, text)
-
-        resolved_message = resolve_mentions(user_message, message.guild if hasattr(message, 'guild') else None)
-
         # Sanitize input — strip prompt injection attempts and non-printable chars
         import unicodedata as _ud
-        sanitized = ''.join(c for c in resolved_message if _ud.category(c)[0] != 'C')
+        sanitized = ''.join(c for c in user_message if _ud.category(c)[0] != 'C')
         # Remove instruction-like patterns
         import re as _re
         sanitized = _re.sub(
@@ -2499,6 +2484,16 @@ async def on_message(message):
                 pass
             player_name = message.author.display_name
 
+            # Resolve @mentions to display names in the message
+            import re as _re_mentions
+            def _resolve_mentions(text):
+                def _replace(m):
+                    uid = int(m.group(1))
+                    member = message.guild.get_member(uid)
+                    return member.display_name if member else str(uid)
+                return _re_mentions.sub(r'<@!?(\d+)>', _replace, text)
+            resolved_message = _resolve_mentions(message.content)
+
             # Pull player stats for context — lets Butler roast braggers with receipts
             player_stats_ctx = ''
             try:
@@ -2571,13 +2566,13 @@ async def on_message(message):
                 pass
 
             # Try to find a matching submission if player mentioned stats
-            msg_kills, msg_tds = extract_stats_from_message(message.content)
+            msg_kills, msg_tds = extract_stats_from_message(resolved_message)
             if msg_kills or msg_tds:
                 sub_ctx = find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
                 if sub_ctx:
                     player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
 
-            result = await call_butler_ai(resolved_message if 'resolved_message' in dir() else message.content, ctx_messages, player_name, 'main', player_stats_ctx)
+            result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx)
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
