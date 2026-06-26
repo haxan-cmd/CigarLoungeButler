@@ -70,7 +70,7 @@ else:
     _creds_info = json.loads(google_creds_raw)
 _creds = Credentials.from_service_account_info(_creds_info, scopes=config.SCOPES)
 gc    = gspread.authorize(_creds)
-sheet = gc.open_by_key(config.SHEET_ID)
+sheet = gspread_retry(gc.open_by_key, config.SHEET_ID)
 
 
 def _init_worksheet(name):
