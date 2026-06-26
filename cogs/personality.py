@@ -873,11 +873,39 @@ class PersonalityCog(commands.Cog):
 
                 # Add weapon bomb count if message asks about it
                 if any(w in resolved_message.lower() for w in ['how many', 'count', 'most kills', 'highest', 'most takedowns', '100 takedown']):
-                    mentioned_weapon = extract_weapon_from_message(resolved_message)
-                    if mentioned_weapon:
-                        bomb_count = count_qualifying_runs(mentioned_weapon, 100)
+                    _bw = extract_weapon_from_message(resolved_message)
+                    if _bw:
+                        bomb_count = count_qualifying_runs(_bw, 100)
                         if bomb_count is not None:
-                            player_stats_ctx += f"\nServer-wide 100+ TD runs with {mentioned_weapon}: {bomb_count}"
+                            player_stats_ctx += f"\nServer-wide 100+ TD runs with {_bw}: {bomb_count}"
+
+                # If a weapon is mentioned in any context, surface its leaderboard rankings
+                # so the Butler can answer "who's #1 on Messer" correctly
+                msg_lower = resolved_message.lower()
+                mentioned_weapon = extract_weapon_from_message(resolved_message)
+                if mentioned_weapon:
+                    try:
+                        ld_ctx = cached_leaderboard_data()
+                        weapon_entries = []
+                        for r in ld_ctx:
+                            if len(r) < 4 or r[0].strip() != mentioned_weapon:
+                                continue
+                            if ' - ' in r[0]:
+                                continue
+                            try:
+                                weapon_entries.append((r[1].strip(), int(r[3])))
+                            except ValueError:
+                                continue
+                        weapon_entries.sort(key=lambda x: -x[1])
+                        if weapon_entries:
+                            board_lines = []
+                            medals = {1: '🥇', 2: '🥈', 3: '🥉'}
+                            for i, (pname, score) in enumerate(weapon_entries[:5], 1):
+                                medal = medals.get(i, f'#{i}')
+                                board_lines.append(f"{medal} {pname}: {score} TDs")
+                            player_stats_ctx += f"\n\n{mentioned_weapon} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
+                    except Exception:
+                        pass
 
                 # Detect rude messages — force idiot emoji regardless of AI response
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
