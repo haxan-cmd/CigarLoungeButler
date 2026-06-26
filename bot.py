@@ -998,6 +998,36 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
 
     return [w for w, c in weapon_counts.items() if c >= 100]
 
+def get_personal_bests(discord_id, cached_data=None):
+    """Return dict with highest kills, highest TDs, and best lethality from all submissions."""
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    discord_id_str = str(discord_id)
+    best_kills = 0
+    best_td = 0
+    best_lethality = 0.0
+    for row in subs:
+        if len(row) < 9 or row[2].strip() != discord_id_str:
+            continue
+        try:
+            td = int(row[7])
+            kills = int(row[8])
+        except (ValueError, IndexError):
+            continue
+        if kills > best_kills:
+            best_kills = kills
+        if td > best_td:
+            best_td = td
+        if td >= 100 and kills > 0:
+            lethality = round((kills / td) * 100, 1)
+            if lethality > best_lethality:
+                best_lethality = lethality
+    return {
+        'kills': best_kills,
+        'td': best_td,
+        'lethality': best_lethality
+    }
+
+
 def get_best_placements_for_player(discord_id, top_n=5):
     """Get top N best leaderboard placements for a player across all boards."""
     discord_id_str = str(discord_id)
@@ -1182,6 +1212,7 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
     named_feats, feat_submissions = get_feats_for_player(discord_id, cached_data)
     special_ops = get_special_ops_for_player(discord_id, cached_data)
     best_placements = get_best_placements_for_player(discord_id)
+    personal_bests = get_personal_bests(discord_id, cached_data)
 
     try:
         butler_stats = calculate_butler_stats()
@@ -1293,6 +1324,16 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         for pos, lb_name, emoji, gap in best_placements:
             gap_str = f" (+{gap})" if gap is not None else ""
             lines.append(f"• {emoji} {lb_name} — #{pos}{gap_str}")
+        lines.append("")
+
+    if personal_bests['kills'] > 0 or personal_bests['td'] > 0:
+        lines.append("**Personal Bests:**")
+        if personal_bests['kills'] > 0:
+            lines.append(f"• <a:topkill:1360314538364240024> Kills — **{personal_bests['kills']}**")
+        if personal_bests['td'] > 0:
+            lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
+        if personal_bests['lethality'] > 0:
+            lines.append(f"• ⚔️ Lethality — **{personal_bests['lethality']}%**")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
@@ -1901,6 +1942,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
 
 GUILD_ID = 1324379304544567356
 last_submission_time = None  # For dry spell detection
+_dry_spell_posted = False    # True once the dry weather post has fired; reset on next submission
 
 BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
 
@@ -1938,6 +1980,8 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     if not weekly_snapshot.is_running():
         weekly_snapshot.start()
+    if not dry_weather_check.is_running():
+        dry_weather_check.start()
     # Update butlers-manual
     try:
         real_guild = bot.get_guild(GUILD_ID)
@@ -1955,6 +1999,43 @@ async def on_ready():
     except Exception as e:
         print(f"butlers-manual update error: {e}")
 
+
+
+_DRY_WEATHER_LINES = [
+    "The lounge has gone quiet. The Butler waits.",
+    "No runs in two days. The Butler has begun dusting things that were already clean.",
+    "Silence. The Butler has refolded the napkins. Twice.",
+    "The boards are still. The Butler stares at the door.",
+    "Nothing. The Butler has started talking to the cigar.",
+    "The lounge is empty. The Butler has begun alphabetising the ash.",
+]
+_dry_weather_line_idx = 0
+
+@tasks.loop(hours=2)
+async def dry_weather_check():
+    """Post a Butler line in main if no submission in 48 hours."""
+    global _dry_spell_posted, _dry_weather_line_idx
+    try:
+        if _dry_spell_posted:
+            return
+        if last_submission_time is None:
+            return
+        from datetime import timezone as _tz
+        now = datetime.now(timezone.utc)
+        hours_since = (now - last_submission_time).total_seconds() / 3600
+        if hours_since < 48:
+            return
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            return
+        main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
+        if main_ch:
+            line = _DRY_WEATHER_LINES[_dry_weather_line_idx % len(_DRY_WEATHER_LINES)]
+            _dry_weather_line_idx += 1
+            await main_ch.send(f"*{line}*")
+            _dry_spell_posted = True
+    except Exception as e:
+        print(f"Dry weather check error: {e}")
 
 
 @tasks.loop(hours=168)  # 7 days
@@ -3236,6 +3317,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             )
 
         last_submission_time = now
+        global _dry_spell_posted
+        _dry_spell_posted = False
 
     except Exception as e:
         print(f"Butler personality error: {e}")
