@@ -707,6 +707,7 @@ class PersonalityCog(commands.Cog):
                     player_weapon_diversity = {}  # name -> set of weapons
                     player_subclass_diversity = {}  # name -> set of subclasses
                     player_sub_counts = {}  # name -> submission count
+                    player_best_sub = {}  # name -> best submission row by TD (for kills data)
                     name_lookup = {p_row[0].strip(): p_row[1].strip() for p_row in p_rows if len(p_row) > 1}
                     for row in subs_all:
                         if len(row) < 5:
@@ -724,6 +725,15 @@ class PersonalityCog(commands.Cog):
                         player_weapon_diversity[pname].add(weapon)
                         player_subclass_diversity[pname].add(subclass)
                         player_sub_counts[pname] += 1
+                        # Track best submission by TD so we have kills data for any player
+                        try:
+                            row_td = int(row[7]) if len(row) > 7 else 0
+                            current_best = player_best_sub.get(pname)
+                            current_best_td = int(current_best[7]) if current_best and len(current_best) > 7 else 0
+                            if row_td > current_best_td:
+                                player_best_sub[pname] = row
+                        except (ValueError, TypeError):
+                            pass
 
                     # Weapons on leaderboards per player
                     player_lb_weapons = {}  # name -> set of weapons with board entries
@@ -774,13 +784,26 @@ class PersonalityCog(commands.Cog):
                             player_pb_td[pname] = max(player_pb_td.get(pname, 0), score)
 
                     pb_lines = []
-                    all_pb_names = set(player_pb_td) | set(player_pb_kills)
+                    all_pb_names = set(player_pb_td) | set(player_pb_kills) | set(player_best_sub)
                     for pname in sorted(all_pb_names):
                         td = player_pb_td.get(pname, 0)
-                        kills = player_pb_kills.get(pname, 0)
                         parts = []
-                        if td: parts.append(f"best TD: {td}")
-                        if kills: parts.append(f"best kills: {kills}")
+                        best_sub = player_best_sub.get(pname)
+                        if best_sub and len(best_sub) > 8:
+                            sub_td = int(best_sub[7]) if best_sub[7].strip().isdigit() else 0
+                            sub_kills = best_sub[8].strip() if best_sub[8].strip().isdigit() else '?'
+                            sub_weapon = best_sub[3].strip() if len(best_sub) > 3 else '?'
+                            # Use whichever TD is higher — submission or LeaderboardData (legacy)
+                            best_td = max(td, sub_td)
+                            if best_td == sub_td and sub_td > 0:
+                                parts.append(f"best game: {sub_weapon} — {sub_td} TDs / {sub_kills} kills")
+                            elif td > sub_td:
+                                parts.append(f"best TD: {td} (legacy entry, weapon not tracked per-game here)")
+                        elif td:
+                            parts.append(f"best TD: {td}")
+                        kills_pb = player_pb_kills.get(pname, 0)
+                        if kills_pb:
+                            parts.append(f"best kills score: {kills_pb}")
                         if parts:
                             pb_lines.append(f"{pname}: {', '.join(parts)}")
                     if pb_lines:
