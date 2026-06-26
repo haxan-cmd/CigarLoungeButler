@@ -4581,6 +4581,64 @@ async def bounty_refresh_card(interaction: discord.Interaction, member: discord.
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
+@bot.tree.command(name="bounty_set_bonus", description="Mark a player's bounty special challenge as complete (mod only).")
+@discord.app_commands.describe(member="The player to mark bonus complete for")
+async def bounty_set_bonus(interaction: discord.Interaction, member: discord.Member):
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    bounty = get_active_bounty()
+    if not bounty:
+        await interaction.followup.send("No active bounty found.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    player_name = member.nick if member.nick else member.display_name
+    player_id = str(member.id)
+
+    player_row = get_player_bounty_progress(bounty['title'], player_id)
+    if not player_row:
+        await interaction.followup.send(f"No bounty data found for **{player_name}**. Use /bounty_add_card first.", ephemeral=True)
+        return
+
+    player_progress = player_row['progress']
+
+    if player_progress.get('__special__', 0) >= 1:
+        await interaction.followup.send(f"**{player_name}** has already completed the bonus.", ephemeral=True)
+        return
+
+    player_progress['__special__'] = 1
+
+    # Update their forum card
+    forum_post_id = player_row.get('forum_post_id')
+    forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+    forum_channel = guild.get_channel(forum_channel_id)
+
+    if forum_channel and forum_post_id:
+        try:
+            forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+            card_text = build_player_bounty_card(bounty, player_progress)
+            messages = []
+            async for msg in forum_thread.history(limit=5, oldest_first=True):
+                messages.append(msg)
+            bot_messages = [m for m in messages if m.author.bot]
+            if bot_messages:
+                await bot_messages[-1].edit(content=card_text)
+            else:
+                await forum_thread.send(card_text)
+        except Exception as e:
+            print(f"bounty_set_bonus card update error: {e}")
+
+    # Save updated progress
+    save_player_bounty_progress(player_row['row'], player_name, forum_post_id, player_progress)
+
+    await interaction.followup.send(f"⚜️ Bonus marked complete for **{player_name}**.", ephemeral=True)
+
+
+
 def calculate_butler_stats(week_start=None, week_end=None):
     """Pull stats from Submissions and LeaderboardData sheets.
     If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
