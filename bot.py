@@ -6247,6 +6247,96 @@ async def populate_butlers_archive(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
+WEAPON_FORUM_1H = 1486118387800346768
+WEAPON_FORUM_2H = 1456639902077812868
+
+_WEAPONS_2H = {
+    "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
+    "Highland Sword", "Dane Axe", "Glaive", "Two-Handed Hammer", "Halberd",
+    "Polehammer", "Spear", "Quarterstaff", "Goedendag", "Pole Axe",
+    "War Bow", "Crossbow", "Siege Crossbow", "Sledge Hammer", "Shovel",
+}
+_WEAPONS_1H = {
+    "Longsword", "War Axe", "Warhammer", "Falchion", "Heavy Cavalry Sword",
+    "Axe", "One-Handed Spear", "Messer", "Rapier", "Morning Star", "Sword",
+    "Dagger", "Hatchet", "Cudgel", "Katars", "Short Sword", "Mace",
+    "Javelin", "Throwing Axe", "Pick Axe",
+}
+
+def _weapon_forum_id(weapon):
+    if weapon in _WEAPONS_2H:
+        return WEAPON_FORUM_2H
+    return WEAPON_FORUM_1H
+
+
+@bot.tree.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
+async def create_missing_boards(interaction: discord.Interaction):
+    if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # All primary weapons across all subclasses
+    all_primaries = set()
+    for weapons in _SUBCLASS_PRIMARIES.values():
+        all_primaries.update(weapons)
+
+    # Existing boards in leaderboards_ws
+    existing = set()
+    try:
+        for row in leaderboards_ws.get_all_values()[1:]:
+            if row:
+                existing.add(row[0].strip())
+    except Exception as e:
+        await interaction.followup.send(f"Failed to read leaderboards sheet: {e}", ephemeral=True)
+        return
+
+    missing = sorted(all_primaries - existing)
+    if not missing:
+        await interaction.followup.send("All primary weapon boards already exist.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    created = []
+    failed = []
+
+    for weapon in missing:
+        try:
+            forum_id = _weapon_forum_id(weapon)
+            forum = guild.get_channel(forum_id) or await guild.fetch_channel(forum_id)
+
+            thread_with_msg = await forum.create_thread(
+                name=weapon,
+                content=f"**{weapon}** leaderboard"
+            )
+            thread = thread_with_msg.thread
+
+            entries = get_leaderboard_entries(weapon)
+            chunks = format_leaderboard_text(entries)
+
+            await thread.send(file=discord.File(DECORATION_TOP))
+            msg_ids = []
+            for chunk in chunks:
+                lb_msg = await thread.send(chunk)
+                msg_ids.append(str(lb_msg.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+            leaderboards_ws.append_row([weapon, str(thread.id), ",".join(msg_ids), "weapon"])
+            created.append(weapon)
+            await asyncio.sleep(1.5)
+
+        except Exception as e:
+            print(f"create_missing_boards error for {weapon}: {e}")
+            failed.append(weapon)
+            await asyncio.sleep(1)
+
+    msg = f"Created {len(created)} boards: {chr(10).join(created)}"
+    if failed:
+        msg += f"\nFailed: {chr(10).join(failed)}"
+    await interaction.followup.send(msg[:1900], ephemeral=True)
+
+
 import traceback
 try:
     bot.run(TOKEN)
