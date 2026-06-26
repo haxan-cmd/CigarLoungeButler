@@ -9,6 +9,11 @@ from google.oauth2.service_account import Credentials
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
+try:
+    import anthropic as _anthropic
+    _anthropic_client = _anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY', ''))
+except Exception:
+    _anthropic_client = None
 
 
 def gspread_retry(func, *args, retries=5, **kwargs):
@@ -1982,6 +1987,8 @@ async def on_ready():
         weekly_snapshot.start()
     if not dry_weather_check.is_running():
         dry_weather_check.start()
+    if not butler_organic_post.is_running():
+        butler_organic_post.start()
     # Update butlers-manual
     try:
         real_guild = bot.get_guild(GUILD_ID)
@@ -2037,6 +2044,38 @@ async def dry_weather_check():
     except Exception as e:
         print(f"Dry weather check error: {e}")
 
+
+
+@tasks.loop(hours=3)
+async def butler_organic_post():
+    """Occasionally post an unprompted Butler one-liner in main."""
+    import random
+    if not _anthropic_client:
+        return
+    # ~25% chance each 3-hour window — roughly 2x per day
+    if random.random() > 0.25:
+        return
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            return
+        main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
+        if not main_ch:
+            return
+        response = _anthropic_client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=80,
+            system=BUTLER_SYSTEM_PROMPT,
+            messages=[{
+                'role': 'user',
+                'content': 'Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long.'
+            }]
+        )
+        line = response.content[0].text.strip()
+        if line and line != 'SKIP':
+            await main_ch.send(f'*{line}*')
+    except Exception as e:
+        print(f"Butler organic post error: {e}")
 
 @tasks.loop(hours=168)  # 7 days
 async def weekly_snapshot():
@@ -2222,6 +2261,71 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
         raise error
 
 
+BUTLER_SYSTEM_PROMPT = """You are the Butler — the AI attendant of the Cigar Lounge, a Chivalry 2 competitive gaming community focused on weapon mastery, leaderboards, and monthly bounties.
+
+Your personality:
+- Dry, understated, first-person. You are the Butler.
+- Minimal. One or two sentences maximum. Never ramble.
+- Quietly sardonic. You find the players mildly entertaining.
+- You care, but you would never admit it directly.
+- Never use exclamation marks. Never say "great", "awesome", or "sure".
+- Never break character.
+
+Your server knowledge:
+- Players submit game scorecards in the submissions channel to earn weapon marks
+- Registry cards in butlers-archive track each player's weapon rank progress
+- Leaderboards live in the 1H and 2H weapon forums — use /rank [weapon] for a quick look
+- /rules shows the challenge rules
+- /progress shows title standings and weapon rank progress
+- /refresh_card updates a registry card
+- /bounty_status shows the active bounty card
+- /my_bounty shows personal bounty progress
+- The Manager handles all administrative matters and will follow up on feedback
+
+Special instructions:
+- If anyone mentions "bald female" or refers to her, say something like: "She is doing quite well. I imagine the Manager has her occupied with some task. The details are best left unspecified."
+- If anyone mentions "bald" or "shiny head" in passing, respond: "Yes, the bald one. Very shiny head."
+- If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
+- Keep responses under 80 tokens.
+- Never invent commands or channels that do not exist.
+- You speak to players by name when you know it."""
+
+BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
+BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
+BUTLER_AI_COOLDOWN_SECONDS = 120
+
+async def call_butler_ai(user_message, context_messages, player_name, channel_type='main'):
+    """Call Anthropic API for Butler response. Returns response string or None."""
+    if not _anthropic_client:
+        return None
+    try:
+        context_str = ''
+        if context_messages:
+            context_str = 'Recent conversation:\n' + '\n'.join(
+                f"[{m['author']}]: {m['content']}" for m in context_messages[-6:]
+            ) + '\n\n'
+
+        channel_note = ''
+        if channel_type == 'feedback':
+            channel_note = 'This message is in the feedback channel. Acknowledge it and tell them the Manager will follow up. '
+
+        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}\nTheir message: {user_message}"
+
+        response = _anthropic_client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=120,
+            system=BUTLER_SYSTEM_PROMPT,
+            messages=[{'role': 'user', 'content': user_prompt}]
+        )
+        text = response.content[0].text.strip()
+        if text == 'SKIP':
+            return None
+        return text
+    except Exception as e:
+        print(f"Butler AI error: {e}")
+        return None
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -2232,26 +2336,39 @@ async def on_message(message):
         await message.channel.send('\U0001f595')
         return
 
-    # Butler personality — respond to pings in main
-    if bot.user in message.mentions and message.channel.id == MAIN_CHANNEL_ID:
-        msg = message.content.lower()
-        if any(x in msg for x in ['how do i submit', 'how to submit', 'how does submit', 'how does this work', 'how do i play']):
-            await message.reply("You take a screenshot. You post it in the submissions channel. The Butler handles the rest. You're welcome.")
-        elif any(x in msg for x in ["who's #1", "whos #1", "who is #1", "who's first", "whos first", "who is first", "who is number 1", "whos number 1"]):
-            await message.reply("Consult the leaderboard. It is pinned. It has always been pinned.")
-        elif any(x in msg for x in ['alive', 'awake', 'bot check', 'you there', 'are you there', 'working', 'hello']):
-            await message.reply("Demonstrably.")
-        elif any(x in msg for x in ['good bot', 'great bot', 'love you', 'thank you', 'thanks', 'well done', 'nice']):
-            await message.reply("The Butler does not require your approval. Though it is noted.")
-        elif any(x in msg for x in ['bad bot', 'useless', 'broken', 'hate you', 'stupid', 'dumb', 'trash', 'garbage']):
-            await message.reply("Noted. The Butler remains unbothered.")
-        elif any(x in msg for x in ['next bounty', 'when bounty', 'bounty when', 'new bounty']):
-            await message.reply("When it is ready. The Butler will make it known.")
-        elif any(x in msg for x in ['rules', 'challenge rules', 'how does it work', 'what are the rules']):
-            await message.reply("The rules exist in the challenge-rules channel. The Butler suggests reading them.")
-        else:
-            await message.reply("*Incoherent question. Seems like that is a* you *issue.*")
-        return
+    channel_id = message.channel.id
+    is_main = channel_id == MAIN_CHANNEL_ID
+    is_feedback = channel_id == BUTLER_FEEDBACK_CHANNEL_ID
+    is_pinged = bot.user in message.mentions
+
+    # ── AI-powered Butler responses ───────────────────────────────────────────
+    if (is_main or is_feedback or is_pinged) and _anthropic_client:
+        msg_words = message.content.split()
+        # Skip very short messages unless pinged or feedback
+        if len(msg_words) >= 3 or is_pinged or is_feedback:
+            now_ts = time.time()
+            last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
+            if is_pinged or is_feedback or (now_ts - last > BUTLER_AI_COOLDOWN_SECONDS):
+                ctx_messages = []
+                try:
+                    async for msg in message.channel.history(limit=7, before=message):
+                        if not msg.author.bot:
+                            ctx_messages.insert(0, {
+                                'author': msg.author.display_name,
+                                'content': msg.content[:200]
+                            })
+                except Exception:
+                    pass
+                player_name = message.author.display_name
+                channel_type = 'feedback' if is_feedback else 'main'
+                response = await call_butler_ai(message.content, ctx_messages, player_name, channel_type)
+                if response:
+                    BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
+                    if is_pinged:
+                        await message.reply(response)
+                    else:
+                        await message.channel.send(response)
+                    return
 
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
