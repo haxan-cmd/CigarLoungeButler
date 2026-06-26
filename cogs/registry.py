@@ -1570,11 +1570,11 @@ class RegistryCog(commands.Cog):
             rows = players_ws.get_all_values()[1:]
             registered = any(row and row[0].strip() == discord_id_str for row in rows)
             if not registered:
-                await interaction.followup.send("You don't have a registry card yet — you need at least one submission first.", ephemeral=True)
+                await interaction.followup.send("No card on file. Submit a run first.", ephemeral=True)
                 return
 
             await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
-            await interaction.followup.send("Your registry card has been refreshed.", ephemeral=True)
+            await interaction.followup.send("Registry card updated.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
@@ -1676,7 +1676,7 @@ class RegistryCog(commands.Cog):
         elif forum in LEADERBOARD_FORUMS:
             channel_id, label, blurb = LEADERBOARD_FORUMS[forum]
             await update_leaderboard_index(interaction.guild, channel_id, label, blurb)
-        await interaction.followup.send("Index updated.", ephemeral=True)
+        await interaction.followup.send("Index rebuilt.", ephemeral=True)
 
     @app_commands.command(name="purge_blank_cards", description="Delete registry cards for players with no marks data (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
@@ -1955,7 +1955,7 @@ class RegistryCog(commands.Cog):
     @app_commands.command(name="populate_butlers_archive", description="Pre-populate ButlersArchive sheet for all players (admin only).")
     async def populate_butlers_archive(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("No permission.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         try:

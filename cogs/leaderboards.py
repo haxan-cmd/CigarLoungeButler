@@ -1,6 +1,5 @@
-"""
-cogs/leaderboards.py — Leaderboard helpers, forum index builder, and leaderboard slash commands.
-"""
+# Leaderboard read/write, Discord thread management, and the index builder.
+# update_leaderboards() is the main entry point — called after every submission.
 import asyncio
 import discord
 from discord import app_commands
@@ -42,7 +41,7 @@ def _weapon_forum_id(weapon):
     return WEAPON_FORUM_1H
 
 async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
-    """Build or update a pinned index thread in a leaderboard forum."""
+    # Builds (or rebuilds) the pinned index thread inside a leaderboard forum.
     try:
         forum = guild.get_channel(forum_channel_id)
         if not forum:
@@ -50,7 +49,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             return
 
         index_thread_name = f"📋 {index_label} Index"
-        # Fetch active threads via API to avoid cache misses after restart
+        # Can't rely on the cache after a restart — have to hit the API directly
         seen_ids = set()
         threads = []
         try:
@@ -73,9 +72,8 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             if thread.name != index_thread_name and thread.id not in seen_ids:
                 threads.append(thread)
 
-        # Deduplicate threads by base name:
-        # - Map threads: "Map - Faction" → strip faction suffix, keep first per base name
-        # - Weapon threads: exact name, keep first occurrence (handles shared weapons across subclasses)
+        # Map boards come in pairs ("Rudhelm - Mason", "Rudhelm - Agatha") — only show
+        # the base map name once in the index. Weapon threads are exact, keep first.
         seen_base_names = set()
         deduped_threads = []
         for t in sorted(threads, key=lambda t: t.name.lower()):
@@ -86,7 +84,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         deduped_threads.sort(key=lambda x: x[0].lower())
         threads_for_index = deduped_threads  # list of (display_name, thread)
 
-        # Build alphabetical groups with bullet separators, matching player index style
+        # Alphabetical groups matching the style of the player registry index
         groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
         lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
         for group_name, start, end in groups:
@@ -170,12 +168,13 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     guild = interaction.guild
     discord_id = str(interaction.user.id)
     any_updated = False
-    placements = []  # list of (lb_name, position)
+    placements = []  # (lb_name, position) — returned so submissions can show placement in the confirm message
 
-    # (lb_name, score, top_10, personal_best, unlimited_top50)
+    # Each tuple: (lb_name, score, top_10, personal_best, unlimited_top50)
+    # top_10 = board caps at 10 entries, personal_best = one entry per player, unlimited = append always
     updates = []
 
-    # Weapon board — exclude VIP, top 10
+    # VIP runs don't count toward weapon boards — they use catapult
     if not vip:
         updates.append((selected_weapon, takedowns, True, True, False))
 
@@ -307,7 +306,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
             if len(chunks) <= len(message_ids):
-                # Fits in existing slots — just edit in place
+                # Happy path — fits in what we already have, just edit in place
                 packed = pack_chunks_into_slots(chunks, len(message_ids))
                 for idx, mid in enumerate(message_ids):
                     try:
@@ -316,9 +315,9 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     except Exception as e:
                         print(f"Discord edit error for {lb_name} msg {mid}: {e}")
             else:
-                # Need more slots — delete bottom decoration, post new messages, repost decoration
+                # Board grew past its allocated slots — pull the bottom decoration off,
+                # post extra messages, then repost the decoration at the end.
                 try:
-                    # Find and delete bottom decoration (last message in thread before we add more)
                     async for old_msg in thread.history(limit=5, oldest_first=False):
                         if old_msg.attachments:
                             await old_msg.delete()
@@ -379,10 +378,10 @@ def get_leaderboard_entries(name):
     return sorted(entries, key=lambda x: x['score'], reverse=True)
 
 def pack_chunks_into_slots(chunks, num_slots):
-    """Pack chunks into exactly num_slots messages.
-    If chunks > slots, concatenate overflow into the last slot (up to 1900 chars).
-    If chunks < slots, fill remaining slots with zero-width space.
-    """
+    # We pre-allocate a fixed number of Discord messages per leaderboard so we
+    # can edit them in-place rather than deleting and reposting. This keeps
+    # message links stable. If we have fewer chunks than slots, pad with zero-width
+    # spaces. If we have more, cram the overflow into the last slot.
     if num_slots == 0:
         return []
 
@@ -448,7 +447,7 @@ class LeaderboardsCog(commands.Cog):
     )
     async def setup_leaderboard(self, interaction: discord.Interaction, name: str, type: str):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
         await interaction.response.send_message("Setting up leaderboard...", ephemeral=True)
@@ -515,7 +514,7 @@ class LeaderboardsCog(commands.Cog):
 
     async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
         all_lb_rows = leaderboards_ws.get_all_records()
@@ -653,7 +652,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
     async def create_missing_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("No permission.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)

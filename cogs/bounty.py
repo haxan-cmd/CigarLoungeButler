@@ -394,10 +394,10 @@ class BountyCog(commands.Cog):
         weapon7: str = None,
     ):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
-        await interaction.response.send_message("Creating bounty...", ephemeral=True)
+        await interaction.response.send_message("Working on it.", ephemeral=True)
 
         # Deactivate any existing active bounty
         rows = bounty_ws.get_all_values()
@@ -501,12 +501,12 @@ class BountyCog(commands.Cog):
     @app_commands.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
     async def bounty_end(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.response.send_message("No active bounty found.", ephemeral=True)
+            await interaction.response.send_message("No bounty is running.", ephemeral=True)
             return
 
         await interaction.response.send_message(
@@ -591,12 +591,12 @@ class BountyCog(commands.Cog):
         try:
             bounty = get_active_bounty()
             if not bounty:
-                await interaction.followup.send("No active bounty.", ephemeral=True)
+                await interaction.followup.send("No bounty is running.", ephemeral=True)
                 return
 
             bounty_channel = interaction.guild.get_channel(bounty['channel_id'])
             if not bounty_channel:
-                await interaction.followup.send("Could not find bounty channel.", ephemeral=True)
+                await interaction.followup.send("Bounty channel not found.", ephemeral=True)
                 return
 
             # Delete old progress message if it exists
@@ -613,17 +613,17 @@ class BountyCog(commands.Cog):
 
             # Save new message ID to Bounty sheet
             bounty_ws.update_cell(bounty['row'], 14, str(msg.id))
-            await interaction.followup.send("Progress board posted.", ephemeral=True)
+            await interaction.followup.send("Done.", ephemeral=True)
         except Exception as e:
             import traceback
             traceback.print_exc()
-            await interaction.followup.send(f"Error: {e}", ephemeral=True)
+            await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
 
     @app_commands.command(name="bounty_status", description="Show the current active bounty card")
     async def bounty_status(self, interaction: discord.Interaction):
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+            await interaction.response.send_message("No bounty is running.", ephemeral=True)
             return
         card = build_bounty_card(
             bounty['title'], bounty['theme_emoji'], bounty['weapons'],
@@ -635,7 +635,7 @@ class BountyCog(commands.Cog):
     async def bounty_hunt(self, interaction: discord.Interaction):
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+            await interaction.response.send_message("No bounty is running.", ephemeral=True)
             return
         board = build_progress_board(bounty, top_n=10)
         await interaction.response.send_message(board)
@@ -644,11 +644,11 @@ class BountyCog(commands.Cog):
     async def my_bounty(self, interaction: discord.Interaction):
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.response.send_message("No active bounty right now.", ephemeral=True)
+            await interaction.response.send_message("No bounty is running.", ephemeral=True)
             return
         player_row = get_player_bounty_progress(bounty['title'], str(interaction.user.id))
         if not player_row:
-            await interaction.response.send_message("You have no submissions for this bounty yet.", ephemeral=True)
+            await interaction.response.send_message("No submissions recorded for this bounty.", ephemeral=True)
             return
         card = build_player_bounty_card(bounty, player_row['progress'])
         await interaction.response.send_message(card)
@@ -661,7 +661,7 @@ class BountyCog(commands.Cog):
 
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.followup.send("No active bounty found.", ephemeral=True)
+            await interaction.followup.send("No bounty is running.", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -710,9 +710,9 @@ class BountyCog(commands.Cog):
                     json.dumps(player_progress)
                 ])
 
-            await interaction.followup.send(f"✅ Created bounty card for **{player_name}**.", ephemeral=True)
+            await interaction.followup.send(f"Bounty card created for {player_name}.", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
 
     @app_commands.command(name="bounty_refresh_card", description="Refresh a player's bounty forum card (mod only)")
     @app_commands.checks.has_permissions(administrator=True)
@@ -722,7 +722,7 @@ class BountyCog(commands.Cog):
 
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.followup.send("No active bounty found.", ephemeral=True)
+            await interaction.followup.send("No bounty is running.", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -761,20 +761,20 @@ class BountyCog(commands.Cog):
                 await forum_thread.send(card_text)
             await interaction.followup.send(f"✅ Refreshed bounty card for **{player_name}**.", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
 
     @app_commands.command(name="bounty_set_bonus", description="Mark a player's bounty special challenge as complete (mod only).")
     @app_commands.describe(member="The player to mark bonus complete for")
     async def bounty_set_bonus(self, interaction: discord.Interaction, member: discord.Member):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("No permission.", ephemeral=True)
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
         bounty = get_active_bounty()
         if not bounty:
-            await interaction.followup.send("No active bounty found.", ephemeral=True)
+            await interaction.followup.send("No bounty is running.", ephemeral=True)
             return
 
         guild = interaction.guild

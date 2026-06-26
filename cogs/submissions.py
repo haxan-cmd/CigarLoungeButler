@@ -437,7 +437,7 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
         except ValueError:
             view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "invalid")
             await interaction.response.send_message(
-                "❌ Takedowns, Kills, and Deaths must be whole numbers. Please try again.",
+                "Those aren't numbers. The Butler requires whole numbers.",
                 view=view,
                 ephemeral=True
             )
@@ -447,7 +447,7 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
         if takedowns < 0 or kills < 0 or deaths < 0:
             view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "negative")
             await interaction.response.send_message(
-                "❌ Takedowns, Kills, and Deaths cannot be negative. Please try again.",
+                "Those numbers aren't possible. Try again.",
                 view=view,
                 ephemeral=True
             )
@@ -456,7 +456,7 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
         if kills > takedowns:
             view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "kills>td")
             await interaction.response.send_message(
-                f"❌ Kills ({kills}) cannot exceed Takedowns ({takedowns}) — takedowns include kills plus assists. Please try again.",
+                f"Kills ({kills}) can't exceed takedowns ({takedowns}). Takedowns include kills and assists. Check the scoreboard.",
                 view=view,
                 ephemeral=True
             )
@@ -470,7 +470,7 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
                 self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip
             )
             await interaction.response.edit_message(
-                content="Was your score over 20,000 points?",
+                content="Was your score over 20,000 points?",  # kept neutral — it's a yes/no gate, not a greeting
                 view=view
             )
         elif needs_vip:
@@ -479,7 +479,7 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
                 self.selected_map, self.faction, takedowns, kills, deaths
             )
             await interaction.response.edit_message(
-                content="**Almost done!** Were you playing as VIP?",
+                content="Were you playing as VIP?",
                 view=view
             )
         else:
@@ -547,7 +547,7 @@ class TripleCheckView(discord.ui.View):
                 score_over_20k=score_over_20k
             )
             await interaction.response.edit_message(
-                content="**Almost done!** Were you playing as VIP?",
+                content="Were you playing as VIP?",
                 view=view
             )
         else:
@@ -789,7 +789,7 @@ async def _submission_worker(guild_id):
             print(f"Submission worker timeout for guild {guild_id}")
             try:
                 await interaction.followup.send(
-                    "⚠️ Submission timed out during processing. Please try again.",
+                    "The submission took too long and was dropped. Try again.",
                     ephemeral=True
                 )
             except Exception:
@@ -923,7 +923,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
-    await interaction.response.edit_message(content="✅ Most impressive! Your run has been recorded.", view=None)
+    await interaction.response.edit_message(content="Noted. The record has been updated.", view=None)
 
     # Log to Google Sheets first so we get the row index
     submission_row = None
