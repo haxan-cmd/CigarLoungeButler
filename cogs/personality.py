@@ -849,13 +849,5 @@ class PersonalityCog(commands.Cog):
         print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger'][:60]}' | response: '{entry['response'][:60]}'")
 
 
-    import traceback
-    try:
-        bot.run(TOKEN)
-    except Exception as e:
-        traceback.print_exc()
-        input("Press Enter to exit...")
-
-
 async def setup(bot):
     await bot.add_cog(PersonalityCog(bot))
