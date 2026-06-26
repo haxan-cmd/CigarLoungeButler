@@ -24,6 +24,7 @@ from utils.helpers import (
     parse_submission_text, format_weapon_marks,
     detect_weapon_milestones, build_milestone_message,
     nerve_log_submission, nerve_log_error, nerve_log_milestone,
+    submission_state,
 )
 
 MOD_ROLE_ID            = config.MOD_ROLE_ID
@@ -32,6 +33,8 @@ DECORATION_TOP         = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
 DECORATION_BOTTOM      = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Bottom.png')
 SUBMISSIONS_CHANNEL_ID = config.SUBMISSIONS_CHANNEL_ID
 BUTLERS_NOTES_CHANNEL_ID = config.BUTLERS_NOTES_CHANNEL_ID
+BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
+BOUNTY_CARDS_FORUM_ID  = config.BOUNTY_CARDS_FORUM_ID
 MAIN_CHANNEL_ID        = config.MAIN_CHANNEL_ID
 MAPS                   = config.MAPS
 VIP_MAPS               = config.VIP_MAPS
@@ -873,7 +876,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     # Cross-cog lazy imports to avoid circular dependencies at module load
-    from cogs.leaderboards import update_leaderboards
+    from cogs.leaderboards import update_leaderboards, update_leaderboard_index
     from cogs.bounty import update_bounty, get_active_bounty
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1077,13 +1080,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
     try:
-        global last_submission_time
         main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
         now = datetime.now(timezone.utc)
 
         if main_channel:
             # Dry spell — first submission after 4+ hours of silence
-            if last_submission_time and (now - last_submission_time).total_seconds() > 14400:
+            if submission_state['last_submission_time'] and (now - submission_state['last_submission_time']).total_seconds() > 14400:
                 await main_channel.send("Yes. Yes, I am awake.")
 
             # New player first submission
@@ -1109,7 +1111,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 mention_author=False
             )
 
-        last_submission_time = now
+        submission_state['last_submission_time'] = now
         global _dry_spell_posted
         _dry_spell_posted = False
 

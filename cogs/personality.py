@@ -2,6 +2,9 @@
 cogs/personality.py — Butler AI, on_message handler, task loops, on_ready.
 """
 import asyncio
+import time
+import re
+import random
 import anthropic
 import discord
 from discord import app_commands
@@ -15,7 +18,7 @@ from utils.sheets import (
     cached_submissions, cached_players, cached_leaderboard_data,
 )
 from utils.helpers import (
-    build_manual_content, nerve_log_butler, nerve_log_error, nerve_flush,
+    build_manual_content, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
 from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
 
@@ -32,7 +35,7 @@ FEAT_WEAPONS                = config.FEAT_WEAPONS
 DECORATION_TOP              = config.DECORATION_TOP
 DECORATION_BOTTOM           = config.DECORATION_BOTTOM
 
-last_submission_time = None
+# last_submission_time lives in submission_state (utils/helpers.py) so submissions.py can update it
 _dry_spell_posted    = False
 _dry_weather_line_idx = 0
 
@@ -314,11 +317,10 @@ class PersonalityCog(commands.Cog):
         try:
             if _dry_spell_posted:
                 return
-            if last_submission_time is None:
+            if submission_state['last_submission_time'] is None:
                 return
-            from datetime import timezone as _tz
             now = datetime.now(timezone.utc)
-            hours_since = (now - last_submission_time).total_seconds() / 3600
+            hours_since = (now - submission_state['last_submission_time']).total_seconds() / 3600
             if hours_since < 48:
                 return
             guild = self.bot.get_guild(GUILD_ID)

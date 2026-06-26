@@ -1,20 +1,12 @@
-"""
-utils/helpers.py — Pure helper functions shared across cogs:
-    • Submission text parser
-    • Weapon mark formatter
-    • Milestone detection
-    • Nerve-center logging
-"""
 import random
 from datetime import datetime
 
 import config
 
 
-# ── Submission text parser ────────────────────────────────────────────────────
 def parse_submission_text(text):
-    """Parse message caption for weapon and subclass hints.
-    Returns (weapon, subclass) — either may be None if not detected."""
+    # Sort aliases longest-first so "war bow" matches before "bow" — otherwise
+    # shorter aliases steal the match from longer ones that overlap.
     text_lower = text.lower().strip()
     detected_weapon   = None
     detected_subclass = None
@@ -34,6 +26,8 @@ def parse_submission_text(text):
                 detected_subclass = raw
             break
 
+    # If they said a parent class (e.g. "vanguard") and a weapon, try to narrow
+    # it down to the specific subclass automatically — saves them having to type it.
     if detected_parent and detected_weapon:
         subs = config.PARENT_TO_SUBCLASSES[detected_parent]
         candidates = [s for s in subs if detected_weapon in config.CLASS_WEAPON_MAP.get(s, [])]
@@ -43,9 +37,9 @@ def parse_submission_text(text):
     return detected_weapon, detected_subclass
 
 
-# ── Weapon mark formatter ─────────────────────────────────────────────────────
 def format_weapon_marks(marks):
-    """Format mark count with emphasis based on rank tier, ×N prestige past Iridescent."""
+    # Formatting tiers map to rank thresholds — bold at Gold (12), italic+bold at
+    # Crimson (60), plus prestige multiplier suffix past Iridescent (150).
     if marks >= 150:
         prestige = sum(1 for t in config.PRESTIGE_THRESHOLDS if marks >= t)
         prestige_str = f" ×**{prestige}**" if prestige > 0 else ""
@@ -58,13 +52,12 @@ def format_weapon_marks(marks):
         return str(marks)
 
 
-# ── Milestone detection ───────────────────────────────────────────────────────
+# Only these thresholds get milestone announcements — not every rank crossing,
+# just the ones that actually mean something: first mark, Crimson, Prestige, Iridescent.
 _MILESTONE_THRESHOLDS = {1, 60, 80, 150}
 
 def detect_weapon_milestones(old_flat, new_flat):
-    """Return list of (weapon, threshold, rank_name) for significant rank crossings.
-    old_flat / new_flat: dict of weapon_name -> int marks (plain weapon keys).
-    """
+    # old_flat / new_flat: dict of weapon_name -> int marks
     milestones = []
     for weapon in set(old_flat) | set(new_flat):
         old = old_flat.get(weapon, 0)
@@ -74,6 +67,7 @@ def detect_weapon_milestones(old_flat, new_flat):
         for threshold, rank_name in config.WEAPON_RANK_THRESHOLDS:
             if threshold in _MILESTONE_THRESHOLDS and old < threshold <= new:
                 milestones.append((weapon, threshold, rank_name))
+        # Prestige multiplier — fire each time they cross another prestige threshold past 150
         if old >= 150:
             old_x = sum(1 for t in config.PRESTIGE_THRESHOLDS if old >= t)
             new_x = sum(1 for t in config.PRESTIGE_THRESHOLDS if new >= t)
@@ -83,7 +77,6 @@ def detect_weapon_milestones(old_flat, new_flat):
 
 
 def build_milestone_message(player_name, weapon, threshold, rank_name):
-    """Return a Butler-voiced announcement string for this milestone, or None."""
     if rank_name.startswith("Iridescent ×"):
         n = int(rank_name.split("×")[1].strip())
         mark_count = (config.PRESTIGE_THRESHOLDS[n - 1]
@@ -99,12 +92,17 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
     return messages.get(threshold)
 
 
-# ── Nerve-center logging ──────────────────────────────────────────────────────
+# Shared mutable state between submissions and personality cogs.
+# Using a dict so both modules mutate the same object after import.
+submission_state = {'last_submission_time': None}
+
+# In-memory log for the hourly digest posted to nerve center.
+# Nothing persists across restarts — intentional, digest is ephemeral.
 _nerve_events = {
-    'submissions':       [],   # (timestamp, player, weapon)
-    'butler_interactions': [], # (trigger[:60], response[:60])
-    'errors':            [],   # (timestamp, error_str)
-    'milestones':        [],   # (player, weapon, rank)
+    'submissions':         [],  # (timestamp, player, weapon)
+    'butler_interactions': [],  # (trigger[:60], response[:60])
+    'errors':              [],  # (timestamp, error_str)
+    'milestones':          [],  # (player, weapon, rank)
 }
 
 
@@ -125,7 +123,7 @@ def nerve_log_milestone(player, weapon, rank):
 
 
 async def nerve_alert(bot_instance, context, error):
-    """Immediately post a critical error alert to nerve center."""
+    # Fire-and-forget critical error to nerve center — don't let this crash anything else
     try:
         guild = bot_instance.get_guild(config.GUILD_ID)
         if not guild:
@@ -139,7 +137,8 @@ async def nerve_alert(bot_instance, context, error):
 
 
 def nerve_flush():
-    """Return formatted digest string and clear the buffer."""
+    # Drain the buffer and return a formatted digest string.
+    # Called by the hourly task loop in personality.py.
     subs         = _nerve_events['submissions']
     interactions = _nerve_events['butler_interactions']
     errors       = _nerve_events['errors']
@@ -179,7 +178,6 @@ def nerve_flush():
     return "\n".join(lines)
 
 
-# ── butlers-manual content builder ────────────────────────────────────────────
 def build_manual_content():
     lines = [
         "📖 **BUTLER'S MANUAL**",
