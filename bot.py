@@ -928,8 +928,32 @@ def get_feats_for_player(discord_id, cached_data=None):
 
     return named_feats, feats
 
+# Subclass primary weapons — only these count toward Mastered Weapon (100 submissions)
+_SUBCLASS_PRIMARIES = {
+    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe"},
+    "Guardian":       {"Warhammer", "Falchion", "Heavy Cavalry Sword", "Axe", "One-Handed Spear"},
+    "Crusader":       {"Messer", "Battle Axe", "Two-Handed Hammer", "Executioner's Axe", "Quarterstaff"},
+    "Devastator":     {"Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe", "Highland Sword"},
+    "Raider":         {"Dane Axe", "Glaive", "Two-Handed Hammer", "Messer"},
+    "Ambusher":       {"Hatchet", "Dagger", "Cudgel", "Katars", "Short Sword"},
+    "Poleman":        {"Halberd", "Polehammer", "Spear", "Glaive", "Quarterstaff", "Goedendag"},
+    "Man-at-Arms":    {"Sword", "Morning Star", "One-Handed Spear", "Rapier", "Heavy Cavalry Sword"},
+    "Field Engineer": {"Goedendag", "Pick Axe", "Sledge Hammer", "Shovel"},
+    "Longbowman":     {"War Bow", "Bow"},
+    "Crossbowman":    {"Crossbow", "Siege Crossbow"},
+    "Skirmisher":     {"Javelin", "Throwing Axe"},
+}
+
+def is_primary_weapon(weapon, subclass):
+    """Return True if weapon is a primary for the given subclass."""
+    primaries = _SUBCLASS_PRIMARIES.get(subclass)
+    if primaries is None:
+        return True  # Unknown subclass — allow by default
+    return weapon in primaries
+
+
 def get_mastered_weapons_for_player(discord_id, cached_data=None):
-    """Weapons with 100+ submissions. Checks Submissions sheet and LegacyMarks."""
+    """Weapons with 100+ primary-weapon submissions. Checks Submissions sheet and LegacyMarks."""
     subs = (cached_data or {}).get('submissions') or cached_submissions()
     discord_id_str = str(discord_id)
     weapon_counts = {}
@@ -937,6 +961,9 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
         if len(row) < 9 or row[2].strip() != discord_id_str:
             continue
         weapon = row[3].strip()
+        subclass = row[4].strip() if len(row) > 4 else ''
+        if not is_primary_weapon(weapon, subclass):
+            continue
         try:
             td = int(row[7])
         except (ValueError, IndexError):
