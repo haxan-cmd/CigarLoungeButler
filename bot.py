@@ -1905,6 +1905,8 @@ last_submission_time = None  # For dry spell detection
 BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
 
 PLAYER_COMMANDS = [
+    ("/rules", "Show the Cigar Lounge challenge rules."),
+    ("/rank", "Show the top 10 for any weapon leaderboard e.g. /rank Messer."),
     ("/progress", "Show your title standings and weapon rank progress. Use /progress [name] for any player."),
     ("/refresh_card", "Refresh your registry card in butlers-archive."),
     ("/butlers_report", "Summon the Butler's Favourites report."),
@@ -6287,7 +6289,7 @@ _WEAPONS_1H = {
     "Longsword", "War Axe", "Warhammer", "Falchion", "Heavy Cavalry Sword",
     "Axe", "One-Handed Spear", "Messer", "Rapier", "Morning Star", "Sword",
     "Dagger", "Hatchet", "Cudgel", "Katars", "Short Sword", "Mace",
-    "Javelin", "Throwing Axe", "Pick Axe",
+    "Javelin", "Throwing Axe", "Pick Axe", "Bow",
 }
 
 def _weapon_forum_id(weapon):
@@ -6362,6 +6364,50 @@ async def create_missing_boards(interaction: discord.Interaction):
     if failed:
         msg += f"\nFailed: {chr(10).join(failed)}"
     await interaction.followup.send(msg[:1900], ephemeral=True)
+
+
+
+@bot.tree.command(name="rules", description="Show the Cigar Lounge challenge rules.")
+async def rules_command(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    for chunk in CHALLENGE_RULES_CONTENT:
+        await interaction.followup.send(chunk, ephemeral=True)
+
+
+@bot.tree.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
+@discord.app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
+async def rank_command(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+
+    # Try exact match first, then case-insensitive
+    entries = get_leaderboard_entries(name)
+    if not entries:
+        # Try case-insensitive match against all board names
+        all_boards = set()
+        for row in leaderboard_data_ws.get_all_values()[1:]:
+            if row:
+                all_boards.add(row[0].strip())
+        match = next((b for b in all_boards if b.lower() == name.lower()), None)
+        if match:
+            entries = get_leaderboard_entries(match)
+            name = match
+        else:
+            # Suggest close matches
+            suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
+            msg = f"No leaderboard found for **{name}**."
+            if suggestions:
+                msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+
+    top = entries[:10]
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    lines = [f"**{name}** — Top {len(top)}", ""]
+    for i, e in enumerate(top, 1):
+        medal = medals.get(i, f"{i}.")
+        lines.append(f"{medal} **{e['player']}** — {e['score']}")
+
+    await interaction.followup.send("\n".join(lines))
 
 
 import traceback
