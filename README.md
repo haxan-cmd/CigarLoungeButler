@@ -24,21 +24,23 @@ Live weapon leaderboards across all 1H and 2H weapons, plus map boards and feat 
 Per-player forum threads in the Butler's Archive. Weapon marks merged from live submissions, leaderboard data, and legacy records — keyed by `(weapon, subclass)` to prevent double-counting. Includes subclass/class rank progression and Best Placements sorted by dominance gap.
 
 ### 🎖️ Butler's Favourites
-Weekly prestige report. Tracks five titles with auto role assignment:
+Prestige titles recalculated automatically after every submission. Only one player holds each title at a time.
 
 | Title | Criteria |
 |---|---|
-| **Grand Marshal** | Most kills |
-| **Weapons Master** | Most weapon marks |
-| **Campaign Master** | Best TD/kill ratio (Warlord) |
-| **Headhunter** | Best kill rate % (Lethality) |
-| **Butcher** | Most team damage dealt |
+| **Grand Marshal** | Most leaderboard breadth — appears on 15+ boards across all categories, ranked by average placement |
+| **Weapons Master** | Appears on 9+ weapon leaderboards, ranked by average placement |
+| **Campaign Master** | Appears on 6+ map leaderboards, ranked by average placement |
+| **Headhunter** | #1 on the 100 Kills board — ranked by average kills score, weighted by submissions |
+| **Butcher** | #1 on the 200 Takedowns board — ranked by average takedowns score, weighted by submissions |
+
+Weekly Lethality Rating (best Kill Rate %) and Warlord (best TD/Kill ratio) are also tracked, with a minimum 3-run floor.
 
 ### 🎯 Bounty System
 Active bounty cards with per-player progress tracking, a live Top Hunters board, and archival on bounty end. Supports per-weapon custom targets. Public commands: `/bounty_hunt`, `/my_bounty`, `/bounty_status`.
 
 ### 🧠 Nerve Center Digest
-Hourly summary posted to a private channel — submissions, milestones, Butler interactions, and errors. Quiet when nothing happened; dry when something did.
+Hourly summary posted to a private channel — submissions, milestones, Butler interactions, and errors. Quiet when nothing happened.
 
 ### ⚠️ Anomaly Detection
 Flags suspicious runs to a private notes channel when kills or team damage exceed 2× the server record, or when a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries.
