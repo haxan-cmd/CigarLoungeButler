@@ -86,7 +86,7 @@ BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
 BUTLER_IDIOT_ROLE_ID = 1510070252044554390
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
-BUTLER_AI_COOLDOWN_SECONDS = 30
+BUTLER_AI_COOLDOWN_SECONDS = 15
 
 import os as _os
 _anthropic_client = None
@@ -577,7 +577,7 @@ class PersonalityCog(commands.Cog):
             discord_id_str = str(message.author.id)
             is_registered = any(
                 row and row[0].strip() == discord_id_str
-                for row in players_ws.get_all_values()[1:]
+                for row in cached_players()
             )
             if not is_registered:
                 return
@@ -877,10 +877,7 @@ class PersonalityCog(commands.Cog):
                 if result:
                     response_text, needs_eyeball = result
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
-                    if is_pinged:
-                        sent_msg = await message.reply(response_text)
-                    else:
-                        sent_msg = await message.channel.send(response_text)
+                    sent_msg = await message.reply(response_text, mention_author=False)
                     # Track for reaction feedback
                     BUTLER_RESPONSE_LOG[sent_msg.id] = {
                         'trigger': message.content[:100],
