@@ -1166,8 +1166,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         messages = build_registry_messages(player_name, discord_id, cached_data)
         thread_id = get_registry_thread_id(discord_id)
 
-        top_path = os.path.join(os.path.dirname(__file__), 'assets', 'WMMR_Spacer_Top.png')
-        bot_path = os.path.join(os.path.dirname(__file__), 'assets', 'WMMR_Spacer_Bottom.png')
+        top_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Top.png')
+        bot_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Bottom.png')
 
         if thread_id:
             # Edit existing thread in place

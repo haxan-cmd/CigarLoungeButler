@@ -1,6 +1,7 @@
 # Leaderboard read/write, Discord thread management, and the index builder.
 # update_leaderboards() is the main entry point — called after every submission.
 import asyncio
+import os
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -13,8 +14,9 @@ from utils.sheets import (
 )
 
 MOD_ROLE_ID       = config.MOD_ROLE_ID
-DECORATION_TOP    = config.DECORATION_TOP
-DECORATION_BOTTOM = config.DECORATION_BOTTOM
+_ASSETS_DIR       = os.path.join(os.path.dirname(__file__), '..', 'assets')
+DECORATION_TOP    = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
+DECORATION_BOTTOM = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Bottom.png')
 _SUBCLASS_PRIMARIES = config._SUBCLASS_PRIMARIES
 FACTION_EMOJIS     = config.FACTION_EMOJIS
 MAP_ATTACK_DEFENSE = config.MAP_ATTACK_DEFENSE

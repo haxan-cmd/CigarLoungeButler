@@ -1,5 +1,6 @@
 # Admin and mod commands — rules, challenge rules, patch notes, submission removal, seeding.
 import asyncio
+import os
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -15,8 +16,10 @@ MOD_ROLE_ID             = config.MOD_ROLE_ID
 GUILD_ID                = config.GUILD_ID
 CHALLENGE_RULES_CHANNEL_ID = config.CHALLENGE_RULES_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
-DECORATION_TOP          = config.DECORATION_TOP
-DECORATION_BOTTOM       = config.DECORATION_BOTTOM
+# Asset paths are relative to the repo root, not the cogs/ subdirectory
+_ASSETS_DIR     = os.path.join(os.path.dirname(__file__), '..', 'assets')
+DECORATION_TOP  = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
+DECORATION_BOTTOM = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Bottom.png')
 PLAYER_TITLES           = config.PLAYER_TITLES
 GRAND_MARSHAL_ROLE_ID   = config.GRAND_MARSHAL_ROLE_ID
 WEAPONS_MASTER_ROLE_ID  = config.WEAPONS_MASTER_ROLE_ID

@@ -1,6 +1,7 @@
 """
 cogs/submissions.py — UI views, submission flow, and submission worker.
 """
+import os
 import re
 import json
 import asyncio
@@ -26,8 +27,9 @@ from utils.helpers import (
 )
 
 MOD_ROLE_ID            = config.MOD_ROLE_ID
-DECORATION_TOP         = config.DECORATION_TOP
-DECORATION_BOTTOM      = config.DECORATION_BOTTOM
+_ASSETS_DIR            = os.path.join(os.path.dirname(__file__), '..', 'assets')
+DECORATION_TOP         = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
+DECORATION_BOTTOM      = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Bottom.png')
 SUBMISSIONS_CHANNEL_ID = config.SUBMISSIONS_CHANNEL_ID
 BUTLERS_NOTES_CHANNEL_ID = config.BUTLERS_NOTES_CHANNEL_ID
 MAIN_CHANNEL_ID        = config.MAIN_CHANNEL_ID
@@ -36,6 +38,7 @@ VIP_MAPS               = config.VIP_MAPS
 MAP_FACTIONS           = config.MAP_FACTIONS
 FEAT_WEAPONS           = config.FEAT_WEAPONS
 MARKSMAN_SUBCLASSES    = config.MARKSMAN_SUBCLASSES
+SUBCLASS_PARENT        = config.SUBCLASS_PARENT
 WEAPONS_2H             = config.WEAPONS_2H
 WEAPONS_1H             = config.WEAPONS_1H
 CLASS_WEAPON_MAP       = config.CLASS_WEAPON_MAP
