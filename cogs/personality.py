@@ -85,6 +85,13 @@ BUTLER_IDIOT_ROLE_ID = 1510070252044554390
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 30
 
+import os as _os
+_anthropic_client = None
+try:
+    _anthropic_client = anthropic.Anthropic(api_key=_os.environ['ANTHROPIC_API_KEY'])
+except Exception as _e:
+    print(f"Butler AI unavailable: {_e}")
+
 def count_qualifying_runs(weapon_name, min_td=100):
     """Count runs with TD >= min_td for a weapon using LeaderboardData (includes legacy)."""
     try:
