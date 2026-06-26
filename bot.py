@@ -2287,7 +2287,8 @@ Special instructions:
 - If anyone mentions "bald" or "shiny head" in passing, make a dry remark about the shine. Vary it each time.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
-- You have access to the player's stats (total marks, submissions, top weapons). If they are bragging or talking themselves up and their stats don't back it up, use the numbers to put them in their place. Be dry about it, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
+- You have access to the player's stats (total marks, submissions, top weapons) AND a summary of all registered players ranked by marks. Use this to answer comparison questions directly — who has more marks, who submits more, where someone ranks. Be specific with numbers.
+- If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - Never invent commands or channels that do not exist.
@@ -2484,6 +2485,7 @@ async def on_message(message):
             player_stats_ctx = ''
             try:
                 p_rows = players_ws.get_all_values()[1:]
+                # Current player stats
                 for p_row in p_rows:
                     if p_row and p_row[0].strip() == discord_id_str:
                         total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
@@ -2491,6 +2493,62 @@ async def on_message(message):
                         top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
                         player_stats_ctx = f"Player stats — Total marks: {total_marks}, Submissions: {submissions}, Top weapons: {top_weapons}"
                         break
+                # Build rich per-player summary for comparisons
+                subs_all = cached_submissions()
+                ld_all = cached_leaderboard_data()
+
+                # Unique weapons and subclasses per player from submissions
+                player_weapon_diversity = {}  # name -> set of weapons
+                player_subclass_diversity = {}  # name -> set of subclasses
+                player_sub_counts = {}  # name -> submission count
+                name_lookup = {p_row[0].strip(): p_row[1].strip() for p_row in p_rows if len(p_row) > 1}
+                for row in subs_all:
+                    if len(row) < 5:
+                        continue
+                    pid = row[2].strip()
+                    pname = name_lookup.get(pid, '')
+                    if not pname:
+                        continue
+                    weapon = row[3].strip()
+                    subclass = row[4].strip()
+                    if pname not in player_weapon_diversity:
+                        player_weapon_diversity[pname] = set()
+                        player_subclass_diversity[pname] = set()
+                        player_sub_counts[pname] = 0
+                    player_weapon_diversity[pname].add(weapon)
+                    player_subclass_diversity[pname].add(subclass)
+                    player_sub_counts[pname] += 1
+
+                # Weapons on leaderboards per player
+                player_lb_weapons = {}  # name -> set of weapons with board entries
+                for row in ld_all:
+                    if len(row) < 2:
+                        continue
+                    pname = row[1].strip()
+                    weapon = row[0].strip()
+                    if pname not in player_lb_weapons:
+                        player_lb_weapons[pname] = set()
+                    player_lb_weapons[pname].add(weapon)
+
+                # Build summary lines
+                all_players_summary = []
+                for p_row in p_rows:
+                    if len(p_row) > 1 and p_row[1].strip():
+                        pname = p_row[1].strip()
+                        marks = int(p_row[3]) if len(p_row) > 3 and p_row[3].strip().isdigit() else 0
+                        unique_weapons = len(player_weapon_diversity.get(pname, set()))
+                        unique_subclasses = len(player_subclass_diversity.get(pname, set()))
+                        lb_weapons = len(player_lb_weapons.get(pname, set()))
+                        sub_count = player_sub_counts.get(pname, 0)
+                        all_players_summary.append((pname, marks, sub_count, unique_weapons, unique_subclasses, lb_weapons))
+
+                all_players_summary.sort(key=lambda x: -x[1])
+                summary_lines = [
+                    f"{n}: {m} marks, {s} subs, {uw} unique weapons used, {us} subclasses, {lw} on leaderboards"
+                    for n, m, s, uw, us, lw in all_players_summary[:20]
+                ]
+                if summary_lines:
+                    player_stats_ctx += f"\n\nAll players (top 20 by marks):\n" + "\n".join(summary_lines)
             except Exception:
                 pass
 
