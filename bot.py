@@ -2288,6 +2288,7 @@ Special instructions:
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
 - You have access to the player's stats (total marks, submissions, top weapons). If they are bragging or talking themselves up and their stats don't back it up, use the numbers to put them in their place. Be dry about it, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
+- If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
@@ -2297,6 +2298,87 @@ BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 30
+
+def extract_stats_from_message(text):
+    """Extract kills and takedown numbers from a natural language message."""
+    import re
+    kills = None
+    tds = None
+    # Match patterns like "150 kills", "200 takedowns", "200 TDs", "200 tkd"
+    kill_match = re.search(r'(\d+)\s*(?:kills?|kill\s*count)', text, re.IGNORECASE)
+    td_match = re.search(r'(\d+)\s*(?:takedowns?|t\.?d\.?s?|tkd)', text, re.IGNORECASE)
+    if kill_match:
+        kills = int(kill_match.group(1))
+    if td_match:
+        tds = int(td_match.group(1))
+    return kills, tds
+
+
+def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
+    """Find a recent submission matching the given stats. Returns context string or empty."""
+    try:
+        subs = cached_submissions()
+        discord_id_str = str(discord_id)
+        player_subs = [r for r in subs if len(r) > 8 and r[2].strip() == discord_id_str]
+        if not player_subs:
+            return ''
+        # Search most recent 20 submissions
+        for row in reversed(player_subs[-20:]):
+            try:
+                row_kills = int(row[8])
+                row_tds = int(row[7])
+            except (ValueError, IndexError):
+                continue
+            kills_match = kills is None or abs(row_kills - kills) <= 2
+            tds_match = tds is None or abs(row_tds - tds) <= 2
+            weapon_match = weapon is None or (len(row) > 3 and weapon.lower() in row[3].lower())
+            if kills_match and tds_match and weapon_match:
+                sub_weapon = row[3].strip() if len(row) > 3 else 'unknown'
+                sub_map = row[5].strip() if len(row) > 5 else 'unknown'
+                sub_class = row[4].strip() if len(row) > 4 else 'unknown'
+                sub_tds = row[7].strip() if len(row) > 7 else '?'
+                sub_kills = row[8].strip() if len(row) > 8 else '?'
+                sub_date = row[0].strip()[:10] if row[0] else '?'
+                # Check if personal best
+                all_kills = [int(r[8]) for r in player_subs if len(r) > 8 and r[8].strip().isdigit()]
+                all_tds = [int(r[7]) for r in player_subs if len(r) > 7 and r[7].strip().isdigit()]
+                pb_kills = max(all_kills) if all_kills else 0
+                pb_tds = max(all_tds) if all_tds else 0
+                is_pb_kills = row_kills >= pb_kills
+                is_pb_tds = row_tds >= pb_tds
+                # Check leaderboard position for this weapon
+                lb_ctx = ''
+                try:
+                    ld = cached_leaderboard_data()
+                    weapon_entries = [(r[1].strip(), int(r[3])) for r in ld
+                                      if len(r) > 3 and r[0].strip() == sub_weapon
+                                      and r[3].strip().isdigit()]
+                    weapon_entries.sort(key=lambda x: -x[1])
+                    player_entry = next((i+1, s) for i, (p, s) in enumerate(weapon_entries) if p == player_name_ref)
+                    if player_entry:
+                        pos, score = player_entry
+                        total_on_board = len(weapon_entries)
+                        if pos == 1:
+                            lb_ctx = f" Currently #1 on the {sub_weapon} board with {score}."
+                        else:
+                            leader_score = weapon_entries[0][1] if weapon_entries else 0
+                            gap = leader_score - score
+                            lb_ctx = f" Currently #{pos} of {total_on_board} on the {sub_weapon} board with {score} — {gap} behind #1."
+                except Exception:
+                    pass
+
+                ctx = (f"Found matching submission: {sub_weapon} on {sub_map} as {sub_class} "
+                       f"— {sub_tds} TDs / {sub_kills} kills ({sub_date}). "
+                       f"Personal best kills: {pb_kills}, Personal best TDs: {pb_tds}. "
+                       f"This run {'IS' if is_pb_kills else 'is NOT'} a kills PB, "
+                       f"{'IS' if is_pb_tds else 'is NOT'} a TDs PB."
+                       f"{lb_ctx}")
+                return ctx
+        return ''
+    except Exception as e:
+        print(f"find_submission_from_stats error: {e}")
+        return ''
+
 
 async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats=''):
     """Call Anthropic API for Butler response. Returns response string or None."""
@@ -2411,6 +2493,13 @@ async def on_message(message):
                         break
             except Exception:
                 pass
+
+            # Try to find a matching submission if player mentioned stats
+            msg_kills, msg_tds = extract_stats_from_message(message.content)
+            if msg_kills or msg_tds:
+                sub_ctx = find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
+                if sub_ctx:
+                    player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
 
             result = await call_butler_ai(message.content, ctx_messages, player_name, 'main', player_stats_ctx)
             if result:
