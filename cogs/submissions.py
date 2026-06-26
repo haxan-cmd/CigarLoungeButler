@@ -1284,12 +1284,7 @@ class SubmissionsCog(commands.Cog):
         )
         if not has_image:
             return
-        detected_weapon, detected_subclass = parse_submission_text(message.content or "")
-        view = SubmitView(
-            original_message=message,
-            detected_weapon=detected_weapon,
-            detected_subclass=detected_subclass,
-        )
+        view = SubmitView(original_message=message)
         prompt = await message.reply(
             "\U0001f4cb **Submit this run?**",
             view=view,
