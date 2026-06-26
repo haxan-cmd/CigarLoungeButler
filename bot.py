@@ -779,8 +779,8 @@ def get_butler_titles_for_player(discord_id, stats):
     discord_id_str = str(discord_id)
     titles = []
     title_checks = [
-        ('grand_marshal', '<:Grand_Marshall:1467680882490998979> Grand Marshal'),
-        ('weapons_master', '<:Weapons_Master:1467727674117193870> Weapons Master'),
+        ('grand_marshal', '<a:grandmarshal:1519928617407348877> Grand Marshal'),
+        ('weapons_master', '<a:weaponsmaster:1519928521445605488> Weapons Master'),
         ('campaign_master', '🗺️ Campaign Master'),
         ('headhunter', '<a:topkill:1360314538364240024> Headhunter'),
         ('butcher', '<a:toptkd:1360312666475728958> Butcher'),
@@ -4969,8 +4969,8 @@ def build_favourites_embed(stats):
         f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"
-        f"<:Grand_Marshall:1467680882490998979> **Grand Marshal** — {stats['grand_marshal']}\n"
-        f"<:Weapons_Master:1467727674117193870> **Weapons Master** — {stats['weapons_master']}\n"
+        f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
+        f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
@@ -5185,8 +5185,8 @@ async def progress_command(interaction: discord.Interaction, player: str = None)
         return f"{emoji} {label} \u2014 {player_val} / {holder_val} {holder_name} **(-{diff})**"
 
     title_lines = [
-        fmt_title("<:Grand_Marshall:1467680882490998979>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name),
-        fmt_title("<:Weapons_Master:1467727674117193870>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name),
+        fmt_title("<a:grandmarshal:1519928617407348877>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name),
+        fmt_title("<a:weaponsmaster:1519928521445605488>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name),
         fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name),
         fmt_title("<a:topkill:1360314538364240024>", "Headhunter", player_kills_best, hh_holder or "N/A", hh_score, resolved_name, is_board=False),
         fmt_title("<a:toptkd:1360312666475728958>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
