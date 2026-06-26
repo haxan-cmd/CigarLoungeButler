@@ -1815,8 +1815,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         messages = build_registry_messages(player_name, discord_id, cached_data)
         thread_id = get_registry_thread_id(discord_id)
 
-        top_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Top.png')
-        bot_path = os.path.join(os.path.dirname(__file__), 'WMMR_Spacer_Bottom.png')
+        top_path = os.path.join(os.path.dirname(__file__), 'assets', 'WMMR_Spacer_Top.png')
+        bot_path = os.path.join(os.path.dirname(__file__), 'assets', 'WMMR_Spacer_Bottom.png')
 
         if thread_id:
             # Edit existing thread in place
@@ -1963,7 +1963,6 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
 GUILD_ID = 1324379304544567356
 last_submission_time = None  # For dry spell detection
 _dry_spell_posted = False    # True once the dry weather post has fired; reset on next submission
-_last_digest_hour = None     # (year, month, day, hour) UTC — prevents duplicate posts on redeploy
 
 BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
 NERVE_CENTER_CHANNEL_ID = 1520092706074787870
@@ -2176,14 +2175,10 @@ async def butler_organic_post():
 @tasks.loop(hours=1)
 async def nerve_center_digest():
     """Post hourly digest to nerve center channel."""
-    global _last_digest_hour
     try:
-        now = datetime.now(timezone.utc)
-        current_hour = (now.year, now.month, now.day, now.hour)
-        if _last_digest_hour == current_hour:
-            return
-        _last_digest_hour = current_hour
         digest = nerve_flush()
+        if not digest:
+            return
         guild = bot.get_guild(GUILD_ID)
         if not guild:
             return
