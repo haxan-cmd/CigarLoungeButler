@@ -607,22 +607,52 @@ class PersonalityCog(commands.Cog):
                         if p_row and p_row[0].strip() == discord_id_str:
                             total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
                             top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
-                            # Personal bests from submissions
+                            # Find the player's best games from their submission history.
+                            # We track best-by-TD and best-by-kills separately because they
+                            # might be different games — Butler needs weapon+map to answer
+                            # "what's my best game" correctly, not just the raw numbers.
                             pb_kills = 0
                             pb_td = 0
+                            best_td_game = None    # full row of their highest-TD submission
+                            best_kills_game = None # full row of their highest-kills submission
                             try:
                                 subs_for_pb = cached_submissions()
-                                for pb_row in subs_for_pb:
-                                    if len(pb_row) > 8 and pb_row[2].strip() == discord_id_str:
-                                        try:
-                                            pb_kills = max(pb_kills, int(pb_row[8]))
-                                            pb_td = max(pb_td, int(pb_row[7]))
-                                        except ValueError:
-                                            pass
+                                player_subs_pb = [
+                                    r for r in subs_for_pb
+                                    if len(r) > 8 and r[2].strip() == discord_id_str
+                                ]
+                                for pb_row in player_subs_pb:
+                                    try:
+                                        row_kills = int(pb_row[8])
+                                        row_td = int(pb_row[7])
+                                    except ValueError:
+                                        continue
+                                    if row_td > pb_td:
+                                        pb_td = row_td
+                                        best_td_game = pb_row
+                                    if row_kills > pb_kills:
+                                        pb_kills = row_kills
+                                        best_kills_game = pb_row
                             except Exception:
                                 pass
-                            pb_str = f", Best kills: {pb_kills}, Best TDs: {pb_td}" if pb_kills > 0 else ""
-                            player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons: {top_weapons}{pb_str}"
+
+                            def _game_str(row):
+                                weapon = row[3].strip() if len(row) > 3 else '?'
+                                map_   = row[5].strip() if len(row) > 5 else '?'
+                                tds    = row[7].strip() if len(row) > 7 else '?'
+                                kills  = row[8].strip() if len(row) > 8 else '?'
+                                date   = row[0].strip()[:10] if row[0] else '?'
+                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills ({date})"
+
+                            pb_parts = []
+                            if best_td_game is not None:
+                                pb_parts.append(f"Best TD game: {_game_str(best_td_game)}")
+                            if best_kills_game is not None and best_kills_game is not best_td_game:
+                                pb_parts.append(f"Best kills game: {_game_str(best_kills_game)}")
+                            elif best_kills_game is not None and best_kills_game is best_td_game:
+                                pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game)}"
+                            pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
+                            player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons by marks: {top_weapons}{pb_str}"
                             break
                     # Build rich per-player summary for comparisons
                     subs_all = cached_submissions()
