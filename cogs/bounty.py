@@ -384,7 +384,7 @@ class BountyCog(commands.Cog):
         special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)"
     )
     async def bounty_create(
-        interaction: discord.Interaction,
+        self, interaction: discord.Interaction,
         title: str,
         channel_name: str,
         theme_emoji: str,

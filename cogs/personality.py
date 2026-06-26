@@ -250,9 +250,6 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         return None
 
 
-@bot.event
-
-
 class PersonalityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
