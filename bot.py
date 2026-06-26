@@ -1457,6 +1457,7 @@ def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks,
             if '429' in str(e) and attempt < 3:
                 _time.sleep(2 ** attempt * 3)  # 3s, 6s, 12s backoff
             else:
+                nerve_log_error("ButlersArchive", e)
                 print(f"update_butlers_archive_row error: {e}")
                 return
 
@@ -1951,6 +1952,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, tak
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     vip_str = "Yes" if vip else "No"
     feats_str = ", ".join(feats) if feats else "None"
+    nerve_log_submission(discord_name, weapon)
     submissions_ws.append_row([
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
@@ -1963,6 +1965,76 @@ last_submission_time = None  # For dry spell detection
 _dry_spell_posted = False    # True once the dry weather post has fired; reset on next submission
 
 BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
+NERVE_CENTER_CHANNEL_ID = 1520092706074787870
+
+# In-memory event buffer for hourly digest
+_nerve_events = {
+    'submissions': [],       # (timestamp, player, weapon)
+    'butler_interactions': [], # (trigger[:60], response[:60], reactions)
+    'errors': [],            # (timestamp, error_str)
+    'milestones': [],        # (player, weapon, rank)
+}
+
+def nerve_log_submission(player, weapon):
+    from datetime import datetime
+    _nerve_events['submissions'].append((datetime.utcnow().strftime('%H:%M'), player, weapon))
+
+def nerve_log_butler(trigger, response):
+    _nerve_events['butler_interactions'].append((trigger[:60], response[:60]))
+
+def nerve_log_error(context, error):
+    from datetime import datetime
+    _nerve_events['errors'].append((datetime.utcnow().strftime('%H:%M'), f"{context}: {str(error)[:80]}"))
+
+def nerve_log_milestone(player, weapon, rank):
+    _nerve_events['milestones'].append((player, weapon, rank))
+
+async def nerve_alert(bot_instance, context, error):
+    """Immediately post a critical error alert to nerve center."""
+    try:
+        guild = bot_instance.get_guild(GUILD_ID)
+        if not guild:
+            return
+        ch = guild.get_channel(NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID)
+        if ch:
+            await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
+    except Exception:
+        pass
+
+
+def nerve_flush():
+    """Return formatted digest and clear buffer."""
+    subs = _nerve_events['submissions']
+    interactions = _nerve_events['butler_interactions']
+    errors = _nerve_events['errors']
+    milestones = _nerve_events['milestones']
+
+    if not subs and not interactions and not errors and not milestones:
+        return None
+
+    lines = ["🧠 **Hourly Digest**"]
+    if subs:
+        lines.append(f"\n**Submissions ({len(subs)})**")
+        for ts, p, w in subs[-10:]:
+            lines.append(f"• `{ts}` {p} — {w}")
+    if milestones:
+        lines.append(f"\n**Milestones**")
+        for p, w, r in milestones:
+            lines.append(f"• {p} — {w} — {r}")
+    if interactions:
+        lines.append(f"\n**Butler ({len(interactions)} interactions)**")
+        for t, r in interactions[-5:]:
+            lines.append(f'• {t[:40]} -> {r[:40]}')
+    if errors:
+        lines.append(f"\n**⚠️ Errors ({len(errors)})**")
+        for ts, e in errors[-5:]:
+            lines.append(f"• `{ts}` {e}")
+
+    # Clear
+    for k in _nerve_events:
+        _nerve_events[k].clear()
+
+    return "\n".join(lines)
 
 PLAYER_COMMANDS = [
     ("/rules", "Show the Cigar Lounge challenge rules."),
@@ -2002,6 +2074,8 @@ async def on_ready():
         dry_weather_check.start()
     if not butler_organic_post.is_running():
         butler_organic_post.start()
+    if not nerve_center_digest.is_running():
+        nerve_center_digest.start()
     # Update butlers-manual
     try:
         real_guild = bot.get_guild(GUILD_ID)
@@ -2089,6 +2163,23 @@ async def butler_organic_post():
             await main_ch.send(f'*{line}*')
     except Exception as e:
         print(f"Butler organic post error: {e}")
+
+@tasks.loop(hours=1)
+async def nerve_center_digest():
+    """Post hourly digest to nerve center channel."""
+    try:
+        digest = nerve_flush()
+        if not digest:
+            return
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            return
+        ch = guild.get_channel(NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID)
+        if ch:
+            await ch.send(digest[:1900])
+    except Exception as e:
+        print(f"Nerve center digest error: {e}")
+
 
 @tasks.loop(hours=168)  # 7 days
 async def weekly_snapshot():
@@ -3791,6 +3882,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         for weapon, threshold, rank_name in milestones:
                             msg = build_milestone_message(_user_name, weapon, threshold, rank_name)
                             if msg:
+                                nerve_log_milestone(_user_name, weapon, rank_name)
                                 await main_ch.send(msg)
                                 await asyncio.sleep(0.5)
             except Exception as e:
