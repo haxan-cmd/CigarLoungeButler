@@ -94,7 +94,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
     _sheet_cache.invalidate(submissions_ws)
 
 class SubmitView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg=None):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
