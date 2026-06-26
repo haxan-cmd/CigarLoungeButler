@@ -743,10 +743,12 @@ class PersonalityCog(commands.Cog):
                     player_weapon_diversity = {}  # name -> set of weapons
                     player_subclass_diversity = {}  # name -> set of subclasses
                     player_sub_counts = {}  # name -> submission count
-                    player_best_sub = {}  # name -> best submission row by TD (for kills data)
+                    player_best_sub = {}   # name -> best submission row by TD
+                    player_td_totals = {}  # name -> [td values] for avg
+                    player_kill_totals = {}  # name -> [kills values] for avg + lethality
                     name_lookup = {p_row[0].strip(): p_row[1].strip() for p_row in p_rows if len(p_row) > 1}
                     for row in subs_all:
-                        if len(row) < 5:
+                        if len(row) < 9:
                             continue
                         pid = row[2].strip()
                         pname = name_lookup.get(pid, '')
@@ -758,12 +760,16 @@ class PersonalityCog(commands.Cog):
                             player_weapon_diversity[pname] = set()
                             player_subclass_diversity[pname] = set()
                             player_sub_counts[pname] = 0
+                            player_td_totals[pname] = []
+                            player_kill_totals[pname] = []
                         player_weapon_diversity[pname].add(weapon)
                         player_subclass_diversity[pname].add(subclass)
                         player_sub_counts[pname] += 1
-                        # Track best submission by TD so we have kills data for any player
                         try:
-                            row_td = int(row[7]) if len(row) > 7 else 0
+                            row_td = int(row[7])
+                            row_kills = int(row[8])
+                            player_td_totals[pname].append(row_td)
+                            player_kill_totals[pname].append(row_kills)
                             current_best = player_best_sub.get(pname)
                             current_best_td = int(current_best[7]) if current_best and len(current_best) > 7 else 0
                             if row_td > current_best_td:
@@ -795,8 +801,18 @@ class PersonalityCog(commands.Cog):
                             all_players_summary.append((pname, marks, sub_count, unique_weapons, unique_subclasses, lb_weapons))
 
                     all_players_summary.sort(key=lambda x: -x[1])
+                    def _lethality_str(pname):
+                        tds = player_td_totals.get(pname, [])
+                        kills = player_kill_totals.get(pname, [])
+                        if len(tds) < 3:
+                            return ''
+                        avg_td = sum(tds) / len(tds)
+                        avg_k = sum(kills) / len(kills)
+                        kill_rate = (avg_k / avg_td * 100) if avg_td > 0 else 0
+                        td_per_kill = (avg_td / avg_k) if avg_k > 0 else 0
+                        return f", avg {avg_td:.0f} TD/{avg_k:.0f}K per run, {kill_rate:.0f}% kill rate"
                     summary_lines = [
-                        f"{n}: {m} marks, {uw} unique weapons used, {us} subclasses, {lw} on leaderboards"
+                        f"{n}: {m} marks, {uw} unique weapons, {lw} on leaderboards{_lethality_str(n)}"
                         for n, m, s, uw, us, lw in all_players_summary[:20]
                     ]
                     if summary_lines:

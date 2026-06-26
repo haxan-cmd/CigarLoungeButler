@@ -1040,11 +1040,22 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
-        # Edit summary to add highscore bonus mark
+        # Write High Score feat back to the Submissions sheet so mark totals count it
+        if submission_row:
+            try:
+                current_feats = submissions_ws.cell(submission_row, 12).value or ''
+                if 'High Score' not in current_feats:
+                    updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
+                    if current_feats in ('', 'None'):
+                        updated_feats = 'High Score'
+                    submissions_ws.update_cell(submission_row, 12, updated_feats)
+                    _sheet_cache.invalidate(submissions_ws)
+            except Exception as e:
+                print(f"Highscore feat write error: {e}")
+        # Edit summary message to show the bonus mark
         try:
             async for msg in original_message.channel.history(limit=10, after=original_message):
                 if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                    # Increment the marks total in the message
                     import re as _re
                     def increment_marks(content):
                         def replacer(m):
