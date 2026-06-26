@@ -6335,7 +6335,7 @@ async def create_missing_boards(interaction: discord.Interaction):
 
             thread_with_msg = await forum.create_thread(
                 name=weapon,
-                content=f"**{weapon}** leaderboard"
+                content="<:cigar:1444893851427803298>"
             )
             thread = thread_with_msg.thread
 
