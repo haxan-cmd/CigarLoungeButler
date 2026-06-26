@@ -766,7 +766,7 @@ def get_player_bounties_completed(discord_id):
                                 pass
                             break
                     # Complete only if ALL weapons hit their target
-                    if target and all(progress.get(w, 0) >= t for w, t in target.items()):
+                    if target and all(progress.get(w, 0) >= (t['total'] if isinstance(t, dict) else t) for w, t in target.items()):
                         completed.add(row[0].strip())
                 except Exception:
                     pass
@@ -1050,7 +1050,7 @@ def get_bounty_completions_for_player(discord_id):
                         except Exception:
                             pass
                         break
-                if target and all(progress.get(w, 0) >= t for w, t in target.items()):
+                if target and all(progress.get(w, 0) >= (t['total'] if isinstance(t, dict) else t) for w, t in target.items()):
                     placement = None
                     for brow in bounty_rows:
                         if brow and brow[0].strip() == bounty_title and len(brow) > 7 and brow[7]:
