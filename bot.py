@@ -2406,7 +2406,9 @@ Special instructions:
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
-- You have server-wide weapon run counts (100+ TD) when available. Use these to answer questions like "how many 100 takedown runs with Messer" or "how many times has the community hit 100 TDs with X weapon".
+- You have server-wide weapon run counts (100+ TD) when available.
+- You have per-player personal bests (best TD game, best kills game) for all players. Use these to answer "what's X's best game" questions.
+- You have Special Ops achievements per player (Fist and Shield, Knife etc). Use these to answer who has specific feats. Use these to answer questions like "how many 100 takedown runs with Messer" or "how many times has the community hit 100 TDs with X weapon".
 - CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
@@ -2722,6 +2724,54 @@ async def on_message(message):
                 ]
                 if summary_lines:
                     player_stats_ctx += f"\n\nAll players (top 20 by marks):\n" + "\n".join(summary_lines)
+
+                # Per-player personal bests from LeaderboardData
+                player_pb_td = {}  # name -> best TD score
+                player_pb_kills = {}  # name -> best kills score
+                for row in ld_all:
+                    if len(row) < 4:
+                        continue
+                    lb_name = row[0].strip()
+                    pname = row[1].strip()
+                    try:
+                        score = int(row[3])
+                    except ValueError:
+                        continue
+                    if lb_name == '100 Kills':
+                        player_pb_kills[pname] = max(player_pb_kills.get(pname, 0), score)
+                    elif ' - ' not in lb_name and lb_name not in {'Flawless', 'Healing Horn', '200 Takedowns'}:
+                        player_pb_td[pname] = max(player_pb_td.get(pname, 0), score)
+
+                pb_lines = []
+                all_pb_names = set(player_pb_td) | set(player_pb_kills)
+                for pname in sorted(all_pb_names):
+                    td = player_pb_td.get(pname, 0)
+                    kills = player_pb_kills.get(pname, 0)
+                    parts = []
+                    if td: parts.append(f"best TD: {td}")
+                    if kills: parts.append(f"best kills: {kills}")
+                    if parts:
+                        pb_lines.append(f"{pname}: {', '.join(parts)}")
+                if pb_lines:
+                    player_stats_ctx += f"\n\nPlayer personal bests:\n" + "\n".join(pb_lines)
+
+                # SpecialOps achievements per player
+                try:
+                    if special_ops_ws:
+                        so_rows = special_ops_ws.get_all_values()[1:]
+                        so_by_player = {}
+                        for so_row in so_rows:
+                            if len(so_row) > 2:
+                                pname = so_row[1].strip()
+                                achievement = so_row[2].strip()
+                                if pname not in so_by_player:
+                                    so_by_player[pname] = []
+                                so_by_player[pname].append(achievement)
+                        if so_by_player:
+                            so_lines = [f"{p}: {', '.join(a)}" for p, a in so_by_player.items()]
+                            player_stats_ctx += f"\n\nSpecial achievements (Fist and Shield, Knife, etc):\n" + "\n".join(so_lines)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
