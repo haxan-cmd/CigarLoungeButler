@@ -1060,8 +1060,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     def increment_marks(content):
                         def replacer(m):
                             n = int(m.group(1)) + 1
-                            return f"**+{n} mark{'s' if n != 1 else ''}**"
-                        return _re.sub(r'\*\*\+(\d+) marks?\*\*', replacer, content)
+                            return f"**{n} mark{'s' if n != 1 else ''}**"
+                        # Match "**1 mark**" or "**2 marks**" (no + prefix)
+                        return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
                     new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
                     await msg.edit(content=new_content)
                     break
