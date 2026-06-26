@@ -622,7 +622,7 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         submitted_class = row[4].strip() if len(row) > 4 else ''
         feats_str = row[11].strip() if len(row) > 11 else ''
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
-        if not weapon or weapon == 'Other':
+        if not weapon or weapon in ('Other', 'Multiple Weapons'):
             continue
         marks = 1
         if '200 Takedowns' in feats:
@@ -654,7 +654,7 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             if row[2].strip() != discord_id_str:
                 continue
             weapon = row[5].strip() if len(row) > 5 else ''
-            if not weapon or weapon == 'Other':
+            if not weapon or weapon in ('Other', 'Multiple Weapons'):
                 continue
             # Skip plain key if any subclass-keyed entry exists for this weapon
             has_subclass_key = any(
@@ -2502,9 +2502,8 @@ async def on_message(message):
                 for p_row in p_rows:
                     if p_row and p_row[0].strip() == discord_id_str:
                         total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
-                        submissions = p_row[4].strip() if len(p_row) > 4 else '0'
                         top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
-                        player_stats_ctx = f"Player stats — Total marks: {total_marks}, Submissions: {submissions}, Top weapons: {top_weapons}"
+                        player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons: {top_weapons}"
                         break
                 # Build rich per-player summary for comparisons
                 subs_all = cached_submissions()
@@ -2557,7 +2556,7 @@ async def on_message(message):
 
                 all_players_summary.sort(key=lambda x: -x[1])
                 summary_lines = [
-                    f"{n}: {m} marks, {s} subs, {uw} unique weapons used, {us} subclasses, {lw} on leaderboards"
+                    f"{n}: {m} marks, {uw} unique weapons used, {us} subclasses, {lw} on leaderboards"
                     for n, m, s, uw, us, lw in all_players_summary[:20]
                 ]
                 if summary_lines:
@@ -2833,6 +2832,7 @@ class RangedWeaponSelect(discord.ui.Select):
         self.prompt_msg = prompt_msg
         self.subclass = subclass
         options = [discord.SelectOption(label=w) for w in weapons]
+        options.append(discord.SelectOption(label="Multiple Weapons"))
         super().__init__(placeholder="Choose your weapon...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
