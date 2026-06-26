@@ -2287,15 +2287,18 @@ Special instructions:
 - If anyone mentions "bald" or "shiny head" in passing, make a dry remark about the shine. Vary it each time.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
+- You have access to the player's stats (total marks, submissions, top weapons). If they are bragging or talking themselves up and their stats don't back it up, use the numbers to put them in their place. Be dry about it, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - Keep responses under 80 tokens.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
+# msg_id -> {'trigger': str, 'response': str, 'player': str}
+BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 30
 
-async def call_butler_ai(user_message, context_messages, player_name, channel_type='main'):
+async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats=''):
     """Call Anthropic API for Butler response. Returns response string or None."""
     if not _anthropic_client:
         return None
@@ -2325,7 +2328,8 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
             '[redacted]', sanitized
         )
         truncated_msg = sanitized[:300]
-        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+        stats_str = f'\n\n{player_stats}' if player_stats else ''
+        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
@@ -2393,14 +2397,40 @@ async def on_message(message):
             except Exception:
                 pass
             player_name = message.author.display_name
-            result = await call_butler_ai(message.content, ctx_messages, player_name, 'main')
+
+            # Pull player stats for context — lets Butler roast braggers with receipts
+            player_stats_ctx = ''
+            try:
+                p_rows = players_ws.get_all_values()[1:]
+                for p_row in p_rows:
+                    if p_row and p_row[0].strip() == discord_id_str:
+                        total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
+                        submissions = p_row[4].strip() if len(p_row) > 4 else '0'
+                        top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
+                        player_stats_ctx = f"Player stats — Total marks: {total_marks}, Submissions: {submissions}, Top weapons: {top_weapons}"
+                        break
+            except Exception:
+                pass
+
+            result = await call_butler_ai(message.content, ctx_messages, player_name, 'main', player_stats_ctx)
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                 if is_pinged:
-                    await message.reply(response_text)
+                    sent_msg = await message.reply(response_text)
                 else:
-                    await message.channel.send(response_text)
+                    sent_msg = await message.channel.send(response_text)
+                # Track for reaction feedback
+                BUTLER_RESPONSE_LOG[sent_msg.id] = {
+                    'trigger': message.content[:100],
+                    'response': response_text[:100],
+                    'player': player_name,
+                    'reactions': []
+                }
+                # Keep log bounded
+                if len(BUTLER_RESPONSE_LOG) > 200:
+                    oldest = next(iter(BUTLER_RESPONSE_LOG))
+                    del BUTLER_RESPONSE_LOG[oldest]
                 return
 
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
@@ -6699,6 +6729,32 @@ async def rank_command(interaction: discord.Interaction, name: str):
         lines.append(f"{medal} **{e['player']}** — {e['score']}")
 
     await interaction.followup.send("\n".join(lines))
+
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    """Track reactions on Butler responses for feedback analysis."""
+    if user.bot:
+        return
+    msg_id = reaction.message.id
+    if msg_id not in BUTLER_RESPONSE_LOG:
+        return
+    emoji_str = str(reaction.emoji)
+    entry = BUTLER_RESPONSE_LOG[msg_id]
+    entry['reactions'].append(emoji_str)
+    # Classify engagement
+    positive = {'😂', '😆', '🤣', '👍', '❤️', '🔥', '💀', '😭', '👏'}
+    negative = {'👎', '🙄', '😐'}
+    middle_finger = {'🖕'}
+    if emoji_str in positive:
+        sentiment = 'positive'
+    elif emoji_str in negative:
+        sentiment = 'negative'
+    elif emoji_str in middle_finger:
+        sentiment = 'middle_finger'  # also positive for the Butler
+    else:
+        sentiment = 'neutral'
+    print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger'][:60]}' | response: '{entry['response'][:60]}'")
 
 
 import traceback
