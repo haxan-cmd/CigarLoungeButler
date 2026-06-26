@@ -4174,15 +4174,58 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-            # Pack all chunks into existing messages — never post new ones (would appear after decoration)
-            packed = pack_chunks_into_slots(chunks, len(message_ids))
-
-            for idx, mid in enumerate(message_ids):
+            if len(chunks) <= len(message_ids):
+                # Fits in existing slots — just edit in place
+                packed = pack_chunks_into_slots(chunks, len(message_ids))
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=packed[idx])
+                    except Exception as e:
+                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+            else:
+                # Need more slots — delete bottom decoration, post new messages, repost decoration
                 try:
-                    msg = await thread.fetch_message(mid)
-                    await msg.edit(content=packed[idx])
+                    # Find and delete bottom decoration (last message in thread before we add more)
+                    async for old_msg in thread.history(limit=5, oldest_first=False):
+                        if old_msg.attachments:
+                            await old_msg.delete()
+                            break
                 except Exception as e:
-                    print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+                    print(f"Decoration delete error for {lb_name}: {e}")
+
+                # Edit existing slots
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=chunks[idx])
+                    except Exception as e:
+                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+
+                # Post new slots for overflow chunks
+                new_msg_ids = list(message_ids)
+                for extra_chunk in chunks[len(message_ids):]:
+                    new_msg = await thread.send(extra_chunk)
+                    new_msg_ids.append(new_msg.id)
+                    await asyncio.sleep(0.5)
+
+                # Repost bottom decoration
+                try:
+                    await thread.send(file=discord.File(DECORATION_BOTTOM))
+                except Exception as e:
+                    print(f"Decoration repost error for {lb_name}: {e}")
+
+                # Update Leaderboards sheet with new message IDs
+                try:
+                    all_lb_data = leaderboards_ws.get_all_values()
+                    for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
+                        if lb_row_data and lb_row_data[0].strip() == lb_name:
+                            leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                            break
+                except Exception as e:
+                    print(f"Leaderboards sheet update error for {lb_name}: {e}")
+
+                print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
 
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
@@ -4401,15 +4444,52 @@ async def refresh_leaderboard(interaction: discord.Interaction, name: str = None
             guild = interaction.guild
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-            # Pack all chunks into existing messages — never post new ones (would appear after decoration)
-            packed = pack_chunks_into_slots(chunks, len(message_ids))
-
-            for idx, mid in enumerate(message_ids):
+            if len(chunks) <= len(message_ids):
+                packed = pack_chunks_into_slots(chunks, len(message_ids))
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=packed[idx])
+                    except Exception as e:
+                        print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+            else:
+                # Need more slots — delete bottom decoration, post new messages, repost decoration
                 try:
-                    msg = await thread.fetch_message(mid)
-                    await msg.edit(content=packed[idx])
+                    async for old_msg in thread.history(limit=5, oldest_first=False):
+                        if old_msg.attachments:
+                            await old_msg.delete()
+                            break
                 except Exception as e:
-                    print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+                    print(f"Decoration delete error for {lb_name}: {e}")
+
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=chunks[idx])
+                    except Exception as e:
+                        print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+
+                new_msg_ids = list(message_ids)
+                for extra_chunk in chunks[len(message_ids):]:
+                    new_msg = await thread.send(extra_chunk)
+                    new_msg_ids.append(new_msg.id)
+                    await asyncio.sleep(0.5)
+
+                try:
+                    await thread.send(file=discord.File(DECORATION_BOTTOM))
+                except Exception as e:
+                    print(f"Decoration repost error for {lb_name}: {e}")
+
+                try:
+                    all_lb_data = leaderboards_ws.get_all_values()
+                    for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
+                        if lb_row_data and lb_row_data[0].strip() == lb_name:
+                            leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                            break
+                except Exception as e:
+                    print(f"Leaderboards sheet update error for {lb_name}: {e}")
+
+                print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
 
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
