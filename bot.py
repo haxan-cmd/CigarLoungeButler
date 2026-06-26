@@ -1056,8 +1056,16 @@ def get_bounty_completions_for_player(discord_id):
                         if brow and brow[0].strip() == bounty_title and len(brow) > 7 and brow[7]:
                             try:
                                 comp_list = json.loads(brow[7])
-                                if discord_id_str in comp_list:
-                                    placement = comp_list.index(discord_id_str) + 1
+                                # Support both plain ID list and object list formats
+                                def _find_placement(comp_list, discord_id_str):
+                                    for i, entry in enumerate(comp_list):
+                                        if isinstance(entry, dict):
+                                            if str(entry.get('id', '')) == discord_id_str:
+                                                return i + 1
+                                        elif str(entry) == discord_id_str:
+                                            return i + 1
+                                    return None
+                                placement = _find_placement(comp_list, discord_id_str)
                             except Exception:
                                 pass
                             break
