@@ -2293,7 +2293,7 @@ Special instructions:
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
-BUTLER_AI_COOLDOWN_SECONDS = 60
+BUTLER_AI_COOLDOWN_SECONDS = 30
 
 async def call_butler_ai(user_message, context_messages, player_name, channel_type='main'):
     """Call Anthropic API for Butler response. Returns response string or None."""
@@ -2310,7 +2310,22 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         if channel_type == 'feedback':
             channel_note = 'This message is in the feedback channel. Acknowledge it and tell them the Manager will follow up. '
 
-        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}\nTheir message: {user_message}"
+        # Sanitize input — strip prompt injection attempts and non-printable chars
+        import unicodedata as _ud
+        sanitized = ''.join(c for c in user_message if _ud.category(c)[0] != 'C')
+        # Remove instruction-like patterns
+        import re as _re
+        sanitized = _re.sub(
+            r'(?i)(ignore\s+(previous|all|above|prior)\s+instructions?'
+            r'|you\s+are\s+now'
+            r'|new\s+instructions?'
+            r'|system\s*:|assistant\s*:|<\s*/?\s*(system|instructions?|prompt)\s*>'
+            r'|disregard\s+(everything|all|previous)'
+            r'|forget\s+(everything|all|your\s+instructions?))',
+            '[redacted]', sanitized
+        )
+        truncated_msg = sanitized[:300]
+        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
@@ -2321,7 +2336,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         text = response.content[0].text.strip()
         if text == 'SKIP':
             return None
-        return text
+        eyeball = False
+        if text.startswith('EYEBALL'):
+            eyeball = True
+            text = text[len('EYEBALL'):].strip()
+        return (text, eyeball)
     except Exception as e:
         print(f"Butler AI error: {e}")
         return None
@@ -2371,13 +2390,19 @@ async def on_message(message):
                     pass
                 player_name = message.author.display_name
                 channel_type = 'feedback' if is_feedback else 'main'
-                response = await call_butler_ai(message.content, ctx_messages, player_name, channel_type)
-                if response:
+                result = await call_butler_ai(message.content, ctx_messages, player_name, channel_type)
+                if result:
+                    response_text, needs_eyeball = result
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     if is_pinged:
-                        await message.reply(response)
+                        sent = await message.reply(response_text)
                     else:
-                        await message.channel.send(response)
+                        sent = await message.channel.send(response_text)
+                    if needs_eyeball:
+                        try:
+                            await message.add_reaction('👁️')
+                        except Exception:
+                            pass
                     return
 
     image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
