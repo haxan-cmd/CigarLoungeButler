@@ -2800,9 +2800,11 @@ async def on_message(message):
             is_rude = any(w in resolved_message.lower() for w in rude_words)
 
             result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot)
-            if result and is_rude:
-                response_text, needs_eyeball = result
-                result = (f"<a:idiot_daze:1520130932584223012> {response_text}", needs_eyeball)
+            if is_rude:
+                try:
+                    await message.add_reaction('<a:idiot_daze:1520130932584223012>')
+                except Exception:
+                    pass
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
