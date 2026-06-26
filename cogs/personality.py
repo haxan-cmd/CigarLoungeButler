@@ -654,6 +654,41 @@ class PersonalityCog(commands.Cog):
                                 date   = row[0].strip()[:10] if row[0] else '?'
                                 return f"{weapon} on {map_} — {tds} TDs / {kills} kills ({date})"
 
+                            # Also check LeaderboardData for legacy entries that predate
+                            # the submissions sheet — a player's actual best game might
+                            # only exist there, not in submissions.
+                            try:
+                                player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
+                                ld_for_pb = cached_leaderboard_data()
+                                for ld_row in ld_for_pb:
+                                    if len(ld_row) < 4:
+                                        continue
+                                    if ld_row[1].strip() != player_name_for_ld:
+                                        continue
+                                    lb_name = ld_row[0].strip()
+                                    if ' - ' in lb_name or lb_name in {'Flawless', 'Healing Horn', '200 Takedowns', '100 Kills'}:
+                                        continue
+                                    try:
+                                        ld_td = int(ld_row[3])
+                                    except ValueError:
+                                        continue
+                                    if ld_td > pb_td:
+                                        # Legacy entry beats submissions best — surface weapon + score
+                                        pb_td = ld_td
+                                        best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?']
+                            except Exception:
+                                pass
+
+                            def _game_str(row):
+                                weapon = row[3].strip() if len(row) > 3 else '?'
+                                map_   = row[5].strip() if len(row) > 5 else '?'
+                                tds    = row[7].strip() if len(row) > 7 else '?'
+                                kills  = row[8].strip() if len(row) > 8 else '?'
+                                is_legacy = row[0] == 'legacy'
+                                if is_legacy:
+                                    return f"{weapon} — {tds} TDs (legacy entry, no map/kills data)"
+                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills"
+
                             pb_parts = []
                             if best_td_game is not None:
                                 pb_parts.append(f"Best TD game: {_game_str(best_td_game)}")
