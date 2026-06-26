@@ -595,6 +595,21 @@ class PersonalityCog(commands.Cog):
                             })
                 except Exception:
                     pass
+
+                # If this message is a Discord reply, fetch the referenced message
+                # so the Butler knows exactly what's being pointed at
+                if message.reference and message.reference.message_id:
+                    try:
+                        ref_msg = (message.reference.resolved
+                                   or await message.channel.fetch_message(message.reference.message_id))
+                        if ref_msg:
+                            author = ref_msg.author.display_name
+                            ctx_messages.append({
+                                'author': f'[REPLIED TO: {author}]',
+                                'content': ref_msg.content[:300]
+                            })
+                    except Exception:
+                        pass
                 player_name = message.author.display_name
                 is_idiot = any(r.id == BUTLER_IDIOT_ROLE_ID for r in getattr(message.author, 'roles', []))
 
