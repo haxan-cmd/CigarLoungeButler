@@ -2293,6 +2293,7 @@ Special instructions:
 - If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
+- CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
 
@@ -2398,9 +2399,24 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         if channel_type == 'feedback':
             channel_note = 'This message is in the feedback channel. Acknowledge it and tell them the Manager will follow up. '
 
+        # Resolve @mentions to player names
+        import re as _re2
+        def resolve_mentions(text, guild):
+            if guild is None:
+                return text
+            def replace_mention(m):
+                uid = m.group(1)
+                member = guild.get_member(int(uid))
+                if member:
+                    return member.display_name
+                return uid
+            return _re2.sub(r'<@!?(\d+)>', replace_mention, text)
+
+        resolved_message = resolve_mentions(user_message, message.guild if hasattr(message, 'guild') else None)
+
         # Sanitize input — strip prompt injection attempts and non-printable chars
         import unicodedata as _ud
-        sanitized = ''.join(c for c in user_message if _ud.category(c)[0] != 'C')
+        sanitized = ''.join(c for c in resolved_message if _ud.category(c)[0] != 'C')
         # Remove instruction-like patterns
         import re as _re
         sanitized = _re.sub(
@@ -2561,7 +2577,7 @@ async def on_message(message):
                 if sub_ctx:
                     player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
 
-            result = await call_butler_ai(message.content, ctx_messages, player_name, 'main', player_stats_ctx)
+            result = await call_butler_ai(resolved_message if 'resolved_message' in dir() else message.content, ctx_messages, player_name, 'main', player_stats_ctx)
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
