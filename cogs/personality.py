@@ -32,6 +32,7 @@ BOUNTY_FORUM_CHANNEL_ID     = config.BOUNTY_FORUM_CHANNEL_ID
 WEAPONS_2H                  = config.WEAPONS_2H
 WEAPONS_1H                  = config.WEAPONS_1H
 FEAT_WEAPONS                = config.FEAT_WEAPONS
+_SUBCLASS_PRIMARIES         = config._SUBCLASS_PRIMARIES
 DECORATION_TOP              = config.DECORATION_TOP
 DECORATION_BOTTOM           = config.DECORATION_BOTTOM
 
