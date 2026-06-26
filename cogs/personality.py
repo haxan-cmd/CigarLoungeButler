@@ -646,20 +646,12 @@ class PersonalityCog(commands.Cog):
                             except Exception:
                                 pass
 
-                            def _game_str(row):
-                                weapon = row[3].strip() if len(row) > 3 else '?'
-                                map_   = row[5].strip() if len(row) > 5 else '?'
-                                tds    = row[7].strip() if len(row) > 7 else '?'
-                                kills  = row[8].strip() if len(row) > 8 else '?'
-                                date   = row[0].strip()[:10] if row[0] else '?'
-                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills ({date})"
-
                             # Also check LeaderboardData for legacy entries that predate
                             # the submissions sheet — a player's actual best game might
                             # only exist there, not in submissions.
+                            player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
+                            ld_for_pb = cached_leaderboard_data()
                             try:
-                                player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
-                                ld_for_pb = cached_leaderboard_data()
                                 for ld_row in ld_for_pb:
                                     if len(ld_row) < 4:
                                         continue
@@ -673,29 +665,57 @@ class PersonalityCog(commands.Cog):
                                     except ValueError:
                                         continue
                                     if ld_td > pb_td:
-                                        # Legacy entry beats submissions best — surface weapon + score
                                         pb_td = ld_td
-                                        best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?']
+                                        best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?', '?']
                             except Exception:
                                 pass
 
-                            def _game_str(row):
-                                weapon = row[3].strip() if len(row) > 3 else '?'
-                                map_   = row[5].strip() if len(row) > 5 else '?'
-                                tds    = row[7].strip() if len(row) > 7 else '?'
-                                kills  = row[8].strip() if len(row) > 8 else '?'
+                            def _placement_str(weapon, player_name, ld_rows):
+                                # Find player's rank on this weapon's board and return a label
+                                entries = []
+                                for r in ld_rows:
+                                    if len(r) < 4 or r[0].strip() != weapon:
+                                        continue
+                                    try:
+                                        entries.append((r[1].strip(), int(r[3])))
+                                    except ValueError:
+                                        continue
+                                entries.sort(key=lambda x: -x[1])
+                                for i, (pname, score) in enumerate(entries):
+                                    if pname == player_name:
+                                        pos = i + 1
+                                        medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(pos, f'#{pos}')
+                                        return f"{medal} on the {weapon} board ({score} TDs, {len(entries)} entries)"
+                                return None
+
+                            def _game_str(row, player_name='', ld_rows=None):
                                 is_legacy = row[0] == 'legacy'
+                                weapon = row[3].strip() if len(row) > 3 else '?'
+                                tds    = row[7].strip() if len(row) > 7 else '?'
                                 if is_legacy:
-                                    return f"{weapon} — {tds} TDs (legacy entry, no map/kills data)"
-                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills"
+                                    lb_ctx = ''
+                                    if ld_rows and player_name:
+                                        placement = _placement_str(weapon, player_name, ld_rows)
+                                        if placement:
+                                            lb_ctx = f', {placement}'
+                                    return f"{weapon} — {tds} TDs (legacy entry, no map/deaths data){lb_ctx}"
+                                map_    = row[5].strip() if len(row) > 5 else '?'
+                                kills   = row[8].strip() if len(row) > 8 else '?'
+                                deaths  = row[9].strip() if len(row) > 9 else '?'
+                                lb_ctx = ''
+                                if ld_rows and player_name:
+                                    placement = _placement_str(weapon, player_name, ld_rows)
+                                    if placement:
+                                        lb_ctx = f', {placement}'
+                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills / {deaths} deaths{lb_ctx}"
 
                             pb_parts = []
                             if best_td_game is not None:
-                                pb_parts.append(f"Best TD game: {_game_str(best_td_game)}")
+                                pb_parts.append(f"Best TD game: {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}")
                             if best_kills_game is not None and best_kills_game is not best_td_game:
-                                pb_parts.append(f"Best kills game: {_game_str(best_kills_game)}")
+                                pb_parts.append(f"Best kills game: {_game_str(best_kills_game, player_name_for_ld, ld_for_pb)}")
                             elif best_kills_game is not None and best_kills_game is best_td_game:
-                                pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game)}"
+                                pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                             player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons by marks: {top_weapons}{pb_str}"
                             break
