@@ -1954,7 +1954,7 @@ BUTLERS_MANUAL_CHANNEL_ID = 1519829042843357274
 PLAYER_COMMANDS = [
     ("/rules", "Show the Cigar Lounge challenge rules."),
     ("/rank", "Show the top 10 for any weapon leaderboard e.g. /rank Messer."),
-    ("/progress", "Show your title standings and weapon rank progress. Use /progress [name] for any player."),
+    ("/stats", "Show your title standings and weapon rank progress. Use /stats [name] for any player."),
     ("/refresh_card", "Refresh your registry card in butlers-archive."),
     ("/butlers_report", "Summon the Butler's Favourites report."),
     ("/bounty_status", "Show the current active bounty card."),
@@ -5381,7 +5381,7 @@ async def update_title_roles(guild, stats):
                 print(f"Title announcement error: {e}")
 
 
-@bot.tree.command(name="progress", description="Show a player's title standings and weapon ranks.")
+@bot.tree.command(name="stats", description="Show a player's title standings and weapon ranks.")
 @discord.app_commands.describe(player="Player name (leave blank for your own)")
 async def progress_command(interaction: discord.Interaction, player: str = None):
     await interaction.response.defer()
@@ -5518,16 +5518,27 @@ async def progress_command(interaction: discord.Interaction, player: str = None)
     player_kills_best = kills_best.get(resolved_name, 0)
     player_td_best = td_best.get(resolved_name, 0)
 
-    def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True):
+    # Total board counts
+    total_combined_boards = len(set(holder_combined.keys()) and holder_combined) and len(holder_combined) or 0
+    total_weapon_boards = len(holder_weapon) if holder_weapon else 0
+    total_map_boards = len(holder_map) if holder_map else 0
+    # More accurate: count unique board names
+    all_board_names = set(lb_groups.keys()) - {"100 Kills", "200 Takedowns"}
+    total_combined_boards = len(all_board_names)
+    total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn"}])
+    total_map_boards = len([b for b in all_board_names if " - " in b])
+
+    def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True, total=None):
+        total_str = f"/{total}" if total is not None else ""
         if resolved == holder_name:
-            return f"{emoji} {label} \u2713 ({player_val})"
+            return f"{emoji} {label} \u2713 ({player_val}{total_str})"
         diff = holder_val - player_val
-        return f"{emoji} {label} \u2014 {player_val} / {holder_val} {holder_name} **(-{diff})**"
+        return f"{emoji} {label} \u2014 {player_val}{total_str} / {holder_val}{total_str} {holder_name} **(-{diff})**"
 
     title_lines = [
-        fmt_title("<a:grandmarshal:1519928617407348877>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name),
-        fmt_title("<a:weaponsmaster:1519928521445605488>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name),
-        fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name),
+        fmt_title("<a:grandmarshal:1519928617407348877>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
+        fmt_title("<a:weaponsmaster:1519928521445605488>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
+        fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
         fmt_title("<a:topkill:1360314538364240024>", "Headhunter", player_kills_best, hh_holder or "N/A", hh_score, resolved_name, is_board=False),
         fmt_title("<a:toptkd:1360312666475728958>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
     ]
