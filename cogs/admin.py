@@ -1,7 +1,5 @@
-"""
-cogs/admin.py — Admin/mod slash commands: rules, challenge rules, patch notes,
-remove_submission, seed_players, title_guide.
-"""
+# Admin and mod commands — rules, challenge rules, patch notes, submission removal, seeding.
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -30,10 +28,10 @@ CHALLENGE_RULES_CONTENT = [
     # 1. Intro + weapon ranks
     """\
 <:cigar:1444893851427803298> **CIGAR LOUNGE**
-Cigar Lounge is a place where 100-bombers pursue long-term weapon mastery, complete bounties, and compete for high scores against their peers.
+100-bombers come here to grind weapon marks, complete bounties, and settle scores against each other.
 
-This is not about one-off games.
-This is about consistency, discipline, and mastery.
+One outstanding game is a coincidence.
+The lounge is interested in what you do after that.
 
 <:level1_1:1361419350665461820> — **Bronze**
 • 1 weapon mark (1 total)
@@ -85,19 +83,15 @@ A weapon mark is earned by completing a **100 takedown game** with the following
 **Note:**
 Goedendag counts for Polearms and Engineer (Footman).
 
-Weapon marks are added to your **Player Card**, which is created with your first valid submission.""",
+Weapon marks are recorded on your **Player Card**. The card is created on your first valid submission.""",
 
     # 3. Subclass & class progression
     """\
 🧩 **SUBCLASS & CLASS PROGRESSION**
-Each time a weapon badge is upgraded:
-• You earn **1 subclass mark**
+Each time a weapon badge upgrades, you earn **1 subclass mark**.
 
-Subclasses vary in length depending on how many primary weapons they contain.
-A progress meter is shown next to each subclass.
-
-When a subclass meter fills:
-• You earn **1 class mark**""",
+Subclasses differ in length — depends how many primary weapons are in them.
+Fill the meter and you earn **1 class mark**.""",
 
     # 4. Subclass ranks
     """\
@@ -124,7 +118,7 @@ When a subclass meter fills:
     # 6. Overall player titles
     """\
 🏆 **OVERALL PLAYER TITLES**
-Earned by completing monthly bounties. This is how you rank up on this server.
+Complete bounties. That's how you rank up.
 
 0 — Unbound
 1 — Proven
@@ -150,12 +144,12 @@ Additionally, you can earn <:hhanded:1430199468246044772> **The Hundred-Handed**
     # 8. Bounties
     """\
 🎯 **BOUNTIES**
-Players may complete **bounties**, which are tracked on separate bounty cards. Completing these objectives is how you rank up in this server. Bounties are **time-limited**.""",
+Monthly objectives tracked on separate bounty cards. Complete them — that's how you rank up. They don't run forever.""",
 ]
 
 
 def get_challenge_rules_message_ids():
-    """Get stored challenge rules message IDs from sheet."""
+    # We store the message IDs so /update_challenge_rules can edit in place
     try:
         ws = sheet.worksheet('ChallengeRules')
         rows = ws.get_all_values()[1:]
@@ -164,7 +158,6 @@ def get_challenge_rules_message_ids():
         return []
 
 def save_challenge_rules_message_ids(msg_ids):
-    """Save challenge rules message IDs to sheet."""
     try:
         try:
             ws = sheet.worksheet('ChallengeRules')
@@ -351,7 +344,7 @@ class AdminCog(commands.Cog):
         report = []
 
         try:
-            # ── 1. FIND & DELETE FROM SUBMISSIONS ────────────────────────────────
+            # 1. find and delete the submission row
             sub_rows = submissions_ws.get_all_values()
             sub_row_idx = None
             sub_data = None
@@ -377,7 +370,7 @@ class AdminCog(commands.Cog):
             submissions_ws.delete_rows(sub_row_idx)
             report.append(f"✅ Submissions: row deleted ({player_name}, {weapon}, {map_name})")
 
-            # ── 2. LEADERBOARDDATA — remove rows with this message link ──────────
+            # 2. strip it from LeaderboardData
             ld_rows = leaderboard_data_ws.get_all_values()
             ld_deleted = 0
             affected_lb_names = set()
@@ -390,7 +383,7 @@ class AdminCog(commands.Cog):
                     ld_deleted += 1
             report.append(f"✅ LeaderboardData: {ld_deleted} row(s) deleted, affected boards: {', '.join(affected_lb_names) or 'none'}")
 
-            # ── 3. REBUILD AFFECTED LEADERBOARD DISCORD POSTS ────────────────────
+            # 3. rebuild any leaderboard threads that had this score in them
             if affected_lb_names:
                 all_lb_rows = leaderboards_ws.get_all_records()
                 rebuilt = []
@@ -421,7 +414,7 @@ class AdminCog(commands.Cog):
                         print(f"Leaderboard rebuild error ({lb_name}): {e}")
                 report.append(f"✅ Leaderboards rebuilt: {', '.join(rebuilt) or 'none'}")
 
-            # ── 4. BOUNTY ROLLBACK ────────────────────────────────────────────────
+            # 4. roll back bounty progress if it counted toward an active bounty
             bounty = get_active_bounty()
             if bounty:
                 matched_key = next((k for k in bounty['weapons'] if k.lower() == weapon.lower()), None)
@@ -461,7 +454,7 @@ class AdminCog(commands.Cog):
                 else:
                     report.append(f"ℹ️ Bounty: weapon {weapon} not on active bounty or TDs < 100, skipped")
 
-            # ── 5. REFRESH REGISTRY CARD ──────────────────────────────────────────
+            # 5. rebuild their registry card so the mark count reflects the removal
             try:
                 discord_id_int = int(discord_id)
                 await create_or_update_registry_card(guild, discord_id_int, player_name)

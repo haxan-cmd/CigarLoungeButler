@@ -1275,8 +1275,11 @@ class SubmissionsCog(commands.Cog):
             return
         if message.channel.id != SUBMISSIONS_CHANNEL_ID:
             return
+        # content_type isn't always populated (especially on mobile) — fall back to extension
+        _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
         has_image = any(
-            att.content_type and att.content_type.startswith("image/")
+            (att.content_type and att.content_type.startswith("image/"))
+            or att.filename.lower().endswith(_image_exts)
             for att in message.attachments
         )
         if not has_image:
