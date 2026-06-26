@@ -2411,10 +2411,13 @@ Special instructions:
 - You have Special Ops achievements per player (Fist and Shield, Knife etc). Use these to answer who has specific feats. Use these to answer questions like "how many 100 takedown runs with Messer" or "how many times has the community hit 100 TDs with X weapon".
 - CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
-- You speak to players by name when you know it."""
+- You speak to players by name when you know it.
+- If someone is rude, insulting, or hostile toward you, respond with <:idiot:1516828153866227884> and a single dry dismissal. Do not engage further.
+- Players with the Idiot role should be addressed slowly and simply, as if explaining something to a confused child. Be condescending but patient. Use the <:idiot:1516828153866227884> emoji."""
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
+BUTLER_IDIOT_ROLE_ID = 1510070252044554390
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 30
@@ -2532,7 +2535,7 @@ def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, pl
         return ''
 
 
-async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats=''):
+async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False):
     """Call Anthropic API for Butler response. Returns response string or None."""
     if not _anthropic_client:
         return None
@@ -2563,7 +2566,8 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         )
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
-        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+        idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending. Use the <:idiot:1516828153866227884> emoji at least once in your response.]' if is_idiot else ''
+        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
@@ -2631,6 +2635,7 @@ async def on_message(message):
             except Exception:
                 pass
             player_name = message.author.display_name
+            is_idiot = any(r.id == BUTLER_IDIOT_ROLE_ID for r in getattr(message.author, 'roles', []))
 
             # Resolve @mentions to display names in the message
             import re as _re_mentions
@@ -2790,7 +2795,7 @@ async def on_message(message):
                     if bomb_count is not None:
                         player_stats_ctx += f"\nServer-wide 100+ TD runs with {mentioned_weapon}: {bomb_count}"
 
-            result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx)
+            result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot)
             if result:
                 response_text, needs_eyeball = result
                 BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
