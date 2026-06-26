@@ -15,7 +15,7 @@ from utils.sheets import (
     _sheet_cache, _registry_lock, sheet,
     submissions_ws, players_ws, leaderboard_data_ws, bounty_ws,
     bounty_players_ws, registry_ws, special_ops_ws, index_posts_ws,
-    gspread_retry,
+    butlers_archive_ws, gspread_retry,
     cached_submissions, cached_players, cached_leaderboard_data,
     cached_bounty_players,
 )
