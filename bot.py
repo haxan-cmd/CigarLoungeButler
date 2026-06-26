@@ -2010,7 +2010,15 @@ def nerve_flush():
     milestones = _nerve_events['milestones']
 
     if not subs and not interactions and not errors and not milestones:
-        return None
+        import random
+        quiet_lines = [
+            "All quiet. The Butler approves.",
+            "Nothing to report. The lounge is running smoothly.",
+            "Silence. The Butler finds it acceptable.",
+            "No errors. No chaos. The Butler is mildly surprised.",
+            "Everything in order. The Manager need not be disturbed.",
+        ]
+        return f"🧠 **Hourly Digest**\n*{random.choice(quiet_lines)}*"
 
     lines = ["🧠 **Hourly Digest**"]
     if subs:
@@ -2397,6 +2405,8 @@ Special instructions:
 - If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
+- You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
+- You have server-wide weapon run counts (100+ TD) when available. Use these to answer questions like "how many 100 takedown runs with Messer" or "how many times has the community hit 100 TDs with X weapon".
 - CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
@@ -2406,6 +2416,38 @@ BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 30
+
+def count_qualifying_runs(weapon_name, min_td=100):
+    """Count runs with TD >= min_td for a weapon using LeaderboardData (includes legacy)."""
+    try:
+        ld = cached_leaderboard_data()
+        count = 0
+        for row in ld:
+            if len(row) < 4:
+                continue
+            lb_name = row[0].strip()
+            try:
+                score = int(row[3])
+            except ValueError:
+                continue
+            if lb_name.lower() == weapon_name.lower() and score >= min_td:
+                count += 1
+        return count
+    except Exception:
+        return None
+
+
+def extract_weapon_from_message(text):
+    """Try to find a known weapon name mentioned in the message."""
+    all_weapons = set()
+    for weapons in _SUBCLASS_PRIMARIES.values():
+        all_weapons.update(weapons)
+    text_lower = text.lower()
+    for w in sorted(all_weapons, key=len, reverse=True):  # longest match first
+        if w.lower() in text_lower:
+            return w
+    return None
+
 
 def extract_stats_from_message(text):
     """Extract kills and takedown numbers from a natural language message."""
@@ -2607,7 +2649,22 @@ async def on_message(message):
                     if p_row and p_row[0].strip() == discord_id_str:
                         total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
                         top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
-                        player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons: {top_weapons}"
+                        # Personal bests from submissions
+                        pb_kills = 0
+                        pb_td = 0
+                        try:
+                            subs_for_pb = cached_submissions()
+                            for pb_row in subs_for_pb:
+                                if len(pb_row) > 8 and pb_row[2].strip() == discord_id_str:
+                                    try:
+                                        pb_kills = max(pb_kills, int(pb_row[8]))
+                                        pb_td = max(pb_td, int(pb_row[7]))
+                                    except ValueError:
+                                        pass
+                        except Exception:
+                            pass
+                        pb_str = f", Best kills: {pb_kills}, Best TDs: {pb_td}" if pb_kills > 0 else ""
+                        player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons: {top_weapons}{pb_str}"
                         break
                 # Build rich per-player summary for comparisons
                 subs_all = cached_submissions()
@@ -2674,6 +2731,14 @@ async def on_message(message):
                 sub_ctx = find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
                 if sub_ctx:
                     player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
+
+            # Add weapon bomb count if message asks about it
+            if any(w in resolved_message.lower() for w in ['how many', 'count', 'most kills', 'highest', 'most takedowns', '100 takedown']):
+                mentioned_weapon = extract_weapon_from_message(resolved_message)
+                if mentioned_weapon:
+                    bomb_count = count_qualifying_runs(mentioned_weapon, 100)
+                    if bomb_count is not None:
+                        player_stats_ctx += f"\nServer-wide 100+ TD runs with {mentioned_weapon}: {bomb_count}"
 
             result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx)
             if result:
