@@ -1,0 +1,722 @@
+"""
+cogs/leaderboards.py — Leaderboard helpers, forum index builder, and leaderboard slash commands.
+"""
+import asyncio
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+import config
+from utils.sheets import (
+    _sheet_cache, sheet,
+    leaderboards_ws, leaderboard_data_ws,
+    gspread_retry, cached_leaderboard_data,
+)
+
+MOD_ROLE_ID       = config.MOD_ROLE_ID
+DECORATION_TOP    = config.DECORATION_TOP
+DECORATION_BOTTOM = config.DECORATION_BOTTOM
+_SUBCLASS_PRIMARIES = config._SUBCLASS_PRIMARIES
+FACTION_EMOJIS     = config.FACTION_EMOJIS
+MAP_ATTACK_DEFENSE = config.MAP_ATTACK_DEFENSE
+
+WEAPON_FORUM_1H = config.WEAPONS_1H_FORUM_ID
+WEAPON_FORUM_2H = config.WEAPONS_2H_FORUM_ID
+
+_WEAPONS_2H = {
+    "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
+    "Highland Sword", "Dane Axe", "Glaive", "Two-Handed Hammer", "Halberd",
+    "Polehammer", "Spear", "Quarterstaff", "Goedendag", "Pole Axe",
+    "War Bow", "Crossbow", "Siege Crossbow", "Sledge Hammer", "Shovel",
+}
+_WEAPONS_1H = {
+    "Longsword", "War Axe", "Warhammer", "Falchion", "Heavy Cavalry Sword",
+    "Axe", "One-Handed Spear", "Messer", "Rapier", "Morning Star", "Sword",
+    "Dagger", "Hatchet", "Cudgel", "Katars", "Short Sword", "Mace",
+    "Javelin", "Throwing Axe", "Pick Axe", "Bow",
+}
+
+def _weapon_forum_id(weapon):
+    if weapon in _WEAPONS_2H:
+        return WEAPON_FORUM_2H
+    return WEAPON_FORUM_1H
+
+async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
+    """Build or update a pinned index thread in a leaderboard forum."""
+    try:
+        forum = guild.get_channel(forum_channel_id)
+        if not forum:
+            print(f"Leaderboard index: forum {forum_channel_id} not found")
+            return
+
+        index_thread_name = f"📋 {index_label} Index"
+        # Fetch active threads via API to avoid cache misses after restart
+        seen_ids = set()
+        threads = []
+        try:
+            active = await guild.http.get_active_threads(guild.id)
+            for t_data in active.get('threads', []):
+                if int(t_data['parent_id']) == forum_channel_id and t_data['name'] != index_thread_name:
+                    t_obj = forum.get_thread(int(t_data['id']))
+                    if not t_obj:
+                        t_obj = await guild.fetch_channel(int(t_data['id']))
+                    threads.append(t_obj)
+                    seen_ids.add(int(t_data['id']))
+        except Exception as e:
+            print(f"Active threads fetch error: {e}")
+            # Fallback to cache
+            for t in forum.threads:
+                if t.name != index_thread_name:
+                    threads.append(t)
+                    seen_ids.add(t.id)
+        async for thread in forum.archived_threads(limit=None):
+            if thread.name != index_thread_name and thread.id not in seen_ids:
+                threads.append(thread)
+
+        # Deduplicate threads by base name:
+        # - Map threads: "Map - Faction" → strip faction suffix, keep first per base name
+        # - Weapon threads: exact name, keep first occurrence (handles shared weapons across subclasses)
+        seen_base_names = set()
+        deduped_threads = []
+        for t in sorted(threads, key=lambda t: t.name.lower()):
+            base = t.name.split(' - ')[0].strip() if ' - ' in t.name else t.name
+            if base not in seen_base_names:
+                seen_base_names.add(base)
+                deduped_threads.append((base, t))
+        deduped_threads.sort(key=lambda x: x[0].lower())
+        threads_for_index = deduped_threads  # list of (display_name, thread)
+
+        # Build alphabetical groups with bullet separators, matching player index style
+        groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+        lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
+        for group_name, start, end in groups:
+            group_threads = [(name, t) for name, t in threads_for_index if name and start <= name[0].upper() <= end]
+            if not group_threads:
+                continue
+            lines.append(f"**{group_name}**")
+            links = ' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in group_threads)
+            lines.append(links)
+            lines.append("")
+        other = [(name, t) for name, t in threads_for_index if not name or not name[0].upper().isalpha()]
+        if other:
+            lines.append("**#**")
+            lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in other))
+            lines.append("")
+        if blurb:
+            lines.append("─────────────────────")
+            lines.append(blurb)
+
+        content = "\n".join(lines).strip()
+
+        index_thread = None
+        for t in forum.threads:
+            if t.name == f"📋 {index_label} Index":
+                index_thread = t
+                break
+        if not index_thread:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == f"📋 {index_label} Index":
+                    index_thread = t
+                    break
+
+        def _chunk(text):
+            if len(text) <= 1900:
+                return [text]
+            sections = text.split("\n\n")
+            result_chunks, current = [], ""
+            for section in sections:
+                if len(current) + len(section) + 2 > 1900:
+                    if current:
+                        result_chunks.append(current.strip())
+                    current = section
+                else:
+                    current += ("\n\n" if current else "") + section
+            if current:
+                result_chunks.append(current.strip())
+            return result_chunks
+
+        chunks = _chunk(content)
+
+        if index_thread:
+            msgs = []
+            async for msg in index_thread.history(limit=50, oldest_first=True):
+                msgs.append(msg)
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            for chunk in chunks:
+                await asyncio.sleep(0.5)
+                await index_thread.send(chunk)
+            print(f"Leaderboard index updated: {index_label}")
+        else:
+            result = await forum.create_thread(name=f"📋 {index_label} Index", content="**➜ INDEX**")
+            await asyncio.sleep(0.5)
+            for chunk in chunks:
+                await asyncio.sleep(0.5)
+                await result.thread.send(chunk)
+            print(f"Leaderboard index created: {index_label}")
+
+    except Exception as e:
+        print(f"Leaderboard index error ({index_label}): {e}")
+
+
+
+async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
+                              takedowns, kills, deaths, vip, feats,
+                              player_name, message_link):
+    guild = interaction.guild
+    discord_id = str(interaction.user.id)
+    any_updated = False
+    placements = []  # list of (lb_name, position)
+
+    # (lb_name, score, top_10, personal_best, unlimited_top50)
+    updates = []
+
+    # Weapon board — exclude VIP, top 10
+    if not vip:
+        updates.append((selected_weapon, takedowns, True, True, False))
+
+    # Map board — top 10
+    map_lb_name = f"{selected_map} - {faction}"
+    updates.append((map_lb_name, takedowns, True, True, False))
+
+    # Feat boards
+    if "Flawless" in feats:
+        updates.append(("Flawless", takedowns, False, True, False))
+    if "100 Kills" in feats:
+        updates.append(("100 Kills", kills, False, False, True))
+    if "200 Takedowns" in feats:
+        updates.append(("200 Takedowns", takedowns, False, False, True))
+    if selected_weapon == "Mallet" and kills >= 100:
+        updates.append(("Mallet", takedowns, True, True, False))
+    if selected_weapon == "Knife" and kills >= 100:
+        updates.append(("Knife", takedowns, True, True, False))
+    if selected_weapon == "Healing Horn" and kills >= 100:
+        updates.append(("Healing Horn", kills, False, True, False))
+
+    # Columns: A=Leaderboard Name, B=Player, C=Discord ID, D=Score, E=Message Link
+    all_values = leaderboard_data_ws.get_all_values()
+    all_lb_rows = leaderboards_ws.get_all_records()
+
+    for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
+        existing_sheet_row = None
+        existing_score = None
+        for i, row in enumerate(all_values[1:], start=2):
+            row_lb = row[0] if len(row) > 0 else ''
+            row_discord_id = row[2] if len(row) > 2 else ''
+            row_score = row[3] if len(row) > 3 else ''
+            if row_lb == lb_name and row_discord_id == discord_id:
+                existing_sheet_row = i
+                existing_score = int(row_score) if row_score else 0
+                break
+
+        if unlimited_top50:
+            # Always append, no cap, no personal best check
+            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
+            any_updated = True
+            # Find position after append
+            all_board = [int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]]
+            all_board.append(score)
+            all_board.sort(reverse=True)
+            pos = all_board.index(score) + 1
+            placements.append((lb_name, pos))
+        elif personal_best:
+            if existing_sheet_row is not None:
+                if score > existing_score:
+                    leaderboard_data_ws.update_cell(existing_sheet_row, 2, player_name)
+                    leaderboard_data_ws.update_cell(existing_sheet_row, 4, score)
+                    leaderboard_data_ws.update_cell(existing_sheet_row, 5, message_link)
+                    leaderboard_data_ws.update_cell(existing_sheet_row, 6, selected_weapon)
+                    any_updated = True
+                    # Find position
+                    board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                    # Replace old score with new
+                    board_scores = [s for s in board_scores if s != existing_score]
+                    board_scores.append(score)
+                    board_scores.sort(reverse=True)
+                    pos = board_scores.index(score) + 1
+                    placements.append((lb_name, pos))
+                else:
+                    continue
+            else:
+                if top_10:
+                    board_entries = [row for row in all_values[1:] if row[0] == lb_name]
+                    board_entries_sorted = sorted(
+                        board_entries, key=lambda x: int(x[3]) if len(x) > 3 and x[3] else 0, reverse=True
+                    )
+                    if len(board_entries_sorted) >= 10:
+                        lowest_score = int(board_entries_sorted[9][3]) if board_entries_sorted[9][3] else 0
+                        if score <= lowest_score:
+                            continue
+                        tenth_discord_id = board_entries_sorted[9][2] if len(board_entries_sorted[9]) > 2 else ''
+                        for i, row in enumerate(all_values[1:], start=2):
+                            if row[0] == lb_name and (row[2] if len(row) > 2 else '') == tenth_discord_id:
+                                leaderboard_data_ws.delete_rows(i)
+                                all_values = leaderboard_data_ws.get_all_values()  # reload after delete
+                                break
+                leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
+                any_updated = True
+                board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                board_scores.append(score)
+                board_scores.sort(reverse=True)
+                pos = board_scores.index(score) + 1
+                placements.append((lb_name, pos))
+        else:
+            leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
+            any_updated = True
+            board_scores = sorted([int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+            board_scores.append(score)
+            board_scores.sort(reverse=True)
+            pos = board_scores.index(score) + 1
+            placements.append((lb_name, pos))
+
+        # Reload and update Discord message
+        updated_values = leaderboard_data_ws.get_all_values()
+        entries = []
+        for row in updated_values[1:]:
+            if row[0] == lb_name:
+                entries.append({
+                    'player': row[1] if len(row) > 1 else '',
+                    'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                    'link': row[4] if len(row) > 4 else ''
+                })
+        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+
+        # Cap 100 Kills / 200 Takedowns display at top 50
+        if lb_name in ("100 Kills", "200 Takedowns"):
+            display_entries = entries[:50]
+            overflow = len(entries) - 50
+        else:
+            display_entries = entries
+            overflow = 0
+
+        chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
+
+        lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+        if not lb_row:
+            print(f"No Leaderboards sheet entry found for: {lb_name}")
+            continue
+
+        thread_id = int(lb_row['Thread ID'])
+        message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+
+        try:
+            thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+            if len(chunks) <= len(message_ids):
+                # Fits in existing slots — just edit in place
+                packed = pack_chunks_into_slots(chunks, len(message_ids))
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=packed[idx])
+                    except Exception as e:
+                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+            else:
+                # Need more slots — delete bottom decoration, post new messages, repost decoration
+                try:
+                    # Find and delete bottom decoration (last message in thread before we add more)
+                    async for old_msg in thread.history(limit=5, oldest_first=False):
+                        if old_msg.attachments:
+                            await old_msg.delete()
+                            break
+                except Exception as e:
+                    print(f"Decoration delete error for {lb_name}: {e}")
+
+                # Edit existing slots
+                for idx, mid in enumerate(message_ids):
+                    try:
+                        msg = await thread.fetch_message(mid)
+                        await msg.edit(content=chunks[idx])
+                    except Exception as e:
+                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+
+                # Post new slots for overflow chunks
+                new_msg_ids = list(message_ids)
+                for extra_chunk in chunks[len(message_ids):]:
+                    new_msg = await thread.send(extra_chunk)
+                    new_msg_ids.append(new_msg.id)
+                    await asyncio.sleep(0.5)
+
+                # Repost bottom decoration
+                try:
+                    await thread.send(file=discord.File(DECORATION_BOTTOM))
+                except Exception as e:
+                    print(f"Decoration repost error for {lb_name}: {e}")
+
+                # Update Leaderboards sheet with new message IDs
+                try:
+                    all_lb_data = leaderboards_ws.get_all_values()
+                    for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
+                        if lb_row_data and lb_row_data[0].strip() == lb_name:
+                            leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                            break
+                except Exception as e:
+                    print(f"Leaderboards sheet update error for {lb_name}: {e}")
+
+                print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
+
+        except Exception as e:
+            print(f"Discord update error for {lb_name}: {e}")
+
+    return any_updated, placements
+
+
+def get_leaderboard_entries(name):
+    rows = leaderboard_data_ws.get_all_values()
+    entries = []
+    for row in rows[1:]:  # skip header
+        if row[0] == name:
+            entries.append({
+                'player': row[1] if len(row) > 1 else '',
+                'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                'link': row[4] if len(row) > 4 else '',
+                'weapon': row[5] if len(row) > 5 else ''
+            })
+    return sorted(entries, key=lambda x: x['score'], reverse=True)
+
+def pack_chunks_into_slots(chunks, num_slots):
+    """Pack chunks into exactly num_slots messages.
+    If chunks > slots, concatenate overflow into the last slot (up to 1900 chars).
+    If chunks < slots, fill remaining slots with zero-width space.
+    """
+    if num_slots == 0:
+        return []
+
+    if len(chunks) <= num_slots:
+        packed = list(chunks)
+        while len(packed) < num_slots:
+            packed.append("\u200b")
+        return packed
+
+    # More chunks than slots — merge excess into last slot
+    packed = list(chunks[:num_slots - 1])
+    last = chunks[num_slots - 1]
+    for extra in chunks[num_slots:]:
+        candidate = last + "\n" + extra
+        if len(candidate) <= 1900:
+            last = candidate
+        else:
+            # Truncate with overflow note
+            last = last + "\n*...continued*"
+            break
+    packed.append(last)
+    return packed
+
+
+def format_leaderboard_text(entries, overflow=0, show_weapon=False):
+    if not entries:
+        return ["No entries yet."]
+
+    lines = []
+    for e in entries:
+        weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        if e['link']:
+            lines.append(f"• {e['player']} — [{e['score']}]({e['link']}){weapon_str}")
+        else:
+            lines.append(f"• {e['player']} — {e['score']}{weapon_str}")
+
+    if overflow > 0:
+        lines.append(f"*...and {overflow} more entries*")
+
+    chunks = []
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 > 1900:
+            chunks.append(current)
+            current = line
+        else:
+            current = current + "\n" + line if current else line
+    if current:
+        chunks.append(current)
+
+    return chunks
+
+
+
+class LeaderboardsCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread")
+    @app_commands.describe(
+        name="Name of the leaderboard e.g. War Axe",
+        type="Type: weapon, feat, or map"
+    )
+    async def setup_leaderboard(self, interaction: discord.Interaction, name: str, type: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Setting up leaderboard...", ephemeral=True)
+        thread = interaction.channel
+
+        if type == "map":
+            map_info = MAP_ATTACK_DEFENSE.get(name)
+            if not map_info:
+                await interaction.edit_original_response(content=f"No attack/defense info found for map: {name}")
+                return
+
+            attack_faction = map_info["attack"]
+            defense_faction = map_info["defense"]
+            attack_emoji = FACTION_EMOJIS[attack_faction]
+            defense_emoji = FACTION_EMOJIS[defense_faction]
+
+            attack_name = f"{name} - {attack_faction}"
+            defense_name = f"{name} - {defense_faction}"
+
+            attack_entries = get_leaderboard_entries(attack_name)
+            defense_entries = get_leaderboard_entries(defense_name)
+
+            attack_chunks = format_leaderboard_text(attack_entries)
+            defense_chunks = format_leaderboard_text(defense_entries)
+
+            attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
+            defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
+
+            await thread.send(file=discord.File(DECORATION_TOP))
+            await thread.send(attack_header)
+            attack_msg_ids = []
+            for chunk in attack_chunks:
+                attack_msg = await thread.send(chunk)
+                attack_msg_ids.append(str(attack_msg.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await thread.send(defense_header)
+            defense_msg_ids = []
+            for chunk in defense_chunks:
+                defense_msg = await thread.send(chunk)
+                defense_msg_ids.append(str(defense_msg.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+            leaderboards_ws.append_row([attack_name, str(thread.id), ",".join(attack_msg_ids), "map"])
+            leaderboards_ws.append_row([defense_name, str(thread.id), ",".join(defense_msg_ids), "map"])
+
+            await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
+
+        else:
+            entries = get_leaderboard_entries(name)
+            chunks = format_leaderboard_text(entries, show_weapon=(name in ("100 Kills", "200 Takedowns")))
+            await thread.send(file=discord.File(DECORATION_TOP))
+            msg_ids = []
+            for chunk in chunks:
+                lb_msg = await thread.send(chunk)
+                msg_ids.append(str(lb_msg.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+            leaderboards_ws.append_row([name, str(thread.id), ",".join(msg_ids), type])
+
+            await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
+
+    @app_commands.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name")
+    @app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
+
+    async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+            return
+
+        all_lb_rows = leaderboards_ws.get_all_records()
+
+        if name is None:
+            # Auto-detect by current channel/thread ID
+            channel_id = str(interaction.channel.id)
+            matching = [r for r in all_lb_rows if str(r['Thread ID']) == channel_id]
+            if not matching:
+                await interaction.response.send_message("❌ No leaderboard found for this channel. Try specifying the name manually.", ephemeral=True)
+                return
+            # If multiple (e.g. map boards with attack + defense), refresh all
+            names_to_refresh = [r['Leaderboard Name'] for r in matching]
+        else:
+            lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
+            if not lb_row:
+                await interaction.response.send_message(f"❌ No leaderboard found with name: `{name}`", ephemeral=True)
+                return
+            names_to_refresh = [name]
+
+        await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
+
+        for lb_name in names_to_refresh:
+            lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+            if not lb_row:
+                continue
+
+            entries = get_leaderboard_entries(lb_name)
+            entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+
+            if lb_name in ("100 Kills", "200 Takedowns"):
+                overflow = max(0, len(entries) - 50)
+                display_entries = entries[:50]
+            else:
+                overflow = 0
+                display_entries = entries
+
+            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
+
+            thread_id = int(lb_row['Thread ID'])
+            message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+
+            try:
+                guild = interaction.guild
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+                if len(chunks) <= len(message_ids):
+                    packed = pack_chunks_into_slots(chunks, len(message_ids))
+                    for idx, mid in enumerate(message_ids):
+                        try:
+                            msg = await thread.fetch_message(mid)
+                            await msg.edit(content=packed[idx])
+                        except Exception as e:
+                            print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+                else:
+                    # Need more slots — delete bottom decoration, post new messages, repost decoration
+                    try:
+                        async for old_msg in thread.history(limit=5, oldest_first=False):
+                            if old_msg.attachments:
+                                await old_msg.delete()
+                                break
+                    except Exception as e:
+                        print(f"Decoration delete error for {lb_name}: {e}")
+
+                    for idx, mid in enumerate(message_ids):
+                        try:
+                            msg = await thread.fetch_message(mid)
+                            await msg.edit(content=chunks[idx])
+                        except Exception as e:
+                            print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+
+                    new_msg_ids = list(message_ids)
+                    for extra_chunk in chunks[len(message_ids):]:
+                        new_msg = await thread.send(extra_chunk)
+                        new_msg_ids.append(new_msg.id)
+                        await asyncio.sleep(0.5)
+
+                    try:
+                        await thread.send(file=discord.File(DECORATION_BOTTOM))
+                    except Exception as e:
+                        print(f"Decoration repost error for {lb_name}: {e}")
+
+                    try:
+                        all_lb_data = leaderboards_ws.get_all_values()
+                        for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
+                            if lb_row_data and lb_row_data[0].strip() == lb_name:
+                                leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                                break
+                    except Exception as e:
+                        print(f"Leaderboards sheet update error for {lb_name}: {e}")
+
+                    print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
+
+            except Exception as e:
+                await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
+                return
+
+        await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
+
+    @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
+    @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
+    async def rank_command(self, interaction: discord.Interaction, name: str):
+        await interaction.response.defer()
+
+        # Try exact match first, then case-insensitive
+        entries = get_leaderboard_entries(name)
+        if not entries:
+            # Try case-insensitive match against all board names
+            all_boards = set()
+            for row in leaderboard_data_ws.get_all_values()[1:]:
+                if row:
+                    all_boards.add(row[0].strip())
+            match = next((b for b in all_boards if b.lower() == name.lower()), None)
+            if match:
+                entries = get_leaderboard_entries(match)
+                name = match
+            else:
+                # Suggest close matches
+                suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
+                msg = f"No leaderboard found for **{name}**."
+                if suggestions:
+                    msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
+                await interaction.followup.send(msg, ephemeral=True)
+                return
+
+        top = entries[:10]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = [f"**{name}** — Top {len(top)}", ""]
+        for i, e in enumerate(top, 1):
+            medal = medals.get(i, f"{i}.")
+            lines.append(f"{medal} **{e['player']}** — {e['score']}")
+
+        await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
+    async def create_missing_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("No permission.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # All primary weapons across all subclasses
+        all_primaries = set()
+        for weapons in _SUBCLASS_PRIMARIES.values():
+            all_primaries.update(weapons)
+
+        # Existing boards in leaderboards_ws
+        existing = set()
+        try:
+            for row in leaderboards_ws.get_all_values()[1:]:
+                if row:
+                    existing.add(row[0].strip())
+        except Exception as e:
+            await interaction.followup.send(f"Failed to read leaderboards sheet: {e}", ephemeral=True)
+            return
+
+        missing = sorted(all_primaries - existing)
+        if not missing:
+            await interaction.followup.send("All primary weapon boards already exist.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        created = []
+        failed = []
+
+        for weapon in missing:
+            try:
+                forum_id = _weapon_forum_id(weapon)
+                forum = guild.get_channel(forum_id) or await guild.fetch_channel(forum_id)
+
+                thread_with_msg = await forum.create_thread(
+                    name=weapon,
+                    content="<:cigar:1444893851427803298>"
+                )
+                thread = thread_with_msg.thread
+
+                entries = get_leaderboard_entries(weapon)
+                chunks = format_leaderboard_text(entries)
+
+                await thread.send(file=discord.File(DECORATION_TOP))
+                msg_ids = []
+                for chunk in chunks:
+                    lb_msg = await thread.send(chunk)
+                    msg_ids.append(str(lb_msg.id))
+                await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+                leaderboards_ws.append_row([weapon, str(thread.id), ",".join(msg_ids), "weapon"])
+                created.append(weapon)
+                await asyncio.sleep(1.5)
+
+            except Exception as e:
+                print(f"create_missing_boards error for {weapon}: {e}")
+                failed.append(weapon)
+                await asyncio.sleep(1)
+
+        msg = f"Created {len(created)} boards: {chr(10).join(created)}"
+        if failed:
+            msg += f"\nFailed: {chr(10).join(failed)}"
+        await interaction.followup.send(msg[:1900], ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(LeaderboardsCog(bot))

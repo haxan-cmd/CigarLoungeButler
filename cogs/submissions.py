@@ -1,0 +1,1299 @@
+"""
+cogs/submissions.py — UI views, submission flow, and submission worker.
+"""
+import re
+import json
+import asyncio
+import discord
+from discord import app_commands
+from discord.ext import commands
+from datetime import datetime, timezone
+
+import config
+from utils.sheets import (
+    _sheet_cache, _registry_lock,
+    submissions_ws, players_ws, leaderboard_data_ws,
+    bounty_ws, bounty_players_ws, registry_ws,
+    leaderboards_ws, index_posts_ws,
+    _submission_queues, _submission_workers, get_submission_queue,
+    cached_submissions, cached_players, cached_leaderboard_data,
+    gspread_retry,
+)
+from utils.helpers import (
+    parse_submission_text, format_weapon_marks,
+    detect_weapon_milestones, build_milestone_message,
+    nerve_log_submission, nerve_log_error, nerve_log_milestone,
+)
+
+MOD_ROLE_ID            = config.MOD_ROLE_ID
+DECORATION_TOP         = config.DECORATION_TOP
+DECORATION_BOTTOM      = config.DECORATION_BOTTOM
+SUBMISSIONS_CHANNEL_ID = config.SUBMISSIONS_CHANNEL_ID
+BUTLERS_NOTES_CHANNEL_ID = config.BUTLERS_NOTES_CHANNEL_ID
+MAIN_CHANNEL_ID        = config.MAIN_CHANNEL_ID
+MAPS                   = config.MAPS
+VIP_MAPS               = config.VIP_MAPS
+MAP_FACTIONS           = config.MAP_FACTIONS
+FEAT_WEAPONS           = config.FEAT_WEAPONS
+MARKSMAN_SUBCLASSES    = config.MARKSMAN_SUBCLASSES
+WEAPONS_2H             = config.WEAPONS_2H
+WEAPONS_1H             = config.WEAPONS_1H
+CLASS_WEAPON_MAP       = config.CLASS_WEAPON_MAP
+WEAPON_RANK_THRESHOLDS = config.WEAPON_RANK_THRESHOLDS
+PRESTIGE_THRESHOLDS    = config.PRESTIGE_THRESHOLDS
+GUILD_ID               = config.GUILD_ID
+
+
+# ── Player helpers ─────────────────────────────────────────────────────────────
+def get_classes_for_category(category):
+    weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
+    result = []
+    for cls, weapons in CLASS_WEAPON_MAP.items():
+        if any(w in weapon_list for w in weapons):
+            result.append(cls)
+    return sorted(set(result))
+
+def get_weapons_for_class_and_category(selected_class, category):
+    weapon_list = WEAPONS_2H if category == "2h" else WEAPONS_1H
+    class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
+    return sorted([w for w in class_weapons if w in weapon_list])
+
+def get_all_weapons_for_class(selected_class):
+    class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
+    return sorted([w for w in class_weapons if w not in FEAT_WEAPONS])
+
+def upsert_player(discord_id, discord_name):
+    """Returns True if this is a new player."""
+    try:
+        rows = cached_players()
+        discord_id_str = str(discord_id)
+        for i, row in enumerate(rows, start=2):
+            if row and row[0] == discord_id_str:
+                if len(row) < 2 or row[1] != discord_name:
+                    players_ws.update_cell(i, 2, discord_name)
+                    _sheet_cache.invalidate(players_ws)
+                return False
+        players_ws.append_row([discord_id_str, discord_name, ""])
+        _sheet_cache.invalidate(players_ws)
+        return True
+    except Exception as e:
+        print(f"Player upsert error: {e}")
+        return False
+
+def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
+                   takedowns, kills, deaths, vip, feats, message_link):
+    from datetime import datetime as _dt
+    timestamp = _dt.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    vip_str   = "Yes" if vip else "No"
+    feats_str = ", ".join(feats) if feats else "None"
+    nerve_log_submission(discord_name, weapon)
+    submissions_ws.append_row([
+        timestamp, discord_name, str(discord_id), weapon, cls,
+        map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
+    ])
+    _sheet_cache.invalidate(submissions_ws)
+
+class SubmitView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+
+    async def on_timeout(self):
+        try:
+            await self.prompt_msg.delete()
+        except Exception:
+            pass
+        self.stop()
+
+
+    @discord.ui.button(label='Submit Run', style=discord.ButtonStyle.green, emoji='⚔️')
+    async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        caption = self.original_message.content.strip()
+        detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
+        if detected_weapon or detected_subclass:
+            view = ParseConfirmView(self.original_message, self.prompt_msg, detected_weapon, detected_subclass)
+            hints = []
+            if detected_weapon:
+                hints.append(f"Weapon: `{detected_weapon}`")
+            if detected_subclass:
+                hints.append(f"Class: `{detected_subclass}`")
+            await interaction.response.send_message(
+                content="\U0001f4cb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
+                view=view,
+                ephemeral=True
+            )
+        else:
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+            await interaction.response.send_message(
+                content="**Step 1 of 5:** Which class were you playing?",
+                view=view,
+                ephemeral=True
+            )
+
+    @discord.ui.button(label='Dismiss', style=discord.ButtonStyle.grey, emoji='✖️')
+    async def dismiss_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await self.prompt_msg.delete()
+        await interaction.response.defer()
+
+
+class ParseConfirmView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, detected_weapon, detected_subclass):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.detected_weapon = detected_weapon
+        self.detected_subclass = detected_subclass
+
+    async def on_timeout(self):
+        try:
+            await self.prompt_msg.delete()
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label='Confirm', style=discord.ButtonStyle.green, emoji='✅')
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        weapon = self.detected_weapon
+        subclass = self.detected_subclass
+
+        # If we have both weapon and subclass, skip straight to map
+        if weapon and subclass:
+            # Determine category from weapon
+            category = "2h" if weapon in WEAPONS_2H else "1h"
+            view = MapSelectView(self.original_message, self.prompt_msg, subclass, weapon)
+            await interaction.response.edit_message(
+                content=f"**Step 3 of 5:** Class: `{subclass}` | Weapon: `{weapon}`\nWhich map were you on?",
+                view=view
+            )
+        elif weapon:
+            # Have weapon, still need class — pass weapon so class select skips weapon step
+            category = "2h" if weapon in WEAPONS_2H else "1h"
+            classes = get_classes_for_category(category)
+            view = ClassSelectView(self.original_message, self.prompt_msg, category, classes, pre_detected_weapon=weapon)
+            await interaction.response.edit_message(
+                content=f"**Step 1 of 5:** Weapon: `{weapon}`\nWhich class were you playing?",
+                view=view
+            )
+        elif subclass:
+            # Have class, still need weapon — skip straight to class select
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+            await interaction.response.edit_message(
+                content=f"**Step 1 of 5:** Class: `{subclass}`\nWhich class were you playing?",
+                view=view
+            )
+
+    @discord.ui.button(label='Change', style=discord.ButtonStyle.grey, emoji='🔄')
+    async def change(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+        await interaction.response.edit_message(
+            content="**Step 1 of 5:** Which class were you playing?",
+            view=view
+        )
+
+class WeaponTypeView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+
+    @discord.ui.button(label='Melee', style=discord.ButtonStyle.blurple, emoji='⚔️')
+    async def melee(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+        await interaction.response.edit_message(
+            content="**Step 1 of 5:** Which class were you playing?",
+            view=view
+        )
+
+    @discord.ui.button(label='Ranged', style=discord.ButtonStyle.blurple)
+    async def ranged(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        view = MarksmanSubclassView(self.original_message, self.prompt_msg)
+        await interaction.response.edit_message(
+            content="**Step 2 of 5:** Class: `Marksman`\nWhich subclass were you playing?",
+            view=view
+        )
+
+class MarksmanSubclassView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.add_item(MarksmanSubclassSelect(original_message, prompt_msg))
+
+class MarksmanSubclassSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        options = [discord.SelectOption(label=s, description=SUBCLASS_PARENT.get(s)) for s in MARKSMAN_SUBCLASSES.keys()]
+        super().__init__(placeholder="Choose your subclass...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        subclass = self.values[0]
+        weapons = sorted(MARKSMAN_SUBCLASSES[subclass])
+        view = RangedWeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons)
+        await interaction.response.edit_message(
+            content=f"**Step 2 of 5:** Class: `Marksman` | Subclass: `{subclass}`\nWhich weapon did you use?",
+            view=view
+        )
+
+class RangedWeaponSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, subclass, weapons):
+        super().__init__(timeout=300)
+        self.add_item(RangedWeaponSelect(original_message, prompt_msg, subclass, weapons))
+
+class RangedWeaponSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, subclass, weapons):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.subclass = subclass
+        options = [discord.SelectOption(label=w) for w in weapons]
+        options.append(discord.SelectOption(label="Multiple Weapons"))
+        super().__init__(placeholder="Choose your weapon...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_weapon = self.values[0]
+        view = MapSelectView(self.original_message, self.prompt_msg, f"Marksman ({self.subclass})", selected_weapon)
+        await interaction.response.edit_message(
+            content=f"**Step 3 of 5:** Class: `Marksman ({self.subclass})` | Weapon: `{selected_weapon}`\nWhich map were you on?",
+            view=view
+        )
+
+
+class ClassSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None):
+        super().__init__(timeout=300)
+        self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon))
+
+class ClassSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.category = category
+        self.pre_detected_weapon = pre_detected_weapon
+        CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
+        sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
+        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
+        super().__init__(placeholder="Choose your class...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_class = self.values[0]
+        if self.pre_detected_weapon:
+            # Weapon already confirmed — skip straight to map
+            view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon)
+            await interaction.response.edit_message(
+                content=f"**Step 3 of 5:** Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`\nWhich map were you on?",
+                view=view
+            )
+        else:
+            weapons = get_all_weapons_for_class(selected_class)
+            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons)
+            await interaction.response.edit_message(
+                content=f"**Step 2 of 5:** Class: `{selected_class}`\nWhich weapon did you use?",
+                view=view
+            )
+
+class WeaponSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, weapons):
+        super().__init__(timeout=300)
+        self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons))
+
+class WeaponSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, selected_class, weapons):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        options = [discord.SelectOption(label=w) for w in weapons]
+        super().__init__(placeholder="Choose your weapon...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_weapon = self.values[0]
+        view = MapSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon)
+        await interaction.response.edit_message(
+            content=f"**Step 3 of 5:** Class: `{self.selected_class}` | Weapon: `{selected_weapon}`\nWhich map were you on?",
+            view=view
+        )
+
+class MapSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon):
+        super().__init__(timeout=300)
+        self.add_item(MapSelect(original_message, prompt_msg, selected_class, selected_weapon))
+
+class MapSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        options = [discord.SelectOption(label=m) for m in MAPS]
+        super().__init__(placeholder="Choose your map...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_map = self.values[0]
+        view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map)
+        await interaction.response.edit_message(
+            content=f"**Step 4 of 5:** Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}`\nWhich faction were you playing as?",
+            view=view
+        )
+
+class FactionSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map):
+        super().__init__(timeout=300)
+        self.add_item(FactionSelect(original_message, prompt_msg, selected_class, selected_weapon, selected_map))
+
+class FactionSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        options = [discord.SelectOption(label=f) for f in MAP_FACTIONS.get(selected_map, ["Agatha", "Mason", "Tenosia"])]
+        super().__init__(placeholder="Choose your faction...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        selected_faction = self.values[0]
+        await interaction.response.send_modal(
+            StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, selected_faction)
+        )
+
+class RetryStatsView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, error_msg):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        self.faction = faction
+        self.error_msg = error_msg
+
+
+    @discord.ui.button(label='Try Again', style=discord.ButtonStyle.blurple, emoji='🔄')
+    async def try_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction)
+        )
+
+class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
+    takedowns = discord.ui.TextInput(label="Takedowns", placeholder="e.g. 215", required=True)
+    kills = discord.ui.TextInput(label="Kills", placeholder="e.g. 104", required=True)
+    deaths = discord.ui.TextInput(label="Deaths", placeholder="e.g. 0", required=True)
+
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction):
+        super().__init__()
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        self.faction = faction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            takedowns = int(self.takedowns.value)
+            kills = int(self.kills.value)
+            deaths = int(self.deaths.value)
+        except ValueError:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "invalid")
+            await interaction.response.send_message(
+                "❌ Takedowns, Kills, and Deaths must be whole numbers. Please try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        # Sanity checks
+        if takedowns < 0 or kills < 0 or deaths < 0:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "negative")
+            await interaction.response.send_message(
+                "❌ Takedowns, Kills, and Deaths cannot be negative. Please try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        if kills > takedowns:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "kills>td")
+            await interaction.response.send_message(
+                f"❌ Kills ({kills}) cannot exceed Takedowns ({takedowns}) — takedowns include kills plus assists. Please try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        # Check 20k score first if potential triple, then VIP if applicable
+        needs_vip = (self.selected_map, self.faction) in VIP_MAPS
+        if takedowns >= 150 and kills >= 100:
+            view = TripleCheckView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip
+            )
+            await interaction.response.edit_message(
+                content="Was your score over 20,000 points?",
+                view=view
+            )
+        elif needs_vip:
+            view = VIPView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths
+            )
+            await interaction.response.edit_message(
+                content="**Almost done!** Were you playing as VIP?",
+                view=view
+            )
+        else:
+            await finalise_submission(
+                interaction, self.original_message, self.prompt_msg,
+                self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, takedowns, kills, deaths, False, False
+            )
+
+class VIPView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, score_over_20k=False):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        self.faction = faction
+        self.takedowns = takedowns
+        self.kills = kills
+        self.deaths = deaths
+        self.score_over_20k = score_over_20k
+
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.red)
+    async def vip_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await self.handle_vip(interaction, True)
+
+    @discord.ui.button(label='No', style=discord.ButtonStyle.green)
+    async def vip_no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await self.handle_vip(interaction, False)
+
+    async def handle_vip(self, interaction, vip):
+        await finalise_submission(
+            interaction, self.original_message, self.prompt_msg, self.selected_class,
+            self.selected_weapon, self.selected_map, self.faction,
+            self.takedowns, self.kills, self.deaths, vip, self.score_over_20k
+        )
+
+class TripleCheckView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip=False, needs_vip=False):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.selected_weapon = selected_weapon
+        self.selected_map = selected_map
+        self.faction = faction
+        self.takedowns = takedowns
+        self.kills = kills
+        self.deaths = deaths
+        self.vip = vip
+        self.needs_vip = needs_vip
+
+    async def _after_triple_check(self, interaction, score_over_20k):
+        if self.needs_vip:
+            view = VIPView(
+                self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                self.selected_map, self.faction, self.takedowns, self.kills, self.deaths,
+                score_over_20k=score_over_20k
+            )
+            await interaction.response.edit_message(
+                content="**Almost done!** Were you playing as VIP?",
+                view=view
+            )
+        else:
+            await finalise_submission(
+                interaction, self.original_message, self.prompt_msg, self.selected_class,
+                self.selected_weapon, self.selected_map, self.faction,
+                self.takedowns, self.kills, self.deaths, self.vip, score_over_20k
+            )
+
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
+    async def score_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await self._after_triple_check(interaction, True)
+
+    @discord.ui.button(label='No', style=discord.ButtonStyle.red)
+    async def score_no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        await self._after_triple_check(interaction, False)
+
+
+class EditSubmissionView(discord.ui.View):
+    def __init__(self, original_message, author, submission_row,
+                 weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.author = author
+        self.submission_row = submission_row
+        self.weapon = weapon
+        self.cls = cls
+        self.map_name = map_name
+        self.faction = faction
+        self.takedowns = takedowns
+        self.kills = kills
+        self.deaths = deaths
+        self.vip = vip
+        self.feats = feats
+        self.message_link = message_link
+
+    async def on_timeout(self):
+        try:
+            # Remove the edit button but keep the summary message
+            await self._message.edit(view=None)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label='✏️ Edit', style=discord.ButtonStyle.grey)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Only the person who submitted can edit this.", ephemeral=True)
+            return
+        view = EditFieldSelectView(self)
+        await interaction.response.send_message(
+            content="**Which field would you like to correct?**",
+            view=view,
+            ephemeral=True
+        )
+
+
+class EditFieldSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.edit_view = edit_view
+        self.add_item(EditFieldSelect(edit_view))
+
+
+class EditFieldSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        options = [
+            discord.SelectOption(label="Weapon / Class", value="weapon"),
+            discord.SelectOption(label="Map", value="map"),
+            discord.SelectOption(label="Faction", value="faction"),
+            discord.SelectOption(label="Stats (TD/K/D)", value="stats"),
+            discord.SelectOption(label="VIP", value="vip"),
+        ]
+        super().__init__(placeholder="Choose a field to edit...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        field = self.values[0]
+        ev = self.edit_view
+
+        if field == "weapon":
+            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+            view = ClassSelectView(ev.original_message, None, "all", all_melee_classes)
+            await interaction.response.edit_message(
+                content="**Edit weapon:** Which class were you playing?",
+                view=view
+            )
+        elif field == "map":
+            view = EditMapSelectView(ev)
+            await interaction.response.edit_message(
+                content="**Edit Map:** Which map were you on?",
+                view=view
+            )
+        elif field == "faction":
+            view = EditFactionSelectView(ev)
+            await interaction.response.edit_message(
+                content="**Edit Faction:** Which faction were you playing?",
+                view=view
+            )
+        elif field == "stats":
+            await interaction.response.send_modal(EditStatsModal(ev))
+        elif field == "vip":
+            view = EditVIPView(ev)
+            await interaction.response.edit_message(
+                content="**Edit VIP:** Were you a VIP?",
+                view=view
+            )
+
+
+class EditMapSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.add_item(EditMapSelect(edit_view))
+
+class EditMapSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        options = [discord.SelectOption(label=m) for m in sorted(MAPS)]
+        super().__init__(placeholder="Choose map...", options=options[:25])
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        ev.map_name = self.values[0]
+        await _apply_edit(interaction, ev)
+
+class EditFactionSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.add_item(EditFactionSelect(edit_view))
+
+class EditFactionSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        factions = MAP_FACTIONS.get(edit_view.map_name, {})
+        options = [discord.SelectOption(label=f) for f in factions.keys()] if factions else [
+            discord.SelectOption(label="Agatha"),
+            discord.SelectOption(label="Mason"),
+            discord.SelectOption(label="Tenosia"),
+        ]
+        super().__init__(placeholder="Choose faction...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        ev.faction = self.values[0]
+        await _apply_edit(interaction, ev)
+
+class EditStatsModal(discord.ui.Modal, title="Edit Stats"):
+    def __init__(self, edit_view):
+        super().__init__()
+        self.edit_view = edit_view
+        self.td = discord.ui.TextInput(label="Takedowns", default=str(edit_view.takedowns), required=True)
+        self.k = discord.ui.TextInput(label="Kills", default=str(edit_view.kills), required=True)
+        self.d = discord.ui.TextInput(label="Deaths", default=str(edit_view.deaths), required=True)
+        self.add_item(self.td)
+        self.add_item(self.k)
+        self.add_item(self.d)
+    async def on_submit(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        try:
+            ev.takedowns = int(self.td.value)
+            ev.kills = int(self.k.value)
+            ev.deaths = int(self.d.value)
+        except ValueError:
+            await interaction.response.send_message("Invalid numbers.", ephemeral=True)
+            return
+        await _apply_edit(interaction, ev)
+
+class EditVIPView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.edit_view = edit_view
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.edit_view.vip = True
+        await _apply_edit(interaction, self.edit_view)
+    @discord.ui.button(label='No', style=discord.ButtonStyle.red)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.edit_view.vip = False
+        await _apply_edit(interaction, self.edit_view)
+
+
+
+
+async def _apply_edit(interaction, ev):
+    """Write the updated submission back to the sheet and update the summary message."""
+    try:
+        if ev.submission_row:
+            vip_str = "Yes" if ev.vip else "No"
+            feats_str = ", ".join(ev.feats) if ev.feats else "None"
+            submissions_ws.update_cell(ev.submission_row, 4, ev.weapon)
+            submissions_ws.update_cell(ev.submission_row, 5, ev.cls)
+            submissions_ws.update_cell(ev.submission_row, 6, ev.map_name)
+            submissions_ws.update_cell(ev.submission_row, 7, ev.faction)
+            submissions_ws.update_cell(ev.submission_row, 8, ev.takedowns)
+            submissions_ws.update_cell(ev.submission_row, 9, ev.kills)
+            submissions_ws.update_cell(ev.submission_row, 10, ev.deaths)
+            submissions_ws.update_cell(ev.submission_row, 11, vip_str)
+            submissions_ws.update_cell(ev.submission_row, 12, feats_str)
+    except Exception as e:
+        print(f"Edit sheet update error: {e}")
+
+    # Rebuild summary
+    new_summary = (
+        f"**Run Submitted** *(edited)*\n"
+        f"{ev.author.display_name}\n"
+        f"{ev.weapon} • {ev.cls}\n"
+        f"{ev.map_name} — {ev.faction}\n"
+        f"{ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
+        f"VIP: {'Yes' if ev.vip else 'No'}"
+    )
+    if ev.feats:
+        new_summary += f"\n{', '.join(ev.feats)}"
+
+    try:
+        await ev._message.edit(content=new_summary, view=None)
+    except Exception:
+        pass
+
+    await interaction.response.send_message("✅ Submission updated!", ephemeral=True)
+
+
+async def _submission_worker(guild_id):
+    """Drain the submission queue for a guild, one at a time."""
+    queue = get_submission_queue(guild_id)
+    while True:
+        item = await queue.get()
+        interaction = item[0]
+        try:
+            _, original_message, prompt_msg, args = item
+            await asyncio.wait_for(
+                _do_finalise_submission(interaction, original_message, prompt_msg, *args),
+                timeout=60
+            )
+        except asyncio.TimeoutError:
+            print(f"Submission worker timeout for guild {guild_id}")
+            try:
+                await interaction.followup.send(
+                    "⚠️ Submission timed out during processing. Please try again.",
+                    ephemeral=True
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Submission worker error: {e}")
+        finally:
+            queue.task_done()
+
+
+async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
+    guild_id = interaction.guild.id
+    queue = get_submission_queue(guild_id)
+    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k)
+    await queue.put((interaction, original_message, prompt_msg, args))
+    # Ensure worker is running for this guild
+    worker = _submission_workers.get(guild_id)
+    if worker is None or worker.done():
+        _submission_workers[guild_id] = asyncio.create_task(_submission_worker(guild_id))
+
+
+
+async def check_submission_anomaly(guild, player_name, message_link, selected_weapon, selected_map, takedowns, kills):
+    """Flag suspicious submissions to butlers-notes if stats exceed 2x any server record."""
+    try:
+        notes_channel = guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
+        if not notes_channel:
+            return
+
+        flags = []
+
+        all_rows = submissions_ws.get_all_values()[1:]
+
+        # Server record: kills
+        all_kills = [int(r[8]) for r in all_rows if len(r) > 8 and r[8].strip().lstrip('-').isdigit() and int(r[8]) > 0]
+        if all_kills:
+            record_kills = max(all_kills)
+            if kills > record_kills * 2:
+                pct = int(((kills - record_kills) / record_kills) * 100)
+                flags.append(f"**Kills:** {kills} — server record is {record_kills} (+{pct}%)")
+
+        # Server record: takedowns
+        all_tds = [int(r[7]) for r in all_rows if len(r) > 7 and r[7].strip().lstrip('-').isdigit() and int(r[7]) > 0]
+        if all_tds:
+            record_tds = max(all_tds)
+            if takedowns > record_tds * 2:
+                pct = int(((takedowns - record_tds) / record_tds) * 100)
+                flags.append(f"**Takedowns:** {takedowns} — server record is {record_tds} (+{pct}%)")
+
+        # Weapon leaderboard: would this be 1st place by 20%+ gap?
+        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        weapon_scores = [int(r[3]) for r in ld_rows if r[0] == selected_weapon and len(r) > 3 and r[3].strip().isdigit()]
+        if weapon_scores:
+            current_best = max(weapon_scores)
+            if takedowns > current_best * 1.8:
+                pct = int(((takedowns - current_best) / current_best) * 100)
+                flags.append(f"**Weapon ({selected_weapon}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
+
+        # Map leaderboard: same check
+        map_scores = [int(r[3]) for r in ld_rows if r[0] == selected_map and len(r) > 3 and r[3].strip().isdigit()]
+        if map_scores:
+            current_best = max(map_scores)
+            if takedowns > current_best * 1.8:
+                pct = int(((takedowns - current_best) / current_best) * 100)
+                flags.append(f"**Map ({selected_map}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
+
+        if flags:
+            alert = (
+                f"⚠️ **Suspicious submission — {player_name}**\n"
+                + "\n".join(flags)
+                + f"\n{message_link}"
+            )
+            await notes_channel.send(alert)
+
+    except Exception as e:
+        print(f"Anomaly check error: {e}")
+
+
+async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
+    # Cross-cog lazy imports to avoid circular dependencies at module load
+    from cogs.leaderboards import update_leaderboards
+    from cogs.bounty import update_bounty, get_active_bounty
+    from cogs.registry import (
+        create_or_update_registry_card,
+        calculate_weapon_marks_for_player,
+        update_butlers_archive_row,
+        get_weapon_rank,
+    )
+    from cogs.favourites import calculate_butler_stats, update_title_roles
+    feats = []
+    if kills >= 100:
+        feats.append("100 Kills")
+    if takedowns >= 200:
+        feats.append("200 Takedowns")
+    if deaths == 0:
+        feats.append("Flawless")
+    if takedowns >= 150 and deaths == 0:
+        feats.append("Predator")
+    if takedowns >= 150 and kills >= 100 and score_over_20k:
+        feats.append("Triple")
+    if selected_weapon in FEAT_WEAPONS and kills >= 100:
+        feats.append(selected_weapon)
+
+    vip_str = "Yes" if vip else "No"
+    feats_str = ", ".join(feats) if feats else None
+
+    summary = (
+        f"**Run Submitted**\n"
+        f"{interaction.user.display_name}\n"
+        f"{selected_weapon} • {selected_class}\n"
+        f"{selected_map} — {faction}\n"
+        f"{takedowns} TD / {kills} K / {deaths} D\n"
+        f"VIP: {vip_str}"
+    )
+    if feats_str:
+        summary += f"\n{feats_str}"
+
+    # Build marks breakdown
+    marks_earned = 1
+    marks_lines = ["*+1 submission*"]
+    if '200 Takedowns' in feats:
+        marks_earned += 1
+        marks_lines.append(f"*<a:200tkd:1363648828414230538> +1 Takedowns*")
+    if '100 Kills' in feats:
+        marks_earned += 1
+        marks_lines.append(f"*<a:100kill:1361412390339608686> +1 Kills*")
+    if 'Triple' in feats:
+        marks_earned += 1
+        marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
+    marks_summary = f"\n**{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+
+    message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+
+    await interaction.response.edit_message(content="✅ Most impressive! Your run has been recorded.", view=None)
+
+    # Log to Google Sheets first so we get the row index
+    submission_row = None
+    try:
+        is_new_player = log_submission(
+            interaction.user.display_name,
+            interaction.user.id,
+            selected_weapon,
+            selected_class,
+            selected_map,
+            faction,
+            takedowns,
+            kills,
+            deaths,
+            vip,
+            feats,
+            message_link
+        )
+        # Row index is last row in submissions sheet
+        submission_row = len(submissions_ws.get_all_values())
+    except Exception as e:
+        is_new_player = False
+        print(f"Sheet logging error: {e}")
+
+    # Anomaly check — alert butlers-notes if stats look suspicious
+    try:
+        await check_submission_anomaly(
+            interaction.guild,
+            interaction.user.display_name,
+            message_link,
+            selected_weapon,
+            selected_map,
+            takedowns,
+            kills
+        )
+    except Exception as e:
+        print(f"Anomaly check call error: {e}")
+
+    # Post summary with Edit button
+    edit_view = EditSubmissionView(
+        original_message, interaction.user,
+        submission_row, selected_weapon, selected_class,
+        selected_map, faction, takedowns, kills, deaths, vip, feats, message_link
+    )
+    summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
+    edit_view._message = summary_reply
+
+    await asyncio.sleep(1)
+    try:
+        await prompt_msg.delete()
+    except discord.NotFound:
+        pass
+
+    # React to the original screenshot
+    async def safe_react(emoji):
+        try:
+            await original_message.add_reaction(emoji)
+        except Exception as e:
+            print(f"Reaction failed ({emoji}): {e}")
+
+    await safe_react("<:cigar:1444893851427803298>")
+    if deaths == 0:
+        await safe_react("<a:flawless:1360358300834599062>")
+    if kills >= 100:
+        await safe_react("<a:100kill:1361412390339608686>")
+    if takedowns >= 200:
+        await safe_react("<a:200tkd:1363648828414230538>")
+    if takedowns >= 150 and deaths == 0:
+        await safe_react("<a:predator:1366794896081555567>")
+    if takedowns >= 150 and kills >= 100 and score_over_20k:
+        await safe_react("<a:triple:1365532698260668466>")
+
+    is_ranged = selected_class.startswith("Marksman")
+
+    # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
+    # and beats the player's own existing score on that board
+    if not vip and not is_ranged:
+        all_values = leaderboard_data_ws.get_all_values()
+        weapon_entries = [row for row in all_values[1:] if row[0] == selected_weapon]
+        scores = sorted(
+            [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
+            reverse=True
+        )
+        qualifies_board = len(scores) < 10 or takedowns > scores[9]
+        # Check if player already has a higher score on this board
+        discord_id_str = str(interaction.user.id)
+        player_existing = [
+            int(row[3]) for row in weapon_entries
+            if len(row) > 3 and row[3] and len(row) > 2 and row[2] == discord_id_str
+        ]
+        beats_personal_best = not player_existing or takedowns > max(player_existing)
+        if qualifies_board and beats_personal_best:
+            await safe_react("<:weapon_hs:1350656128635375698>")
+
+    # Update leaderboards (skip for ranged submissions)
+    any_updated = False
+    placements = []
+    newly_completed = False
+    if not is_ranged:
+        try:
+            any_updated, placements = await update_leaderboards(
+                interaction, selected_weapon, selected_map, faction,
+                takedowns, kills, deaths, vip, feats,
+                interaction.user.display_name, message_link
+            )
+        except Exception as e:
+            print(f"Leaderboard update error: {e}")
+
+    if any_updated:
+        await safe_react("<a:highscore:1360312918545269057>")
+        # Edit summary to add highscore bonus mark
+        try:
+            async for msg in original_message.channel.history(limit=10, after=original_message):
+                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                    # Increment the marks total in the message
+                    import re as _re
+                    def increment_marks(content):
+                        def replacer(m):
+                            n = int(m.group(1)) + 1
+                            return f"**+{n} mark{'s' if n != 1 else ''}**"
+                        return _re.sub(r'\*\*\+(\d+) marks?\*\*', replacer, content)
+                    new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
+                    await msg.edit(content=new_content)
+                    break
+        except Exception as e:
+            print(f"Highscore mark edit error: {e}")
+
+    # Bounty check (skip for ranged submissions)
+    if not is_ranged:
+        try:
+            bounty_hit = await update_bounty(
+                interaction.guild, selected_weapon,
+                interaction.user.display_name, interaction.user.id, takedowns
+            )
+            print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
+            if bounty_hit:
+                await safe_react("🐱")
+                # Check if this run completed the bounty
+                _bounty = get_active_bounty()
+                if _bounty:
+                    newly_completed = await check_bounty_completion(
+                        interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
+                    )
+        except Exception as e:
+            import traceback
+            print(f"Bounty update error: {e}")
+            traceback.print_exc()
+
+    # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
+    try:
+        global last_submission_time
+        main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
+        now = datetime.now(timezone.utc)
+
+        if main_channel:
+            # Dry spell — first submission after 4+ hours of silence
+            if last_submission_time and (now - last_submission_time).total_seconds() > 14400:
+                await main_channel.send("Yes. Yes, I am awake.")
+
+            # New player first submission
+            if is_new_player:
+                await main_channel.send(f"*A new arrival. The Butler acknowledges you,* {interaction.user.display_name}.")
+
+            # New #1 on any leaderboard
+            new_firsts = [lb for lb, pos in placements if pos == 1]
+            if new_firsts:
+                await main_channel.send(f"On top. But for how long.")
+
+            # Bounty completion
+            if newly_completed:
+                await main_channel.send(
+                    f"The bounty is settled. **{interaction.user.display_name}** has seen to it. "
+                    f"The bald woman would have done it faster, I imagine."
+                )
+
+        # Flawless — reply in submissions channel
+        if deaths == 0:
+            await original_message.reply(
+                "*Immaculate. As flawless as the bald woman's head.*",
+                mention_author=False
+            )
+
+        last_submission_time = now
+        global _dry_spell_posted
+        _dry_spell_posted = False
+
+    except Exception as e:
+        print(f"Butler personality error: {e}")
+
+    # Edit the summary reply to include placements
+    if placements:
+        placement_lines = "\n".join(
+            f"{'🏆' if ' - ' in lb else '<:weapon_hs:1350656128635375698>'} {lb} — #{pos}"
+            for lb, pos in placements
+        )
+        try:
+            # Find the reply we sent and edit it
+            async for msg in original_message.channel.history(limit=10, after=original_message):
+                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                    await msg.edit(content=msg.content + f"\n{placement_lines}")
+                    break
+        except Exception as e:
+            print(f"Placement edit error: {e}")
+
+    # Background tasks — run after confirmation is posted
+    _guild = interaction.guild
+    _user_id = interaction.user.id
+    _user_name = interaction.user.display_name
+
+    async def _bg_tasks():
+        # Update registry card
+        try:
+            await create_or_update_registry_card(_guild, _user_id, _user_name)
+        except Exception as e:
+            print(f"Registry card update error: {e}")
+
+        # Update bounty cards index
+        try:
+            bounty = get_active_bounty()
+            if bounty:
+                bounty_blurb = (
+                    f"[{bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
+                    f"A monthly bounty where select weapons qualify toward completion. Submit the required number of runs per weapon to complete the bounty. Often comes with a bonus challenge.\n\n"
+                    f"**Weapons & Requirements:**\n" +
+                    "\n".join(f"▸ {w}: {d['total']} runs" for w, d in bounty['weapons'].items())
+                )
+                await update_leaderboard_index(_guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards", bounty_blurb)
+        except Exception as e:
+            print(f"Bounty cards index update error: {e}")
+
+        # Update ButlersArchive summary sheet + milestone detection
+        try:
+            subs = cached_submissions()
+            discord_id_str = str(_user_id)
+            player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
+            submission_count = len(player_subs)
+            last_submission = player_subs[-1][0] if player_subs else ''
+
+            # Read OLD weapon marks from Players sheet BEFORE updating — used for milestone diff
+            old_flat = {}
+            try:
+                p_rows = players_ws.get_all_values()
+                for p_row in p_rows[1:]:
+                    if p_row and p_row[0].strip() == discord_id_str:
+                        old_marks_str = p_row[6].strip() if len(p_row) > 6 else ''
+                        for part in old_marks_str.split(','):
+                            part = part.strip()
+                            if ':' in part:
+                                w, c = part.rsplit(':', 1)
+                                try:
+                                    old_flat[w.strip()] = int(c.strip())
+                                except ValueError:
+                                    pass
+                        break
+            except Exception as e:
+                print(f"Milestone: old marks read error: {e}")
+
+            # Compute new weapon marks
+            weapon_marks_data = calculate_weapon_marks_for_player(_user_id)
+            flat_marks = {}
+            for k, v in weapon_marks_data.items():
+                w = k[0] if isinstance(k, tuple) else k
+                flat_marks[w] = flat_marks.get(w, 0) + v
+            weapon_marks_str = ', '.join(
+                f"{w}: {int(v)}" for w, v in sorted(flat_marks.items(), key=lambda x: -x[1]) if v > 0
+            ) if flat_marks else ''
+
+            # Class marks summary (count submissions per base class)
+            class_counts = {}
+            for r in player_subs:
+                if len(r) > 4:
+                    cls = r[4].strip()
+                    base = cls.split('(')[0].strip() if '(' in cls else cls
+                    class_counts[base] = class_counts.get(base, 0) + 1
+            class_marks_str = ', '.join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
+
+            total_marks = sum(flat_marks.values()) if flat_marks else 0
+
+            # Thread ID from registry
+            reg_rows = registry_ws.get_all_values()[1:]
+            thread_id = None
+            for r in reg_rows:
+                if len(r) > 2 and r[0].strip() == discord_id_str:
+                    thread_id = r[2].strip() or None
+                    break
+
+            update_butlers_archive_row(
+                _user_id, _user_name, thread_id,
+                total_marks, submission_count, last_submission,
+                weapon_marks_str, class_marks_str
+            )
+
+            # ── MILESTONE ANNOUNCEMENTS ───────────────────────────────────
+            try:
+                is_first_submission = submission_count == 1
+                milestones = detect_weapon_milestones(old_flat, flat_marks)
+                # Suppress Bronze (threshold 1) unless this is the player's very first submission
+                milestones = [(w, t, r) for w, t, r in milestones if t != 1 or is_first_submission]
+                if milestones:
+                    main_ch = _guild.get_channel(MAIN_CHANNEL_ID) or await _guild.fetch_channel(MAIN_CHANNEL_ID)
+                    if main_ch:
+                        for weapon, threshold, rank_name in milestones:
+                            msg = build_milestone_message(_user_name, weapon, threshold, rank_name)
+                            if msg:
+                                nerve_log_milestone(_user_name, weapon, rank_name)
+                                await main_ch.send(msg)
+                                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"Milestone announcement error: {e}")
+
+        except Exception as e:
+            print(f"ButlersArchive bg update error: {e}")
+
+        # Update Butler's Favourites
+        try:
+            if BUTLERS_FAVOURITES_CHANNEL_ID:
+                fav_channel = _guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+                if fav_channel:
+                    _now = datetime.now(timezone.utc)
+                    days_since_monday = _now.weekday()
+                    week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
+                    if week_start_dt > _now:
+                        week_start_dt -= timedelta(weeks=1)
+                    week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
+                    stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                    stats['week_label'] = week_label
+                    embed_text = build_favourites_embed(stats)
+                    async for msg in fav_channel.history(limit=5):
+                        if msg.author == _guild.me:
+                            await msg.edit(content=embed_text)
+                            break
+                    else:
+                        await fav_channel.send(embed_text)
+                    await update_title_roles(_guild, stats)
+        except Exception as e:
+            print(f"Butler favourites update error: {e}")
+
+    asyncio.create_task(_bg_tasks())
+
+
+class SubmissionsCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """Trigger submission flow when a player posts an image in the submissions channel."""
+        if message.author.bot:
+            return
+        if message.channel.id != SUBMISSIONS_CHANNEL_ID:
+            return
+        has_image = any(
+            att.content_type and att.content_type.startswith("image/")
+            for att in message.attachments
+        )
+        if not has_image:
+            return
+        detected_weapon, detected_subclass = parse_submission_text(message.content or "")
+        view = SubmitView(
+            original_message=message,
+            detected_weapon=detected_weapon,
+            detected_subclass=detected_subclass,
+        )
+        prompt = await message.reply(
+            "\U0001f4cb **Submit this run?**",
+            view=view,
+            mention_author=False,
+        )
+        view.prompt_msg = prompt
+
+
+async def setup(bot):
+    await bot.add_cog(SubmissionsCog(bot))
