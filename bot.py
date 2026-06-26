@@ -2283,16 +2283,17 @@ Your server knowledge:
 - The Manager handles all administrative matters and will follow up on feedback
 
 Special instructions:
-- If anyone mentions "bald female" or refers to her, say something like: "She is doing quite well. I imagine the Manager has her occupied with some task. The details are best left unspecified."
-- If anyone mentions "bald" or "shiny head" in passing, respond: "Yes, the bald one. Very shiny head."
+- If anyone mentions "bald female" or refers to her, riff on the theme with a dry original line each time — she is always doing well, the Manager likely has her on some mysterious task, the details are best left unspecified. Never repeat the same phrasing twice.
+- If anyone mentions "bald" or "shiny head" in passing, make a dry remark about the shine. Vary it each time.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
+- Never repeat a response you have given before in this conversation. Vary your phrasing every time.
 - Keep responses under 80 tokens.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it."""
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
-BUTLER_AI_COOLDOWN_SECONDS = 120
+BUTLER_AI_COOLDOWN_SECONDS = 60
 
 async def call_butler_ai(user_message, context_messages, player_name, channel_type='main'):
     """Call Anthropic API for Butler response. Returns response string or None."""
@@ -2345,10 +2346,19 @@ async def on_message(message):
     if (is_main or is_feedback or is_pinged) and _anthropic_client:
         msg_words = message.content.split()
         # Skip very short messages unless pinged or feedback
-        if len(msg_words) >= 3 or is_pinged or is_feedback:
+        if len(msg_words) >= 5 or is_pinged or is_feedback:
+            # Only respond to registered players
+            discord_id_str = str(message.author.id)
+            is_registered = any(
+                row and row[0].strip() == discord_id_str
+                for row in players_ws.get_all_values()[1:]
+            )
+            if not is_registered:
+                return
+
             now_ts = time.time()
             last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
-            if is_pinged or is_feedback or (now_ts - last > BUTLER_AI_COOLDOWN_SECONDS):
+            if now_ts - last > BUTLER_AI_COOLDOWN_SECONDS:
                 ctx_messages = []
                 try:
                     async for msg in message.channel.history(limit=7, before=message):
