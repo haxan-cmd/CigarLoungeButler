@@ -1422,30 +1422,43 @@ def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks,
                                 submission_count, last_submission,
                                 weapon_marks_str, class_marks_str):
     """Write snapshot columns D–H into the Players sheet row for this player."""
-    try:
-        discord_id_str = str(discord_id)
-        rows = players_ws.get_all_values()
-        for i, row in enumerate(rows[1:], start=2):
-            if row and row[0].strip() == discord_id_str:
+    import time as _time
+    discord_id_str = str(discord_id)
+    # Use cache instead of raw get_all_values to avoid rate limit storms
+    rows = cached_players()
+    row_idx = None
+    row_data = None
+    for i, row in enumerate(rows, start=2):
+        if row and row[0].strip() == discord_id_str:
+            row_idx = i
+            row_data = row
+            break
+
+    for attempt in range(4):
+        try:
+            if row_idx:
                 players_ws.update(
-                    f'D{i}:H{i}',
+                    f'D{row_idx}:H{row_idx}',
                     [[total_marks, submission_count, last_submission,
                       weapon_marks_str, class_marks_str]]
                 )
-                if thread_id and (len(row) < 3 or not row[2].strip()):
-                    players_ws.update_cell(i, 3, str(thread_id))
-                _sheet_cache.invalidate(players_ws)
+                if thread_id and row_data and (len(row_data) < 3 or not row_data[2].strip()):
+                    players_ws.update_cell(row_idx, 3, str(thread_id))
+            else:
+                players_ws.append_row([
+                    discord_id_str, player_name,
+                    str(thread_id) if thread_id else '',
+                    total_marks, submission_count, last_submission,
+                    weapon_marks_str, class_marks_str
+                ])
+            _sheet_cache.invalidate(players_ws)
+            return
+        except Exception as e:
+            if '429' in str(e) and attempt < 3:
+                _time.sleep(2 ** attempt * 3)  # 3s, 6s, 12s backoff
+            else:
+                print(f"update_butlers_archive_row error: {e}")
                 return
-        # New player not yet in sheet — append full row
-        players_ws.append_row([
-            discord_id_str, player_name,
-            str(thread_id) if thread_id else '',
-            total_marks, submission_count, last_submission,
-            weapon_marks_str, class_marks_str
-        ])
-        _sheet_cache.invalidate(players_ws)
-    except Exception as e:
-        print(f"update_butlers_archive_row error: {e}")
 
 
 # ---------------------------------------------------------------------------
