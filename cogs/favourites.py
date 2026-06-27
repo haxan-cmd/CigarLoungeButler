@@ -61,8 +61,10 @@ def calculate_butler_stats(week_start=None, week_end=None):
     td_scores_sub = {}
     kills_scores_sub = {}
     players_set = set()
-    lethal_ratios = {}    # player -> [kills/td ratios]
-    lobby_finishes = {}   # player -> [(rank, size), ...]
+    lethal_ratios = {}       # player -> [kills/td ratios]
+    lobby_finishes = {}      # player -> [(rank, size), ...]
+    team_score_ratios = {}   # player -> [your_td / avg_teammate_td]
+    kill_efficiency = {}     # player -> [(your_kills, total_lobby_kills, lobby_size)]
 
     for row in subs:
         if len(row) < 9:
@@ -82,15 +84,30 @@ def calculate_butler_stats(week_start=None, week_end=None):
         players_set.add(player)
         td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
         kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
-        # Track lethality ratio: kills/td (higher = more lethal, lower = more dominant/assists)
+        # Lethality: kill rate (kills/td)
         if kills > 0 and td > 0:
             lethal_ratios.setdefault(player, []).append(kills / td)
-        # Track lobby rank for dominance stats (cols 14/15, index 13/14)
+        # Lobby TD rank for Warlord fallback (cols 14/15, index 13/14)
         try:
             lr = int(row[13]) if len(row) > 13 and row[13] else None
             ls = int(row[14]) if len(row) > 14 and row[14] else None
             if lr and ls and 1 < ls <= 64:
                 lobby_finishes.setdefault(player, []).append((lr, ls))
+        except (ValueError, TypeError):
+            pass
+        # Warlord: team score ratio (col 19, index 18 — your TD / avg teammate TD)
+        try:
+            tsr = float(row[18]) if len(row) > 18 and row[18] else None
+            if tsr and tsr > 0:
+                team_score_ratios.setdefault(player, []).append(tsr)
+        except (ValueError, TypeError):
+            pass
+        # Lethality v2: kill efficiency vs lobby (cols 18/15, index 17/18)
+        try:
+            tlk = int(row[17]) if len(row) > 17 and row[17] else None  # total_lobby_kills col 18
+            ls2 = int(row[14]) if len(row) > 14 and row[14] else None
+            if tlk and tlk > 0 and kills > 0 and ls2 and 1 < ls2 <= 64:
+                kill_efficiency.setdefault(player, []).append((kills, tlk, ls2))
         except (ValueError, TypeError):
             pass
 
@@ -101,66 +118,76 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Lethality: avg kill rate (K/TD%) × kills lobby percentile when available.
-    # Requires 3+ submissions. Rewards precision (converting TDs into kills)
-    # and relative kills dominance in lobby.
+    # ── LETHALITY — kill share efficiency, min 3 submissions with lobby data ──
+    # Score = avg(your_kills / (total_lobby_kills / lobby_size))
+    # i.e. how many times the lobby average in kills you got per game
+    # Falls back to kill rate (kills/td) for players without lobby data yet
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
 
-    # Build kills lobby percentile per player from col 15 (kills_rank) + col 14 (lobby_size)
-    kills_lobby_pcts = {}  # player -> avg kills lobby percentile (0–100, higher = better)
-    kill_finish_map = {}   # player -> list of (kills_rank, lobby_size)
-    for row in subs:
-        if not row or not row[0]:
-            continue
-        player = row[0].strip()
-        try:
-            kr = int(row[15]) if len(row) > 15 and row[15] else None
-            ls = int(row[14]) if len(row) > 14 and row[14] else None
-            if kr and ls and 1 < ls <= 64:
-                kill_finish_map.setdefault(player, []).append((kr, ls))
-        except (ValueError, TypeError):
-            pass
-    for p, finishes in kill_finish_map.items():
-        avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
-        kills_lobby_pcts[p] = avg_pct
-
     def lethality_score(p):
-        avg_rate = sum(qualified_lethal[p]) / len(qualified_lethal[p])  # 0–1
-        lobby_pct = kills_lobby_pcts.get(p)  # 0–100 or None
-        if lobby_pct is not None:
-            return avg_rate * (lobby_pct / 100)
-        return avg_rate
+        eff = kill_efficiency.get(p, [])
+        if len(eff) >= 2:
+            # Primary: kill efficiency vs lobby average
+            scores = [k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1]
+            return sum(scores) / len(scores) if scores else 0
+        # Fallback: raw kill rate
+        if p in qualified_lethal:
+            return sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 0.5  # scale down vs efficiency
+        return 0
 
-    lethal_ranked = sorted(qualified_lethal.keys(), key=lambda p: -lethality_score(p))
+    lethal_candidates = set(qualified_lethal.keys()) | {p for p, v in kill_efficiency.items() if len(v) >= 2}
+    lethal_ranked = sorted(lethal_candidates, key=lambda p: -lethality_score(p))
 
     def lethality_label(p):
-        rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100
-        pct = kills_lobby_pcts.get(p)
-        if pct is not None:
-            return f"{p} ({rate:.0f}% kill rate · top {100-pct:.0f}% kills)"
-        return f"{p} ({rate:.0f}% kill rate)"
+        eff = kill_efficiency.get(p, [])
+        if len(eff) >= 2:
+            avg_eff = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
+            rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100 if p in qualified_lethal else None
+            rate_str = f" · {rate:.0f}% kill rate" if rate else ""
+            return f"{p} ({avg_eff:.1f}× lobby avg kills{rate_str})"
+        if p in qualified_lethal:
+            rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100
+            return f"{p} ({rate:.0f}% kill rate)"
+        return p
 
     high_lethality = [lethality_label(p) for p in lethal_ranked[:5]]
     most_lethal_top5 = high_lethality
 
-    # Most Dominant — best single-game lobby finish, min 2 games with lobby data
-    # Sort: lowest rank first, then largest lobby (being 1st of 32 > 1st of 10)
-    qualified_dom = {p: v for p, v in lobby_finishes.items() if len(v) >= 2}
-    dom_ranked = sorted(
-        qualified_dom.keys(),
-        key=lambda p: (min(r for r, _ in qualified_dom[p]),
-                       -max(s for _, s in qualified_dom[p]))
-    )
+    # ── WARLORD — team dominance, min 2 submissions with team data ──
+    # Primary: avg(your_td / avg_teammate_td) — how much you outscored your team
+    # Fallback: lobby finish rank for players without team data yet
     def _ord(n):
         return f"{n}{'th' if 11<=n%100<=13 else {1:'st',2:'nd',3:'rd'}.get(n%10,'th')}"
 
+    def warlord_score(p):
+        ratios = team_score_ratios.get(p, [])
+        if len(ratios) >= 2:
+            return sum(ratios) / len(ratios)
+        # Fallback: convert lobby rank percentile
+        finishes = lobby_finishes.get(p, [])
+        if len(finishes) >= 2:
+            avg_pct = sum((s - r) / (s - 1) for r, s in finishes if s > 1) / len(finishes)
+            return avg_pct * 0.5  # scale down vs ratio
+        return 0
+
+    warlord_candidates = (
+        {p for p, v in team_score_ratios.items() if len(v) >= 2} |
+        {p for p, v in lobby_finishes.items() if len(v) >= 2}
+    )
+    dom_ranked = sorted(warlord_candidates, key=lambda p: -warlord_score(p))
+
     most_dominant = []
     for p in dom_ranked[:5]:
-        best_r, best_s = min(qualified_dom[p], key=lambda x: (x[0], -x[1]))
-        avg_pct = sum((s - r) / (s - 1) * 100 for r, s in qualified_dom[p] if s > 1) / len(qualified_dom[p])
-        best_str = f"{_ord(best_r)}/{best_s}"
-        avg_str = f"avg top {100-avg_pct:.0f}%" if avg_pct < 100 else ""
-        entry = f"{p} — {best_str}" + (f" · {avg_str}" if avg_str else "")
+        ratios = team_score_ratios.get(p, [])
+        if len(ratios) >= 2:
+            avg_ratio = sum(ratios) / len(ratios)
+            best_ratio = max(ratios)
+            entry = f"{p} — {avg_ratio:.1f}× teammates avg · peak {best_ratio:.1f}×"
+        else:
+            finishes = lobby_finishes.get(p, [])
+            best_r, best_s = min(finishes, key=lambda x: (x[0], -x[1]))
+            avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
+            entry = f"{p} — {_ord(best_r)}/{best_s} · avg top {100-avg_pct:.0f}%"
         most_dominant.append(entry)
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
