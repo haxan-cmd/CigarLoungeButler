@@ -1042,7 +1042,7 @@ async def update_archive_index(guild):
 
         entries.sort(key=lambda x: x[0].lower())
 
-        groups = [(‘A-D’, ‘A’, ‘D’), (‘E-K’, ‘E’, ‘K’), (‘L-R’, ‘L’, ‘R’), (‘S-Z’, ‘S’, ‘Z’)]
+        groups = [('A-D', 'A', 'D'), ('E-K', 'E', 'K'), ('L-R', 'L', 'R'), ('S-Z', 'S', 'Z')]
 
         def _make_fields(group_name, group_entries):
             """Return list of (name, value) embed field tuples, splitting if over 1024 chars."""
@@ -1051,15 +1051,15 @@ async def update_archive_index(guild):
             current_name = group_name
             current_links = []
             for link in links:
-                candidate = ‘ • ‘.join(current_links + [link])
+                candidate = ' • '.join(current_links + [link])
                 if len(candidate) > 1000:
-                    fields.append((current_name, ‘ • ‘.join(current_links)))
+                    fields.append((current_name, ' • '.join(current_links)))
                     current_name = f"{group_name} (cont.)"
                     current_links = [link]
                 else:
                     current_links.append(link)
             if current_links:
-                fields.append((current_name, ‘ • ‘.join(current_links)))
+                fields.append((current_name, ' • '.join(current_links)))
             return fields
 
         embed_fields = []
@@ -1069,7 +1069,7 @@ async def update_archive_index(guild):
                 embed_fields.extend(_make_fields(group_name, group_entries))
         other = [(n, t) for n, t in entries if not n or not n[0].upper().isalpha()]
         if other:
-            embed_fields.extend(_make_fields(‘#’, other))
+            embed_fields.extend(_make_fields('#', other))
 
         # Build embed(s) — Discord allows max 25 fields per embed
         def _build_embeds(fields):
@@ -1078,7 +1078,7 @@ async def update_archive_index(guild):
                 chunk = fields[i:i + 25]
                 e = discord.Embed(
                     title="📋 Player Registry Index",
-                    description="Jump to a player’s card",
+                    description="Jump to a player's card",
                     colour=discord.Colour.from_str("#2b2d31"),
                 )
                 for fname, fval in chunk:
