@@ -234,6 +234,9 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if not bounty:
         return False
 
+    if not weapon:
+        return False
+
     weapons = bounty['weapons']
 
     # Normalize weapon name for matching (case-insensitive)
