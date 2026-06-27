@@ -349,16 +349,16 @@ def build_favourites_embed(stats):
     return (
         header +
         f"\n"
-        f"**<a:topkill:1360314538364240024> Lethality** *(kill rate × lobby kills rank, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
+        f"**<a:mostlethal:1520490418817601658> Lethality** *(kill rate × lobby kills rank, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
         f"\n"
-        f"**⚔️ Warlord** *(lobby dominance, min 2 runs)*\n" + warlord_section +
+        f"**<:warlord:1520490364039860347> Warlord** *(lobby dominance, min 2 runs)*\n" + warlord_section +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"
         f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
         f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
-        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
-        f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
+        f"<a:mostlethal:1520490418817601658> **Headhunter** — {stats['headhunter']}\n"
+        f"<:warlord:1520490364039860347> **Butcher** — {stats['butcher']}\n"
         f"\n─────────────────────\n"
         f"\n**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
