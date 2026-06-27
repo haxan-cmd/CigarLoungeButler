@@ -91,7 +91,7 @@ def upsert_player(discord_id, discord_name):
 
 def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
                    takedowns, kills, deaths, vip, feats, message_link,
-                   lobby_rank=None, lobby_size=None):
+                   lobby_rank=None, lobby_size=None, kills_rank=None):
     from datetime import datetime as _dt
     timestamp = _dt.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     vip_str   = "Yes" if vip else "No"
@@ -100,8 +100,9 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
     submissions_ws.append_row([
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link,
-        lobby_rank if lobby_rank is not None else '',
-        lobby_size if lobby_size is not None else '',
+        lobby_rank  if lobby_rank  is not None else '',
+        lobby_size  if lobby_size  is not None else '',
+        kills_rank  if kills_rank  is not None else '',
     ])
     _sheet_cache.invalidate(submissions_ws)
 
@@ -1164,6 +1165,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Compute lobby context from other_scores / other_kills
     lobby_rank = None
     lobby_size = None
+    kills_rank = None
     lobby_line = None
     _other_td = other_scores if isinstance(other_scores, list) else []
     _other_k  = other_kills if isinstance(other_kills, list) else []
@@ -1182,10 +1184,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if gap > 0:
                     parts.append(f"+{gap} TD clear")
             # Kills rank if we have it
+            kills_rank = None
             valid_k = [k for k in _other_k if isinstance(k, int) and k > 0]
             if valid_k and kills:
                 kills_rank = sum(1 for k in valid_k if k >= kills) + 1
-                kills_pct = round((1 - (kills_rank - 1) / lobby_size) * 100)
                 parts.append(f"Kills: {kills_rank}{_ordinal(kills_rank)}")
             # K/TD ratio
             if takedowns > 0 and kills:
@@ -1244,6 +1246,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             message_link,
             lobby_rank=lobby_rank,
             lobby_size=lobby_size,
+            kills_rank=kills_rank,
         )
         # Row index is last row in submissions sheet
         submission_row = len(submissions_ws.get_all_values())

@@ -476,29 +476,35 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
     return [w for w, c in weapon_counts.items() if c >= 100]
 
 def get_lobby_stats_for_player(discord_id, cached_data=None):
-    """Return best lobby finish and avg finish percentile from submissions with lobby data."""
+    """Return best/avg lobby finish for TD and kills from submissions with lobby data."""
     subs = (cached_data or {}).get('submissions') or cached_submissions()
     discord_id_str = str(discord_id)
-    finishes = []
+    td_finishes = []    # [(rank, size), ...]
+    kill_finishes = []  # [(rank, size), ...]
     for row in subs:
         if not row or row[2].strip() != discord_id_str:
             continue
         try:
             lr = int(row[13]) if len(row) > 13 and row[13] else None
             ls = int(row[14]) if len(row) > 14 and row[14] else None
+            kr = int(row[15]) if len(row) > 15 and row[15] else None
             if lr and ls and ls > 1:
-                finishes.append((lr, ls))
+                td_finishes.append((lr, ls))
+            if kr and ls and ls > 1:
+                kill_finishes.append((kr, ls))
         except (ValueError, TypeError):
             pass
-    if not finishes:
+    if not td_finishes:
         return None
-    best_r, best_s = min(finishes, key=lambda x: (x[0], -x[1]))
-    avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
+    best_r, best_s = min(td_finishes, key=lambda x: (x[0], -x[1]))
+    avg_td_pct  = sum((s - r) / (s - 1) * 100 for r, s in td_finishes  if s > 1) / len(td_finishes)
+    avg_k_pct   = (sum((s - r) / (s - 1) * 100 for r, s in kill_finishes if s > 1) / len(kill_finishes)) if kill_finishes else None
     return {
-        'best_rank': best_r,
-        'best_size': best_s,
-        'avg_percentile': avg_pct,
-        'games': len(finishes),
+        'best_rank':   best_r,
+        'best_size':   best_s,
+        'avg_td_pct':  avg_td_pct,
+        'avg_k_pct':   avg_k_pct,
+        'games':       len(td_finishes),
     }
 
 
@@ -845,7 +851,10 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
     if lobby_stats:
         lines.append("**Lobby Stats:**")
         lines.append(f"• Best finish — **{lobby_stats['best_rank']} of {lobby_stats['best_size']}**")
-        lines.append(f"• Avg finish — **top {100 - lobby_stats['avg_percentile']:.0f}%** over {lobby_stats['games']} tracked games")
+        lines.append(f"• Avg TD rank — **top {100 - lobby_stats['avg_td_pct']:.0f}%**")
+        if lobby_stats.get('avg_k_pct') is not None:
+            lines.append(f"• Avg kill rank — **top {100 - lobby_stats['avg_k_pct']:.0f}%**")
+        lines.append(f"*({lobby_stats['games']} tracked games)*")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
