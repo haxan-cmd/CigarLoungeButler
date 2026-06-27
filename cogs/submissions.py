@@ -1365,7 +1365,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vision_data=None):
     # Cross-cog lazy imports to avoid circular dependencies at module load
-    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
+    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, post_scorecard_to_threads
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1601,6 +1601,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             )
         except Exception as e:
             print(f"Leaderboard update error: {e}")
+
+    if placements and original_message.attachments:
+        try:
+            await post_scorecard_to_threads(interaction.guild, [lb for lb, _ in placements], original_message)
+        except Exception as e:
+            print(f"Scorecard re-upload error: {e}")
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
