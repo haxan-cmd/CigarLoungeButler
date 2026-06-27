@@ -172,6 +172,7 @@ class SubmitView(discord.ui.View):
 
         # Has image — defer so vision API has time to run
         await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("📋 Reading your scorecard...", ephemeral=True)
 
         parsed = None
         try:
