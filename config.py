@@ -68,15 +68,15 @@ WEAPONS_1H = [
 ]
 
 CLASS_WEAPON_MAP = {
-    "Officer":        ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
-    "Guardian":       ["Axe", "Falchion", "Fist and Shield", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
-    "Crusader":       ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
-    "Devastator":     ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
+    "Officer":        ["Axe", "Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "Sword", "War Axe"],
+    "Guardian":       ["Axe", "Falchion", "Fist and Shield", "Hatchet", "Heavy Cavalry Sword", "Mace", "One-Handed Spear", "Short Sword", "Warhammer"],
+    "Crusader":       ["Axe", "Battle Axe", "Executioner's Axe", "Falchion", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
+    "Devastator":     ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Knife", "Maul", "War Club"],
     "Raider":         ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
     "Ambusher":       ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
-    "Poleman":        ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
-    "Man-at-Arms":    ["Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Mace",
-                       "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
+    "Poleman":        ["Cudgel", "Glaive", "Goedendag", "Halberd", "Hatchet", "Knife", "Polehammer", "Quarterstaff", "Short Sword", "Spear"],
+    "Man-at-Arms":    ["Axe", "Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Knife", "Mace",
+                       "Morning Star", "One-Handed Spear", "Rapier", "Short Sword", "Sword"],
     "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
 }
 
@@ -147,13 +147,13 @@ MARKSMAN_SUBCLASSES = {
 
 # ── Registry weapon / class maps ─────────────────────────────────────────────
 REGISTRY_WEAPON_MAP = {
-    "Officer":        ["Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "War Axe"],
+    "Officer":        ["Axe", "Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "Sword", "War Axe"],
     "Guardian":       ["Axe", "Falchion", "Heavy Cavalry Sword", "One-Handed Spear", "Warhammer"],
-    "Crusader":       ["Battle Axe", "Executioner's Axe", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
-    "Devastator":     ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Maul", "War Club"],
+    "Crusader":       ["Axe", "Battle Axe", "Executioner's Axe", "Falchion", "Messer", "Morning Star", "Quarterstaff", "Two-Handed Hammer"],
+    "Devastator":     ["Battle Axe", "Executioner's Axe", "Greatsword", "Highland Sword", "Knife", "Maul", "War Club"],
     "Raider":         ["Dane Axe", "Glaive", "Messer", "Two-Handed Hammer"],
     "Ambusher":       ["Cudgel", "Dagger", "Hatchet", "Katars", "Knife", "Short Sword"],
-    "Poleman":        ["Glaive", "Goedendag", "Halberd", "Polehammer", "Quarterstaff", "Spear"],
+    "Poleman":        ["Cudgel", "Glaive", "Goedendag", "Halberd", "Hatchet", "Knife", "Polehammer", "Quarterstaff", "Short Sword", "Spear"],
     "Man-at-Arms":    ["Falchion", "Heavy Cavalry Sword", "Mace", "Morning Star", "One-Handed Spear", "Rapier", "Sword"],
     "Field Engineer": ["Goedendag", "Pick Axe", "Shovel", "Sledge Hammer"],
     "Longbowman":     ["Bow", "War Bow"],
