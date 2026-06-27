@@ -118,7 +118,15 @@ def vision_parse_scorecard(image_url: str) -> dict:
                 ]
             }]
         )
+        print(f"[VISION] stop_reason={r.stop_reason} content_blocks={len(r.content)}")
+        if not r.content:
+            print("[VISION] Empty content list from API")
+            return empty
         raw = r.content[0].text.strip()
+        print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
+        if not raw:
+            print("[VISION] Empty text block from API")
+            return empty
         # Strip markdown code fences if model wraps output
         if raw.startswith('```'):
             raw = raw.split('```')[1]

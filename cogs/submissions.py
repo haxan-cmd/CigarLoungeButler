@@ -462,6 +462,7 @@ class ClassSelect(discord.ui.Select):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.category = category
+        self.classes = classes
         self.pre_detected_weapon = pre_detected_weapon
         self.vision_data = vision_data or {}
         CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
@@ -483,19 +484,22 @@ class ClassSelect(discord.ui.Select):
             )
         else:
             weapons = get_all_weapons_for_class(selected_class)
-            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons, vision_data=vd)
+            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons, vision_data=vd, all_classes=classes, category=self.category)
             await interaction.response.edit_message(
                 content=f"Class: `{selected_class}`. Which weapon?",
                 view=view
             )
 
 class WeaponSelectView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None):
+    def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None, all_classes=None, category="all"):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.selected_class = selected_class
         self.vision_data = vision_data or {}
+        # Preserve the original class list so Back can restore it correctly
+        self.all_classes = all_classes or sorted(CLASS_WEAPON_MAP.keys())
+        self.category = category
         self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons, vision_data))
 
     @discord.ui.button(label='Back', style=discord.ButtonStyle.grey, emoji='◀️', row=1)
@@ -503,8 +507,7 @@ class WeaponSelectView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes, vision_data=self.vision_data)
+        view = ClassSelectView(self.original_message, self.prompt_msg, self.category, self.all_classes, vision_data=self.vision_data)
         await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
 class WeaponSelect(discord.ui.Select):
