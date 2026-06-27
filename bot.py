@@ -42,8 +42,10 @@ COGS = [
 @bot.event
 async def on_ready():
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} slash commands")
+        guild = discord.Object(id=config.GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"✅ Synced {len(synced)} slash commands to guild")
     except Exception as e:
         print(f"❌ Command sync failed: {e}")
 
