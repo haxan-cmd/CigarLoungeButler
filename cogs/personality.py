@@ -4,6 +4,7 @@ cogs/personality.py — Butler AI, on_message handler, task loops, on_ready.
 import asyncio
 import time
 import re
+from datetime import time as dt_time
 import random
 import anthropic
 import discord
@@ -379,7 +380,7 @@ class PersonalityCog(commands.Cog):
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
 
-    @tasks.loop(hours=1)
+    @tasks.loop(time=[dt_time(h, 0) for h in range(24)])
     async def nerve_center_digest(self):
         """Post hourly digest to nerve center channel."""
         print(f"[NERVE] digest loop firing at {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
