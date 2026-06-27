@@ -125,10 +125,11 @@ class SubmitView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
 
         # Try vision parse if there's an image attachment
+        # Run in a thread so the blocking Anthropic HTTP call doesn't stall the event loop
         parsed = None
         for att in self.original_message.attachments:
             if att.content_type and att.content_type.startswith('image/'):
-                parsed = vision_parse_scorecard(att.url)
+                parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
                 break
 
         # Validate parsed fields against known lists
