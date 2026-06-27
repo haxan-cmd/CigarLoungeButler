@@ -69,7 +69,7 @@ def get_weapons_for_class_and_category(selected_class, category):
 
 def get_all_weapons_for_class(selected_class):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
-    return sorted([w for w in class_weapons if w not in FEAT_WEAPONS])
+    return sorted(class_weapons)
 
 def upsert_player(discord_id, discord_name):
     """Returns True if this is a new player."""
