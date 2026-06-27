@@ -1018,3 +1018,33 @@ class LeaderboardsCog(commands.Cog):
             return
 
         await interaction.response.send_message("Rebuilding the ledger entrance...", ephemeral=True)
+        guild = interaction.guild
+
+        # Clear cached message IDs so we post fresh instead of editing stale/wrong messages
+        _entrance_message_ids.clear()
+
+        try:
+            await build_ledger_entrance(guild)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Entrance build failed: {e}")
+            return
+
+        # Rebuild all forum indexes
+        index_targets = [
+            (WEAPON_FORUM_1H,    "Weapons 1H"),
+            (WEAPON_FORUM_2H,    "Weapons 2H"),
+            (MAP_RECORDS_FORUM_ID, "Map Records"),
+            (FEATS_FORUM_ID,     "Feats"),
+        ]
+        for forum_id, label in index_targets:
+            try:
+                await update_leaderboard_index(guild, forum_id, label)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"ledger_refresh: index error for {label}: {e}")
+
+        await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
+
+
+async def setup(bot):
+    await bot.add_cog(LeaderboardsCog(bot))
