@@ -35,21 +35,31 @@ def butler_quip(prompt: str, fallback: str = '') -> str:
 
 _SCORECARD_PROMPT = """You are reading a Chivalry 2 end-of-round scoreboard screenshot.
 
-The submitting player's row is visually highlighted (different colour or indicator) compared to other rows.
+The Chivalry 2 scoreboard shows player rows with these columns in order:
+SCORE | NAME | [icon] | TAKEDOWNS | KILLS | DEATHS | ASSISTS
 
-Extract the following from the highlighted row only:
-- weapon (exact weapon name as shown in-game)
-- subclass (the player's subclass/class e.g. Ambusher, Officer, Devastator)
-- map (the map name shown on screen)
-- faction (the submitting player's faction: Agatha, Mason, or Tenosia)
-- takedowns (integer)
-- kills (integer)
-- deaths (integer)
+TAKEDOWNS is the first number column after the player name. It is typically the largest number (often 100-300 for top players).
+KILLS is the second number column. It is always less than or equal to takedowns.
+DEATHS is the third number column.
+ASSISTS is the fourth number column — do NOT confuse this with deaths.
 
-Also extract comparison data from ALL other visible rows (ignore their names):
-- other_scores: list of takedown integers for every other player visible, in descending order
+The score (leftmost column) is a large point value (often 1,000-20,000) — do NOT use this as takedowns.
 
-Return ONLY valid JSON in this exact format, with null for any field you cannot read confidently:
+The submitting player's row is visually highlighted (brighter, different colour, or has a marker).
+
+Extract ONLY from the highlighted row:
+- weapon (exact weapon name shown — may appear as an icon tooltip or text)
+- subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms)
+- map (map name shown on screen, e.g. Rudhelm, Galencourt, Coxwell)
+- faction (Agatha, Mason, or Tenosia — based on which team the highlighted row is on)
+- takedowns (integer — first numeric column after name, typically 50-400)
+- kills (integer — second numeric column, always <= takedowns)
+- deaths (integer — third numeric column, typically 0-50)
+
+Also return:
+- other_scores: list of takedown integers (first numeric column) for all other visible rows, in order
+
+Return ONLY valid JSON, null for any field you are not confident about:
 {
   "weapon": null,
   "subclass": null,
@@ -61,7 +71,7 @@ Return ONLY valid JSON in this exact format, with null for any field you cannot 
   "other_scores": []
 }
 
-Do not guess. If a field is unclear or not visible, return null for that field."""
+Do not guess. Return null rather than a wrong value."""
 
 
 def vision_parse_scorecard(image_url: str) -> dict:
@@ -79,7 +89,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
     try:
         import json as _json
         r = _anthropic_client.messages.create(
-            model='claude-haiku-4-5-20251001',
+            model='claude-sonnet-4-6',
             max_tokens=300,
             messages=[{
                 'role': 'user',
