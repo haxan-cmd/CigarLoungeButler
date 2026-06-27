@@ -30,6 +30,9 @@ BOUNTY_CARDS_FORUM_ID    = config.BOUNTY_CARDS_FORUM_ID
 REGISTRY_FORUM_ID        = config.REGISTRY_FORUM_CHANNEL_ID
 LEDGER_ENTRANCE_CHANNEL_ID  = config.LEDGER_ENTRANCE_CHANNEL_ID
 REGISTRY_INDEX_THREAD_ID    = config.REGISTRY_INDEX_THREAD_ID
+INDEX_THREAD_2H             = config.INDEX_THREAD_2H
+INDEX_THREAD_1H             = config.INDEX_THREAD_1H
+INDEX_THREAD_FEATS          = config.INDEX_THREAD_FEATS
 
 _WEAPONS_2H = {
     "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
@@ -132,13 +135,14 @@ async def build_ledger_entrance(guild):
             key=lambda x: x[0]
         )
 
-        # ── Find index threads ──────────────────────────────────────────────
-        idx_1h     = await _find_index_thread(guild, WEAPON_FORUM_1H,       "Weapons 1H")
-        idx_2h     = await _find_index_thread(guild, WEAPON_FORUM_2H,       "Weapons 2H")
+        # ── Index threads — hardcoded IDs for known existing threads ───────
+        _t = lambda tid: type('T', (), {'id': tid})()
+        idx_1h     = _t(INDEX_THREAD_1H)
+        idx_2h     = _t(INDEX_THREAD_2H)
         idx_maps   = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID,  "Map Records")
-        idx_feats  = await _find_index_thread(guild, FEATS_FORUM_ID,        "Feats")
+        idx_feats  = _t(INDEX_THREAD_FEATS)
         idx_bounty = await _find_index_thread(guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards")
-        idx_reg    = type('T', (), {'id': REGISTRY_INDEX_THREAD_ID})()  # hardcoded — known thread ID
+        idx_reg    = _t(REGISTRY_INDEX_THREAD_ID)
 
         def index_link(thread, label):
             if thread:
@@ -289,21 +293,33 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         is_map_index    = index_label == "Map Records"
 
         if is_weapon_index:
-            # Group weapons by which parent class uses them primarily
+            import config as _cfg
+            # Known index thread names to exclude from board links
+            index_names = {f"📋 {index_label} Index", f"{index_label} Index",
+                           "Weapons 2H Index", "Weapons 1H Index", "1H Weapons Index", "2H Weapons Index"}
+            boards_only = [(n, t) for n, t in threads_for_index if n not in index_names]
+
             CLASS_GROUPS = [
                 ("⚔️ Knight",   ["Officer", "Guardian", "Crusader"]),
                 ("🗡️ Vanguard", ["Devastator", "Raider", "Ambusher"]),
                 ("🛡️ Footman",  ["Poleman", "Man-at-Arms", "Field Engineer"]),
                 ("🏹 Archer",   ["Longbowman", "Crossbowman", "Skirmisher"]),
             ]
-            import config as _cfg
+            # Archer weapons pulled from MARKSMAN_SUBCLASSES
+            archer_weapons = set()
+            for ws in _cfg.MARKSMAN_SUBCLASSES.values():
+                archer_weapons.update(ws)
+
             placed = set()
             for group_label, subclasses in CLASS_GROUPS:
                 group_weapons = set()
-                for sc in subclasses:
-                    group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
+                if group_label.startswith("🏹"):
+                    group_weapons = archer_weapons
+                else:
+                    for sc in subclasses:
+                        group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
                 group_items = [
-                    (name, t) for name, t in threads_for_index
+                    (name, t) for name, t in boards_only
                     if name in group_weapons and name not in placed
                 ]
                 if not group_items:
@@ -313,8 +329,8 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 lines.append(f"**{group_label}**")
                 lines.append(make_links(group_items))
                 lines.append("")
-            # Anything not matched into a class group
-            remainder = [(n, t) for n, t in threads_for_index if n not in placed]
+            # Anything not matched — genuine misc boards, no index threads
+            remainder = [(n, t) for n, t in boards_only if n not in placed]
             if remainder:
                 lines.append("**Other**")
                 lines.append(make_links(remainder))
@@ -348,11 +364,24 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
 
         content = "\n".join(lines).strip()
 
+        # Use hardcoded thread IDs for known existing indexes; fall back to name search
+        _known_index_ids = {
+            "Weapons 1H":  INDEX_THREAD_1H,
+            "Weapons 2H":  INDEX_THREAD_2H,
+            "Feats":       INDEX_THREAD_FEATS,
+        }
         index_thread = None
-        for t in forum.threads:
-            if t.name == f"📋 {index_label} Index":
-                index_thread = t
-                break
+        if index_label in _known_index_ids:
+            try:
+                index_thread = guild.get_channel(_known_index_ids[index_label]) or \
+                               await guild.fetch_channel(_known_index_ids[index_label])
+            except Exception:
+                pass
+        if not index_thread:
+            for t in forum.threads:
+                if t.name == f"📋 {index_label} Index":
+                    index_thread = t
+                    break
         if not index_thread:
             async for t in forum.archived_threads(limit=None):
                 if t.name == f"📋 {index_label} Index":
