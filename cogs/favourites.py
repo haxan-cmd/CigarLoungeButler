@@ -378,7 +378,7 @@ def build_favourites_embed(stats):
         f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
         f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
-        f"<:200takedown:1402294631948881921> **Butcher** — {stats['butcher']}\n"
+        f"<a:200tkd:1363648828414230538> **Butcher** — {stats['butcher']}\n"
         f"\n─────────────────────\n"
         f"\n**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
