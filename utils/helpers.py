@@ -33,6 +33,84 @@ def butler_quip(prompt: str, fallback: str = '') -> str:
         return fallback
 
 
+_SCORECARD_PROMPT = """You are reading a Chivalry 2 end-of-round scoreboard screenshot.
+
+The submitting player's row is visually highlighted (different colour or indicator) compared to other rows.
+
+Extract the following from the highlighted row only:
+- weapon (exact weapon name as shown in-game)
+- subclass (the player's subclass/class e.g. Ambusher, Officer, Devastator)
+- map (the map name shown on screen)
+- faction (the submitting player's faction: Agatha, Mason, or Tenosia)
+- takedowns (integer)
+- kills (integer)
+- deaths (integer)
+
+Also extract comparison data from ALL other visible rows (ignore their names):
+- other_scores: list of takedown integers for every other player visible, in descending order
+
+Return ONLY valid JSON in this exact format, with null for any field you cannot read confidently:
+{
+  "weapon": null,
+  "subclass": null,
+  "map": null,
+  "faction": null,
+  "takedowns": null,
+  "kills": null,
+  "deaths": null,
+  "other_scores": []
+}
+
+Do not guess. If a field is unclear or not visible, return null for that field."""
+
+
+def vision_parse_scorecard(image_url: str) -> dict:
+    """
+    Pass a Discord image URL to Claude vision and extract scorecard fields.
+    Returns a dict with keys: weapon, subclass, map, faction, takedowns, kills, deaths, other_scores.
+    Any field that couldn't be read confidently is None.
+    """
+    empty = {
+        'weapon': None, 'subclass': None, 'map': None, 'faction': None,
+        'takedowns': None, 'kills': None, 'deaths': None, 'other_scores': []
+    }
+    if not _anthropic_client:
+        return empty
+    try:
+        import json as _json
+        r = _anthropic_client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=300,
+            messages=[{
+                'role': 'user',
+                'content': [
+                    {'type': 'image', 'source': {'type': 'url', 'url': image_url}},
+                    {'type': 'text',  'text': _SCORECARD_PROMPT},
+                ]
+            }]
+        )
+        raw = r.content[0].text.strip()
+        # Strip markdown code fences if model wraps output
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'):
+                raw = raw[4:]
+        data = _json.loads(raw)
+        # Coerce numeric fields to int, ignore bad values
+        for field in ('takedowns', 'kills', 'deaths'):
+            try:
+                if data.get(field) is not None:
+                    data[field] = int(data[field])
+            except (ValueError, TypeError):
+                data[field] = None
+        if not isinstance(data.get('other_scores'), list):
+            data['other_scores'] = []
+        return {**empty, **data}
+    except Exception as e:
+        print(f"vision_parse_scorecard error: {e}")
+        return empty
+
+
 def parse_submission_text(text):
     # Sort aliases longest-first so "war bow" matches before "bow" — otherwise
     # shorter aliases steal the match from longer ones that overlap.
