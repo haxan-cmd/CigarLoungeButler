@@ -643,6 +643,44 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     return any_updated, placements
 
 
+async def post_scorecard_to_threads(guild, lb_names, original_message):
+    """Re-upload scorecard image to each leaderboard thread so it persists
+    even if the original submission message is later deleted."""
+    if not original_message.attachments:
+        return
+    attachment = original_message.attachments[0]
+    if not (attachment.content_type or "").startswith("image/"):
+        return
+    try:
+        import aiohttp, io as _io
+        async with aiohttp.ClientSession() as session:
+            async with session.get(attachment.url) as resp:
+                if resp.status != 200:
+                    return
+                image_bytes = await resp.read()
+    except Exception as e:
+        print(f"[SCORECARD_UPLOAD] Fetch failed: {e}")
+        return
+
+    all_lb_rows = leaderboards_ws.get_all_records()
+    posted = set()
+    for lb_name in lb_names:
+        lb_row = next((r for r in all_lb_rows if r["Leaderboard Name"] == lb_name), None)
+        if not lb_row:
+            continue
+        thread_id = int(lb_row["Thread ID"])
+        if thread_id in posted:
+            continue
+        try:
+            thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            import io as _io2
+            await thread.send(file=discord.File(_io2.BytesIO(image_bytes), filename=attachment.filename))
+            posted.add(thread_id)
+            print(f"[SCORECARD_UPLOAD] Posted to {lb_name} thread {thread_id}")
+        except Exception as e:
+            print(f"[SCORECARD_UPLOAD] Failed for {lb_name}: {e}")
+
+
 def get_leaderboard_entries(name):
     rows = leaderboard_data_ws.get_all_values()
     entries = []

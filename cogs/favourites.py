@@ -95,16 +95,16 @@ def calculate_butler_stats(week_start=None, week_end=None):
                 lobby_finishes.setdefault(player, []).append((lr, ls))
         except (ValueError, TypeError):
             pass
-        # Warlord: team score ratio (col 19, index 18 — your TD / avg teammate TD)
+        # Warlord: team score ratio (col 20, index 19 — your TD / avg teammate TD)
         try:
-            tsr = float(row[18]) if len(row) > 18 and row[18] else None
+            tsr = float(row[19]) if len(row) > 19 and row[19] else None
             if tsr and tsr > 0:
                 team_score_ratios.setdefault(player, []).append(tsr)
         except (ValueError, TypeError):
             pass
-        # Lethality v2: kill efficiency vs lobby (cols 18/15, index 17/18)
+        # Lethality v2: kill efficiency vs lobby (col 19 index 18 / col 15 index 14)
         try:
-            tlk = int(row[17]) if len(row) > 17 and row[17] else None  # total_lobby_kills col 18
+            tlk = int(row[18]) if len(row) > 18 and row[18] else None  # total_lobby_kills col 19
             ls2 = int(row[14]) if len(row) > 14 and row[14] else None
             if tlk and tlk > 0 and kills > 0 and ls2 and 1 < ls2 <= 64:
                 kill_efficiency.setdefault(player, []).append((kills, tlk, ls2))
