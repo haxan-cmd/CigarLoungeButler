@@ -356,7 +356,7 @@ def build_favourites_embed(stats):
         f"*All-Time Titles*\n"
         f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
         f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
-        f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
+        f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
         f"<a:mostlethal:1520490418817601658> **Headhunter** — {stats['headhunter']}\n"
         f"<:warlord:1520490364039860347> **Butcher** — {stats['butcher']}\n"
         f"\n─────────────────────\n"
