@@ -8,7 +8,7 @@ import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import config
 from utils.sheets import (
@@ -877,7 +877,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index
-    from cogs.bounty import update_bounty, get_active_bounty
+    from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
         calculate_weapon_marks_for_player,

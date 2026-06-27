@@ -2,6 +2,7 @@
 # update_leaderboards() is the main entry point — called after every submission.
 import asyncio
 import os
+import re as _re
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -55,7 +56,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         seen_ids = set()
         threads = []
         try:
-            active = await guild.http.get_active_threads(guild.id)
+            active = await guild._state.http.get_active_threads(guild.id)
             for t_data in active.get('threads', []):
                 if int(t_data['parent_id']) == forum_channel_id and t_data['name'] != index_thread_name:
                     t_obj = forum.get_thread(int(t_data['id']))
@@ -302,7 +303,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             continue
 
         thread_id = int(lb_row['Thread ID'])
-        message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+        message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
@@ -353,7 +354,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     all_lb_data = leaderboards_ws.get_all_values()
                     for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
                         if lb_row_data and lb_row_data[0].strip() == lb_name:
-                            leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                            leaderboards_ws.update_cell(i, 3, '|'.join(str(m) for m in new_msg_ids))
                             break
                 except Exception as e:
                     print(f"Leaderboards sheet update error for {lb_name}: {e}")
@@ -492,8 +493,8 @@ class LeaderboardsCog(commands.Cog):
                 defense_msg_ids.append(str(defense_msg.id))
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            leaderboards_ws.append_row([attack_name, str(thread.id), ",".join(attack_msg_ids), "map"])
-            leaderboards_ws.append_row([defense_name, str(thread.id), ",".join(defense_msg_ids), "map"])
+            leaderboards_ws.append_row([attack_name, str(thread.id), "|".join(attack_msg_ids), "map"])
+            leaderboards_ws.append_row([defense_name, str(thread.id), "|".join(defense_msg_ids), "map"])
 
             await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
 
@@ -507,7 +508,7 @@ class LeaderboardsCog(commands.Cog):
                 msg_ids.append(str(lb_msg.id))
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            leaderboards_ws.append_row([name, str(thread.id), ",".join(msg_ids), type])
+            leaderboards_ws.append_row([name, str(thread.id), "|".join(msg_ids), type])
 
             await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
@@ -557,7 +558,7 @@ class LeaderboardsCog(commands.Cog):
             chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
 
             thread_id = int(lb_row['Thread ID'])
-            message_ids = [int(mid.strip()) for mid in str(lb_row['Message ID']).split(',') if mid.strip()]
+            message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
             try:
                 guild = interaction.guild
@@ -603,7 +604,7 @@ class LeaderboardsCog(commands.Cog):
                         all_lb_data = leaderboards_ws.get_all_values()
                         for i, lb_row_data in enumerate(all_lb_data[1:], start=2):
                             if lb_row_data and lb_row_data[0].strip() == lb_name:
-                                leaderboards_ws.update_cell(i, 3, ','.join(str(m) for m in new_msg_ids))
+                                leaderboards_ws.update_cell(i, 3, '|'.join(str(m) for m in new_msg_ids))
                                 break
                     except Exception as e:
                         print(f"Leaderboards sheet update error for {lb_name}: {e}")
@@ -704,7 +705,7 @@ class LeaderboardsCog(commands.Cog):
                     msg_ids.append(str(lb_msg.id))
                 await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-                leaderboards_ws.append_row([weapon, str(thread.id), ",".join(msg_ids), "weapon"])
+                leaderboards_ws.append_row([weapon, str(thread.id), "|".join(msg_ids), "weapon"])
                 created.append(weapon)
                 await asyncio.sleep(1.5)
 
