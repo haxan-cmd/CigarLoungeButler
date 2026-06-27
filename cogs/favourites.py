@@ -344,6 +344,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
         'high_lethality': high_lethality if high_lethality else [],
+        'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
         'most_dominant': most_dominant if most_dominant else [],
     }
 
@@ -376,8 +377,8 @@ def build_favourites_embed(stats):
         f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
         f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
         f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
-        f"<a:mostlethal:1520490418817601658> **Headhunter** — {stats['headhunter']}\n"
-        f"<:warlord:1520490364039860347> **Butcher** — {stats['butcher']}\n"
+        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
+        f"<:200takedown:1402294631948881921> **Butcher** — {stats['butcher']}\n"
         f"\n─────────────────────\n"
         f"\n**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
         f"\n"
@@ -401,8 +402,8 @@ async def update_title_roles(guild, stats):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('headhunter', HEADHUNTER_ROLE_ID, 'Headhunter',
-         "The tally has been reviewed. {old}, your count has been surpassed. {new}, the Headhunter title is yours. The butler suggests you stop being modest about it."),
+        ('most_lethal_player', HEADHUNTER_ROLE_ID, 'Most Lethal',
+         "The kill tallies have been reviewed. {old}, your edge has been lost. {new}, the Most Lethal title is yours. The butler is mildly impressed."),
         ('butcher', BUTCHER_ROLE_ID, 'Butcher',
          "The battlefield reports are in. {old}, someone has left more bodies behind. {new}, you are hereby declared the Butcher. The butler finds the whole affair rather distasteful, but acknowledges your commitment."),
     ]
