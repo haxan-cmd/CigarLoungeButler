@@ -139,11 +139,40 @@ class SubmitView(discord.ui.View):
             await interaction.response.send_message("Already processing your submission — please wait.", ephemeral=True)
             return
         _active_vision.add(msg_id)
-        # Defer so vision has time to run without hitting the 3s interaction deadline
+
+        # Check for image before deferring — no image = instant response, no loading state
+        def _has_image(msg):
+            for att in msg.attachments:
+                if att.content_type and att.content_type.startswith('image/'):
+                    return True
+                if not att.content_type and any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                    return True
+            return False
+
+        has_image = _has_image(self.original_message)
+
+        if not has_image:
+            # No image — skip vision entirely, go straight to class select instantly
+            _active_vision.discard(msg_id)
+            caption = self.original_message.content.strip()
+            detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
+            if detected_weapon or detected_subclass:
+                view = ParseConfirmView(self.original_message, self.prompt_msg, detected_weapon, detected_subclass)
+                hints = []
+                if detected_weapon:   hints.append(f"Weapon: `{detected_weapon}`")
+                if detected_subclass: hints.append(f"Class: `{detected_subclass}`")
+                await interaction.response.send_message(
+                    content="\U0001f4cb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
+                    view=view, ephemeral=True)
+            else:
+                all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+                view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+                await interaction.response.send_message(content="Which class were you playing?", view=view, ephemeral=True)
+            return
+
+        # Has image — defer so vision API has time to run
         await interaction.response.defer(ephemeral=True)
 
-        # Try vision parse if there's an image attachment
-        # Run in a thread so the blocking Anthropic HTTP call doesn't stall the event loop
         parsed = None
         try:
             print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
@@ -652,7 +681,12 @@ class WeaponSelectView(discord.ui.View):
         self.category = category
         self.weapons = weapons
         if weapons:
-            options = [discord.SelectOption(label=w) for w in weapons[:25]]
+            import config as _cfg
+            primaries = _cfg._SUBCLASS_PRIMARIES.get(selected_class, set())
+            def _opt(w):
+                is_secondary = bool(primaries) and w not in primaries
+                return discord.SelectOption(label=w, description="⬦ Secondary" if is_secondary else None)
+            options = [_opt(w) for w in weapons[:25]]
             self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons, vision_data, options))
 
     @discord.ui.button(label="Search Weapon", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
