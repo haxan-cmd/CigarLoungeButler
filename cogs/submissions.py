@@ -484,7 +484,7 @@ class ClassSelect(discord.ui.Select):
             )
         else:
             weapons = get_all_weapons_for_class(selected_class)
-            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons, vision_data=vd, all_classes=classes, category=self.category)
+            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons, vision_data=vd, all_classes=self.classes, category=self.category)
             await interaction.response.edit_message(
                 content=f"Class: `{selected_class}`. Which weapon?",
                 view=view
@@ -525,11 +525,26 @@ class WeaponSelect(discord.ui.Select):
             return
         selected_weapon = self.values[0]
         vd = {**self.vision_data, 'weapon': selected_weapon}
-        view = MapSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon, vision_data=vd)
-        await interaction.response.edit_message(
-            content=f"Class: `{self.selected_class}` | Weapon: `{selected_weapon}`. Which map?",
-            view=view
-        )
+        # Skip map/faction steps if vision already has them
+        if vd.get('map') and vd.get('faction'):
+            await interaction.response.send_modal(
+                StatsModal(self.original_message, self.prompt_msg, self.selected_class, selected_weapon,
+                           vd['map'], vd['faction'],
+                           prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
+                           vision_data=vd)
+            )
+        elif vd.get('map'):
+            view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon, vd['map'], vision_data=vd)
+            await interaction.response.edit_message(
+                content=f"Class: `{self.selected_class}` | Weapon: `{selected_weapon}` | Map: `{vd['map']}`. Which faction?",
+                view=view
+            )
+        else:
+            view = MapSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon, vision_data=vd)
+            await interaction.response.edit_message(
+                content=f"Class: `{self.selected_class}` | Weapon: `{selected_weapon}`. Which map?",
+                view=view
+            )
 
 class MapSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, vision_data=None):
@@ -569,11 +584,20 @@ class MapSelect(discord.ui.Select):
             return
         selected_map = self.values[0]
         vd = {**self.vision_data, 'map': selected_map}
-        view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map, vision_data=vd)
-        await interaction.response.edit_message(
-            content=f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}`. Which faction?",
-            view=view
-        )
+        # Skip faction step if vision already has it
+        if vd.get('faction'):
+            await interaction.response.send_modal(
+                StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
+                           selected_map, vd['faction'],
+                           prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
+                           vision_data=vd)
+            )
+        else:
+            view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map, vision_data=vd)
+            await interaction.response.edit_message(
+                content=f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}`. Which faction?",
+                view=view
+            )
 
 class FactionSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, vision_data=None):
