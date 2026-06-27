@@ -143,11 +143,11 @@ def calculate_butler_stats(week_start=None, week_end=None):
         if len(eff) >= 2:
             avg_eff = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
             rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100 if p in qualified_lethal else None
-            rate_str = f" · {rate:.0f}% kill rate" if rate else ""
-            return f"{p} ({avg_eff:.1f}× lobby avg kills{rate_str})"
+            rate_str = f" · {rate:.0f}% kill share" if rate else ""
+            return f"{p} ({avg_eff:.1f}× avg kills{rate_str})"
         if p in qualified_lethal:
             rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100
-            return f"{p} ({rate:.0f}% kill rate)"
+            return f"{p} ({rate:.0f}% kill share)"
         return p
 
     high_lethality = [lethality_label(p) for p in lethal_ranked[:5]]
@@ -182,7 +182,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         if len(ratios) >= 2:
             avg_ratio = sum(ratios) / len(ratios)
             best_ratio = max(ratios)
-            entry = f"{p} — {avg_ratio:.1f}× teammates avg · peak {best_ratio:.1f}×"
+            entry = f"{p} — {avg_ratio:.1f}× team avg TD · best {best_ratio:.1f}×"
         else:
             finishes = lobby_finishes.get(p, [])
             best_r, best_s = min(finishes, key=lambda x: (x[0], -x[1]))
