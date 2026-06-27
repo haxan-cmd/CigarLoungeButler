@@ -913,7 +913,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k):
     # Cross-cog lazy imports to avoid circular dependencies at module load
-    from cogs.leaderboards import update_leaderboards, update_leaderboard_index
+    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1233,6 +1233,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 await update_leaderboard_index(_guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards", bounty_blurb)
         except Exception as e:
             print(f"Bounty cards index update error: {e}")
+
+        # Refresh ledger entrance after any submission that touched leaderboards
+        if any_updated:
+            try:
+                await build_ledger_entrance(_guild)
+            except Exception as e:
+                print(f"Ledger entrance refresh error: {e}")
 
         # Update ButlersArchive summary sheet + milestone detection
         try:

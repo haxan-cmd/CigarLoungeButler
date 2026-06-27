@@ -22,8 +22,13 @@ _SUBCLASS_PRIMARIES = config._SUBCLASS_PRIMARIES
 FACTION_EMOJIS     = config.FACTION_EMOJIS
 MAP_ATTACK_DEFENSE = config.MAP_ATTACK_DEFENSE
 
-WEAPON_FORUM_1H = config.WEAPONS_1H_FORUM_ID
-WEAPON_FORUM_2H = config.WEAPONS_2H_FORUM_ID
+WEAPON_FORUM_1H          = config.WEAPONS_1H_FORUM_ID
+WEAPON_FORUM_2H          = config.WEAPONS_2H_FORUM_ID
+MAP_RECORDS_FORUM_ID     = config.MAP_RECORDS_FORUM_ID
+FEATS_FORUM_ID           = config.FEATS_FORUM_ID
+BOUNTY_CARDS_FORUM_ID    = config.BOUNTY_CARDS_FORUM_ID
+REGISTRY_FORUM_ID        = config.REGISTRY_FORUM_CHANNEL_ID
+LEDGER_ENTRANCE_CHANNEL_ID = config.LEDGER_ENTRANCE_CHANNEL_ID
 
 _WEAPONS_2H = {
     "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
@@ -42,6 +47,190 @@ def _weapon_forum_id(weapon):
     if weapon in _WEAPONS_2H:
         return WEAPON_FORUM_2H
     return WEAPON_FORUM_1H
+
+# Persists the entrance message IDs so Butler edits in-place rather than reposting.
+# { section_key: message_id }  — populated on first post, reused on every refresh.
+_entrance_message_ids: dict = {}
+
+
+async def _find_index_thread(guild, forum_channel_id: int, index_label: str):
+    """Return the index thread object for a forum, or None if not found yet."""
+    try:
+        forum = guild.get_channel(forum_channel_id)
+        if not forum:
+            forum = await guild.fetch_channel(forum_channel_id)
+        target_name = f"📋 {index_label} Index"
+        for t in forum.threads:
+            if t.name == target_name:
+                return t
+        async for t in forum.archived_threads(limit=None):
+            if t.name == target_name:
+                return t
+    except Exception as e:
+        print(f"_find_index_thread error ({index_label}): {e}")
+    return None
+
+
+async def build_ledger_entrance(guild):
+    """
+    Post or refresh the 6-section ledger entrance in LEDGER_ENTRANCE_CHANNEL_ID.
+    Each section is one message; Butler edits it in-place on subsequent calls.
+    """
+    try:
+        channel = guild.get_channel(LEDGER_ENTRANCE_CHANNEL_ID)
+        if not channel:
+            channel = await guild.fetch_channel(LEDGER_ENTRANCE_CHANNEL_ID)
+
+        # Pull all board rows from the sheet once
+        try:
+            all_lb_rows = leaderboards_ws.get_all_records()
+        except Exception as e:
+            print(f"Ledger entrance sheet read error: {e}")
+            return
+
+        def board_links(names_and_ids, guild_id):
+            """Turn a list of (display_name, thread_id) into inline bullet links."""
+            return ' • '.join(
+                f"[{name}](https://discord.com/channels/{guild_id}/{tid})"
+                for name, tid in names_and_ids
+            )
+
+        guild_id = guild.id
+
+        # ── Gather boards by type ───────────────────────────────────────────
+        weapon_1h_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'weapon'
+             and r['Leaderboard Name'] in _WEAPONS_1H],
+            key=lambda x: x[0]
+        )
+        weapon_2h_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'weapon'
+             and r['Leaderboard Name'] in _WEAPONS_2H],
+            key=lambda x: x[0]
+        )
+        map_boards_raw = [
+            r for r in all_lb_rows
+            if r.get('Type', '').strip().lower() == 'map'
+        ]
+        # Dedupe maps — show base name once, link to whichever faction thread comes first
+        seen_maps = {}
+        for r in sorted(map_boards_raw, key=lambda x: x['Leaderboard Name']):
+            base = r['Leaderboard Name'].split(' - ')[0].strip()
+            if base not in seen_maps:
+                seen_maps[base] = int(r['Thread ID'])
+        map_boards = sorted(seen_maps.items(), key=lambda x: x[0])
+
+        feat_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'feat'],
+            key=lambda x: x[0]
+        )
+
+        # ── Find index threads ──────────────────────────────────────────────
+        idx_1h     = await _find_index_thread(guild, WEAPON_FORUM_1H,       "Weapons 1H")
+        idx_2h     = await _find_index_thread(guild, WEAPON_FORUM_2H,       "Weapons 2H")
+        idx_maps   = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID,  "Map Records")
+        idx_feats  = await _find_index_thread(guild, FEATS_FORUM_ID,        "Feats")
+        idx_bounty = await _find_index_thread(guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards")
+        idx_reg    = await _find_index_thread(guild, REGISTRY_FORUM_ID,     "Registry")
+
+        def index_link(thread, label):
+            if thread:
+                return f"[→ Full {label} Index](https://discord.com/channels/{guild_id}/{thread.id})"
+            return f"*{label} index not yet built*"
+
+        # ── Build section content strings ───────────────────────────────────
+        sections = []
+
+        # 1H Weapons
+        body_1h = board_links(weapon_1h_boards, guild_id) if weapon_1h_boards else "*No boards yet*"
+        sections.append(("1h", (
+            f"⚔️  **ONE-HANDED WEAPONS**\n"
+            f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
+            f"{index_link(idx_1h, '1H')}\n\n"
+            f"{body_1h}"
+        )))
+
+        # 2H Weapons
+        body_2h = board_links(weapon_2h_boards, guild_id) if weapon_2h_boards else "*No boards yet*"
+        sections.append(("2h", (
+            f"🪓  **TWO-HANDED WEAPONS**\n"
+            f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
+            f"{index_link(idx_2h, '2H')}\n\n"
+            f"{body_2h}"
+        )))
+
+        # Maps
+        body_maps = board_links(map_boards, guild_id) if map_boards else "*No boards yet*"
+        sections.append(("maps", (
+            f"🗺️  **MAP RECORDS**\n"
+            f"Top 10 takedown runs per map, tracked by faction.\n"
+            f"{index_link(idx_maps, 'Maps')}\n\n"
+            f"{body_maps}"
+        )))
+
+        # Feats
+        body_feats = board_links(feat_boards, guild_id) if feat_boards else "*No boards yet*"
+        sections.append(("feats", (
+            f"🏅  **FEATS**\n"
+            f"Special achievement boards — Flawless runs, 100 Kill games, 200 Takedown games, and weapon-specific challenges.\n"
+            f"{index_link(idx_feats, 'Feats')}\n\n"
+            f"{body_feats}"
+        )))
+
+        # Bounty Cards
+        sections.append(("bounty", (
+            f"🎯  **BOUNTY CARDS**\n"
+            f"Active and completed bounties. Each card tracks progress toward the current target.\n"
+            f"{index_link(idx_bounty, 'Bounty Cards')}"
+        )))
+
+        # Registry
+        sections.append(("registry", (
+            f"<:cigar:1444893851427803298>  **BUTLER'S ARCHIVE**\n"
+            f"Player registry cards — every registered player's weapon marks, ranks, and submission history.\n"
+            f"{index_link(idx_reg, 'Registry')}"
+        )))
+
+        # ── Post or edit each section ───────────────────────────────────────
+        # Load existing message IDs from channel history on first run if we lost them
+        if not _entrance_message_ids:
+            try:
+                bot_id = guild.me.id
+                async for msg in channel.history(limit=20, oldest_first=True):
+                    if msg.author.id == bot_id:
+                        for key, _ in sections:
+                            if key not in _entrance_message_ids:
+                                _entrance_message_ids[key] = msg.id
+                                break
+            except Exception:
+                pass
+
+        for key, content in sections:
+            mid = _entrance_message_ids.get(key)
+            if mid:
+                try:
+                    msg = await channel.fetch_message(mid)
+                    await msg.edit(content=content)
+                    await asyncio.sleep(0.4)
+                    continue
+                except discord.NotFound:
+                    pass
+            # No existing message — post fresh
+            new_msg = await channel.send(content)
+            _entrance_message_ids[key] = new_msg.id
+            await asyncio.sleep(0.4)
+
+        print("Ledger entrance updated.")
+
+    except Exception as e:
+        print(f"build_ledger_entrance error: {e}")
+
 
 async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
     # Builds (or rebuilds) the pinned index thread inside a leaderboard forum.
@@ -87,22 +276,71 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         deduped_threads.sort(key=lambda x: x[0].lower())
         threads_for_index = deduped_threads  # list of (display_name, thread)
 
-        # Alphabetical groups matching the style of the player registry index
-        groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
-        lines = [f"📋 **{index_label} Index**", "*Jump to a leaderboard*", ""]
-        for group_name, start, end in groups:
-            group_threads = [(name, t) for name, t in threads_for_index if name and start <= name[0].upper() <= end]
-            if not group_threads:
-                continue
-            lines.append(f"**{group_name}**")
-            links = ' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in group_threads)
-            lines.append(links)
+        lines = [f"📋 **{index_label} Index**", "*Select a board below*", ""]
+
+        def make_links(items):
+            return ' • '.join(
+                f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                for name, t in items
+            )
+
+        is_weapon_index = index_label in ("Weapons 1H", "Weapons 2H")
+        is_map_index    = index_label == "Map Records"
+
+        if is_weapon_index:
+            # Group weapons by which parent class uses them primarily
+            CLASS_GROUPS = [
+                ("⚔️ Knight",   ["Officer", "Guardian", "Crusader"]),
+                ("🗡️ Vanguard", ["Devastator", "Raider", "Ambusher"]),
+                ("🛡️ Footman",  ["Poleman", "Man-at-Arms", "Field Engineer"]),
+                ("🏹 Archer",   ["Longbowman", "Crossbowman", "Skirmisher"]),
+            ]
+            import config as _cfg
+            placed = set()
+            for group_label, subclasses in CLASS_GROUPS:
+                group_weapons = set()
+                for sc in subclasses:
+                    group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
+                group_items = [
+                    (name, t) for name, t in threads_for_index
+                    if name in group_weapons and name not in placed
+                ]
+                if not group_items:
+                    continue
+                group_items.sort(key=lambda x: x[0])
+                placed.update(n for n, _ in group_items)
+                lines.append(f"**{group_label}**")
+                lines.append(make_links(group_items))
+                lines.append("")
+            # Anything not matched into a class group
+            remainder = [(n, t) for n, t in threads_for_index if n not in placed]
+            if remainder:
+                lines.append("**Other**")
+                lines.append(make_links(remainder))
+                lines.append("")
+
+        elif is_map_index:
+            # All maps alphabetically — clean single group
+            lines.append("**Maps**")
+            lines.append(make_links(threads_for_index))
             lines.append("")
-        other = [(name, t) for name, t in threads_for_index if not name or not name[0].upper().isalpha()]
-        if other:
-            lines.append("**#**")
-            lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{t.id})" for name, t in other))
-            lines.append("")
+
+        else:
+            # Default: alphabetical A–D / E–K / L–R / S–Z groups
+            groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+            for group_name, start, end in groups:
+                group_threads = [(name, t) for name, t in threads_for_index if name and start <= name[0].upper() <= end]
+                if not group_threads:
+                    continue
+                lines.append(f"**{group_name}**")
+                lines.append(make_links(group_threads))
+                lines.append("")
+            other = [(name, t) for name, t in threads_for_index if not name or not name[0].upper().isalpha()]
+            if other:
+                lines.append("**#**")
+                lines.append(make_links(other))
+                lines.append("")
+
         if blurb:
             lines.append("─────────────────────")
             lines.append(blurb)
@@ -721,6 +959,37 @@ class LeaderboardsCog(commands.Cog):
         if failed:
             msg += f"\nFailed: {chr(10).join(failed)}"
         await interaction.followup.send(msg[:1900], ephemeral=True)
+
+    @app_commands.command(name="ledger_refresh", description="Rebuild the ledger entrance channel and all forum indexes (mod only).")
+    async def ledger_refresh(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Rebuilding the ledger entrance...", ephemeral=True)
+        guild = interaction.guild
+
+        try:
+            await build_ledger_entrance(guild)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Entrance build failed: {e}")
+            return
+
+        # Rebuild all forum indexes
+        index_targets = [
+            (WEAPON_FORUM_1H,    "Weapons 1H"),
+            (WEAPON_FORUM_2H,    "Weapons 2H"),
+            (MAP_RECORDS_FORUM_ID, "Map Records"),
+            (FEATS_FORUM_ID,     "Feats"),
+        ]
+        for forum_id, label in index_targets:
+            try:
+                await update_leaderboard_index(guild, forum_id, label)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"ledger_refresh: index error for {label}: {e}")
+
+        await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
 
 
 async def setup(bot):
