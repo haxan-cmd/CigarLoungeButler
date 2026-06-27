@@ -56,12 +56,13 @@ Extract ONLY from the highlighted row:
 - kills (integer — second numeric column, always <= takedowns)
 - deaths (integer — third numeric column, typically 0-50)
 
-Also return:
-- other_scores: list of takedown integers (first numeric column) for all other visible rows, in order
+Also return for ALL other visible rows (excluding the highlighted player):
+- other_scores: list of takedown integers (first numeric column after name) in row order
+- other_kills: list of kill integers (second numeric column after name) in the same row order
 
 Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you are not confident about. Do not guess.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"other_scores":[]}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"other_scores":[],"other_kills":[]}"""
 
 
 def vision_parse_scorecard(image_url: str) -> dict:
@@ -72,7 +73,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
     """
     empty = {
         'weapon': None, 'subclass': None, 'map': None, 'faction': None,
-        'takedowns': None, 'kills': None, 'deaths': None, 'other_scores': []
+        'takedowns': None, 'kills': None, 'deaths': None, 'other_scores': [], 'other_kills': []
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _anthropic_client:
@@ -132,6 +133,8 @@ def vision_parse_scorecard(image_url: str) -> dict:
                 data[field] = None
         if not isinstance(data.get('other_scores'), list):
             data['other_scores'] = []
+        if not isinstance(data.get('other_kills'), list):
+            data['other_kills'] = []
         return {**empty, **data}
     except Exception as e:
         print(f"[VISION] Error: {e}")

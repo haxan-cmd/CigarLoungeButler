@@ -1033,7 +1033,7 @@ async def update_archive_index(guild):
 
         entries.sort(key=lambda x: x[0].lower())
 
-        groups = [(‘A–D’, ‘A’, ‘D’), (‘E–K’, ‘E’, ‘K’), (‘L–R’, ‘L’, ‘R’), (‘S–Z’, ‘S’, ‘Z’)]
+        groups = [(‘A-D’, ‘A’, ‘D’), (‘E-K’, ‘E’, ‘K’), (‘L-R’, ‘L’, ‘R’), (‘S-Z’, ‘S’, ‘Z’)]
 
         def _make_fields(group_name, group_entries):
             """Return list of (name, value) embed field tuples, splitting if over 1024 chars."""

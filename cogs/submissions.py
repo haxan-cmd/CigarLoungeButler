@@ -27,6 +27,9 @@ from utils.helpers import (
     submission_state, butler_quip, vision_parse_scorecard,
 )
 
+def _ordinal(n):
+    return {1:'st',2:'nd',3:'rd'}.get(n if n < 20 else n % 10, 'th')
+
 MOD_ROLE_ID            = config.MOD_ROLE_ID
 _ASSETS_DIR            = os.path.join(os.path.dirname(__file__), '..', 'assets')
 DECORATION_TOP         = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
@@ -745,7 +748,8 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
                 interaction, self.original_message, self.prompt_msg,
                 self.selected_class, self.selected_weapon,
                 self.selected_map, self.faction, takedowns, kills, deaths, False, False,
-                other_scores=self.vision_data.get('other_scores', [])
+                other_scores=self.vision_data.get('other_scores', []),
+                other_kills=self.vision_data.get('other_kills', []),
             )
 
 class VIPView(discord.ui.View):
@@ -1059,10 +1063,10 @@ async def _submission_worker(guild_id):
             queue.task_done()
 
 
-async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None):
+async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None, other_kills=None):
     guild_id = interaction.guild.id
     queue = get_submission_queue(guild_id)
-    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores or [])
+    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores or [], other_kills or [])
     await queue.put((interaction, original_message, prompt_msg, args))
     # Ensure worker is running for this guild
     worker = _submission_workers.get(guild_id)
@@ -1127,7 +1131,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
         print(f"Anomaly check error: {e}")
 
 
-async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None):
+async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None, other_kills=None):
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
@@ -1157,17 +1161,37 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     caption = original_message.content.strip() if original_message.content else ""
 
-    # Compute lobby rank from other_scores
+    # Compute lobby context from other_scores / other_kills
     lobby_rank = None
     lobby_size = None
     lobby_line = None
-    if other_scores:
-        valid = [s for s in other_scores if isinstance(s, int) and s > 0]
-        if valid:
-            lobby_size = len(valid) + 1  # +1 for the submitting player
-            lobby_rank = sum(1 for s in valid if s >= takedowns) + 1
+    _other_td = other_scores if isinstance(other_scores, list) else []
+    _other_k  = other_kills if isinstance(other_kills, list) else []
+
+    if _other_td:
+        valid_td = [s for s in _other_td if isinstance(s, int) and s > 0]
+        if valid_td:
+            lobby_size = len(valid_td) + 1
+            lobby_rank = sum(1 for s in valid_td if s >= takedowns) + 1
             pct = round((1 - (lobby_rank - 1) / lobby_size) * 100)
-            lobby_line = f"Ranked {lobby_rank} of {lobby_size} · Top {pct}%"
+            parts = [f"Ranked {lobby_rank} of {lobby_size} · Top {pct}%"]
+            # Gap to next player above/below
+            sorted_td = sorted(valid_td, reverse=True)
+            if lobby_rank == 1 and sorted_td:
+                gap = takedowns - sorted_td[0]
+                if gap > 0:
+                    parts.append(f"+{gap} TD clear")
+            # Kills rank if we have it
+            valid_k = [k for k in _other_k if isinstance(k, int) and k > 0]
+            if valid_k and kills:
+                kills_rank = sum(1 for k in valid_k if k >= kills) + 1
+                kills_pct = round((1 - (kills_rank - 1) / lobby_size) * 100)
+                parts.append(f"Kills: {kills_rank}{_ordinal(kills_rank)}")
+            # K/TD ratio
+            if takedowns > 0 and kills:
+                ratio = round(kills / takedowns * 100)
+                parts.append(f"{ratio}% kill rate")
+            lobby_line = " · ".join(parts)
 
     summary = (
         f"**Run Submitted**\n"
