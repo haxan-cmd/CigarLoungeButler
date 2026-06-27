@@ -681,7 +681,15 @@ class WeaponSelect(discord.ui.Select):
         self.vision_data = vision_data or {}
         self.weapons_list = weapons
         if options is None:
-            options = [discord.SelectOption(label=w) for w in weapons[:25]]
+            import config as _cfg
+            primaries = _cfg._SUBCLASS_PRIMARIES.get(selected_class, set())
+            def _opt(w):
+                is_secondary = primaries and w not in primaries
+                return discord.SelectOption(
+                    label=w,
+                    description="⬦ Secondary" if is_secondary else None,
+                )
+            options = [_opt(w) for w in weapons[:25]]
         super().__init__(placeholder="Choose your weapon...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
