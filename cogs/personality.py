@@ -398,6 +398,10 @@ class PersonalityCog(commands.Cog):
             if not ch:
                 print(f"[NERVE] channel {NERVE_CENTER_CHANNEL_ID} not found")
                 return
+            # Unarchive if it's a thread that went dormant
+            if isinstance(ch, discord.Thread) and ch.archived:
+                print("[NERVE] thread is archived — unarchiving")
+                await ch.edit(archived=False)
             print(f"[NERVE] sending to #{ch.name} ({type(ch).__name__})")
             await ch.send(digest[:1900])
             print("[NERVE] sent OK")

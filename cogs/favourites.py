@@ -89,7 +89,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         try:
             lr = int(row[13]) if len(row) > 13 and row[13] else None
             ls = int(row[14]) if len(row) > 14 and row[14] else None
-            if lr and ls and ls > 1:
+            if lr and ls and 1 < ls <= 64:
                 lobby_finishes.setdefault(player, []).append((lr, ls))
         except (ValueError, TypeError):
             pass
@@ -116,7 +116,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         try:
             kr = int(row[15]) if len(row) > 15 and row[15] else None
             ls = int(row[14]) if len(row) > 14 and row[14] else None
-            if kr and ls and ls > 1:
+            if kr and ls and 1 < ls <= 64:
                 kill_finish_map.setdefault(player, []).append((kr, ls))
         except (ValueError, TypeError):
             pass
@@ -151,12 +151,17 @@ def calculate_butler_stats(week_start=None, week_end=None):
         key=lambda p: (min(r for r, _ in qualified_dom[p]),
                        -max(s for _, s in qualified_dom[p]))
     )
+    def _ord(n):
+        return f"{n}{'th' if 11<=n%100<=13 else {1:'st',2:'nd',3:'rd'}.get(n%10,'th')}"
+
     most_dominant = []
     for p in dom_ranked[:5]:
         best_r, best_s = min(qualified_dom[p], key=lambda x: (x[0], -x[1]))
         avg_pct = sum((s - r) / (s - 1) * 100 for r, s in qualified_dom[p] if s > 1) / len(qualified_dom[p])
-        most_dominant.append(f"{p} — {best_r} of {best_s} · avg top {100-avg_pct:.0f}%"
-                             if avg_pct < 100 else f"{p} — {best_r} of {best_s}")
+        best_str = f"{_ord(best_r)}/{best_s}"
+        avg_str = f"avg top {100-avg_pct:.0f}%" if avg_pct < 100 else ""
+        entry = f"{p} — {best_str}" + (f" · {avg_str}" if avg_str else "")
+        most_dominant.append(entry)
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.

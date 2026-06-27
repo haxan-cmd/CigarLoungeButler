@@ -272,6 +272,9 @@ async def nerve_alert(bot_instance, context, error):
         ch = (guild.get_channel(config.NERVE_CENTER_CHANNEL_ID)
               or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID))
         if ch:
+            import discord as _discord
+            if isinstance(ch, _discord.Thread) and ch.archived:
+                await ch.edit(archived=False)
             await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
     except Exception:
         pass
