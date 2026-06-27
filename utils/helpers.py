@@ -96,8 +96,26 @@ def vision_parse_scorecard(image_url: str) -> dict:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 image_bytes = resp.read()
                 content_type = resp.headers.get('Content-Type', 'image/png').split(';')[0].strip()
-            b64_data = base64.standard_b64encode(image_bytes).decode('utf-8')
             print(f"[VISION] Fetched {len(image_bytes)} bytes, type={content_type}")
+            # Resize large images to max 1200px wide — scorecard text is large UI elements,
+            # resolution beyond this doesn't improve accuracy but slows the API call.
+            try:
+                import io
+                from PIL import Image as _PILImage
+                img = _PILImage.open(io.BytesIO(image_bytes))
+                max_w = 1200
+                if img.width > max_w:
+                    ratio = max_w / img.width
+                    new_h = int(img.height * ratio)
+                    img = img.resize((max_w, new_h), _PILImage.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format='PNG', optimize=True)
+                    image_bytes = buf.getvalue()
+                    content_type = 'image/png'
+                    print(f"[VISION] Resized to {img.width}x{img.height}, {len(image_bytes)} bytes")
+            except Exception as resize_err:
+                print(f"[VISION] Resize skipped: {resize_err}")
+            b64_data = base64.standard_b64encode(image_bytes).decode('utf-8')
             image_source = {'type': 'base64', 'media_type': content_type, 'data': b64_data}
         except Exception as fetch_err:
             print(f"[VISION] Image fetch failed ({fetch_err}), falling back to URL source")
