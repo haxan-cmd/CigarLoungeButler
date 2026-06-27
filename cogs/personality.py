@@ -36,8 +36,7 @@ _SUBCLASS_PRIMARIES         = config._SUBCLASS_PRIMARIES
 DECORATION_TOP              = config.DECORATION_TOP
 DECORATION_BOTTOM           = config.DECORATION_BOTTOM
 
-# last_submission_time lives in submission_state (utils/helpers.py) so submissions.py can update it
-_dry_spell_posted    = False
+# dry_spell_posted also lives in submission_state so submissions.py can reset it cross-module
 _dry_weather_line_idx = 0
 
 BUTLER_SYSTEM_PROMPT = """You are the Butler — the AI attendant of the Cigar Lounge, a Chivalry 2 competitive gaming community focused on weapon mastery, leaderboards, and monthly bounties.
@@ -315,9 +314,9 @@ class PersonalityCog(commands.Cog):
     @tasks.loop(hours=2)
     async def dry_weather_check(self):
         """Post a Butler line in main if no submission in 48 hours."""
-        global _dry_spell_posted, _dry_weather_line_idx
+        global _dry_weather_line_idx
         try:
-            if _dry_spell_posted:
+            if submission_state['dry_spell_posted']:
                 return
             if submission_state['last_submission_time'] is None:
                 return
@@ -333,7 +332,7 @@ class PersonalityCog(commands.Cog):
                 line = _DRY_WEATHER_LINES[_dry_weather_line_idx % len(_DRY_WEATHER_LINES)]
                 _dry_weather_line_idx += 1
                 await main_ch.send(f"*{line}*")
-                _dry_spell_posted = True
+                submission_state['dry_spell_posted'] = True
         except Exception as e:
             print(f"Dry weather check error: {e}")
 
@@ -383,18 +382,28 @@ class PersonalityCog(commands.Cog):
     @tasks.loop(hours=1)
     async def nerve_center_digest(self):
         """Post hourly digest to nerve center channel."""
+        print(f"[NERVE] digest loop firing at {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
         try:
             digest = nerve_flush()
             if not digest:
+                print("[NERVE] nerve_flush returned empty — skipping")
                 return
             guild = self.bot.get_guild(GUILD_ID)
             if not guild:
+                print(f"[NERVE] guild {GUILD_ID} not found")
                 return
-            ch = guild.get_channel(NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID)
-            if ch:
-                await ch.send(digest[:1900])
+            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
+                  or guild.get_thread(NERVE_CENTER_CHANNEL_ID)
+                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            if not ch:
+                print(f"[NERVE] channel {NERVE_CENTER_CHANNEL_ID} not found")
+                return
+            print(f"[NERVE] sending to #{ch.name} ({type(ch).__name__})")
+            await ch.send(digest[:1900])
+            print("[NERVE] sent OK")
         except Exception as e:
-            print(f"Nerve center digest error: {e}")
+            import traceback
+            print(f"[NERVE] error: {e}\n{traceback.format_exc()}")
 
     @nerve_center_digest.before_loop
     async def before_nerve_center_digest(self):
