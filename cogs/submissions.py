@@ -641,7 +641,7 @@ class ClassSelect(discord.ui.Select):
 class WeaponSearchModal(discord.ui.Modal, title="Weapon Search"):
     query = discord.ui.TextInput(
         label="Type weapon name",
-        placeholder="e.g. Longsword, Knife...",
+        placeholder="Type any part of the weapon name, e.g. knife, axe...",
         required=True, max_length=30
     )
 
@@ -685,16 +685,8 @@ class WeaponSelectView(discord.ui.View):
         self.all_classes = all_classes or sorted(CLASS_WEAPON_MAP.keys())
         self.category = category
         self.weapons = weapons
-        if weapons:
-            import config as _cfg
-            primaries = _cfg._SUBCLASS_PRIMARIES.get(selected_class, set())
-            def _opt(w):
-                is_secondary = bool(primaries) and w not in primaries
-                return discord.SelectOption(label=w, description="⬦ Secondary" if is_secondary else None)
-            options = [_opt(w) for w in weapons[:25]]
-            self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons, vision_data, options))
 
-    @discord.ui.button(label="Search Weapon", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
+    @discord.ui.button(label="Search Weapon", style=discord.ButtonStyle.blurple, emoji="🔍", row=0)
     async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("Not your submission.", ephemeral=True)
@@ -703,7 +695,7 @@ class WeaponSelectView(discord.ui.View):
             WeaponSearchModal(self.original_message, self.prompt_msg, self.selected_class,
                               self.weapons, self.vision_data, self.all_classes, self.category))
 
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.grey, emoji="◀️", row=1)
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.grey, emoji="◀️", row=0)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
