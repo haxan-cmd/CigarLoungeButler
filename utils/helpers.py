@@ -59,19 +59,9 @@ Extract ONLY from the highlighted row:
 Also return:
 - other_scores: list of takedown integers (first numeric column) for all other visible rows, in order
 
-Return ONLY valid JSON, null for any field you are not confident about:
-{
-  "weapon": null,
-  "subclass": null,
-  "map": null,
-  "faction": null,
-  "takedowns": null,
-  "kills": null,
-  "deaths": null,
-  "other_scores": []
-}
+Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you are not confident about. Do not guess.
 
-Do not guess. Return null rather than a wrong value."""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"other_scores":[]}"""
 
 
 def vision_parse_scorecard(image_url: str) -> dict:
@@ -109,7 +99,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
 
         r = _anthropic_client.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=300,
+            max_tokens=600,
             messages=[{
                 'role': 'user',
                 'content': [
