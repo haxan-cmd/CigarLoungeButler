@@ -644,11 +644,14 @@ class LeaderboardsCog(commands.Cog):
                 return
 
         top = entries[:10]
+        total = len(entries)
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        lines = [f"**{name}** — Top {len(top)}", ""]
+        lines = [f"**{name}** — Top {len(top)} of {total}", ""]
         for i, e in enumerate(top, 1):
-            medal = medals.get(i, f"{i}.")
-            lines.append(f"{medal} **{e['player']}** — {e['score']}")
+            medal = medals.get(i, f"`{i}.`")
+            # Pad numbered entries to align with medal width (medal emoji = ~2 chars wide)
+            prefix = f"{medal} " if i <= 3 else f"{medal}  "
+            lines.append(f"{prefix}**{e['player']}** — {e['score']}")
 
         await interaction.followup.send("\n".join(lines))
 
