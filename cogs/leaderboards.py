@@ -259,15 +259,17 @@ async def build_ledger_entrance(guild):
 
 
 async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
-    # Builds (or rebuilds) the pinned index thread inside a leaderboard forum.
+    """Rebuild the pinned index thread for a leaderboard forum using embeds (matches Player Registry style)."""
     try:
+        import config as _cfg
         forum = guild.get_channel(forum_channel_id)
         if not forum:
             print(f"Leaderboard index: forum {forum_channel_id} not found")
             return
 
         index_thread_name = f"📋 {index_label} Index"
-        # Can't rely on the cache after a restart — have to hit the API directly
+
+        # ── Collect all non-index threads ──────────────────────────────────
         seen_ids = set()
         threads = []
         try:
@@ -281,7 +283,6 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                     seen_ids.add(int(t_data['id']))
         except Exception as e:
             print(f"Active threads fetch error: {e}")
-            # Fallback to cache
             for t in forum.threads:
                 if t.name != index_thread_name:
                     threads.append(t)
@@ -290,163 +291,149 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             if thread.name != index_thread_name and thread.id not in seen_ids:
                 threads.append(thread)
 
-        # Map boards come in pairs ("Rudhelm - Mason", "Rudhelm - Agatha") — only show
-        # the base map name once in the index. Weapon threads are exact, keep first.
-        seen_base_names = set()
-        deduped_threads = []
+        # Dedupe (maps come in pairs like "Rudhelm - Mason")
+        seen_base = set()
+        deduped = []
         for t in sorted(threads, key=lambda t: t.name.lower()):
             base = t.name.split(' - ')[0].strip() if ' - ' in t.name else t.name
-            if base not in seen_base_names:
-                seen_base_names.add(base)
-                deduped_threads.append((base, t))
-        deduped_threads.sort(key=lambda x: x[0].lower())
-        threads_for_index = deduped_threads  # list of (display_name, thread)
+            if base not in seen_base:
+                seen_base.add(base)
+                deduped.append((base, t))
+        deduped.sort(key=lambda x: x[0].lower())
 
-        lines = [f"📋 **{index_label} Index**", "*Select a board below*", ""]
-
+        # ── Build embed fields ─────────────────────────────────────────────
         def make_links(items):
             return ' • '.join(
                 f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
                 for name, t in items
             )
 
-        is_weapon_index = index_label in ("Weapons 1H", "Weapons 2H")
-        is_map_index    = index_label == "Map Records"
+        def _split_field(field_name, items, max_chars=1000):
+            """Split items across multiple fields if value exceeds Discord's 1024-char field limit."""
+            fields = []
+            current_name = field_name
+            current = []
+            for item in items:
+                candidate = make_links(current + [item])
+                if len(candidate) > max_chars and current:
+                    fields.append((current_name, make_links(current)))
+                    current_name = f"{field_name} (cont.)"
+                    current = [item]
+                else:
+                    current.append(item)
+            if current:
+                fields.append((current_name, make_links(current)))
+            return fields
+
+        embed_fields = []  # list of (name, value)
+
+        is_weapon_index = index_label in ("1H Weapons", "2H Weapons")
+        is_map_index    = index_label in ("Map Records",)
 
         if is_weapon_index:
-            import config as _cfg
-            # Known index thread names to exclude from board links
-            index_names = {f"📋 {index_label} Index", f"{index_label} Index",
-                           "Weapons 2H Index", "Weapons 1H Index", "1H Weapons Index", "2H Weapons Index"}
-            boards_only = [(n, t) for n, t in threads_for_index if n not in index_names]
-
             CLASS_GROUPS = [
                 ("⚔️ Knight",   ["Officer", "Guardian", "Crusader"]),
                 ("🗡️ Vanguard", ["Devastator", "Raider", "Ambusher"]),
                 ("🛡️ Footman",  ["Poleman", "Man-at-Arms", "Field Engineer"]),
                 ("🏹 Archer",   ["Longbowman", "Crossbowman", "Skirmisher"]),
             ]
-            # Archer weapons pulled from MARKSMAN_SUBCLASSES
             archer_weapons = set()
             for ws in _cfg.MARKSMAN_SUBCLASSES.values():
                 archer_weapons.update(ws)
 
             placed = set()
             for group_label, subclasses in CLASS_GROUPS:
-                group_weapons = set()
-                if group_label.startswith("🏹"):
-                    group_weapons = archer_weapons
-                else:
-                    for sc in subclasses:
-                        group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
-                group_items = [
-                    (name, t) for name, t in boards_only
-                    if name in group_weapons and name not in placed
-                ]
+                group_weapons = archer_weapons if group_label.startswith("🏹") else set()
+                for sc in subclasses:
+                    group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
+                group_items = [(n, t) for n, t in deduped if n in group_weapons and n not in placed]
                 if not group_items:
                     continue
                 group_items.sort(key=lambda x: x[0])
                 placed.update(n for n, _ in group_items)
-                lines.append(f"**{group_label}**")
-                lines.append(make_links(group_items))
-                lines.append("")
-            # Anything not matched — genuine misc boards, no index threads
-            remainder = [(n, t) for n, t in boards_only if n not in placed]
+                embed_fields.extend(_split_field(group_label, group_items))
+            remainder = [(n, t) for n, t in deduped if n not in placed]
             if remainder:
-                lines.append("**Other**")
-                lines.append(make_links(remainder))
-                lines.append("")
+                embed_fields.extend(_split_field("Other", remainder))
 
         elif is_map_index:
-            # All maps alphabetically — clean single group
-            lines.append("**Maps**")
-            lines.append(make_links(threads_for_index))
-            lines.append("")
+            embed_fields.extend(_split_field("Maps", deduped))
 
         else:
-            # Default: alphabetical A–D / E–K / L–R / S–Z groups
+            # Feats / Bounty / generic — alphabetical groups
             groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
             for group_name, start, end in groups:
-                group_threads = [(name, t) for name, t in threads_for_index if name and start <= name[0].upper() <= end]
-                if not group_threads:
-                    continue
-                lines.append(f"**{group_name}**")
-                lines.append(make_links(group_threads))
-                lines.append("")
-            other = [(name, t) for name, t in threads_for_index if not name or not name[0].upper().isalpha()]
+                grp = [(n, t) for n, t in deduped if n and start <= n[0].upper() <= end]
+                if grp:
+                    embed_fields.extend(_split_field(group_name, grp))
+            other = [(n, t) for n, t in deduped if not n or not n[0].upper().isalpha()]
             if other:
-                lines.append("**#**")
-                lines.append(make_links(other))
-                lines.append("")
+                embed_fields.extend(_split_field('#', other))
 
-        if blurb:
-            lines.append("─────────────────────")
-            lines.append(blurb)
+        # ── Build embed(s) — max 25 fields each ───────────────────────────
+        def _build_embeds(fields):
+            embeds = []
+            for i in range(0, max(len(fields), 1), 25):
+                chunk = fields[i:i + 25]
+                e = discord.Embed(
+                    title=f"📋 {index_label} Index",
+                    description=blurb if (i == 0 and blurb) else ("Jump to a board below" if i == 0 else None),
+                    colour=discord.Colour.from_str("#2b2d31"),
+                )
+                for fname, fval in chunk:
+                    e.add_field(name=fname, value=fval, inline=False)
+                embeds.append(e)
+            return embeds
 
-        content = "\n".join(lines).strip()
+        if not embed_fields:
+            embed_fields = [("No boards yet", "*Nothing here yet.*")]
+        embeds = _build_embeds(embed_fields)
 
-        # Use hardcoded thread IDs for known existing indexes; fall back to name search
+        # ── Find or create index thread ────────────────────────────────────
         _known_index_ids = {
-            "Weapons 1H":  INDEX_THREAD_1H,
-            "Weapons 2H":  INDEX_THREAD_2H,
-            "Feats":       INDEX_THREAD_FEATS,
+            "1H Weapons":  INDEX_THREAD_1H,
+            "2H Weapons":  INDEX_THREAD_2H,
+            "Feats of War": INDEX_THREAD_FEATS,
         }
         index_thread = None
         if index_label in _known_index_ids:
             try:
-                index_thread = guild.get_channel(_known_index_ids[index_label]) or \
-                               await guild.fetch_channel(_known_index_ids[index_label])
+                index_thread = guild.get_channel(_known_index_ids[index_label]) or                                await guild.fetch_channel(_known_index_ids[index_label])
             except Exception:
                 pass
         if not index_thread:
             for t in forum.threads:
-                if t.name == f"📋 {index_label} Index":
+                if t.name == index_thread_name:
                     index_thread = t
                     break
         if not index_thread:
             async for t in forum.archived_threads(limit=None):
-                if t.name == f"📋 {index_label} Index":
+                if t.name == index_thread_name:
                     index_thread = t
                     break
-
-        def _chunk(text):
-            if len(text) <= 1900:
-                return [text]
-            sections = text.split("\n\n")
-            result_chunks, current = [], ""
-            for section in sections:
-                if len(current) + len(section) + 2 > 1900:
-                    if current:
-                        result_chunks.append(current.strip())
-                    current = section
-                else:
-                    current += ("\n\n" if current else "") + section
-            if current:
-                result_chunks.append(current.strip())
-            return result_chunks
-
-        chunks = _chunk(content)
 
         if index_thread:
             msgs = []
             async for msg in index_thread.history(limit=50, oldest_first=True):
                 msgs.append(msg)
+            # Delete all non-starter messages
             for msg in msgs[1:]:
                 try:
                     await msg.delete()
                     await asyncio.sleep(0.3)
                 except Exception:
                     pass
-            for chunk in chunks:
+            # Send fresh embeds
+            for embed in embeds:
                 await asyncio.sleep(0.5)
-                await index_thread.send(chunk)
+                await index_thread.send(embed=embed)
             print(f"Leaderboard index updated: {index_label}")
         else:
-            result = await forum.create_thread(name=f"📋 {index_label} Index", content="**➜ INDEX**")
+            result = await forum.create_thread(name=index_thread_name, content="**➜ INDEX**")
             await asyncio.sleep(0.5)
-            for chunk in chunks:
+            for embed in embeds:
                 await asyncio.sleep(0.5)
-                await result.thread.send(chunk)
+                await result.thread.send(embed=embed)
             print(f"Leaderboard index created: {index_label}")
 
     except Exception as e:
@@ -1031,10 +1018,10 @@ class LeaderboardsCog(commands.Cog):
 
         # Rebuild all forum indexes
         index_targets = [
-            (WEAPON_FORUM_1H,    "Weapons 1H"),
-            (WEAPON_FORUM_2H,    "Weapons 2H"),
+            (WEAPON_FORUM_1H,    "1H Weapons"),
+            (WEAPON_FORUM_2H,    "2H Weapons"),
             (MAP_RECORDS_FORUM_ID, "Map Records"),
-            (FEATS_FORUM_ID,     "Feats"),
+            (FEATS_FORUM_ID,     "Feats of War"),
         ]
         for forum_id, label in index_targets:
             try:
