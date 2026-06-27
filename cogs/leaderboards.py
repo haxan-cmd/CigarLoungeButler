@@ -215,14 +215,23 @@ async def build_ledger_entrance(guild):
         )))
 
         # ── Post or edit each section ───────────────────────────────────────
-        # Load existing message IDs from channel history on first run if we lost them
+        # Load existing message IDs from channel history on first run if we lost them.
+        # Match by content keyword so ordering doesn't matter.
+        _KEY_MARKERS = {
+            '1h':       'ONE-HANDED WEAPONS',
+            '2h':       'TWO-HANDED WEAPONS',
+            'maps':     'MAP RECORDS',
+            'feats':    'FEATS',
+            'bounty':   'BOUNTY CARDS',
+            'registry': "BUTLER'S ARCHIVE",
+        }
         if not _entrance_message_ids:
             try:
                 bot_id = guild.me.id
-                async for msg in channel.history(limit=20, oldest_first=True):
+                async for msg in channel.history(limit=30, oldest_first=True):
                     if msg.author.id == bot_id:
-                        for key, _ in sections:
-                            if key not in _entrance_message_ids:
+                        for key, marker in _KEY_MARKERS.items():
+                            if marker in (msg.content or '') and key not in _entrance_message_ids:
                                 _entrance_message_ids[key] = msg.id
                                 break
             except Exception:
@@ -1009,30 +1018,3 @@ class LeaderboardsCog(commands.Cog):
             return
 
         await interaction.response.send_message("Rebuilding the ledger entrance...", ephemeral=True)
-        guild = interaction.guild
-
-        try:
-            await build_ledger_entrance(guild)
-        except Exception as e:
-            await interaction.edit_original_response(content=f"❌ Entrance build failed: {e}")
-            return
-
-        # Rebuild all forum indexes
-        index_targets = [
-            (WEAPON_FORUM_1H,    "Weapons 1H"),
-            (WEAPON_FORUM_2H,    "Weapons 2H"),
-            (MAP_RECORDS_FORUM_ID, "Map Records"),
-            (FEATS_FORUM_ID,     "Feats"),
-        ]
-        for forum_id, label in index_targets:
-            try:
-                await update_leaderboard_index(guild, forum_id, label)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                print(f"ledger_refresh: index error for {label}: {e}")
-
-        await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
-
-
-async def setup(bot):
-    await bot.add_cog(LeaderboardsCog(bot))
