@@ -87,7 +87,8 @@ def upsert_player(discord_id, discord_name):
         return False
 
 def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
-                   takedowns, kills, deaths, vip, feats, message_link):
+                   takedowns, kills, deaths, vip, feats, message_link,
+                   lobby_rank=None, lobby_size=None):
     from datetime import datetime as _dt
     timestamp = _dt.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     vip_str   = "Yes" if vip else "No"
@@ -95,7 +96,9 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
     nerve_log_submission(discord_name, weapon)
     submissions_ws.append_row([
         timestamp, discord_name, str(discord_id), weapon, cls,
-        map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
+        map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link,
+        lobby_rank if lobby_rank is not None else '',
+        lobby_size if lobby_size is not None else '',
     ])
     _sheet_cache.invalidate(submissions_ws)
 
@@ -1153,6 +1156,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     feats_str = ", ".join(feats) if feats else None
 
     caption = original_message.content.strip() if original_message.content else ""
+
+    # Compute lobby rank from other_scores
+    lobby_rank = None
+    lobby_size = None
+    lobby_line = None
+    if other_scores:
+        valid = [s for s in other_scores if isinstance(s, int) and s > 0]
+        if valid:
+            lobby_size = len(valid) + 1  # +1 for the submitting player
+            lobby_rank = sum(1 for s in valid if s >= takedowns) + 1
+            pct = round((1 - (lobby_rank - 1) / lobby_size) * 100)
+            lobby_line = f"Ranked {lobby_rank} of {lobby_size} · Top {pct}%"
+
     summary = (
         f"**Run Submitted**\n"
         f"{interaction.user.display_name}\n"
@@ -1163,14 +1179,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     if feats_str:
         summary += f"\n{feats_str}"
+    if lobby_line:
+        summary += f"\n*{lobby_line}*"
     if caption:
         summary += f"\n*{caption}*"
-    # Domination context from vision board parse
-    if other_scores:
-        valid = sorted([s for s in other_scores if isinstance(s, int) and s > 0], reverse=True)
-        if valid and takedowns > valid[0]:
-            gap = takedowns - valid[0]
-            summary += f"\n*Top of the server by {gap} takedowns.*"
 
     # Build marks breakdown
     marks_earned = 1
@@ -1205,7 +1217,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             deaths,
             vip,
             feats,
-            message_link
+            message_link,
+            lobby_rank=lobby_rank,
+            lobby_size=lobby_size,
         )
         # Row index is last row in submissions sheet
         submission_row = len(submissions_ws.get_all_values())

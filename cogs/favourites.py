@@ -62,6 +62,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
     kills_scores_sub = {}
     players_set = set()
     lethal_ratios = {}    # player -> [kills/td ratios]
+    lobby_finishes = {}   # player -> [(rank, size), ...]
 
     for row in subs:
         if len(row) < 9:
@@ -84,6 +85,14 @@ def calculate_butler_stats(week_start=None, week_end=None):
         # Track lethality ratio: kills/td (higher = more lethal, lower = more dominant/assists)
         if kills > 0 and td > 0:
             lethal_ratios.setdefault(player, []).append(kills / td)
+        # Track lobby rank for dominance stats (cols 14/15, index 13/14)
+        try:
+            lr = int(row[13]) if len(row) > 13 and row[13] else None
+            ls = int(row[14]) if len(row) > 14 and row[14] else None
+            if lr and ls and ls > 1:
+                lobby_finishes.setdefault(player, []).append((lr, ls))
+        except (ValueError, TypeError):
+            pass
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -104,6 +113,21 @@ def calculate_butler_stats(week_start=None, week_end=None):
         key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
     low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
     most_lethal_top5 = high_lethality
+
+    # Most Dominant — best single-game lobby finish, min 2 games with lobby data
+    # Sort: lowest rank first, then largest lobby (being 1st of 32 > 1st of 10)
+    qualified_dom = {p: v for p, v in lobby_finishes.items() if len(v) >= 2}
+    dom_ranked = sorted(
+        qualified_dom.keys(),
+        key=lambda p: (min(r for r, _ in qualified_dom[p]),
+                       -max(s for _, s in qualified_dom[p]))
+    )
+    most_dominant = []
+    for p in dom_ranked[:5]:
+        best_r, best_s = min(qualified_dom[p], key=lambda x: (x[0], -x[1]))
+        avg_pct = sum((s - r) / (s - 1) * 100 for r, s in qualified_dom[p] if s > 1) / len(qualified_dom[p])
+        most_dominant.append(f"{p} — {best_r} of {best_s} · avg top {100-avg_pct:.0f}%"
+                             if avg_pct < 100 else f"{p} — {best_r} of {best_s}")
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -241,6 +265,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         'butcher': butcher or "N/A",
         'high_lethality': high_lethality if high_lethality else ["N/A"],
         'low_lethality': low_lethality if low_lethality else ["N/A"],
+        'most_dominant': most_dominant if most_dominant else [],
     }
 
 
@@ -272,7 +297,7 @@ def build_favourites_embed(stats):
         f"\n"
         f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
         f"\n"
-        f"**Lethality Rating** *(Kills/TD, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) +
+        f"**⚔️ Most Dominant** *(best lobby finish, min 2 runs)*\n" + (fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Lobby data not yet available*") +
         f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"

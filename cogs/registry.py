@@ -475,6 +475,33 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
 
     return [w for w, c in weapon_counts.items() if c >= 100]
 
+def get_lobby_stats_for_player(discord_id, cached_data=None):
+    """Return best lobby finish and avg finish percentile from submissions with lobby data."""
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    discord_id_str = str(discord_id)
+    finishes = []
+    for row in subs:
+        if not row or row[2].strip() != discord_id_str:
+            continue
+        try:
+            lr = int(row[13]) if len(row) > 13 and row[13] else None
+            ls = int(row[14]) if len(row) > 14 and row[14] else None
+            if lr and ls and ls > 1:
+                finishes.append((lr, ls))
+        except (ValueError, TypeError):
+            pass
+    if not finishes:
+        return None
+    best_r, best_s = min(finishes, key=lambda x: (x[0], -x[1]))
+    avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
+    return {
+        'best_rank': best_r,
+        'best_size': best_s,
+        'avg_percentile': avg_pct,
+        'games': len(finishes),
+    }
+
+
 def get_personal_bests(discord_id, cached_data=None):
     """Return dict with highest kills, highest TDs, and best lethality from all submissions."""
     subs = (cached_data or {}).get('submissions') or cached_submissions()
@@ -690,6 +717,7 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
     special_ops = get_special_ops_for_player(discord_id, cached_data)
     best_placements = get_best_placements_for_player(discord_id)
     personal_bests = get_personal_bests(discord_id, cached_data)
+    lobby_stats = get_lobby_stats_for_player(discord_id, cached_data)
 
     try:
         from cogs.favourites import calculate_butler_stats  # lazy to avoid circular
@@ -812,6 +840,12 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
         if personal_bests['lethality'] > 0:
             lines.append(f"• ⚔️ Lethality — **{personal_bests['lethality']}%**")
+        lines.append("")
+
+    if lobby_stats:
+        lines.append("**Lobby Stats:**")
+        lines.append(f"• Best finish — **{lobby_stats['best_rank']} of {lobby_stats['best_size']}**")
+        lines.append(f"• Avg finish — **top {100 - lobby_stats['avg_percentile']:.0f}%** over {lobby_stats['games']} tracked games")
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
@@ -999,23 +1033,52 @@ async def update_archive_index(guild):
 
         entries.sort(key=lambda x: x[0].lower())
 
-        groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
-        lines = ["📋 **Player Registry Index**", "*Jump to a player’s card*", ""]
+        groups = [(‘A–D’, ‘A’, ‘D’), (‘E–K’, ‘E’, ‘K’), (‘L–R’, ‘L’, ‘R’), (‘S–Z’, ‘S’, ‘Z’)]
+
+        def _make_fields(group_name, group_entries):
+            """Return list of (name, value) embed field tuples, splitting if over 1024 chars."""
+            links = [f"[{n}](https://discord.com/channels/{guild.id}/{t})" for n, t in group_entries]
+            fields = []
+            current_name = group_name
+            current_links = []
+            for link in links:
+                candidate = ‘ • ‘.join(current_links + [link])
+                if len(candidate) > 1000:
+                    fields.append((current_name, ‘ • ‘.join(current_links)))
+                    current_name = f"{group_name} (cont.)"
+                    current_links = [link]
+                else:
+                    current_links.append(link)
+            if current_links:
+                fields.append((current_name, ‘ • ‘.join(current_links)))
+            return fields
+
+        embed_fields = []
         for group_name, start, end in groups:
             group_entries = [(n, t) for n, t in entries if n and start <= n[0].upper() <= end]
-            if not group_entries:
-                continue
-            lines.append(f"**{group_name}**")
-            links = ' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{tid})" for name, tid in group_entries)
-            lines.append(links)
-            lines.append("")
+            if group_entries:
+                embed_fields.extend(_make_fields(group_name, group_entries))
         other = [(n, t) for n, t in entries if not n or not n[0].upper().isalpha()]
         if other:
-            lines.append("**#**")
-            lines.append(' • '.join(f"[{name}](https://discord.com/channels/{guild.id}/{tid})" for name, tid in other))
+            embed_fields.extend(_make_fields(‘#’, other))
 
-        content = "\n".join(lines).strip()
-        # content will be chunked on send if needed
+        # Build embed(s) — Discord allows max 25 fields per embed
+        def _build_embeds(fields):
+            embeds = []
+            for i in range(0, len(fields), 25):
+                chunk = fields[i:i + 25]
+                e = discord.Embed(
+                    title="📋 Player Registry Index",
+                    description="Jump to a player’s card",
+                    colour=discord.Colour.from_str("#2b2d31"),
+                )
+                for fname, fval in chunk:
+                    e.add_field(name=fname, value=fval, inline=False)
+                embeds.append(e)
+            return embeds
+
+        embeds = _build_embeds(embed_fields)
+        content = None  # using embeds instead of text
 
         index_rows = index_posts_ws.get_all_values()[1:]
         existing_thread_id = None
@@ -1035,31 +1098,16 @@ async def update_archive_index(guild):
                 async for msg in thread.history(limit=50, oldest_first=True):
                     msgs.append(msg)
                 print(f"Archive index: found {len(msgs)} messages in index thread")
-                # Delete all non-starter messages and resend fresh chunks
+                # Delete all non-starter messages and resend fresh embeds
                 for msg in msgs[1:]:
                     try:
                         await msg.delete()
                         await asyncio.sleep(0.3)
                     except Exception:
                         pass
-                _chunks = []
-                if len(content) <= 1900:
-                    _chunks = [content]
-                else:
-                    _sections = content.split("\n\n")
-                    _current = ""
-                    for _section in _sections:
-                        if len(_current) + len(_section) + 2 > 1900:
-                            if _current:
-                                _chunks.append(_current.strip())
-                            _current = _section
-                        else:
-                            _current += ("\n\n" if _current else "") + _section
-                    if _current:
-                        _chunks.append(_current.strip())
-                for chunk in _chunks:
+                for embed in embeds:
                     await asyncio.sleep(0.5)
-                    await thread.send(chunk)
+                    await thread.send(embed=embed)
                 print("Archive index updated")
                 return
             except Exception as e:
@@ -1077,28 +1125,8 @@ async def update_archive_index(guild):
                     existing_by_name = thread
                     break
 
-        # Helper: split content into <=1900-char chunks on paragraph boundaries
-        def _chunk_content(text):
-            if len(text) <= 1900:
-                return [text]
-            sections = text.split("\n\n")
-            result_chunks = []
-            current = ""
-            for section in sections:
-                if len(current) + len(section) + 2 > 1900:
-                    if current:
-                        result_chunks.append(current.strip())
-                    current = section
-                else:
-                    current += ("\n\n" if current else "") + section
-            if current:
-                result_chunks.append(current.strip())
-            return result_chunks
-
-        chunks = _chunk_content(content)
-
         if existing_by_name:
-            # Recover the thread — update sheet and resend all content chunks
+            # Recover the thread — update sheet and resend all content embeds
             thread_id = existing_by_name.id
             if existing_row_idx:
                 index_posts_ws.update_cell(existing_row_idx, 3, str(thread_id))
@@ -1107,25 +1135,24 @@ async def update_archive_index(guild):
             msgs = []
             async for msg in existing_by_name.history(limit=50, oldest_first=True):
                 msgs.append(msg)
-            # Delete all messages after the starter (index=0), then resend
             for msg in msgs[1:]:
                 try:
                     await msg.delete()
                     await asyncio.sleep(0.3)
                 except Exception:
                     pass
-            for chunk in chunks:
+            for embed in embeds:
                 await asyncio.sleep(0.5)
-                await existing_by_name.send(chunk)
+                await existing_by_name.send(embed=embed)
             print("Archive index recovered from Discord")
             return
 
         result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
 
-        for chunk in chunks:
+        for embed in embeds:
             await asyncio.sleep(0.5)
-            await result.thread.send(chunk)
+            await result.thread.send(embed=embed)
 
         thread_id = result.thread.id
 
