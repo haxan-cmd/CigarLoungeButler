@@ -2350,7 +2350,7 @@ class RegistryCog(commands.Cog):
 
         # \u2500\u2500 Build output \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         cigar = "<:cigar:1444893851427803298>"
-        lines = [f"{cigar} **{resolved_name}** \u2014 {total_marks} marks across {sub_count} submissions", ""]
+        lines = [f"{cigar} **{resolved_name}** \u2014 {sub_count} submissions", ""]
 
         # Butler titles held
         if butler_titles:
