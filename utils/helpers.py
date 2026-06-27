@@ -35,36 +35,33 @@ def butler_quip(prompt: str, fallback: str = '') -> str:
 
 _SCORECARD_PROMPT = """You are reading a Chivalry 2 end-of-round scoreboard screenshot.
 
-The Chivalry 2 scoreboard shows player rows with these columns in order:
-SCORE | NAME | [icon] | TAKEDOWNS | KILLS | DEATHS | ASSISTS
+The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
+- RANK: leftmost column, a rank number (e.g. 1,000 or 74) — do NOT use this as score or takedowns
+- NAME: player name
+- SCORE: large point value (often 1,000–20,000) — do NOT use this as takedowns
+- T: Takedowns — the number of kills+assists, typically the largest combat stat (50–400 for top players)
+- K: Kills — always less than or equal to T
+- D: Deaths — typically 0–50
+- PING: last column, network latency in ms — ignore this
 
-TAKEDOWNS is the first number column after the player name. It is typically the largest number (often 100-300 for top players).
-KILLS is the second number column. It is always less than or equal to takedowns.
-DEATHS is the third number column.
-ASSISTS is the fourth number column — do NOT confuse this with deaths.
-
-The score (leftmost column) is a large point value (often 1,000-20,000) — do NOT use this as takedowns.
-
-The submitting player's row is visually highlighted (brighter, different colour, or has a marker).
+The submitting player's row is visually highlighted (brighter background, different colour, or has a star/icon marker).
 
 Extract ONLY from the highlighted row:
-- weapon (exact weapon name shown — may appear as an icon tooltip or text)
-- subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms)
-- map (map name shown on screen, e.g. Rudhelm, Galencourt, Coxwell)
-- faction (Agatha, Mason, or Tenosia — based on which team the highlighted row is on)
-- takedowns (integer — first numeric column after name, typically 50-400)
-- kills (integer — second numeric column, always <= takedowns)
-- deaths (integer — third numeric column, typically 0-50)
+- weapon (exact weapon name if shown — may appear as an icon tooltip or text; null if not visible)
+- subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
+- map (full map name shown on screen e.g. "The Battle of Darkforest", "Galencourt")
+- faction (Agatha, Mason, or Tenosia — whichever team side the highlighted row is on)
+- takedowns (integer from T column of highlighted row)
+- kills (integer from K column of highlighted row)
+- deaths (integer from D column of highlighted row)
 
-The scoreboard shows TWO teams side by side. The highlighted player belongs to one team (their faction side).
+The scoreboard shows TWO teams side by side. For ALL other rows (excluding the highlighted player), split by team:
+- team_scores: T column integers for players on the SAME team as the highlighted player
+- team_kills: K column integers for players on the SAME team as the highlighted player
+- enemy_scores: T column integers for players on the ENEMY team
+- enemy_kills: K column integers for players on the ENEMY team
 
-For ALL other visible rows (excluding the highlighted player), split by team:
-- team_scores: takedown integers for players on the SAME team as the highlighted player
-- team_kills: kill integers for players on the SAME team as the highlighted player
-- enemy_scores: takedown integers for players on the ENEMY team
-- enemy_kills: kill integers for players on the ENEMY team
-
-Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you are not confident about. Do not guess.
+Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
 {"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
 
