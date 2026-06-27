@@ -56,13 +56,17 @@ Extract ONLY from the highlighted row:
 - kills (integer — second numeric column, always <= takedowns)
 - deaths (integer — third numeric column, typically 0-50)
 
-Also return for ALL other visible rows (excluding the highlighted player):
-- other_scores: list of takedown integers (first numeric column after name) in row order
-- other_kills: list of kill integers (second numeric column after name) in the same row order
+The scoreboard shows TWO teams side by side. The highlighted player belongs to one team (their faction side).
+
+For ALL other visible rows (excluding the highlighted player), split by team:
+- team_scores: takedown integers for players on the SAME team as the highlighted player
+- team_kills: kill integers for players on the SAME team as the highlighted player
+- enemy_scores: takedown integers for players on the ENEMY team
+- enemy_kills: kill integers for players on the ENEMY team
 
 Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you are not confident about. Do not guess.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"other_scores":[],"other_kills":[]}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
 
 
 def vision_parse_scorecard(image_url: str) -> dict:
@@ -73,7 +77,8 @@ def vision_parse_scorecard(image_url: str) -> dict:
     """
     empty = {
         'weapon': None, 'subclass': None, 'map': None, 'faction': None,
-        'takedowns': None, 'kills': None, 'deaths': None, 'other_scores': [], 'other_kills': []
+        'takedowns': None, 'kills': None, 'deaths': None,
+        'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _anthropic_client:
@@ -131,10 +136,9 @@ def vision_parse_scorecard(image_url: str) -> dict:
                     data[field] = int(data[field])
             except (ValueError, TypeError):
                 data[field] = None
-        if not isinstance(data.get('other_scores'), list):
-            data['other_scores'] = []
-        if not isinstance(data.get('other_kills'), list):
-            data['other_kills'] = []
+        for list_field in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
+            if not isinstance(data.get(list_field), list):
+                data[list_field] = []
         return {**empty, **data}
     except Exception as e:
         print(f"[VISION] Error: {e}")
