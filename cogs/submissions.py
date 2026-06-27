@@ -191,8 +191,8 @@ class SubmitView(discord.ui.View):
                     content="\U0001f4cb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
                     view=view, ephemeral=True)
             else:
-                all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-                view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+                all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+                view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes)
                 await interaction.response.send_message(content="Which class were you playing?", view=view, ephemeral=True)
             return
 
@@ -274,8 +274,8 @@ class SubmitView(discord.ui.View):
                         ephemeral=True
                     )
                 else:
-                    all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-                    view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+                    all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+                    view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes)
                     await interaction.followup.send(content="Which class were you playing?", view=view, ephemeral=True)
         finally:
             _active_vision.discard(msg_id)
@@ -319,7 +319,7 @@ class VisionConfirmView(discord.ui.View):
         p = self.parsed
         # Work through missing fields in order: subclass → weapon → map → faction → stats
         if not p.get('subclass'):
-            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
             view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes,
                                    pre_detected_weapon=p.get('weapon'), vision_data=p)
             await interaction.response.edit_message(content="Which class were you playing?", view=view)
@@ -358,7 +358,7 @@ class VisionConfirmView(discord.ui.View):
             return
         self.parsed['subclass'] = None
         self.parsed['weapon'] = None  # class change invalidates weapon
-        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
+        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
         view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes, vision_data=self.parsed)
         await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
@@ -375,7 +375,7 @@ class VisionConfirmView(discord.ui.View):
             await interaction.response.edit_message(
                 content=f"Class: `{subclass}`\nWhich weapon did you use?", view=view)
         else:
-            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
             view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes, vision_data=self.parsed)
             await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
@@ -446,8 +446,8 @@ class ParseConfirmView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes)
         await interaction.response.edit_message(
             content="Which class were you playing?",
             view=view
@@ -464,8 +464,8 @@ class WeaponTypeView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+        view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes)
         await interaction.response.edit_message(
             content="Which class were you playing?",
             view=view
@@ -483,14 +483,15 @@ class WeaponTypeView(discord.ui.View):
         )
 
 class MarksmanSubclassView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, vision_data=None):
         super().__init__(timeout=300)
-        self.add_item(MarksmanSubclassSelect(original_message, prompt_msg))
+        self.add_item(MarksmanSubclassSelect(original_message, prompt_msg, vision_data=vision_data))
 
 class MarksmanSubclassSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, vision_data=None):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
+        self.vision_data = vision_data or {}
         options = [discord.SelectOption(label=s, description=SUBCLASS_PARENT.get(s)) for s in MARKSMAN_SUBCLASSES.keys()]
         super().__init__(placeholder="Choose your subclass...", options=options)
 
@@ -499,10 +500,13 @@ class MarksmanSubclassSelect(discord.ui.Select):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
         subclass = self.values[0]
-        weapons = sorted(MARKSMAN_SUBCLASSES[subclass])
-        view = RangedWeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons)
+        vd = {**self.vision_data, 'subclass': subclass}
+        # Use get_all_weapons_for_class so secondaries are included with ⬦ labels
+        weapons = get_all_weapons_for_class(subclass)
+        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+        view = WeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons, vision_data=vd, all_classes=all_classes)
         await interaction.response.edit_message(
-            content=f"Class: `Marksman ({subclass})`. Which weapon?",
+            content=f"Class: `Archer ({subclass})`. Which weapon?",
             view=view
         )
 
@@ -657,11 +661,15 @@ class ClassSelect(discord.ui.Select):
             await interaction.response.edit_message(
                 content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?", view=view)
         else:
-            weapons = get_all_weapons_for_class(selected_class)
-            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons,
-                                    vision_data=vd, all_classes=self.classes, category=self.category)
-            await interaction.response.edit_message(
-                content=f"Class: `{selected_class}`. Which weapon?", view=view)
+            if selected_class == "Archer":
+                view = MarksmanSubclassView(self.original_message, self.prompt_msg, vision_data=vd)
+                await interaction.response.edit_message(content="Which Archer subclass?", view=view)
+            else:
+                weapons = get_all_weapons_for_class(selected_class)
+                view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons,
+                                        vision_data=vd, all_classes=self.classes, category=self.category)
+                await interaction.response.edit_message(
+                    content=f"Class: `{selected_class}`. Which weapon?", view=view)
 
 
 class WeaponSearchModal(discord.ui.Modal, title="Weapon Search"):
@@ -1116,8 +1124,8 @@ class EditFieldSelect(discord.ui.Select):
         ev = self.edit_view
 
         if field == "weapon":
-            all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-            view = ClassSelectView(ev.original_message, None, "all", all_melee_classes)
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+            view = ClassSelectView(ev.original_message, None, "all", all_classes)
             await interaction.response.edit_message(
                 content="**Edit weapon:** Which class were you playing?",
                 view=view
@@ -1868,44 +1876,4 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     asyncio.create_task(_bg_tasks())
 
 
-_active_vision: set[int] = set()  # prevents double-processing same message
-_queued_msgs: set[int] = set()  # prevents same message being finalised twice
-
-class SubmissionsCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._prompted_messages: set[int] = set()
-
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        """Trigger submission flow when a player posts an image in the submissions channel."""
-        if message.author.bot:
-            return
-        if message.channel.id != SUBMISSIONS_CHANNEL_ID:
-            return
-        if message.id in self._prompted_messages:
-            return
-        self._prompted_messages.add(message.id)
-        # Prevent unbounded growth — keep only the last 200 message IDs
-        if len(self._prompted_messages) > 200:
-            self._prompted_messages = set(list(self._prompted_messages)[-200:])
-        # content_type isn't always populated (especially on mobile) — fall back to extension
-        _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
-        has_image = any(
-            (att.content_type and att.content_type.startswith("image/"))
-            or att.filename.lower().endswith(_image_exts)
-            for att in message.attachments
-        )
-        if not has_image:
-            return
-        view = SubmitView(original_message=message)
-        prompt = await message.reply(
-            "\U0001f4cb **Submit this run?**",
-            view=view,
-            mention_author=False,
-        )
-        view.prompt_msg = prompt
-
-
-async def setup(bot):
-    await bot.add_cog(SubmissionsCog(bot))
+_active_vision: set[i

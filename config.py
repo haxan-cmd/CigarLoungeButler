@@ -78,6 +78,9 @@ CLASS_WEAPON_MAP = {
     "Man-at-Arms":    ["Axe", "Falchion", "Fist and Shield", "Healing Horn", "Heavy Cavalry Sword", "Knife", "Mace",
                        "Morning Star", "One-Handed Spear", "Rapier", "Short Sword", "Sword"],
     "Field Engineer": ["Goedendag", "Mallet", "Pick Axe", "Shovel", "Sledge Hammer"],
+    "Longbowman":     ["Bow", "Cudgel", "Hatchet", "Knife", "Short Sword", "War Bow"],
+    "Crossbowman":    ["Axe", "Crossbow", "Cudgel", "Knife", "Short Sword", "Siege Crossbow"],
+    "Skirmisher":     ["Axe", "Falchion", "Javelin", "Knife", "Mace", "Throwing Axe"],
 }
 
 SUBCLASS_PARENT = {
