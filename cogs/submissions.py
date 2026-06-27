@@ -1436,7 +1436,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             sorted_team = sorted(_team_td, reverse=True)
             gap = takedowns - sorted_team[0] if sorted_team else 0
             gap_str = f" +{gap} TD" if gap > 0 else ""
-            blurb_parts.append(f"1st on team{gap_str}")
+            # Warlord emoji if 1st on team by 30+ TD gap
+            warlord_prefix = "<:warlord:1520490364039860347> " if gap >= 30 else ""
+            blurb_parts.append(f"{warlord_prefix}1st on team{gap_str}")
         else:
             blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}")
 
@@ -1444,14 +1446,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     total_kills = kills + sum(_all_k) if (kills and _all_k) else None
     if total_kills and total_kills > 0 and kills:
         kill_share = round(kills / total_kills * 100, 1)
-        blurb_parts.append(f"{kill_share}% kill share")
+        # Lethality emoji if kill share >= 5%
+        lethal_prefix = "<a:mostlethal:1520490418817601658> " if kill_share >= 5.0 else ""
+        blurb_parts.append(f"{lethal_prefix}{kill_share}% kill share")
 
-    # --- Lobby TD rank (for storage + blurb context) ---
+    # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
     if _all_td:
         lobby_size = len(_all_td) + 1
         lobby_rank = sum(1 for s in _all_td if s >= takedowns) + 1
-        pct = round((1 - (lobby_rank - 1) / lobby_size) * 100)
-        blurb_parts.append(f"{lobby_rank}{_ordinal(lobby_rank)} of {lobby_size} lobby")
 
     # --- Kills rank (for storage) ---
     if _all_k and kills:
