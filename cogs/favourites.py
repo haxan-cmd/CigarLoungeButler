@@ -351,6 +351,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
 
 
 def build_favourites_embed(stats):
+    import discord as _discord
+
     def fmt_list(items, suffix, n=3):
         return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
 
@@ -358,36 +360,79 @@ def build_favourites_embed(stats):
         return "\n".join(f"{i+1}. {p}" for i, p in enumerate(items[:n]))
 
     week_label = stats.get('week_label', '')
-    header = (
-        f"**📋 The Butler's Favourites** | {week_label}\n"
+    desc = (
+        f"Weekly report · {stats['total_runs']} runs · {stats['total_players']} players"
         if week_label else
-        f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
+        f"{stats['total_runs']} runs · {stats['total_players']} players"
+    )
+    title = f"📋 The Butler's Favourites" + (f"  |  {week_label}" if week_label else "")
+
+    embed = _discord.Embed(
+        title=title,
+        description=f"*{desc}*",
+        color=0x8b6914,
     )
 
-    warlord_section = (fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough lobby data yet*")
+    # ── Weekly section header ──
+    embed.add_field(name="─── This Week ───", value="​", inline=False)
 
-    return (
-        header +
-        f"\n"
-        f"**<a:mostlethal:1520490418817601658> Lethality** *(kill conversion + kills vs lobby avg, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
-        f"\n"
-        f"**<:warlord:1520490364039860347> Warlord** *(TD + kill dominance vs lobby, min 2 runs)*\n" + warlord_section +
-        f"\n\n─────────────────────\n"
-        f"*All-Time Titles*\n"
-        f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
-        f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
-        f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
-        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
-        f"<a:200tkd:1363648828414230538> **Butcher** — {stats['butcher']}\n"
-        f"\n─────────────────────\n"
-        f"\n**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
-        f"\n"
-        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
-        f"\n"
-        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
-        f"\n"
-        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
+    # Lethality (full width)
+    lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
+    embed.add_field(
+        name="<a:mostlethal:1520490418817601658> Lethality  *(kill conversion · kills vs lobby avg)*",
+        value=lethal_text,
+        inline=False,
     )
+
+    # Warlord (full width)
+    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough lobby data yet*"
+    embed.add_field(
+        name="<:warlord:1520490364039860347> Warlord  *(TD dominance · kill dominance)*",
+        value=warlord_text,
+        inline=False,
+    )
+
+    # 2-column row: Busiest | Highest TD
+    embed.add_field(
+        name="🏃 Busiest",
+        value=fmt_list(stats['top_busiest'], "runs") or "*—*",
+        inline=True,
+    )
+    embed.add_field(
+        name="<a:toptkd:1360312666475728958> Highest Takedowns",
+        value=fmt_list(stats['top_td_list'], "TD") or "*—*",
+        inline=True,
+    )
+    embed.add_field(name="​", value="​", inline=True)  # spacer to force next pair onto new row
+
+    # 2-column row: Top Weapons | Top Maps
+    embed.add_field(
+        name="⚔️ Top Weapons",
+        value=fmt_list(stats['top_weapons'], "runs") or "*—*",
+        inline=True,
+    )
+    embed.add_field(
+        name="🗺️ Top Maps",
+        value=fmt_list(stats['top_maps'], "runs") or "*—*",
+        inline=True,
+    )
+    embed.add_field(name="​", value="​", inline=True)  # spacer
+
+    # ── All-Time Titles ──
+    embed.add_field(name="─── All-Time Titles ───", value="​", inline=False)
+    embed.add_field(
+        name="​",
+        value=(
+            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
+            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
+            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
+            f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
+            f"<a:200tkd:1363648828414230538> **Butcher** — {stats['butcher']}"
+        ),
+        inline=False,
+    )
+
+    return embed
 
 
 
@@ -504,7 +549,7 @@ class FavouritesCog(commands.Cog):
             embed_text = build_favourites_embed(stats)
 
             # Post publicly in the channel
-            await interaction.followup.send(embed_text)
+            await interaction.followup.send(embed=embed_text)
 
             # Update pinned favourites channel if set
             if BUTLERS_FAVOURITES_CHANNEL_ID:
@@ -513,10 +558,10 @@ class FavouritesCog(commands.Cog):
                     try:
                         async for msg in fav_channel.history(limit=5):
                             if msg.author == interaction.guild.me:
-                                await msg.edit(content=embed_text)
+                                await msg.edit(content=None, embed=embed_text)
                                 break
                         else:
-                            await fav_channel.send(embed_text)
+                            await fav_channel.send(embed=embed_text)
                     except Exception as e:
                         print(f"Favourites channel update error: {e}")
 
