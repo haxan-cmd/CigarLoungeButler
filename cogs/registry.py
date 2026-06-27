@@ -264,7 +264,7 @@ def get_butler_titles_for_player(discord_id, stats):
         ('weapons_master', '<a:weaponsmaster:1519928521445605488> Weapons Master'),
         ('campaign_master', '🗺️ Campaign Master'),
         ('headhunter', '<a:topkill:1360314538364240024> Headhunter'),
-        ('butcher', '<a:toptkd:1360312666475728958> Butcher'),
+        ('butcher', '<a:200tkd:1363648828414230538> Butcher'),
     ]
     # stats dict uses display names not IDs — match by display name via players sheet
     rows = players_ws.get_all_values()[1:]
@@ -2222,7 +2222,7 @@ class RegistryCog(commands.Cog):
             fmt_title("<a:weaponsmaster:1519928521445605488>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
             fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
             fmt_title("<a:topkill:1360314538364240024>", "Headhunter", player_kills_best, hh_holder or "N/A", hh_score, resolved_name, is_board=False),
-            fmt_title("<a:toptkd:1360312666475728958>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
+            fmt_title("<a:200tkd:1363648828414230538>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
         ]
 
         # Weapon ranks — Gold+ only, top 10
@@ -2404,7 +2404,7 @@ class RegistryCog(commands.Cog):
         pb_kills_row = best_kills_row
         if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or biggest_lead_str:
             lines.append("")
-            lines.append("**Personal Bests**")
+            lines.append("<a:toptkd:1360312666475728958> **Personal Bests**")
             if pb_td_str:
                 lines.append(f"<a:toptkd:1360312666475728958> {pb_td_str}")
             if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
