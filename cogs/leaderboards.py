@@ -161,82 +161,56 @@ async def build_ledger_entrance(guild):
                 return f"[→ Full {label} Index](https://discord.com/channels/{guild_id}/{thread.id})"
             return f"*{label} index not yet built*"
 
-        # ── Build section content strings ───────────────────────────────
-        sections = []
+        # ── Build single embed with one field per section ───────────────────
+        embed = discord.Embed(
+            title="<:cigar:1444893851427803298>  The Ledger",
+            description="*Browse all records, maps, feats, and player registry cards below.*",
+            color=0x8b6914,
+        )
 
-        sections.append(("1h", (
-            f"⚔️  **ONE-HANDED WEAPONS**\n"
-            f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
-            f"{index_link(idx_1h, '1H')}"
-        )))
+        sections = [
+            ("⚔️  ONE-HANDED WEAPONS",
+             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n{index_link(idx_1h, '1H')}"),
+            ("🧳  TWO-HANDED WEAPONS",
+             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n{index_link(idx_2h, '2H')}"),
+            ("🗺️  MAP RECORDS",
+             f"Top 10 takedown runs per map, tracked by faction.\n{index_link(idx_maps, 'Maps')}"),
+            ("🏅  FEATS",
+             f"Special achievement boards — Flawless runs, 100 Kill games, 200 Takedown games, and weapon-specific challenges.\n{index_link(idx_feats, 'Feats')}"),
+            ("🎯  BOUNTY CARDS",
+             f"Active and completed bounties. Each card tracks progress toward the current target.\n{index_link(idx_bounty, 'Bounty Cards')}"),
+            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",
+             f"Player registry cards — every registered player's weapon marks, ranks, and submission history.\n{index_link(idx_reg, 'Registry')}"),
+        ]
 
-        sections.append(("2h", (
-            f"🧳  **TWO-HANDED WEAPONS**\n"
-            f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
-            f"{index_link(idx_2h, '2H')}"
-        )))
+        for name, value in sections:
+            embed.add_field(name=name, value=value, inline=False)
 
-        sections.append(("maps", (
-            f"🗺️  **MAP RECORDS**\n"
-            f"Top 10 takedown runs per map, tracked by faction.\n"
-            f"{index_link(idx_maps, 'Maps')}"
-        )))
-
-        sections.append(("feats", (
-            f"🏅  **FEATS**\n"
-            f"Special achievement boards — Flawless runs, 100 Kill games, 200 Takedown games, and weapon-specific challenges.\n"
-            f"{index_link(idx_feats, 'Feats')}"
-        )))
-
-        sections.append(("bounty", (
-            f"🎯  **BOUNTY CARDS**\n"
-            f"Active and completed bounties. Each card tracks progress toward the current target.\n"
-            f"{index_link(idx_bounty, 'Bounty Cards')}"
-        )))
-
-        sections.append(("registry", (
-            f"<:cigar:1444893851427803298>  **BUTLER'S ARCHIVE**\n"
-            f"Player registry cards — every registered player's weapon marks, ranks, and submission history.\n"
-            f"{index_link(idx_reg, 'Registry')}"
-        )))
-
-        # ── Post or edit each section ───────────────────────────────────────
-        # Load existing message IDs from channel history on first run if we lost them.
-        # Match by content keyword so ordering doesn't matter.
-        _KEY_MARKERS = {
-            '1h':       'ONE-HANDED WEAPONS',
-            '2h':       'TWO-HANDED WEAPONS',
-            'maps':     'MAP RECORDS',
-            'feats':    'FEATS',
-            'bounty':   'BOUNTY CARDS',
-            'registry': "BUTLER'S ARCHIVE",
-        }
-        if not _entrance_message_ids:
+        # ── Post or edit the single entrance message ─────────────────────────
+        mid = _entrance_message_ids.get('entrance')
+        if not mid:
+            # Try to find existing message in channel history
             try:
                 bot_id = guild.me.id
-                async for msg in channel.history(limit=30, oldest_first=True):
-                    if msg.author.id == bot_id:
-                        for key, marker in _KEY_MARKERS.items():
-                            if marker in (msg.content or '') and key not in _entrance_message_ids:
-                                _entrance_message_ids[key] = msg.id
-                                break
+                async for msg in channel.history(limit=20, oldest_first=True):
+                    if msg.author.id == bot_id and msg.embeds:
+                        if any('Ledger' in (e.title or '') for e in msg.embeds):
+                            _entrance_message_ids['entrance'] = msg.id
+                            mid = msg.id
+                            break
             except Exception:
                 pass
 
-        for key, content in sections:
-            mid = _entrance_message_ids.get(key)
-            if mid:
-                try:
-                    msg = await channel.fetch_message(mid)
-                    await msg.edit(content=content)
-                    await asyncio.sleep(0.4)
-                    continue
-                except discord.NotFound:
-                    pass
-            # No existing message — post fresh
-            new_msg = await channel.send(content)
-            _entrance_message_ids[key] = new_msg.id
-            await asyncio.sleep(0.4)
+        if mid:
+            try:
+                msg = await channel.fetch_message(mid)
+                await msg.edit(content=None, embed=embed)
+            except discord.NotFound:
+                mid = None
+
+        if not mid:
+            new_msg = await channel.send(embed=embed)
+            _entrance_message_ids['entrance'] = new_msg.id
 
         print("Ledger entrance updated.")
 
