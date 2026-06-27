@@ -23,8 +23,8 @@ def get_active_bounty():
     """Return the active bounty row as a dict, or None."""
     if not bounty_ws:
         return None
-    rows = [bounty_ws.row_values(1)] + cached_bounty_ws()  # header + cached data rows
-    for i, row in enumerate(rows[1:], start=2):
+    rows = cached_bounty_ws()  # data rows only (header stripped by cache)
+    for i, row in enumerate(rows, start=2):
         if len(row) >= 9 and row[8] == 'TRUE':
             return {
                 'row': i,
