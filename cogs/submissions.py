@@ -500,8 +500,7 @@ class MarksmanSubclassSelect(discord.ui.Select):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
         subclass = self.values[0]
-        vd = {**self.vision_data, 'subclass': subclass}
-        # Use get_all_weapons_for_class so secondaries show with ⬦ labels
+        vd = {**self.vision_data, "subclass": subclass}
         weapons = get_all_weapons_for_class(subclass)
         all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
         view = WeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons, vision_data=vd, all_classes=all_classes)
@@ -1423,7 +1422,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}")
 
     # --- Kill share ---
-    total_kills = kills + sum(_all_k) if kills else None
+    total_kills = kills + sum(_all_k) if (kills and _all_k) else None
     if total_kills and total_kills > 0 and kills:
         kill_share = round(kills / total_kills * 100, 1)
         blurb_parts.append(f"{kill_share}% kill share")
