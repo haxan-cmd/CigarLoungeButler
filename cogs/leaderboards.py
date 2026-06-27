@@ -10,7 +10,7 @@ from discord.ext import commands
 import config
 from utils.sheets import (
     _sheet_cache, sheet,
-    leaderboards_ws, leaderboard_data_ws,
+    leaderboards_ws, leaderboard_data_ws, submissions_ws,
     gspread_retry, cached_leaderboard_data,
 )
 
