@@ -319,7 +319,7 @@ class VisionConfirmView(discord.ui.View):
         p = self.parsed
         # Work through missing fields in order: subclass → weapon → map → faction → stats
         if not p.get('subclass'):
-            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
             view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes,
                                    pre_detected_weapon=p.get('weapon'), vision_data=p)
             await interaction.response.edit_message(content="Which class were you playing?", view=view)
@@ -358,7 +358,7 @@ class VisionConfirmView(discord.ui.View):
             return
         self.parsed['subclass'] = None
         self.parsed['weapon'] = None  # class change invalidates weapon
-        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+        all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
         view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes, vision_data=self.parsed)
         await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
@@ -375,7 +375,7 @@ class VisionConfirmView(discord.ui.View):
             await interaction.response.edit_message(
                 content=f"Class: `{subclass}`\nWhich weapon did you use?", view=view)
         else:
-            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
             view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes, vision_data=self.parsed)
             await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
@@ -501,7 +501,7 @@ class MarksmanSubclassSelect(discord.ui.Select):
             return
         subclass = self.values[0]
         vd = {**self.vision_data, 'subclass': subclass}
-        # Use get_all_weapons_for_class so secondaries are included with ⬦ labels
+        # Use get_all_weapons_for_class so secondaries show with ⬦ labels
         weapons = get_all_weapons_for_class(subclass)
         all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
         view = WeaponSelectView(self.original_message, self.prompt_msg, subclass, weapons, vision_data=vd, all_classes=all_classes)
@@ -1876,4 +1876,44 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     asyncio.create_task(_bg_tasks())
 
 
-_active_vision: set[i
+_active_vision: set[int] = set()  # prevents double-processing same message
+_queued_msgs: set[int] = set()  # prevents same message being finalised twice
+
+class SubmissionsCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self._prompted_messages: set[int] = set()
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """Trigger submission flow when a player posts an image in the submissions channel."""
+        if message.author.bot:
+            return
+        if message.channel.id != SUBMISSIONS_CHANNEL_ID:
+            return
+        if message.id in self._prompted_messages:
+            return
+        self._prompted_messages.add(message.id)
+        # Prevent unbounded growth — keep only the last 200 message IDs
+        if len(self._prompted_messages) > 200:
+            self._prompted_messages = set(list(self._prompted_messages)[-200:])
+        # content_type isn't always populated (especially on mobile) — fall back to extension
+        _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+        has_image = any(
+            (att.content_type and att.content_type.startswith("image/"))
+            or att.filename.lower().endswith(_image_exts)
+            for att in message.attachments
+        )
+        if not has_image:
+            return
+        view = SubmitView(original_message=message)
+        prompt = await message.reply(
+            "\U0001f4cb **Submit this run?**",
+            view=view,
+            mention_author=False,
+        )
+        view.prompt_msg = prompt
+
+
+async def setup(bot):
+    await bot.add_cog(SubmissionsCog(bot))
