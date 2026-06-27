@@ -11,6 +11,10 @@ from discord.ext import commands
 from datetime import datetime
 
 import config
+from config import (
+    WEAPONS_1H_FORUM_ID, WEAPONS_2H_FORUM_ID,
+    MAP_RECORDS_FORUM_ID, FEATS_FORUM_ID, BOUNTY_CARDS_FORUM_ID,
+)
 from utils.sheets import (
     _sheet_cache, _registry_lock, sheet,
     submissions_ws, players_ws, leaderboard_data_ws, bounty_ws,
@@ -1687,6 +1691,7 @@ class RegistryCog(commands.Cog):
         # Bounty blurb — pull active bounty weapons dynamically
         bounty_blurb = "**What is this?** A roughly monthly community challenge. Only specific weapons count for each bounty."
         try:
+            from cogs.bounty import get_active_bounty
             active_bounty = get_active_bounty()
             if active_bounty:
                 weapon_list = ', '.join(active_bounty['weapons'].keys())
