@@ -127,12 +127,20 @@ class SubmitView(discord.ui.View):
         # Try vision parse if there's an image attachment
         # Run in a thread so the blocking Anthropic HTTP call doesn't stall the event loop
         parsed = None
+        print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
         for att in self.original_message.attachments:
             if att.content_type and att.content_type.startswith('image/'):
                 parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
+                print(f"[VISION] Raw parsed result: {parsed}")
                 break
+            elif not att.content_type:
+                # content_type can be None — fall back to filename extension check
+                if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
+                    print(f"[VISION] Raw parsed result (ext check): {parsed}")
+                    break
 
-        # Validate parsed fields against known lists
+        # Validate parsed fields against known lists and sanity bounds
         if parsed:
             if parsed.get('weapon') not in (list(config.WEAPONS_1H) + list(config.WEAPONS_2H) + list(config.FEAT_WEAPONS)):
                 parsed['weapon'] = None
@@ -142,6 +150,16 @@ class SubmitView(discord.ui.View):
                 parsed['map'] = None
             if parsed.get('faction') not in ('Agatha', 'Mason', 'Tenosia'):
                 parsed['faction'] = None
+            # Sanity bounds on stats — if they look wrong, null them so the modal is blank
+            td = parsed.get('takedowns')
+            k  = parsed.get('kills')
+            d  = parsed.get('deaths')
+            if td is not None and (td < 5 or td > 600):
+                parsed['takedowns'] = parsed['kills'] = parsed['deaths'] = None
+            elif k is not None and td is not None and k > td:
+                parsed['kills'] = None  # kills can't exceed takedowns
+            if d is not None and (d < 0 or d > 100):
+                parsed['deaths'] = None
 
         vision_useful = parsed and any(
             parsed.get(f) is not None
@@ -236,35 +254,14 @@ class VisionConfirmView(discord.ui.View):
             view = FactionSelectView(self.original_message, self.prompt_msg, p['subclass'], p['weapon'], p['map'], vision_data=p)
             await interaction.response.edit_message(
                 content=f"Class: `{p['subclass']}` | Weapon: `{p['weapon']}` | Map: `{p['map']}`\nWhich faction?", view=view)
-        elif any(p.get(f) is None for f in ('takedowns', 'kills', 'deaths')):
+        else:
+            # Always show the stats modal as the final step so the player
+            # can verify vision's numbers — never auto-submit from vision alone
             await interaction.response.send_modal(
                 StatsModal(self.original_message, self.prompt_msg, p['subclass'], p['weapon'], p['map'], p['faction'],
                            prefill_td=p.get('takedowns'), prefill_k=p.get('kills'), prefill_d=p.get('deaths'),
                            vision_data=p)
             )
-        else:
-            # Everything present — go straight to VIP/triple checks then finalise
-            needs_vip = (p['map'], p['faction']) in VIP_MAPS
-            if p['takedowns'] >= 150 and p['kills'] >= 100:
-                view = TripleCheckView(
-                    self.original_message, self.prompt_msg, p['subclass'], p['weapon'],
-                    p['map'], p['faction'], p['takedowns'], p['kills'], p['deaths'],
-                    needs_vip=needs_vip
-                )
-                await interaction.response.edit_message(content="Was your score over 20,000 points?", view=view)
-            elif needs_vip:
-                view = VIPView(
-                    self.original_message, self.prompt_msg, p['subclass'], p['weapon'],
-                    p['map'], p['faction'], p['takedowns'], p['kills'], p['deaths']
-                )
-                await interaction.response.edit_message(content="Were you playing as VIP?", view=view)
-            else:
-                await finalise_submission(
-                    interaction, self.original_message, self.prompt_msg,
-                    p['subclass'], p['weapon'], p['map'], p['faction'],
-                    p['takedowns'], p['kills'], p['deaths'], False, False,
-                    other_scores=p.get('other_scores', [])
-                )
 
     @discord.ui.button(label='Confirm', style=discord.ButtonStyle.green, emoji='✅')
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):

@@ -84,7 +84,9 @@ def vision_parse_scorecard(image_url: str) -> dict:
         'weapon': None, 'subclass': None, 'map': None, 'faction': None,
         'takedowns': None, 'kills': None, 'deaths': None, 'other_scores': []
     }
+    print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _anthropic_client:
+        print("[VISION] No Anthropic client — skipping")
         return empty
     try:
         import json as _json
@@ -117,7 +119,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
             data['other_scores'] = []
         return {**empty, **data}
     except Exception as e:
-        print(f"vision_parse_scorecard error: {e}")
+        print(f"[VISION] Error: {e}")
         return empty
 
 
