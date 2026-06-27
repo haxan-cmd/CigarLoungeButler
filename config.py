@@ -111,6 +111,23 @@ MAP_FACTIONS = {
 }
 MAPS = sorted(MAP_FACTIONS.keys())
 
+# Vision sometimes returns full in-game display names — normalize to our short keys
+MAP_ALIASES = {
+    "the battle of darkforest": "Darkforest",
+    "the battle of aberfell": "Aberfell",
+    "the siege of coxwell": "Coxwell",
+    "the battle of galencourt": "Galencourt",
+    "the battle of rudhelm": "Rudhelm",
+    "the battle of falmire": "Falmire",
+    "the siege of lionspire": "Lionspire",
+    "the battle of montcrux": "Montcrux",
+    "the battle of baudwyn": "Baudwyn",
+    "the battle of bridgetown": "Bridgetown",
+    "the battle of askandir": "Askandir",
+    "the siege of thayic stronghold": "Thayic Stronghold",
+    "the siege of trayan citadel": "Trayan Citadel",
+}
+
 FEAT_WEAPONS = ["Mallet", "Knife", "Healing Horn", "Fist and Shield"]
 
 VIP_MAPS = {

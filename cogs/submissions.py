@@ -195,6 +195,10 @@ class SubmitView(discord.ui.View):
                     parsed['weapon'] = None
                 if parsed.get('subclass') not in config.CLASS_WEAPON_MAP:
                     parsed['subclass'] = None
+                # Normalize vision map names (full display names → our short keys)
+                raw_map = parsed.get('map')
+                if raw_map and raw_map not in config.MAP_FACTIONS:
+                    parsed['map'] = config.MAP_ALIASES.get(raw_map.lower())
                 if parsed.get('map') not in config.MAP_FACTIONS:
                     parsed['map'] = None
                 if parsed.get('faction') not in ('Agatha', 'Mason', 'Tenosia'):
