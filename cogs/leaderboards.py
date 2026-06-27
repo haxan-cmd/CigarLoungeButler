@@ -164,27 +164,21 @@ async def build_ledger_entrance(guild):
         # ── Build single embed with one field per section ───────────────────
         embed = discord.Embed(
             title="<:cigar:1444893851427803298>  The Ledger",
-            description="*Browse all records, maps, feats, and player registry cards below.*",
             color=0x8b6914,
         )
 
         sections = [
-            ("⚔️  ONE-HANDED WEAPONS",
-             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n{index_link(idx_1h, '1H')}"),
-            ("🧳  TWO-HANDED WEAPONS",
-             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n{index_link(idx_2h, '2H')}"),
-            ("🗺️  MAP RECORDS",
-             f"Top 10 takedown runs per map, tracked by faction.\n{index_link(idx_maps, 'Maps')}"),
-            ("🏅  FEATS",
-             f"Special achievement boards — Flawless runs, 100 Kill games, 200 Takedown games, and weapon-specific challenges.\n{index_link(idx_feats, 'Feats')}"),
-            ("🎯  BOUNTY CARDS",
-             f"Active and completed bounties. Each card tracks progress toward the current target.\n{index_link(idx_bounty, 'Bounty Cards')}"),
-            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",
-             f"Player registry cards — every registered player's weapon marks, ranks, and submission history.\n{index_link(idx_reg, 'Registry')}"),
+            ("⚔️  ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
+            ("🧳  TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
+            ("🗺️  MAP RECORDS",         index_link(idx_maps, 'Maps')),
+            ("🏅  FEATS",               index_link(idx_feats, 'Feats')),
+            ("🎯  BOUNTY CARDS",        index_link(idx_bounty, 'Bounty Cards')),
+            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE", index_link(idx_reg, 'Registry')),
         ]
 
         for name, value in sections:
             embed.add_field(name=name, value=value, inline=False)
+            embed.add_field(name="​", value="​", inline=False)  # vertical spacer
 
         # ── Post or edit the single entrance message ─────────────────────────
         mid = _entrance_message_ids.get('entrance')
