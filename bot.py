@@ -1,6 +1,3 @@
-"""
-bot.py — Thin entry point. Loads all cogs and starts the bot.
-"""
 import asyncio
 import traceback
 import discord
@@ -8,7 +5,6 @@ from discord.ext import commands
 
 import config
 
-# ── Bot setup ─────────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -25,6 +21,15 @@ COGS = [
     "cogs.personality",
     "cogs.admin",
 ]
+
+
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} slash commands")
+    except Exception as e:
+        print(f"❌ Command sync failed: {e}")
 
 
 @bot.tree.error
