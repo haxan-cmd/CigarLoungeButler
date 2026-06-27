@@ -1252,10 +1252,16 @@ async def _submission_worker(guild_id):
         except Exception as e:
             print(f"Submission worker error: {e}")
         finally:
+            _queued_msgs.discard(item[1].id)
             queue.task_done()
 
 
 async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vision_data=None):
+    msg_id = original_message.id
+    if msg_id in _queued_msgs:
+        await interaction.response.send_message("Already submitting this run — please wait.", ephemeral=True)
+        return
+    _queued_msgs.add(msg_id)
     guild_id = interaction.guild.id
     queue = get_submission_queue(guild_id)
     vd = vision_data or {}
@@ -1837,6 +1843,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
 
 _active_vision: set[int] = set()  # prevents double-processing same message
+_queued_msgs: set[int] = set()  # prevents same message being finalised twice
 
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):
