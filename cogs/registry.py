@@ -2325,13 +2325,43 @@ class RegistryCog(commands.Cog):
             deaths = row[9].strip() if len(row) > 9 else '?'
             return f"**{weapon}** \u2014 {tds} TD / {kills} K / {deaths} D on {map_}"
 
-        # Kill rate
-        kill_rate_str = ''
-        if len(td_list) >= 3:
-            avg_td = sum(td_list) / len(td_list)
-            avg_k = sum(kill_list) / len(kill_list)
-            kr = (avg_k / avg_td * 100) if avg_td > 0 else 0
-            kill_rate_str = f"{kr:.0f}% kill rate across {len(td_list)} runs (avg {avg_td:.0f} TD / {avg_k:.0f} K)"
+        # Biggest lead — largest gap between this player's 1st place score and 2nd place on any board
+        biggest_lead_str = ''
+        try:
+            from collections import defaultdict
+            boards: dict = defaultdict(list)
+            SKIP_BOARDS = {'100 Kills', '200 Takedowns', 'Flawless', 'Healing Horn'}
+            for ld_r in ld_all:
+                if len(ld_r) < 4:
+                    continue
+                lb = ld_r[0].strip()
+                if ' - ' in lb or lb in SKIP_BOARDS:
+                    continue
+                try:
+                    score = int(ld_r[3])
+                except ValueError:
+                    continue
+                boards[lb].append((score, ld_r[1].strip()))
+            best_gap = 0
+            best_gap_board = ''
+            best_gap_score = 0
+            best_gap_second = 0
+            for lb, entries in boards.items():
+                entries.sort(key=lambda x: x[0], reverse=True)
+                if not entries or entries[0][1] != resolved_name:
+                    continue
+                if len(entries) < 2:
+                    continue
+                gap = entries[0][0] - entries[1][0]
+                if gap > best_gap:
+                    best_gap = gap
+                    best_gap_board = lb
+                    best_gap_score = entries[0][0]
+                    best_gap_second = entries[1][0]
+            if best_gap > 0:
+                biggest_lead_str = f"+{best_gap} TD lead on {best_gap_board} ({best_gap_score} vs {best_gap_second})"
+        except Exception:
+            biggest_lead_str = ''
 
         # \u2500\u2500 Special Ops \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         special_ops = get_special_ops_for_player(int(discord_id_str))
@@ -2372,15 +2402,15 @@ class RegistryCog(commands.Cog):
         # Personal bests
         pb_td_str = _pb_str(best_td_row)
         pb_kills_row = best_kills_row
-        if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or kill_rate_str:
+        if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or biggest_lead_str:
             lines.append("")
             lines.append("**Personal Bests**")
             if pb_td_str:
                 lines.append(f"<a:toptkd:1360312666475728958> {pb_td_str}")
             if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
                 lines.append(f"<a:topkill:1360314538364240024> {_pb_str(pb_kills_row)}")
-            if kill_rate_str:
-                lines.append(f"\u2694\ufe0f {kill_rate_str}")
+            if biggest_lead_str:
+                lines.append(f"\ud83c\udfc6 {biggest_lead_str}")
 
         # Special Ops
         if special_ops:
