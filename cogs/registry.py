@@ -2253,6 +2253,25 @@ class RegistryCog(commands.Cog):
         player_subs = [r for r in all_subs if len(r) > 8 and r[2].strip() == discord_id_str_for_subs]
         sub_count = len(player_subs)
 
+        # Add legacy run count from LegacyMarks (each value = runs on that weapon pre-system)
+        try:
+            legacy_ws = sheet.worksheet('LegacyMarks')
+            legacy_rows = legacy_ws.get_all_values()[1:]
+            p_name = None
+            for pr in players_ws.get_all_values()[1:]:
+                if pr and pr[0].strip() == discord_id_str:
+                    p_name = pr[1].strip() if len(pr) > 1 else None
+                    break
+            if p_name:
+                legacy_run_count = sum(
+                    int(r[3]) for r in legacy_rows
+                    if len(r) > 3 and r[0].strip().lower() == p_name.lower()
+                    and r[3].strip().isdigit()
+                )
+                sub_count += legacy_run_count
+        except Exception:
+            pass
+
         best_td_row = None
         best_kills_row = None
         pb_td = 0
