@@ -28,7 +28,8 @@ MAP_RECORDS_FORUM_ID     = config.MAP_RECORDS_FORUM_ID
 FEATS_FORUM_ID           = config.FEATS_FORUM_ID
 BOUNTY_CARDS_FORUM_ID    = config.BOUNTY_CARDS_FORUM_ID
 REGISTRY_FORUM_ID        = config.REGISTRY_FORUM_CHANNEL_ID
-LEDGER_ENTRANCE_CHANNEL_ID = config.LEDGER_ENTRANCE_CHANNEL_ID
+LEDGER_ENTRANCE_CHANNEL_ID  = config.LEDGER_ENTRANCE_CHANNEL_ID
+REGISTRY_INDEX_THREAD_ID    = config.REGISTRY_INDEX_THREAD_ID
 
 _WEAPONS_2H = {
     "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
@@ -137,7 +138,7 @@ async def build_ledger_entrance(guild):
         idx_maps   = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID,  "Map Records")
         idx_feats  = await _find_index_thread(guild, FEATS_FORUM_ID,        "Feats")
         idx_bounty = await _find_index_thread(guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards")
-        idx_reg    = await _find_index_thread(guild, REGISTRY_FORUM_ID,     "Registry")
+        idx_reg    = type('T', (), {'id': REGISTRY_INDEX_THREAD_ID})()  # hardcoded — known thread ID
 
         def index_link(thread, label):
             if thread:
