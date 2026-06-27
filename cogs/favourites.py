@@ -118,21 +118,26 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # ── LETHALITY — kill share efficiency, min 3 submissions with lobby data ──
-    # Score = avg(your_kills / (total_lobby_kills / lobby_size))
-    # i.e. how many times the lobby average in kills you got per game
-    # Falls back to kill rate (kills/td) for players without lobby data yet
+    # ── LETHALITY — kill conversion + kills vs lobby average, min 3 runs ──
+    # kill_conversion = kills/td * 100  (% of your TDs that were actual kills)
+    # lobby_kill_mult  = kills / (total_lobby_kills / lobby_size)  (vs avg player in lobby)
+    # Score = conversion * lobby_kill_mult  (rewards both efficiency AND volume)
+    #
+    # kill_efficiency already holds (kills, total_lobby_kills, lobby_size) tuples per player.
+    # lethal_ratios holds kills/td per run.
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
 
     def lethality_score(p):
         eff = kill_efficiency.get(p, [])
+        krates = lethal_ratios.get(p, [])
+        if len(eff) >= 2 and len(krates) >= 2:
+            lobby_mult = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
+            conversion = sum(krates) / len(krates)  # kills/td avg
+            return lobby_mult * conversion
         if len(eff) >= 2:
-            # Primary: kill efficiency vs lobby average
-            scores = [k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1]
-            return sum(scores) / len(scores) if scores else 0
-        # Fallback: raw kill rate
+            return sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
         if p in qualified_lethal:
-            return sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 0.5  # scale down vs efficiency
+            return sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 0.3
         return 0
 
     lethal_candidates = set(qualified_lethal.keys()) | {p for p, v in kill_efficiency.items() if len(v) >= 2}
@@ -140,15 +145,16 @@ def calculate_butler_stats(week_start=None, week_end=None):
 
     def lethality_label(p):
         eff = kill_efficiency.get(p, [])
+        krates = lethal_ratios.get(p, [])
+        parts = []
+        if krates:
+            conv = sum(krates) / len(krates) * 100
+            parts.append(f"{conv:.0f}% kill conversion")
         if len(eff) >= 2:
-            avg_eff = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
-            rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100 if p in qualified_lethal else None
-            rate_str = f" · {rate:.0f}% kill share" if rate else ""
-            return f"{p} ({avg_eff:.1f}× avg kills{rate_str})"
-        if p in qualified_lethal:
-            rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100
-            return f"{p} ({rate:.0f}% kill share)"
-        return p
+            lobby_mult = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
+            parts.append(f"{lobby_mult:.1f}× avg kills")
+        label = " · ".join(parts) if parts else ""
+        return f"{p} — {label}" if label else p
 
     high_lethality = [lethality_label(p) for p in lethal_ranked[:5]]
     most_lethal_top5 = high_lethality
@@ -159,15 +165,25 @@ def calculate_butler_stats(week_start=None, week_end=None):
     def _ord(n):
         return f"{n}{'th' if 11<=n%100<=13 else {1:'st',2:'nd',3:'rd'}.get(n%10,'th')}"
 
+    # ── WARLORD — lobby dominance across TD + kills, min 2 runs ──
+    # td_dom   = team_score_ratio  (your TD / avg teammate TD)
+    # kill_dom = kills / (total_lobby_kills / lobby_size)  (your kills / lobby avg kills)
+    # Score = avg(td_dom) * avg(kill_dom)  — must dominate both to rank high
+
     def warlord_score(p):
         ratios = team_score_ratios.get(p, [])
-        if len(ratios) >= 2:
-            return sum(ratios) / len(ratios)
-        # Fallback: convert lobby rank percentile
+        eff = kill_efficiency.get(p, [])
+        td_dom = sum(ratios) / len(ratios) if len(ratios) >= 2 else None
+        kill_dom = (sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
+                    if len(eff) >= 2 else None)
+        if td_dom and kill_dom:
+            return td_dom * kill_dom
+        if td_dom:
+            return td_dom * 0.5
+        # Fallback: lobby rank percentile
         finishes = lobby_finishes.get(p, [])
         if len(finishes) >= 2:
-            avg_pct = sum((s - r) / (s - 1) for r, s in finishes if s > 1) / len(finishes)
-            return avg_pct * 0.5  # scale down vs ratio
+            return sum((s - r) / (s - 1) for r, s in finishes if s > 1) / len(finishes) * 0.3
         return 0
 
     warlord_candidates = (
@@ -179,16 +195,19 @@ def calculate_butler_stats(week_start=None, week_end=None):
     most_dominant = []
     for p in dom_ranked[:5]:
         ratios = team_score_ratios.get(p, [])
+        eff = kill_efficiency.get(p, [])
+        parts = []
         if len(ratios) >= 2:
-            avg_ratio = sum(ratios) / len(ratios)
-            best_ratio = max(ratios)
-            entry = f"{p} — {avg_ratio:.1f}× team avg TD · best {best_ratio:.1f}×"
-        else:
+            avg_td = sum(ratios) / len(ratios)
+            parts.append(f"{avg_td:.1f}× avg TD")
+        if len(eff) >= 2:
+            avg_kills = sum(k / (tlk / ls) for k, tlk, ls in eff if tlk > 0 and ls > 1) / len(eff)
+            parts.append(f"{avg_kills:.1f}× avg kills")
+        if not parts:
             finishes = lobby_finishes.get(p, [])
-            best_r, best_s = min(finishes, key=lambda x: (x[0], -x[1]))
             avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
-            entry = f"{p} — {_ord(best_r)}/{best_s} · avg top {100-avg_pct:.0f}%"
-        most_dominant.append(entry)
+            parts.append(f"avg top {100-avg_pct:.0f}% lobby")
+        most_dominant.append(f"{p} — {' · '.join(parts)}")
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -349,9 +368,9 @@ def build_favourites_embed(stats):
     return (
         header +
         f"\n"
-        f"**<a:mostlethal:1520490418817601658> Lethality** *(kill rate × lobby kills rank, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
+        f"**<a:mostlethal:1520490418817601658> Lethality** *(kill conversion + kills vs lobby avg, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
         f"\n"
-        f"**<:warlord:1520490364039860347> Warlord** *(lobby dominance, min 2 runs)*\n" + warlord_section +
+        f"**<:warlord:1520490364039860347> Warlord** *(TD + kill dominance vs lobby, min 2 runs)*\n" + warlord_section +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"
         f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
