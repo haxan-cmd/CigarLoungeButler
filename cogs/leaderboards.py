@@ -1077,10 +1077,6 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
 
-
-async def setup(bot):
-    await bot.add_cog(LeaderboardsCog(bot))
-
     @app_commands.command(name="repair_marks", description="Backfill missing High Score marks from leaderboard entries (mod only)")
     async def repair_marks(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -1174,3 +1170,7 @@ async def setup(bot):
         if errors:
             summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary)
+
+
+async def setup(bot):
+    await bot.add_cog(LeaderboardsCog(bot))
