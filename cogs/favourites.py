@@ -510,5 +510,6 @@ class FavouritesCog(commands.Cog):
             await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
 
 
+
 async def setup(bot):
     await bot.add_cog(FavouritesCog(bot))

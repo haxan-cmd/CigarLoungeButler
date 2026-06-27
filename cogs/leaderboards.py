@@ -563,15 +563,18 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-        # Cap 100 Kills / 200 Takedowns display at top 50
+        # 100 Kills / 200 Takedowns always live in a single message — cap at top 50,
+        # then pack everything into exactly 1 slot so order never breaks.
         if lb_name in ("100 Kills", "200 Takedowns"):
             display_entries = entries[:50]
             overflow = len(entries) - 50
+            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=True)
+            packed = pack_chunks_into_slots(chunks, 1)
         else:
             display_entries = entries
             overflow = 0
-
-        chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
+            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=False)
+            packed = None  # use standard multi-slot logic below
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -584,7 +587,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-            if len(chunks) <= len(message_ids):
+            if packed is not None:
+                # Single-message board — just edit the first slot
+                if message_ids:
+                    try:
+                        msg = await thread.fetch_message(message_ids[0])
+                        await msg.edit(content=packed[0])
+                    except Exception as e:
+                        print(f"Discord edit error for {lb_name} msg {message_ids[0]}: {e}")
+            elif len(chunks) <= len(message_ids):
                 # Happy path — fits in what we already have, just edit in place
                 packed = pack_chunks_into_slots(chunks, len(message_ids))
                 for idx, mid in enumerate(message_ids):
@@ -865,11 +876,13 @@ class LeaderboardsCog(commands.Cog):
             if lb_name in ("100 Kills", "200 Takedowns"):
                 overflow = max(0, len(entries) - 50)
                 display_entries = entries[:50]
+                chunks = format_leaderboard_text(display_entries, overflow, show_weapon=True)
+                refresh_packed = pack_chunks_into_slots(chunks, 1)
             else:
                 overflow = 0
                 display_entries = entries
-
-            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=(lb_name in ("100 Kills", "200 Takedowns")))
+                chunks = format_leaderboard_text(display_entries, overflow, show_weapon=False)
+                refresh_packed = None
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -878,7 +891,14 @@ class LeaderboardsCog(commands.Cog):
                 guild = interaction.guild
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-                if len(chunks) <= len(message_ids):
+                if refresh_packed is not None:
+                    if message_ids:
+                        try:
+                            msg = await thread.fetch_message(message_ids[0])
+                            await msg.edit(content=refresh_packed[0])
+                        except Exception as e:
+                            print(f"Refresh edit error for {lb_name} msg {message_ids[0]}: {e}")
+                elif len(chunks) <= len(message_ids):
                     packed = pack_chunks_into_slots(chunks, len(message_ids))
                     for idx, mid in enumerate(message_ids):
                         try:
