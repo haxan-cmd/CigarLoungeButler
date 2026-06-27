@@ -2211,17 +2211,134 @@ class RegistryCog(commands.Cog):
             if len(weapon_lines_filtered) >= 10:
                 break
 
-        # Build output
-        lines = [f"**Progress \u2014 {resolved_name}**", ""]
-        lines.append("**Butler's Favourites**")
+        # \u2500\u2500 Personal bests from submissions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        all_subs = cached_submissions()
+        discord_id_str_for_subs = discord_id_str
+        player_subs = [r for r in all_subs if len(r) > 8 and r[2].strip() == discord_id_str_for_subs]
+        sub_count = len(player_subs)
+
+        best_td_row = None
+        best_kills_row = None
+        pb_td = 0
+        pb_kills = 0
+        td_list = []
+        kill_list = []
+        for r in player_subs:
+            try:
+                rtd = int(r[7]); rk = int(r[8])
+            except (ValueError, IndexError):
+                continue
+            td_list.append(rtd); kill_list.append(rk)
+            if rtd > pb_td:
+                pb_td = rtd; best_td_row = r
+            if rk > pb_kills:
+                pb_kills = rk; best_kills_row = r
+
+        # Legacy LeaderboardData check for best TD
+        ld_all = cached_leaderboard_data()
+        for ld_r in ld_all:
+            if len(ld_r) < 4:
+                continue
+            if ld_r[1].strip() != resolved_name:
+                continue
+            lb = ld_r[0].strip()
+            if ' - ' in lb or lb in {'Flawless', 'Healing Horn', '200 Takedowns', '100 Kills'}:
+                continue
+            try:
+                ld_td = int(ld_r[3])
+            except ValueError:
+                continue
+            if ld_td > pb_td:
+                pb_td = ld_td
+                best_td_row = ['legacy', resolved_name, '', lb, '', '', '', str(ld_td), '?', '?']
+
+        def _pb_str(row):
+            if row is None:
+                return None
+            is_legacy = row[0] == 'legacy'
+            weapon = row[3].strip() if len(row) > 3 else '?'
+            tds = row[7].strip() if len(row) > 7 else '?'
+            if is_legacy:
+                return f"**{weapon}** \u2014 {tds} TD *(legacy, no map data)*"
+            map_ = row[5].strip() if len(row) > 5 else '?'
+            kills = row[8].strip() if len(row) > 8 else '?'
+            deaths = row[9].strip() if len(row) > 9 else '?'
+            return f"**{weapon}** \u2014 {tds} TD / {kills} K / {deaths} D on {map_}"
+
+        # Kill rate
+        kill_rate_str = ''
+        if len(td_list) >= 3:
+            avg_td = sum(td_list) / len(td_list)
+            avg_k = sum(kill_list) / len(kill_list)
+            kr = (avg_k / avg_td * 100) if avg_td > 0 else 0
+            kill_rate_str = f"{kr:.0f}% kill rate across {len(td_list)} runs (avg {avg_td:.0f} TD / {avg_k:.0f} K)"
+
+        # \u2500\u2500 Special Ops \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        special_ops = get_special_ops_for_player(int(discord_id_str))
+        # \u2500\u2500 Bounties completed \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        bounties_done = get_player_bounties_completed(int(discord_id_str))
+        # \u2500\u2500 Butler titles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        try:
+            from cogs.favourites import calculate_butler_stats
+            fav_stats = calculate_butler_stats()
+            butler_titles = get_butler_titles_for_player(int(discord_id_str), fav_stats)
+        except Exception:
+            butler_titles = []
+
+        # \u2500\u2500 Total marks \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        total_marks = sum(flat_marks.values())
+
+        # \u2500\u2500 Build output \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        cigar = "<:cigar:1444893851427803298>"
+        lines = [f"{cigar} **{resolved_name}** \u2014 {total_marks} marks across {sub_count} submissions", ""]
+
+        # Butler titles held
+        if butler_titles:
+            lines.append("**Current Titles**")
+            lines.extend(butler_titles)
+            lines.append("")
+
+        lines.append("**Title Standings**")
         lines.extend(title_lines)
+
         if weapon_lines_filtered:
             lines.append("")
-            lines.append("**Weapon Ranks** *(Gold+, top 10)*")
+            lines.append("**Weapon Ranks** *(Gold+)*")
             lines.extend(weapon_lines_filtered)
         elif not flat_marks:
             lines.append("")
             lines.append("*No weapon marks recorded yet.*")
+
+        # Personal bests
+        pb_td_str = _pb_str(best_td_row)
+        pb_kills_row = best_kills_row
+        if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or kill_rate_str:
+            lines.append("")
+            lines.append("**Personal Bests**")
+            if pb_td_str:
+                lines.append(f"<a:toptkd:1360312666475728958> {pb_td_str}")
+            if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
+                lines.append(f"<a:topkill:1360314538364240024> {_pb_str(pb_kills_row)}")
+            if kill_rate_str:
+                lines.append(f"\u2694\ufe0f {kill_rate_str}")
+
+        # Special Ops
+        if special_ops:
+            lines.append("")
+            lines.append("**Special Ops**")
+            ops_parts = []
+            for feat, link in special_ops.items():
+                emoji = SPECIAL_OPS_EMOJIS.get(feat, "")
+                if link:
+                    ops_parts.append(f"[{emoji} {feat}]({link})")
+                else:
+                    ops_parts.append(f"{emoji} {feat}")
+            lines.append("  ".join(ops_parts))
+
+        # Bounties
+        if bounties_done:
+            lines.append("")
+            lines.append(f"**Bounties** \u2014 \ud83c\udfc6 {bounties_done} completed")
 
         output = "\n".join(lines)
         await interaction.followup.send(output[:1900])

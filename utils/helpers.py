@@ -1,7 +1,36 @@
+import os
 import random
 from datetime import datetime
 
 import config
+
+# Shared Anthropic client — initialised once, used by any cog that needs a quick Butler line
+_anthropic_client = None
+try:
+    import anthropic as _anthropic
+    _anthropic_client = _anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+except Exception:
+    pass
+
+_BUTLER_SYSTEM_BRIEF = (
+    "You are the Butler — dry, sardonic, one or two sentences max. "
+    "Never say 'great', 'awesome', or use exclamation marks. Never break character."
+)
+
+def butler_quip(prompt: str, fallback: str = '') -> str:
+    """Call Haiku for a short Butler line. Returns fallback if unavailable."""
+    if not _anthropic_client:
+        return fallback
+    try:
+        r = _anthropic_client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=60,
+            system=_BUTLER_SYSTEM_BRIEF,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return r.content[0].text.strip()
+    except Exception:
+        return fallback
 
 
 def parse_submission_text(text):
@@ -94,7 +123,7 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
 
 # Shared mutable state between submissions and personality cogs.
 # Using a dict so both modules mutate the same object after import.
-submission_state = {'last_submission_time': None}
+submission_state = {'last_submission_time': None, 'dry_spell_posted': False}
 
 # In-memory log for the hourly digest posted to nerve center.
 # Nothing persists across restarts — intentional, digest is ephemeral.

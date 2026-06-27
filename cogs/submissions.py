@@ -24,7 +24,7 @@ from utils.helpers import (
     parse_submission_text, format_weapon_marks,
     detect_weapon_milestones, build_milestone_message,
     nerve_log_submission, nerve_log_error, nerve_log_milestone,
-    submission_state,
+    submission_state, butler_quip,
 )
 
 MOD_ROLE_ID            = config.MOD_ROLE_ID
@@ -884,7 +884,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         update_butlers_archive_row,
         get_weapon_rank,
     )
-    from cogs.favourites import calculate_butler_stats, update_title_roles
+    from cogs.favourites import calculate_butler_stats, update_title_roles, build_favourites_embed
     feats = []
     if kills >= 100:
         feats.append("100 Kills")
@@ -1094,38 +1094,61 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     try:
         main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
         now = datetime.now(timezone.utc)
+        player = interaction.user.display_name
 
         if main_channel:
             # Dry spell — first submission after 4+ hours of silence
             if submission_state['last_submission_time'] and (now - submission_state['last_submission_time']).total_seconds() > 14400:
-                await main_channel.send("Yes. Yes, I am awake.")
+                line = butler_quip(
+                    "The lounge has been dead for hours and someone just submitted a run. "
+                    "React as the Butler — one dry line about finally seeing some activity. Vary it each time.",
+                    fallback="The lounge stirs. About time."
+                )
+                await main_channel.send(f"*{line}*")
 
             # New player first submission
             if is_new_player:
-                await main_channel.send(f"*A new arrival. The Butler acknowledges you,* {interaction.user.display_name}.")
+                line = butler_quip(
+                    f"A new player named {player} has just submitted their first run. "
+                    "Acknowledge them briefly as the Butler — dry, not warm, but not unkind. One sentence.",
+                    fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
+                )
+                await main_channel.send(line if line.startswith('*') else f"*{line}*")
 
             # New #1 on any leaderboard
             new_firsts = [lb for lb, pos in placements if pos == 1]
             if new_firsts:
-                await main_channel.send(f"On top. But for how long.")
+                boards = ", ".join(new_firsts)
+                line = butler_quip(
+                    f"{player} just took the top spot on the {boards} leaderboard. "
+                    "React as the Butler — acknowledge it but add doubt or dry skepticism about how long it lasts. One sentence.",
+                    fallback="On top. But for how long."
+                )
+                await main_channel.send(f"*{line}*")
 
             # Bounty completion
             if newly_completed:
-                await main_channel.send(
-                    f"The bounty is settled. **{interaction.user.display_name}** has seen to it. "
-                    f"The bald woman would have done it faster, I imagine."
+                line = butler_quip(
+                    f"{player} just completed the bounty. React as the Butler — acknowledge it, "
+                    "maybe reference the bald woman (Bald Female, a server legend) in comparison. One or two sentences.",
+                    fallback=f"The bounty is settled. **{player}** has seen to it."
                 )
+                await main_channel.send(line)
 
         # Flawless — reply in submissions channel
         if deaths == 0:
+            line = butler_quip(
+                f"{player} just submitted a run with 0 deaths on the {selected_weapon}. "
+                "React as the Butler — one dry line about a flawless run. Can reference the bald woman's shiny head as a metaphor for perfection. Vary it each time.",
+                fallback="*Immaculate. Not a scratch.*"
+            )
             await original_message.reply(
-                "*Immaculate. As flawless as the bald woman's head.*",
+                line if line.startswith('*') else f"*{line}*",
                 mention_author=False
             )
 
         submission_state['last_submission_time'] = now
-        global _dry_spell_posted
-        _dry_spell_posted = False
+        submission_state['dry_spell_posted'] = False
 
     except Exception as e:
         print(f"Butler personality error: {e}")
