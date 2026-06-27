@@ -1150,7 +1150,7 @@ class LeaderboardsCog(commands.Cog):
 
         _sheet_cache.invalidate(submissions_ws)
 
-        # Rebuild registry cards for affected players
+        # Rebuild registry cards for affected players — slow loop to avoid Sheets quota (429)
         rebuilt = []
         for player_name, player_id in affected_players:
             if not player_id:
@@ -1158,9 +1158,10 @@ class LeaderboardsCog(commands.Cog):
             try:
                 await create_or_update_registry_card(interaction.guild, player_id, player_name)
                 rebuilt.append(player_name)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(3.0)  # stay well under Google's write quota
             except Exception as e:
                 errors.append(f"Registry rebuild for {player_name}: {e}")
+                await asyncio.sleep(3.0)  # still wait even on error to avoid cascading 429s
 
         summary = (
             f"✅ Backfilled High Score on **{len(patched_rows)}** submission(s) "
