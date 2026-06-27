@@ -492,9 +492,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 break
 
         if unlimited_top50:
-            # Always append, no cap, no personal best check
+            # Always append, no cap, no personal best check.
+            # Do NOT set any_updated — feat boards (100 Kills, 200 TD) are always-append
+            # and should never trigger the High Score bonus mark.
             leaderboard_data_ws.append_row([lb_name, player_name, discord_id, score, message_link, selected_weapon])
-            any_updated = True
             # Find position after append
             all_board = [int(r[3]) for r in all_values[1:] if r[0] == lb_name and len(r) > 3 and r[3]]
             all_board.append(score)

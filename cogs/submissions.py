@@ -1627,6 +1627,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
         # Write High Score feat back to the Submissions sheet so mark totals count it
+        _high_score_written = False
         if submission_row:
             try:
                 current_feats = submissions_ws.cell(submission_row, 12).value or ''
@@ -1636,8 +1637,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         updated_feats = 'High Score'
                     submissions_ws.update_cell(submission_row, 12, updated_feats)
                     _sheet_cache.invalidate(submissions_ws)
+                    _high_score_written = True
             except Exception as e:
                 print(f"Highscore feat write error: {e}")
+        # Re-run registry card now that High Score is in the sheet — the bg_tasks pass
+        # ran before leaderboard update so it missed this mark.
+        if _high_score_written:
+            try:
+                await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
+                print(f"[HIGHSCORE] Registry card refreshed after High Score feat write for {interaction.user.display_name}")
+            except Exception as e:
+                print(f"Highscore registry refresh error: {e}")
         # Edit summary message to show the bonus mark
         try:
             async for msg in original_message.channel.history(limit=10, after=original_message):
