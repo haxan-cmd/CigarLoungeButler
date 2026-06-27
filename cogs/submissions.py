@@ -128,83 +128,92 @@ class SubmitView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
+        # Prevent double-processing if user clicks twice or Discord replays the interaction
+        msg_id = self.original_message.id
+        if msg_id in _active_vision:
+            await interaction.response.send_message("Already processing your submission — please wait.", ephemeral=True)
+            return
+        _active_vision.add(msg_id)
         # Defer so vision has time to run without hitting the 3s interaction deadline
         await interaction.response.defer(ephemeral=True)
 
         # Try vision parse if there's an image attachment
         # Run in a thread so the blocking Anthropic HTTP call doesn't stall the event loop
         parsed = None
-        print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
-        for att in self.original_message.attachments:
-            if att.content_type and att.content_type.startswith('image/'):
-                parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
-                print(f"[VISION] Raw parsed result: {parsed}")
-                break
-            elif not att.content_type:
-                # content_type can be None — fall back to filename extension check
-                if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+        try:
+            print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
+            for att in self.original_message.attachments:
+                if att.content_type and att.content_type.startswith('image/'):
                     parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
-                    print(f"[VISION] Raw parsed result (ext check): {parsed}")
+                    print(f"[VISION] Raw parsed result: {parsed}")
                     break
-
-        # Validate parsed fields against known lists and sanity bounds
-        if parsed:
-            if parsed.get('weapon') not in (list(config.WEAPONS_1H) + list(config.WEAPONS_2H) + list(config.FEAT_WEAPONS)):
-                parsed['weapon'] = None
-            if parsed.get('subclass') not in config.CLASS_WEAPON_MAP:
-                parsed['subclass'] = None
-            if parsed.get('map') not in config.MAP_FACTIONS:
-                parsed['map'] = None
-            if parsed.get('faction') not in ('Agatha', 'Mason', 'Tenosia'):
-                parsed['faction'] = None
-            # Sanity bounds on stats — if they look wrong, null them so the modal is blank
-            td = parsed.get('takedowns')
-            k  = parsed.get('kills')
-            d  = parsed.get('deaths')
-            if td is not None and (td < 5 or td > 600):
-                parsed['takedowns'] = parsed['kills'] = parsed['deaths'] = None
-            elif k is not None and td is not None and k > td:
-                parsed['kills'] = None  # kills can't exceed takedowns
-            if d is not None and (d < 0 or d > 100):
-                parsed['deaths'] = None
-
-        vision_useful = parsed and any(
-            parsed.get(f) is not None
-            for f in ('weapon', 'subclass', 'takedowns', 'kills', 'deaths')
-        )
-
-        if vision_useful:
-            view = VisionConfirmView(self.original_message, self.prompt_msg, parsed)
-            lines = ["\ud83d\udccb **I read the following from your scorecard:**"]
-            if parsed.get('subclass'):              lines.append(f"Class: `{parsed['subclass']}`")
-            if parsed.get('weapon'):                lines.append(f"Weapon: `{parsed['weapon']}`")
-            if parsed.get('map'):                   lines.append(f"Map: `{parsed['map']}`")
-            if parsed.get('faction'):               lines.append(f"Faction: `{parsed['faction']}`")
-            if parsed.get('takedowns') is not None: lines.append(f"Takedowns: `{parsed['takedowns']}`")
-            if parsed.get('kills') is not None:     lines.append(f"Kills: `{parsed['kills']}`")
-            if parsed.get('deaths') is not None:    lines.append(f"Deaths: `{parsed['deaths']}`")
-            missing = [f for f in ('subclass', 'weapon', 'map', 'faction', 'takedowns', 'kills', 'deaths') if parsed.get(f) is None]
-            if missing:
-                lines.append(f"\n*Could not read: {', '.join(missing)} \u2014 you'll be asked for those next.*")
-            await interaction.followup.send(content="\n".join(lines), view=view, ephemeral=True)
-        else:
-            # Vision got nothing useful \u2014 caption parse then full form
-            caption = self.original_message.content.strip()
-            detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
-            if detected_weapon or detected_subclass:
-                view = ParseConfirmView(self.original_message, self.prompt_msg, detected_weapon, detected_subclass)
-                hints = []
-                if detected_weapon:   hints.append(f"Weapon: `{detected_weapon}`")
-                if detected_subclass: hints.append(f"Class: `{detected_subclass}`")
-                await interaction.followup.send(
-                    content="\ud83d\udccb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
-                    view=view,
-                    ephemeral=True
-                )
+                elif not att.content_type:
+                    # content_type can be None — fall back to filename extension check
+                    if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
+                        print(f"[VISION] Raw parsed result (ext check): {parsed}")
+                        break
+    
+            # Validate parsed fields against known lists and sanity bounds
+            if parsed:
+                if parsed.get('weapon') not in (list(config.WEAPONS_1H) + list(config.WEAPONS_2H) + list(config.FEAT_WEAPONS)):
+                    parsed['weapon'] = None
+                if parsed.get('subclass') not in config.CLASS_WEAPON_MAP:
+                    parsed['subclass'] = None
+                if parsed.get('map') not in config.MAP_FACTIONS:
+                    parsed['map'] = None
+                if parsed.get('faction') not in ('Agatha', 'Mason', 'Tenosia'):
+                    parsed['faction'] = None
+                # Sanity bounds on stats — if they look wrong, null them so the modal is blank
+                td = parsed.get('takedowns')
+                k  = parsed.get('kills')
+                d  = parsed.get('deaths')
+                if td is not None and (td < 5 or td > 600):
+                    parsed['takedowns'] = parsed['kills'] = parsed['deaths'] = None
+                elif k is not None and td is not None and k > td:
+                    parsed['kills'] = None  # kills can't exceed takedowns
+                if d is not None and (d < 0 or d > 100):
+                    parsed['deaths'] = None
+    
+            vision_useful = parsed and any(
+                parsed.get(f) is not None
+                for f in ('weapon', 'subclass', 'takedowns', 'kills', 'deaths')
+            )
+    
+            if vision_useful:
+                view = VisionConfirmView(self.original_message, self.prompt_msg, parsed)
+                lines = ["\ud83d\udccb **I read the following from your scorecard:**"]
+                if parsed.get('subclass'):              lines.append(f"Class: `{parsed['subclass']}`")
+                if parsed.get('weapon'):                lines.append(f"Weapon: `{parsed['weapon']}`")
+                if parsed.get('map'):                   lines.append(f"Map: `{parsed['map']}`")
+                if parsed.get('faction'):               lines.append(f"Faction: `{parsed['faction']}`")
+                if parsed.get('takedowns') is not None: lines.append(f"Takedowns: `{parsed['takedowns']}`")
+                if parsed.get('kills') is not None:     lines.append(f"Kills: `{parsed['kills']}`")
+                if parsed.get('deaths') is not None:    lines.append(f"Deaths: `{parsed['deaths']}`")
+                missing = [f for f in ('subclass', 'weapon', 'map', 'faction', 'takedowns', 'kills', 'deaths') if parsed.get(f) is None]
+                if missing:
+                    lines.append(f"\n*Could not read: {', '.join(missing)} \u2014 you'll be asked for those next.*")
+                await interaction.followup.send(content="\n".join(lines), view=view, ephemeral=True)
             else:
-                all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
-                view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
-                await interaction.followup.send(content="Which class were you playing?", view=view, ephemeral=True)
+                # Vision got nothing useful \u2014 caption parse then full form
+                caption = self.original_message.content.strip()
+                detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
+                if detected_weapon or detected_subclass:
+                    view = ParseConfirmView(self.original_message, self.prompt_msg, detected_weapon, detected_subclass)
+                    hints = []
+                    if detected_weapon:   hints.append(f"Weapon: `{detected_weapon}`")
+                    if detected_subclass: hints.append(f"Class: `{detected_subclass}`")
+                    await interaction.followup.send(
+                        content="\ud83d\udccb I noticed the following in your caption \u2014 does this look right?\n" + "  |  ".join(hints),
+                        view=view,
+                        ephemeral=True
+                    )
+                else:
+                    all_melee_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]])
+                    view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_melee_classes)
+                    await interaction.followup.send(content="Which class were you playing?", view=view, ephemeral=True)
+        finally:
+            _active_vision.discard(msg_id)
 
     @discord.ui.button(label='Dismiss', style=discord.ButtonStyle.grey, emoji='✖️')
     async def dismiss_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -458,23 +467,118 @@ class RangedWeaponSelect(discord.ui.Select):
         )
 
 
-class ClassSelectView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None, vision_data=None):
-        super().__init__(timeout=300)
-        self.vision_data = vision_data or {}
-        self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon, vision_data))
+def _fuzzy_match(query, options):
+    """Return options whose name contains the query (case-insensitive)."""
+    q = query.strip().lower()
+    return [o for o in options if q in o.lower()]
 
-class ClassSelect(discord.ui.Select):
+
+async def _proceed_weapon(interaction, original_message, prompt_msg, selected_class, selected_weapon, vision_data):
+    """Shared logic after a weapon is confirmed."""
+    vd = {**vision_data, 'weapon': selected_weapon}
+    if vd.get('map') and vd.get('faction'):
+        await interaction.response.send_modal(
+            StatsModal(original_message, prompt_msg, selected_class, selected_weapon,
+                       vd['map'], vd['faction'],
+                       prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
+                       vision_data=vd)
+        )
+    elif vd.get('map'):
+        view = FactionSelectView(original_message, prompt_msg, selected_class, selected_weapon, vd['map'], vision_data=vd)
+        await interaction.response.edit_message(
+            content=f"Class: `{selected_class}` | Weapon: `{selected_weapon}` | Map: `{vd['map']}`. Which faction?",
+            view=view
+        )
+    else:
+        view = MapSelectView(original_message, prompt_msg, selected_class, selected_weapon, vision_data=vd)
+        await interaction.response.edit_message(
+            content=f"Class: `{selected_class}` | Weapon: `{selected_weapon}`. Which map?",
+            view=view
+        )
+
+
+class ClassSearchModal(discord.ui.Modal, title="Class Search"):
+    query = discord.ui.TextInput(
+        label="Type class name",
+        placeholder="e.g. Devastator, Long...",
+        required=True, max_length=30
+    )
+
     def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None, vision_data=None):
+        super().__init__()
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.category = category
         self.classes = classes
         self.pre_detected_weapon = pre_detected_weapon
         self.vision_data = vision_data or {}
-        CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
-        sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-        options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        matches = _fuzzy_match(self.query.value, self.classes)
+        if not matches:
+            await interaction.response.send_message(
+                f"No class matching **{self.query.value}**. Try again.", ephemeral=True)
+            return
+        if len(matches) == 1:
+            selected_class = matches[0]
+            vd = {**self.vision_data, 'subclass': selected_class}
+            if self.pre_detected_weapon:
+                view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
+                await interaction.response.edit_message(
+                    content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?", view=view)
+            else:
+                weapons = get_all_weapons_for_class(selected_class)
+                view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons,
+                                        vision_data=vd, all_classes=self.classes, category=self.category)
+                await interaction.response.edit_message(
+                    content=f"Class: `{selected_class}`. Which weapon?", view=view)
+        else:
+            view = ClassSelectView(self.original_message, self.prompt_msg, self.category,
+                                   matches, self.pre_detected_weapon, self.vision_data)
+            await interaction.response.edit_message(
+                content=f"Found {len(matches)} matches — pick one:", view=view)
+
+
+class ClassSelectView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None, vision_data=None):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.category = category
+        self.classes = classes
+        self.pre_detected_weapon = pre_detected_weapon
+        self.vision_data = vision_data or {}
+        if classes:
+            CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
+            sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
+            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:25]]
+            self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon, vision_data, options))
+
+    @discord.ui.button(label="Search Class", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
+    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            ClassSearchModal(self.original_message, self.prompt_msg, self.category,
+                             self.classes, self.pre_detected_weapon, self.vision_data))
+
+
+class ClassSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg, category, classes, pre_detected_weapon=None, vision_data=None, options=None):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.category = category
+        self.classes = classes
+        self.pre_detected_weapon = pre_detected_weapon
+        self.vision_data = vision_data or {}
+        if options is None:
+            CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
+            sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
+            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:25]]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -486,16 +590,51 @@ class ClassSelect(discord.ui.Select):
         if self.pre_detected_weapon:
             view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
             await interaction.response.edit_message(
-                content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?",
-                view=view
-            )
+                content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?", view=view)
         else:
             weapons = get_all_weapons_for_class(selected_class)
-            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons, vision_data=vd, all_classes=self.classes, category=self.category)
+            view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons,
+                                    vision_data=vd, all_classes=self.classes, category=self.category)
             await interaction.response.edit_message(
-                content=f"Class: `{selected_class}`. Which weapon?",
-                view=view
-            )
+                content=f"Class: `{selected_class}`. Which weapon?", view=view)
+
+
+class WeaponSearchModal(discord.ui.Modal, title="Weapon Search"):
+    query = discord.ui.TextInput(
+        label="Type weapon name",
+        placeholder="e.g. Longsword, Knife...",
+        required=True, max_length=30
+    )
+
+    def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None, all_classes=None, category="all"):
+        super().__init__()
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_class = selected_class
+        self.weapons = weapons
+        self.vision_data = vision_data or {}
+        self.all_classes = all_classes or sorted(CLASS_WEAPON_MAP.keys())
+        self.category = category
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        matches = _fuzzy_match(self.query.value, self.weapons)
+        if not matches:
+            await interaction.response.send_message(
+                f"No weapon matching **{self.query.value}**. Try again.", ephemeral=True)
+            return
+        if len(matches) == 1:
+            await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                                  self.selected_class, matches[0], self.vision_data)
+        else:
+            view = WeaponSelectView(self.original_message, self.prompt_msg, self.selected_class,
+                                    matches, vision_data=self.vision_data,
+                                    all_classes=self.all_classes, category=self.category)
+            await interaction.response.edit_message(
+                content=f"Class: `{self.selected_class}`. Found {len(matches)} matches — pick one:", view=view)
+
 
 class WeaponSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None, all_classes=None, category="all"):
@@ -504,12 +643,23 @@ class WeaponSelectView(discord.ui.View):
         self.prompt_msg = prompt_msg
         self.selected_class = selected_class
         self.vision_data = vision_data or {}
-        # Preserve the original class list so Back can restore it correctly
         self.all_classes = all_classes or sorted(CLASS_WEAPON_MAP.keys())
         self.category = category
-        self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons, vision_data))
+        self.weapons = weapons
+        if weapons:
+            options = [discord.SelectOption(label=w) for w in weapons[:25]]
+            self.add_item(WeaponSelect(original_message, prompt_msg, selected_class, weapons, vision_data, options))
 
-    @discord.ui.button(label='Back', style=discord.ButtonStyle.grey, emoji='◀️', row=1)
+    @discord.ui.button(label="Search Weapon", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
+    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            WeaponSearchModal(self.original_message, self.prompt_msg, self.selected_class,
+                              self.weapons, self.vision_data, self.all_classes, self.category))
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.grey, emoji="◀️", row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
@@ -517,13 +667,16 @@ class WeaponSelectView(discord.ui.View):
         view = ClassSelectView(self.original_message, self.prompt_msg, self.category, self.all_classes, vision_data=self.vision_data)
         await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
+
 class WeaponSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None):
+    def __init__(self, original_message, prompt_msg, selected_class, weapons, vision_data=None, options=None):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.selected_class = selected_class
         self.vision_data = vision_data or {}
-        options = [discord.SelectOption(label=w) for w in weapons]
+        self.weapons_list = weapons
+        if options is None:
+            options = [discord.SelectOption(label=w) for w in weapons[:25]]
         super().__init__(placeholder="Choose your weapon...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -531,27 +684,8 @@ class WeaponSelect(discord.ui.Select):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
         selected_weapon = self.values[0]
-        vd = {**self.vision_data, 'weapon': selected_weapon}
-        # Skip map/faction steps if vision already has them
-        if vd.get('map') and vd.get('faction'):
-            await interaction.response.send_modal(
-                StatsModal(self.original_message, self.prompt_msg, self.selected_class, selected_weapon,
-                           vd['map'], vd['faction'],
-                           prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
-                           vision_data=vd)
-            )
-        elif vd.get('map'):
-            view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon, vd['map'], vision_data=vd)
-            await interaction.response.edit_message(
-                content=f"Class: `{self.selected_class}` | Weapon: `{selected_weapon}` | Map: `{vd['map']}`. Which faction?",
-                view=view
-            )
-        else:
-            view = MapSelectView(self.original_message, self.prompt_msg, self.selected_class, selected_weapon, vision_data=vd)
-            await interaction.response.edit_message(
-                content=f"Class: `{self.selected_class}` | Weapon: `{selected_weapon}`. Which map?",
-                view=view
-            )
+        await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                              self.selected_class, selected_weapon, self.vision_data)
 
 class MapSelectView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, vision_data=None):
@@ -1323,7 +1457,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if takedowns >= 150 and kills >= 100 and score_over_20k:
         await safe_react("<a:triple:1365532698260668466>")
 
-    is_ranged = selected_class.startswith("Marksman")
+    is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
 
     # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
     # and beats the player's own existing score on that board
@@ -1631,6 +1765,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     asyncio.create_task(_bg_tasks())
 
+
+_active_vision: set[int] = set()  # prevents double-processing same message
 
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):

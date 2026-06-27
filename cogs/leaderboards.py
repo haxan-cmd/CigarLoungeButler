@@ -92,12 +92,24 @@ async def build_ledger_entrance(guild):
             print(f"Ledger entrance sheet read error: {e}")
             return
 
-        def board_links(names_and_ids, guild_id):
-            """Turn a list of (display_name, thread_id) into inline bullet links."""
-            return ' • '.join(
-                f"[{name}](https://discord.com/channels/{guild_id}/{tid})"
-                for name, tid in names_and_ids
-            )
+        def board_links(names_and_ids, guild_id, max_chars=1600):
+            """Turn a list of (display_name, thread_id) into inline bullet links, capped to fit."""
+            links = []
+            for name, tid in names_and_ids:
+                links.append(f"[{name}](https://discord.com/channels/{guild_id}/{tid})")
+            result = ' • '.join(links)
+            if len(result) <= max_chars:
+                return result
+            # Truncate: keep as many as fit, add overflow note
+            kept = []
+            for link in links:
+                candidate = ' • '.join(kept + [link])
+                if len(candidate) > max_chars - 30:
+                    remaining = len(links) - len(kept)
+                    kept.append(f"*+{remaining} more*")
+                    break
+                kept.append(link)
+            return ' • '.join(kept)
 
         guild_id = guild.id
 
