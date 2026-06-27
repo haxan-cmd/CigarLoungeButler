@@ -1080,3 +1080,97 @@ class LeaderboardsCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(LeaderboardsCog(bot))
+
+    @app_commands.command(name="repair_marks", description="Backfill missing High Score marks from leaderboard entries (mod only)")
+    async def repair_marks(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        from cogs.registry import create_or_update_registry_card
+
+        # leaderboard_data_ws: [lb_name, player, discord_id, score, message_link, weapon]
+        # submissions_ws:       [timestamp, name, discord_id, weapon, cls, map, faction,
+        #                        td, kills, deaths, vip, feats, message_link, ...]
+        # Match on message_link (col E in lb_data = col M in subs, index 12)
+        try:
+            lb_rows  = leaderboard_data_ws.get_all_values()[1:]
+            sub_rows = submissions_ws.get_all_values()  # keep header for row indexing
+        except Exception as e:
+            await interaction.edit_original_response(content=f"Sheet read failed: {e}")
+            return
+
+        # Build index: message_link -> (sheet_row_number, feats_string)
+        # Ignore feat boards (100 Kills / 200 Takedowns) — those never earn High Score
+        FEAT_BOARDS = {"100 Kills", "200 Takedowns", "Flawless"}
+        link_to_sub = {}
+        for i, row in enumerate(sub_rows[1:], start=2):
+            if len(row) < 13:
+                continue
+            link = row[12].strip()
+            if link:
+                link_to_sub[link] = (i, row[11].strip())  # (row_num, feats)
+
+        patched_rows = []
+        affected_players = set()
+
+        for lb_row in lb_rows:
+            if len(lb_row) < 5:
+                continue
+            lb_name    = lb_row[0].strip()
+            player     = lb_row[1].strip()
+            discord_id = lb_row[2].strip()
+            link       = lb_row[4].strip()
+
+            if lb_name in FEAT_BOARDS:
+                continue
+            if not link or link not in link_to_sub:
+                continue
+
+            row_num, feats_str = link_to_sub[link]
+            feats = [f.strip() for f in feats_str.split(',') if f.strip() and f.strip() != 'None']
+
+            if 'High Score' not in feats:
+                patched_rows.append((row_num, feats_str, player, discord_id, lb_name))
+
+        if not patched_rows:
+            await interaction.edit_original_response(content="✅ No missing High Score marks found — all entries look correct.")
+            return
+
+        # Apply patches
+        errors = []
+        for row_num, old_feats, player, discord_id, lb_name in patched_rows:
+            try:
+                if old_feats in ('', 'None', 'none'):
+                    new_feats = 'High Score'
+                else:
+                    new_feats = old_feats.rstrip(', ') + ', High Score'
+                submissions_ws.update_cell(row_num, 12, new_feats)
+                affected_players.add((player, int(discord_id) if discord_id.isdigit() else None))
+                await asyncio.sleep(0.3)  # rate limit
+            except Exception as e:
+                errors.append(f"Row {row_num} ({player}): {e}")
+
+        _sheet_cache.invalidate(submissions_ws)
+
+        # Rebuild registry cards for affected players
+        rebuilt = []
+        for player_name, player_id in affected_players:
+            if not player_id:
+                continue
+            try:
+                await create_or_update_registry_card(interaction.guild, player_id, player_name)
+                rebuilt.append(player_name)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                errors.append(f"Registry rebuild for {player_name}: {e}")
+
+        summary = (
+            f"✅ Backfilled High Score on **{len(patched_rows)}** submission(s) "
+            f"across **{len(affected_players)}** player(s).\n"
+            f"Registry cards rebuilt: {', '.join(rebuilt) or 'none'}"
+        )
+        if errors:
+            summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
+        await interaction.edit_original_response(content=summary)
