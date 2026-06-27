@@ -1,7 +1,6 @@
-"""
-cogs/favourites.py — Butler stats calculation, favourites embed, title roles, /butlers_report.
-"""
+# Stats calculation, Butler's Favourites embed, title role assignment, and /butlers_report.
 import time
+from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -32,10 +31,8 @@ BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
 _butlers_report_cooldowns = {}
 
 def calculate_butler_stats(week_start=None, week_end=None):
-    """Pull stats from Submissions and LeaderboardData sheets.
-    If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
-    Titles always use all-time data regardless of window.
-    """
+    # week_start/end are UTC timestamps — if passed, submission stats are scoped to that window.
+    # Title holders (Grand Marshal etc.) always use all-time data regardless.
     all_subs = cached_submissions()
     ld = cached_leaderboard_data()
 
@@ -95,7 +92,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Lethality Rating — highest avg kills/td ratio shown as %, min 3 subs
+    # Lethality Rating: kills/td ratio. High = you kill most of what you touch.
+    # Requires 3+ submissions to qualify — one lucky game shouldn't win this.
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
     lethal_ranked = sorted(qualified_lethal.keys(),
         key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
@@ -107,8 +105,9 @@ def calculate_butler_stats(week_start=None, week_end=None):
     low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
     most_lethal_top5 = high_lethality
 
-    # Backfill run counts and best scores from LeaderboardData for legacy entries
-    ld_player_boards = {}  # player -> set of board names they appear on (to count unique runs)
+    # Some players have scores in LeaderboardData that predate the Submissions tab —
+    # backfill their counts and best scores so they show up correctly in the report.
+    ld_player_boards = {}  # player -> set of board names they appear on
     for row in ld:
         if len(row) < 4:
             continue
@@ -173,11 +172,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
                 weapon_placements.setdefault(player, []).append(placement)
 
     def best_placement_title(d, min_boards=1, breadth_first=False):
-        """Return player with best placement title.
-        breadth_first=True: most boards wins, avg placement as tiebreaker.
-        breadth_first=False: best avg wins, most boards as tiebreaker.
-        min_boards: minimum boards required to qualify.
-        """
+        # breadth_first=True: show up on the most boards, tiebreak by avg placement (Grand Marshal style)
+        # breadth_first=False: best avg placement wins, tiebreak by board count (Weapons Master style)
         if not d:
             return None
         qualified = {p: v for p, v in d.items() if len(v) >= min_boards}
@@ -220,7 +216,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
             td_scores.setdefault(player, []).append(score)
 
     def best_score_title(d):
-        """Return player with best weighted score: avg * log(count+1)."""
+        # Weight avg score by log(submissions) so someone with 50 entries and a
+        # slightly lower avg beats someone with 1 lucky outlier.
         if not d:
             return None
         import math
@@ -289,7 +286,7 @@ def build_favourites_embed(stats):
 
 
 async def update_title_roles(guild, stats):
-    """Assign title roles and announce changes in #main."""
+    # Called after every /butlers_report — reassigns title roles if the holder changed.
     main_channel = guild.get_channel(MAIN_CHANNEL_ID)
 
     title_configs = [
