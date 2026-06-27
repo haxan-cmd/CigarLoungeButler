@@ -90,13 +90,30 @@ def vision_parse_scorecard(image_url: str) -> dict:
         return empty
     try:
         import json as _json
+        import base64
+        import urllib.request
+
+        # Fetch image bytes first — Discord CDN URLs with expiry tokens (?ex=...)
+        # may expire by the time Sonnet tries to fetch them remotely.
+        try:
+            req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                image_bytes = resp.read()
+                content_type = resp.headers.get('Content-Type', 'image/png').split(';')[0].strip()
+            b64_data = base64.standard_b64encode(image_bytes).decode('utf-8')
+            print(f"[VISION] Fetched {len(image_bytes)} bytes, type={content_type}")
+            image_source = {'type': 'base64', 'media_type': content_type, 'data': b64_data}
+        except Exception as fetch_err:
+            print(f"[VISION] Image fetch failed ({fetch_err}), falling back to URL source")
+            image_source = {'type': 'url', 'url': image_url}
+
         r = _anthropic_client.messages.create(
             model='claude-sonnet-4-6',
             max_tokens=300,
             messages=[{
                 'role': 'user',
                 'content': [
-                    {'type': 'image', 'source': {'type': 'url', 'url': image_url}},
+                    {'type': 'image', 'source': image_source},
                     {'type': 'text',  'text': _SCORECARD_PROMPT},
                 ]
             }]

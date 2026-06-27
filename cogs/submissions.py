@@ -1546,6 +1546,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._prompted_messages: set[int] = set()
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -1554,6 +1555,12 @@ class SubmissionsCog(commands.Cog):
             return
         if message.channel.id != SUBMISSIONS_CHANNEL_ID:
             return
+        if message.id in self._prompted_messages:
+            return
+        self._prompted_messages.add(message.id)
+        # Prevent unbounded growth — keep only the last 200 message IDs
+        if len(self._prompted_messages) > 200:
+            self._prompted_messages = set(list(self._prompted_messages)[-200:])
         # content_type isn't always populated (especially on mobile) — fall back to extension
         _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
         has_image = any(
