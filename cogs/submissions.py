@@ -93,8 +93,34 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
                    takedowns, kills, deaths, vip, feats, message_link,
                    lobby_rank=None, lobby_size=None, kills_rank=None,
                    team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None):
-    from datetime import datetime as _dt
-    timestamp = _dt.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    from datetime import datetime as _dt, timedelta as _td
+    now = _dt.utcnow()
+    timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Deduplicate: skip if this player already has an identical run (same TD/kills/deaths/map/faction)
+    # logged in the last 5 minutes — prevents double-write when vision fails then user resubmits.
+    try:
+        existing = submissions_ws.get_all_values()
+        cutoff = now - _td(minutes=5)
+        for row in reversed(existing[1:]):  # skip header, check newest first
+            if len(row) < 10:
+                continue
+            try:
+                row_time = _dt.strptime(row[0], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                continue
+            if row_time < cutoff:
+                break  # rows are chronological; no point checking further back
+            if (str(row[2]) == str(discord_id)
+                    and str(row[7]) == str(takedowns)
+                    and str(row[8]) == str(kills)
+                    and str(row[9]) == str(deaths)
+                    and str(row[5]).lower() == str(map_name or '').lower()
+                    and str(row[6]).lower() == str(faction or '').lower()):
+                print(f"[DEDUP] Skipping duplicate submission for {discord_name} ({takedowns} TD, {kills}K, {deaths}D)")
+                return
+    except Exception as dedup_err:
+        print(f"[DEDUP] Check failed (non-fatal): {dedup_err}")
     vip_str   = "Yes" if vip else "No"
     feats_str = ", ".join(feats) if feats else "None"
     nerve_log_submission(discord_name, weapon)

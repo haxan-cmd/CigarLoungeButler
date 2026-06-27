@@ -123,7 +123,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
 
         r = _anthropic_client.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=600,
+            max_tokens=1200,
             messages=[{
                 'role': 'user',
                 'content': [
