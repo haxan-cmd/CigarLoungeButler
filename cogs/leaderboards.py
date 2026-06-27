@@ -161,53 +161,39 @@ async def build_ledger_entrance(guild):
                 return f"[→ Full {label} Index](https://discord.com/channels/{guild_id}/{thread.id})"
             return f"*{label} index not yet built*"
 
-        # ── Build section content strings ───────────────────────────────────
+        # ── Build section content strings ───────────────────────────────
         sections = []
 
-        # 1H Weapons
-        body_1h = board_links(weapon_1h_boards, guild_id) if weapon_1h_boards else "*No boards yet*"
         sections.append(("1h", (
             f"⚔️  **ONE-HANDED WEAPONS**\n"
             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
-            f"{index_link(idx_1h, '1H')}\n\n"
-            f"{body_1h}"
+            f"{index_link(idx_1h, '1H')}"
         )))
 
-        # 2H Weapons
-        body_2h = board_links(weapon_2h_boards, guild_id) if weapon_2h_boards else "*No boards yet*"
         sections.append(("2h", (
-            f"🪓  **TWO-HANDED WEAPONS**\n"
+            f"🧳  **TWO-HANDED WEAPONS**\n"
             f"Top 10 takedown runs per weapon. One entry per player, personal best only.\n"
-            f"{index_link(idx_2h, '2H')}\n\n"
-            f"{body_2h}"
+            f"{index_link(idx_2h, '2H')}"
         )))
 
-        # Maps
-        body_maps = board_links(map_boards, guild_id) if map_boards else "*No boards yet*"
         sections.append(("maps", (
             f"🗺️  **MAP RECORDS**\n"
             f"Top 10 takedown runs per map, tracked by faction.\n"
-            f"{index_link(idx_maps, 'Maps')}\n\n"
-            f"{body_maps}"
+            f"{index_link(idx_maps, 'Maps')}"
         )))
 
-        # Feats
-        body_feats = board_links(feat_boards, guild_id) if feat_boards else "*No boards yet*"
         sections.append(("feats", (
             f"🏅  **FEATS**\n"
             f"Special achievement boards — Flawless runs, 100 Kill games, 200 Takedown games, and weapon-specific challenges.\n"
-            f"{index_link(idx_feats, 'Feats')}\n\n"
-            f"{body_feats}"
+            f"{index_link(idx_feats, 'Feats')}"
         )))
 
-        # Bounty Cards
         sections.append(("bounty", (
             f"🎯  **BOUNTY CARDS**\n"
             f"Active and completed bounties. Each card tracks progress toward the current target.\n"
             f"{index_link(idx_bounty, 'Bounty Cards')}"
         )))
 
-        # Registry
         sections.append(("registry", (
             f"<:cigar:1444893851427803298>  **BUTLER'S ARCHIVE**\n"
             f"Player registry cards — every registered player's weapon marks, ranks, and submission history.\n"
