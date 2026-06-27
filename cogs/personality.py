@@ -337,7 +337,11 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"Dry weather check error: {e}")
 
-
+    @dry_weather_check.error
+    async def dry_weather_check_error(self, error):
+        print(f"Dry weather task crashed, restarting: {error}")
+        if not self.dry_weather_check.is_running():
+            self.dry_weather_check.restart()
 
     @tasks.loop(hours=3)
     async def butler_organic_post(self):
@@ -370,6 +374,12 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"Butler organic post error: {e}")
 
+    @butler_organic_post.error
+    async def butler_organic_post_error(self, error):
+        print(f"Organic post task crashed, restarting: {error}")
+        if not self.butler_organic_post.is_running():
+            self.butler_organic_post.restart()
+
     @tasks.loop(hours=1)
     async def nerve_center_digest(self):
         """Post hourly digest to nerve center channel."""
@@ -385,6 +395,16 @@ class PersonalityCog(commands.Cog):
                 await ch.send(digest[:1900])
         except Exception as e:
             print(f"Nerve center digest error: {e}")
+
+    @nerve_center_digest.before_loop
+    async def before_nerve_center_digest(self):
+        await self.bot.wait_until_ready()
+
+    @nerve_center_digest.error
+    async def nerve_center_digest_error(self, error):
+        print(f"Nerve center task crashed, restarting: {error}")
+        if not self.nerve_center_digest.is_running():
+            self.nerve_center_digest.restart()
 
 
     @tasks.loop(hours=168)  # 7 days
