@@ -1,9 +1,25 @@
 import asyncio
 import traceback
+import os
+from aiohttp import web
 import discord
 from discord.ext import commands
 
 import config
+
+
+async def run_healthcheck():
+    """Minimal HTTP server so Railway's healthcheck passes."""
+    async def handle(request):
+        return web.Response(text="ok")
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"✅ Healthcheck server running on port {port}")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -55,6 +71,7 @@ async def on_app_command_error(
 
 
 async def main():
+    await run_healthcheck()
     async with bot:
         for cog in COGS:
             try:
