@@ -597,8 +597,10 @@ class PersonalityCog(commands.Cog):
         content_lower = message.content.lower()
         mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
 
-        # ── Main — only respond if pinged or butler/clanker mentioned ─────────────
-        should_respond = is_pinged or (is_main and mentions_butler)
+        # ── Main only — only respond if pinged or butler/clanker mentioned ────────
+        if not is_main:
+            return
+        should_respond = is_pinged or mentions_butler
         if should_respond and _anthropic_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'

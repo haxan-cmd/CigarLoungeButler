@@ -101,17 +101,46 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Lethality Rating: kills/td ratio. High = you kill most of what you touch.
-    # Requires 3+ submissions to qualify — one lucky game shouldn't win this.
+    # Lethality: avg kill rate (K/TD%) × kills lobby percentile when available.
+    # Requires 3+ submissions. Rewards precision (converting TDs into kills)
+    # and relative kills dominance in lobby.
     qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
-    lethal_ranked = sorted(qualified_lethal.keys(),
-        key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p])*100:.0f}% Kill Rate)" for p in lethal_ranked[:5]]
 
-    # Warlord — lowest avg kills/td ratio shown as TD/Kill, min 5 subs
-    low_ranked = sorted(qualified_lethal.keys(),
-        key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
+    # Build kills lobby percentile per player from col 15 (kills_rank) + col 14 (lobby_size)
+    kills_lobby_pcts = {}  # player -> avg kills lobby percentile (0–100, higher = better)
+    kill_finish_map = {}   # player -> list of (kills_rank, lobby_size)
+    for row in subs:
+        if not row or not row[0]:
+            continue
+        player = row[0].strip()
+        try:
+            kr = int(row[15]) if len(row) > 15 and row[15] else None
+            ls = int(row[14]) if len(row) > 14 and row[14] else None
+            if kr and ls and ls > 1:
+                kill_finish_map.setdefault(player, []).append((kr, ls))
+        except (ValueError, TypeError):
+            pass
+    for p, finishes in kill_finish_map.items():
+        avg_pct = sum((s - r) / (s - 1) * 100 for r, s in finishes if s > 1) / len(finishes)
+        kills_lobby_pcts[p] = avg_pct
+
+    def lethality_score(p):
+        avg_rate = sum(qualified_lethal[p]) / len(qualified_lethal[p])  # 0–1
+        lobby_pct = kills_lobby_pcts.get(p)  # 0–100 or None
+        if lobby_pct is not None:
+            return avg_rate * (lobby_pct / 100)
+        return avg_rate
+
+    lethal_ranked = sorted(qualified_lethal.keys(), key=lambda p: -lethality_score(p))
+
+    def lethality_label(p):
+        rate = sum(qualified_lethal[p]) / len(qualified_lethal[p]) * 100
+        pct = kills_lobby_pcts.get(p)
+        if pct is not None:
+            return f"{p} ({rate:.0f}% kill rate · top {100-pct:.0f}% kills)"
+        return f"{p} ({rate:.0f}% kill rate)"
+
+    high_lethality = [lethality_label(p) for p in lethal_ranked[:5]]
     most_lethal_top5 = high_lethality
 
     # Most Dominant — best single-game lobby finish, min 2 games with lobby data
@@ -263,8 +292,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
-        'high_lethality': high_lethality if high_lethality else ["N/A"],
-        'low_lethality': low_lethality if low_lethality else ["N/A"],
+        'high_lethality': high_lethality if high_lethality else [],
         'most_dominant': most_dominant if most_dominant else [],
     }
 
@@ -284,21 +312,14 @@ def build_favourites_embed(stats):
         f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
     )
 
+    warlord_section = (fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough lobby data yet*")
+
     return (
         header +
         f"\n"
-        f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
+        f"**<a:topkill:1360314538364240024> Lethality** *(kill rate × lobby kills rank, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) + "\n"
         f"\n"
-        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
-        f"\n"
-        f"**<a:topkill:1360314538364240024> Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
-        f"\n"
-        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
-        f"\n"
-        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
-        f"\n"
-        f"**⚔️ Most Dominant** *(best lobby finish, min 2 runs)*\n" + (fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Lobby data not yet available*") +
-        f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
+        f"**⚔️ Warlord** *(lobby dominance, min 2 runs)*\n" + warlord_section +
         f"\n\n─────────────────────\n"
         f"*All-Time Titles*\n"
         f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
@@ -306,6 +327,14 @@ def build_favourites_embed(stats):
         f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
         f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
         f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
+        f"\n─────────────────────\n"
+        f"\n**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
+        f"\n"
+        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
+        f"\n"
+        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
+        f"\n"
+        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
     )
 
 

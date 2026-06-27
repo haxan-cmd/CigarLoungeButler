@@ -729,7 +729,8 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
         if takedowns >= 150 and kills >= 100:
             view = TripleCheckView(
                 self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-                self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip
+                self.selected_map, self.faction, takedowns, kills, deaths, needs_vip=needs_vip,
+                vision_data=self.vision_data,
             )
             await interaction.response.edit_message(
                 content="Score over 20,000 points?",
@@ -738,7 +739,8 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
         elif needs_vip:
             view = VIPView(
                 self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-                self.selected_map, self.faction, takedowns, kills, deaths
+                self.selected_map, self.faction, takedowns, kills, deaths,
+                vision_data=self.vision_data,
             )
             await interaction.response.edit_message(
                 content="Were you VIP this round?",
@@ -749,12 +751,11 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
                 interaction, self.original_message, self.prompt_msg,
                 self.selected_class, self.selected_weapon,
                 self.selected_map, self.faction, takedowns, kills, deaths, False, False,
-                other_scores=self.vision_data.get('other_scores', []),
-                other_kills=self.vision_data.get('other_kills', []),
+                vision_data=self.vision_data,
             )
 
 class VIPView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, score_over_20k=False):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, score_over_20k=False, vision_data=None):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
@@ -766,6 +767,7 @@ class VIPView(discord.ui.View):
         self.kills = kills
         self.deaths = deaths
         self.score_over_20k = score_over_20k
+        self.vision_data = vision_data or {}
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.red)
     async def vip_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -785,11 +787,12 @@ class VIPView(discord.ui.View):
         await finalise_submission(
             interaction, self.original_message, self.prompt_msg, self.selected_class,
             self.selected_weapon, self.selected_map, self.faction,
-            self.takedowns, self.kills, self.deaths, vip, self.score_over_20k
+            self.takedowns, self.kills, self.deaths, vip, self.score_over_20k,
+            vision_data=self.vision_data,
         )
 
 class TripleCheckView(discord.ui.View):
-    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip=False, needs_vip=False):
+    def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip=False, needs_vip=False, vision_data=None):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.prompt_msg = prompt_msg
@@ -802,13 +805,14 @@ class TripleCheckView(discord.ui.View):
         self.deaths = deaths
         self.vip = vip
         self.needs_vip = needs_vip
+        self.vision_data = vision_data or {}
 
     async def _after_triple_check(self, interaction, score_over_20k):
         if self.needs_vip:
             view = VIPView(
                 self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
                 self.selected_map, self.faction, self.takedowns, self.kills, self.deaths,
-                score_over_20k=score_over_20k
+                score_over_20k=score_over_20k, vision_data=self.vision_data,
             )
             await interaction.response.edit_message(
                 content="Were you VIP this round?",
@@ -818,7 +822,8 @@ class TripleCheckView(discord.ui.View):
             await finalise_submission(
                 interaction, self.original_message, self.prompt_msg, self.selected_class,
                 self.selected_weapon, self.selected_map, self.faction,
-                self.takedowns, self.kills, self.deaths, self.vip, score_over_20k
+                self.takedowns, self.kills, self.deaths, self.vip, score_over_20k,
+                vision_data=self.vision_data,
             )
 
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
@@ -1064,10 +1069,11 @@ async def _submission_worker(guild_id):
             queue.task_done()
 
 
-async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None, other_kills=None):
+async def finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vision_data=None):
     guild_id = interaction.guild.id
     queue = get_submission_queue(guild_id)
-    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores or [], other_kills or [])
+    vd = vision_data or {}
+    args = (selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vd)
     await queue.put((interaction, original_message, prompt_msg, args))
     # Ensure worker is running for this guild
     worker = _submission_workers.get(guild_id)
@@ -1132,7 +1138,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
         print(f"Anomaly check error: {e}")
 
 
-async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, other_scores=None, other_kills=None):
+async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vision_data=None):
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
@@ -1162,38 +1168,53 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     caption = original_message.content.strip() if original_message.content else ""
 
-    # Compute lobby context from other_scores / other_kills
+    # Compute lobby context from vision team data
+    vd = vision_data or {}
     lobby_rank = None
     lobby_size = None
     kills_rank = None
     lobby_line = None
-    _other_td = other_scores if isinstance(other_scores, list) else []
-    _other_k  = other_kills if isinstance(other_kills, list) else []
 
-    if _other_td:
-        valid_td = [s for s in _other_td if isinstance(s, int) and s > 0]
-        if valid_td:
-            lobby_size = len(valid_td) + 1
-            lobby_rank = sum(1 for s in valid_td if s >= takedowns) + 1
-            pct = round((1 - (lobby_rank - 1) / lobby_size) * 100)
-            parts = [f"Ranked {lobby_rank} of {lobby_size} · Top {pct}%"]
-            # Gap to next player above/below
-            sorted_td = sorted(valid_td, reverse=True)
-            if lobby_rank == 1 and sorted_td:
-                gap = takedowns - sorted_td[0]
-                if gap > 0:
-                    parts.append(f"+{gap} TD clear")
-            # Kills rank if we have it
-            kills_rank = None
-            valid_k = [k for k in _other_k if isinstance(k, int) and k > 0]
-            if valid_k and kills:
-                kills_rank = sum(1 for k in valid_k if k >= kills) + 1
-                parts.append(f"Kills: {kills_rank}{_ordinal(kills_rank)}")
-            # K/TD ratio
-            if takedowns > 0 and kills:
-                ratio = round(kills / takedowns * 100)
-                parts.append(f"{ratio}% kill rate")
-            lobby_line = " · ".join(parts)
+    _team_td = [s for s in vd.get('team_scores', []) if isinstance(s, int) and s > 0]
+    _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and k > 0]
+    _enemy_td = [s for s in vd.get('enemy_scores', []) if isinstance(s, int) and s > 0]
+    _enemy_k  = [k for k in vd.get('enemy_kills',  []) if isinstance(k, int) and k > 0]
+    _all_td = _team_td + _enemy_td
+    _all_k  = _team_k  + _enemy_k
+
+    blurb_parts = []
+
+    # --- Team rank ---
+    if _team_td:
+        team_rank = sum(1 for s in _team_td if s >= takedowns) + 1
+        team_size = len(_team_td) + 1
+        if team_rank == 1:
+            sorted_team = sorted(_team_td, reverse=True)
+            gap = takedowns - sorted_team[0] if sorted_team else 0
+            gap_str = f" +{gap} TD" if gap > 0 else ""
+            blurb_parts.append(f"1st on team{gap_str}")
+        else:
+            blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}")
+
+    # --- Kill share ---
+    total_kills = kills + sum(_all_k) if kills else None
+    if total_kills and total_kills > 0 and kills:
+        kill_share = round(kills / total_kills * 100, 1)
+        blurb_parts.append(f"{kill_share}% kill share")
+
+    # --- Lobby TD rank (for storage + blurb context) ---
+    if _all_td:
+        lobby_size = len(_all_td) + 1
+        lobby_rank = sum(1 for s in _all_td if s >= takedowns) + 1
+        pct = round((1 - (lobby_rank - 1) / lobby_size) * 100)
+        blurb_parts.append(f"{lobby_rank}{_ordinal(lobby_rank)} of {lobby_size} lobby")
+
+    # --- Kills rank (for storage) ---
+    if _all_k and kills:
+        kills_rank = sum(1 for k in _all_k if k >= kills) + 1
+
+    if blurb_parts:
+        lobby_line = " · ".join(blurb_parts)
 
     summary = (
         f"**Run Submitted**\n"

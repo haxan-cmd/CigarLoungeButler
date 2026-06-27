@@ -1,7 +1,6 @@
-"""
-utils/sheets.py — Google Sheets initialisation, SheetCache, cached accessors,
-and shared async primitives (submission queues, registry lock).
-"""
+# Google Sheets connection, cache, and worksheet objects.
+# Everything that touches the spreadsheet goes through here so other modules
+# don't have to care about auth, retries, or rate limits.
 import os
 import json
 import time
@@ -14,9 +13,9 @@ load_dotenv()
 import config
 
 
-# ── gspread retry helper ──────────────────────────────────────────────────────
 def gspread_retry(func, *args, retries=5, **kwargs):
-    """Call a gspread function with exponential backoff on 429 and 503 errors."""
+    # Sheets will 429 us hard if the bot restarts repeatedly or hits burst limits.
+    # Exponential backoff starting at 10s gives it room to breathe.
     for attempt in range(retries):
         try:
             return func(*args, **kwargs)
@@ -30,15 +29,12 @@ def gspread_retry(func, *args, retries=5, **kwargs):
                 raise
 
 
-# ── SheetCache ────────────────────────────────────────────────────────────────
 class SheetCache:
-    """Simple TTL cache for gspread worksheet data.
-    Stores a snapshot per worksheet, refreshes after TTL seconds or on invalidation.
-    Writes should call invalidate() so the next read fetches fresh data.
-    """
+    # Simple in-memory TTL cache so we're not hammering the Sheets API on
+    # every command. Writes should call invalidate() so the next read is fresh.
     def __init__(self, ttl=60):
         self._ttl = ttl
-        self._cache = {}   # ws_name -> {'data': [...], 'ts': float}
+        self._cache = {}  # ws_name -> {'data': [...], 'ts': float}
 
     def get(self, ws, fetch_fn):
         name = ws.title
@@ -60,9 +56,10 @@ class SheetCache:
 _sheet_cache = SheetCache(ttl=60)
 
 
-# ── Google Sheets connection ──────────────────────────────────────────────────
+# Local .env has GOOGLE_CREDENTIALS=credentials.json (a file path).
+# Railway has the actual JSON content as the env var value.
+# Handle both so local dev and prod work without changing anything.
 google_creds_raw = os.getenv('GOOGLE_CREDENTIALS')
-# Support both: raw JSON string (Railway) and a file path (local .env)
 if google_creds_raw and google_creds_raw.strip().endswith('.json'):
     with open(google_creds_raw.strip()) as _f:
         _creds_info = json.load(_f)
@@ -74,6 +71,8 @@ sheet = gspread_retry(gc.open_by_key, config.SHEET_ID)
 
 
 def _init_worksheet(name):
+    # Same backoff logic as gspread_retry but for individual tab opens —
+    # startup hits the quota fast when opening 8+ worksheets in quick succession.
     for attempt in range(5):
         try:
             return sheet.worksheet(name)
@@ -86,7 +85,6 @@ def _init_worksheet(name):
                 raise
 
 
-# ── Worksheet objects ─────────────────────────────────────────────────────────
 submissions_ws      = _init_worksheet('Submissions')
 players_ws          = _init_worksheet('Players')
 leaderboards_ws     = _init_worksheet('Leaderboards')
@@ -147,11 +145,10 @@ except Exception:
         print(f"IndexPosts sheet init error: {e}")
         index_posts_ws = None
 
-# ButlersArchive lives in the Players sheet (cols D–H)
+# ButlersArchive data lives in cols D-H of the Players sheet, not its own tab
 butlers_archive_ws = players_ws
 
 
-# ── Cached accessors ──────────────────────────────────────────────────────────
 def cached_submissions():
     return _sheet_cache.get(submissions_ws, lambda: submissions_ws.get_all_values()[1:])
 
@@ -170,7 +167,8 @@ def cached_bounty_players():
     return _sheet_cache.get(bounty_players_ws, lambda: bounty_players_ws.get_all_values()[1:])
 
 
-# ── Shared async primitives ───────────────────────────────────────────────────
+# Submission queue per guild — serialises concurrent submissions so two people
+# submitting at the same time don't race and corrupt each other's registry card.
 _submission_queues  = {}
 _submission_workers = {}
 _registry_lock      = asyncio.Lock()
@@ -180,7 +178,7 @@ def get_submission_queue(guild_id):
         _submission_queues[guild_id] = asyncio.Queue()
     return _submission_queues[guild_id]
 
-# Legacy lock accessor retained for any callers still using it
+# Legacy lock accessor kept for anything still using it
 _submission_locks = {}
 def get_submission_lock(guild_id):
     if guild_id not in _submission_locks:
