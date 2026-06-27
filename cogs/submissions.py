@@ -1295,6 +1295,13 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
         await interaction.response.send_message("Already submitting this run — please wait.", ephemeral=True)
         return
     _queued_msgs.add(msg_id)
+    # Acknowledge the interaction immediately so Discord doesn't show "This interaction failed"
+    # while the submission worker processes the run (Google Sheets calls can take 2-5 seconds).
+    if not interaction.response.is_done():
+        try:
+            await interaction.response.defer()
+        except Exception as _defer_err:
+            print(f"[FINALISE] Defer failed (continuing anyway): {_defer_err}")
     guild_id = interaction.guild.id
     queue = get_submission_queue(guild_id)
     vd = vision_data or {}
@@ -1364,8 +1371,20 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
 
 async def _do_finalise_submission(interaction, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, takedowns, kills, deaths, vip, score_over_20k, vision_data=None):
+    # Guard: weapon or class is None means the form flow was incomplete (vision failed and user
+    # bypassed selection somehow). Abort cleanly rather than logging a None entry to the sheet.
+    if not selected_weapon or not selected_class:
+        print(f"[FINALISE] Aborted — weapon={selected_weapon!r} class={selected_class!r} for {interaction.user.display_name}")
+        try:
+            await interaction.edit_original_response(
+                content="⚠️ Weapon or class was not recorded. Please submit again and select your class and weapon from the dropdowns.",
+                view=None
+            )
+        except Exception:
+            pass
+        return
     # Cross-cog lazy imports to avoid circular dependencies at module load
-    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, post_scorecard_to_threads
+    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1486,7 +1505,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
-    await interaction.response.edit_message(content="Noted. The record has been updated.", view=None)
+    try:
+        await interaction.edit_original_response(content="Noted. The record has been updated.", view=None)
+    except Exception as _edit_err:
+        print(f"[FINALISE] edit_original_response failed: {_edit_err}")
 
     # Log to Google Sheets first so we get the row index
     submission_row = None
@@ -1601,12 +1623,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             )
         except Exception as e:
             print(f"Leaderboard update error: {e}")
-
-    if placements and original_message.attachments:
-        try:
-            await post_scorecard_to_threads(interaction.guild, [lb for lb, _ in placements], original_message)
-        except Exception as e:
-            print(f"Scorecard re-upload error: {e}")
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
