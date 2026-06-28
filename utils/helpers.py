@@ -12,6 +12,15 @@ try:
 except Exception:
     pass
 
+# Gemini client for vision (scorecard parsing)
+_gemini_client = None
+try:
+    import google.generativeai as _genai
+    _genai.configure(api_key=os.environ['GOOGLE_AI_API_KEY'])
+    _gemini_client = _genai.GenerativeModel('gemini-2.0-flash')
+except Exception:
+    pass
+
 _BUTLER_SYSTEM_BRIEF = (
     "You are the Butler — dry, sardonic, one or two sentences max. "
     "Never say 'great', 'awesome', or use exclamation marks. Never break character."
@@ -100,73 +109,40 @@ def vision_parse_scorecard(image_url: str) -> dict:
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
-    if not _anthropic_client:
-        print("[VISION] No Anthropic client — skipping")
+    if not _gemini_client:
+        print("[VISION] No Gemini client — skipping")
         return empty
     try:
         import json as _json
-        import base64
         import urllib.request
+        import io
 
-        # Fetch image bytes first — Discord CDN URLs with expiry tokens (?ex=...)
-        # may expire by the time Sonnet tries to fetch them remotely.
+        # Fetch image bytes — Discord CDN URLs with expiry tokens must be fetched immediately
         try:
             req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 image_bytes = resp.read()
                 content_type = resp.headers.get('Content-Type', 'image/png').split(';')[0].strip()
             print(f"[VISION] Fetched {len(image_bytes)} bytes, type={content_type}")
-            # Resize large images to max 1600px wide — higher res improves row-level accuracy.
-            try:
-                import io
-                from PIL import Image as _PILImage
-                img = _PILImage.open(io.BytesIO(image_bytes))
-                max_w = 1600
-                if img.width > max_w:
-                    ratio = max_w / img.width
-                    new_h = int(img.height * ratio)
-                    img = img.resize((max_w, new_h), _PILImage.LANCZOS)
-                    buf = io.BytesIO()
-                    img.save(buf, format='PNG', optimize=True)
-                    image_bytes = buf.getvalue()
-                    content_type = 'image/png'
-                    print(f"[VISION] Resized to {img.width}x{img.height}, {len(image_bytes)} bytes")
-            except Exception as resize_err:
-                print(f"[VISION] Resize skipped: {resize_err}")
-            b64_data = base64.standard_b64encode(image_bytes).decode('utf-8')
-            image_source = {'type': 'base64', 'media_type': content_type, 'data': b64_data}
         except Exception as fetch_err:
-            print(f"[VISION] Image fetch failed ({fetch_err}), falling back to URL source")
-            image_source = {'type': 'url', 'url': image_url}
-
-        r = _anthropic_client.messages.create(
-            model='claude-sonnet-4-5',
-            max_tokens=1800,
-            system="You are a JSON-only data extractor. Output ONLY a single valid JSON object. No prose, no explanation, no markdown. Your entire response must start with { and end with }.",
-            messages=[
-                {
-                    'role': 'user',
-                    'content': [
-                        {'type': 'image', 'source': image_source},
-                        {'type': 'text',  'text': _SCORECARD_PROMPT},
-                    ]
-                },
-                {
-                    'role': 'assistant',
-                    'content': '{'
-                }
-            ]
-        )
-        print(f"[VISION] stop_reason={r.stop_reason} content_blocks={len(r.content)}")
-        if not r.content:
-            print("[VISION] Empty content list from API")
+            print(f"[VISION] Image fetch failed: {fetch_err}")
             return empty
-        raw = '{' + r.content[0].text.strip()
+
+        import google.generativeai as _genai
+        image_part = {'mime_type': content_type, 'data': image_bytes}
+        r = _gemini_client.generate_content(
+            [_SCORECARD_PROMPT, image_part],
+            generation_config={
+                'temperature': 0,
+                'response_mime_type': 'application/json',
+            }
+        )
+        raw = r.text.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
         if not raw:
-            print("[VISION] Empty text block from API")
+            print("[VISION] Empty response from Gemini")
             return empty
-        # Strip markdown code fences if model wraps output
+        # Strip markdown fences if present
         if raw.startswith('```'):
             raw = raw.split('```')[1]
             if raw.startswith('json'):
