@@ -405,7 +405,7 @@ class VisionConfirmView(discord.ui.View):
             view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes, vision_data=self.parsed)
             await interaction.response.edit_message(content="Which class were you playing?", view=view)
 
-    @discord.ui.button(label='Fix Stats', style=discord.ButtonStyle.grey)
+    @discord.ui.button(label='Fix Numbers', style=discord.ButtonStyle.grey)
     async def fix_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self._owner_check(interaction):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
@@ -573,12 +573,11 @@ async def _proceed_weapon(interaction, original_message, prompt_msg, selected_cl
     if vd.get('map') and vd.get('faction'):
         # All fields confirmed — return to VisionConfirmView so user can review before final submit
         view = VisionConfirmView(original_message, prompt_msg, vd)
-        content = (
-            f"📋 **Review your submission:**\n"
-            f"Class: `{selected_class}` | Weapon: `{selected_weapon}` | Map: `{vd['map']}` | Faction: `{vd['faction']}`\n"
-            f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
+        td, k, d = vd.get('takedowns','?'), vd.get('kills','?'), vd.get('deaths','?')
+        await interaction.response.edit_message(
+            content=f"✅ `{selected_class}` · `{selected_weapon}` · `{vd['map']}` · `{vd['faction']}` · TD:`{td}` K:`{k}` D:`{d}`\nLooks right? Hit **Confirm** to submit.",
+            view=view
         )
-        await interaction.response.edit_message(content=content, view=view)
     elif vd.get('map'):
         view = FactionSelectView(original_message, prompt_msg, selected_class, selected_weapon, vd['map'], vision_data=vd)
         await interaction.response.edit_message(
@@ -841,12 +840,11 @@ class MapSelect(discord.ui.Select):
         # If vision already has faction, return to review screen instead of firing StatsModal directly
         if vd.get('faction'):
             view = VisionConfirmView(self.original_message, self.prompt_msg, vd)
-            content = (
-                f"📋 **Review your submission:**\n"
-                f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}` | Faction: `{vd['faction']}`\n"
-                f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
+            td, k, d = vd.get('takedowns','?'), vd.get('kills','?'), vd.get('deaths','?')
+            await interaction.response.edit_message(
+                content=f"✅ `{self.selected_class}` · `{self.selected_weapon}` · `{selected_map}` · `{vd['faction']}` · TD:`{td}` K:`{k}` D:`{d}`\nLooks right? Hit **Confirm** to submit.",
+                view=view
             )
-            await interaction.response.edit_message(content=content, view=view)
         else:
             view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map, vision_data=vd)
             await interaction.response.edit_message(
@@ -878,12 +876,11 @@ class FactionSelect(discord.ui.Select):
         selected_faction = self.values[0]
         vd = {**self.vision_data, 'faction': selected_faction}
         view = VisionConfirmView(self.original_message, self.prompt_msg, vd)
-        content = (
-            f"📋 **Review your submission:**\n"
-            f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{self.selected_map}` | Faction: `{selected_faction}`\n"
-            f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
+        td, k, d = vd.get('takedowns','?'), vd.get('kills','?'), vd.get('deaths','?')
+        await interaction.response.edit_message(
+            content=f"✅ `{self.selected_class}` · `{self.selected_weapon}` · `{self.selected_map}` · `{selected_faction}` · TD:`{td}` K:`{k}` D:`{d}`\nLooks right? Hit **Confirm** to submit.",
+            view=view
         )
-        await interaction.response.edit_message(content=content, view=view)
 
 class RetryStatsView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, error_msg):
