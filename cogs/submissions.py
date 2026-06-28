@@ -1730,7 +1730,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if bounty_hit:
                 await safe_react("🐱")
                 # Check if this run completed the bounty
-                _bounty = get_active_bounty()
+                _bounty = await get_active_bounty()
                 if _bounty:
                     newly_completed = await check_bounty_completion(
                         interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
@@ -1840,7 +1840,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
         # Update bounty cards index
         try:
-            bounty = get_active_bounty()
+            bounty = await get_active_bounty()
             if bounty:
                 bounty_blurb = (
                     f"[{bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
@@ -1888,7 +1888,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 print(f"Milestone: old marks read error: {e}")
 
             # Compute new weapon marks
-            weapon_marks_data = calculate_weapon_marks_for_player(_user_id)
+            weapon_marks_data = await calculate_weapon_marks_for_player(_user_id)
             flat_marks = {}
             for k, v in weapon_marks_data.items():
                 w = k[0] if isinstance(k, tuple) else k
@@ -1954,7 +1954,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     if week_start_dt > _now:
                         week_start_dt -= timedelta(weeks=1)
                     week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-                    stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                    stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
                     stats['week_label'] = week_label
                     embed_text = build_favourites_embed(stats)
                     async for msg in fav_channel.history(limit=5):

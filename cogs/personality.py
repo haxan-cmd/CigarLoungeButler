@@ -574,7 +574,7 @@ class PersonalityCog(commands.Cog):
                     week_start_ts = week_end_ts - 7 * 86400
                     week_start_dt = now - timedelta(days=7)
                     week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
-                    weekly_stats = calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
+                    weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
                     weekly_stats['week_label'] = week_label
                     embed_text = build_favourites_embed(weekly_stats)
                     fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
@@ -1071,7 +1071,7 @@ class PersonalityCog(commands.Cog):
         image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
         # Check if this is an art post in the active bounty channel
-        bounty = get_active_bounty()
+        bounty = await get_active_bounty()
         if bounty and message.channel.id == bounty['channel_id']:
             has_image = any(
                 att.filename.lower().endswith(image_extensions)
