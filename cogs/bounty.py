@@ -228,6 +228,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
 
     bounty = await get_active_bounty()
     if not bounty:
+        print(f"[BOUNTY] No active bounty found — skipping for {player_name} weapon={weapon}")
         return False
 
     if not weapon:
@@ -237,6 +238,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
 
     matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
     if not matched_key:
+        print(f"[BOUNTY] Weapon '{weapon}' not in bounty '{bounty['title']}' — keys: {list(weapons.keys())}")
         return False
 
     # Increment global participation counter
@@ -742,6 +744,104 @@ class BountyCog(commands.Cog):
         await save_player_bounty_progress(bounty['title'], player_id, player_name, forum_post_id, player_progress)
 
         await interaction.followup.send(f"⚜️ Bonus marked complete for **{player_name}**.", ephemeral=True)
+
+    @app_commands.command(name="bounty_credit", description="Manually credit a player with a bounty weapon hit (mod only).")
+    @app_commands.describe(member="The player to credit", weapon="The bounty weapon to credit them for")
+    async def bounty_credit(self, interaction: discord.Interaction, member: discord.Member, weapon: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        bounty = await get_active_bounty()
+        if not bounty:
+            await interaction.followup.send("No bounty is running.", ephemeral=True)
+            return
+
+        weapons = bounty['weapons']
+        matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
+        if not matched_key:
+            valid = ", ".join(weapons.keys())
+            await interaction.followup.send(
+                f"❌ `{weapon}` is not in the current bounty.\nValid weapons: {valid}", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        player_name = member.nick if member.nick else member.display_name
+        player_id = str(member.id)
+
+        # Increment global weapon counter
+        w = weapons[matched_key]
+        w['current'] += 1
+        weapons[matched_key] = w
+
+        # Update player progress
+        player_row = await get_player_bounty_progress(bounty['title'], player_id)
+        if player_row:
+            player_progress = player_row['progress']
+            forum_post_id = player_row['forum_post_id']
+        else:
+            player_progress = {}
+            forum_post_id = None
+
+        raw = player_progress.get(matched_key, 0)
+        cur = raw['current'] if isinstance(raw, dict) else int(raw)
+        player_progress[matched_key] = cur + 1
+
+        # Assign bounty role if not already
+        bounty_role = guild.get_role(bounty['role_id']) if bounty['role_id'] else None
+        if bounty_role and bounty_role not in member.roles:
+            try:
+                await member.add_roles(bounty_role, reason="Bounty credit (manual)")
+            except Exception as e:
+                print(f"[BOUNTY_CREDIT] Role assign error: {e}")
+
+        # Update forum card
+        forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+        forum_channel = guild.get_channel(forum_channel_id)
+        if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            if forum_post_id:
+                try:
+                    forum_thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+                    card_text = build_player_bounty_card(bounty, player_progress)
+                    messages = []
+                    async for msg in forum_thread.history(limit=5, oldest_first=True):
+                        messages.append(msg)
+                    bot_messages = [m for m in messages if m.author.bot]
+                    if bot_messages:
+                        await bot_messages[-1].edit(content=card_text)
+                    else:
+                        await forum_thread.send(card_text)
+                except Exception as e:
+                    print(f"[BOUNTY_CREDIT] Forum card update error: {e}")
+                    forum_post_id = None
+            if not forum_post_id:
+                try:
+                    new_thread, _ = await forum_channel.create_thread(
+                        name=player_name, content=bounty['theme_emoji'])
+                    card_text = build_player_bounty_card(bounty, player_progress)
+                    await new_thread.send(card_text)
+                    forum_post_id = new_thread.id
+                except Exception as e:
+                    print(f"[BOUNTY_CREDIT] Forum card create error: {e}")
+
+        await save_player_bounty_progress(bounty['title'], player_id, player_name, forum_post_id, player_progress)
+
+        # Check completion
+        completions = bounty['completions']
+        newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
+        if newly_completed:
+            date_str = datetime.now(timezone.utc).strftime('%b %d')
+            completions.append({"id": player_id, "name": player_name, "date": date_str})
+
+        await save_bounty_state(bounty['id'], weapons, bounty['special_done'], completions)
+
+        new_total = cur + 1
+        target = weapons[matched_key]['total']
+        await interaction.followup.send(
+            f"✅ Credited **{player_name}** with 1 hit on **{matched_key}** ({new_total}/{target}).", ephemeral=True)
+        print(f"[BOUNTY_CREDIT] {interaction.user.display_name} manually credited {player_name} for {matched_key}")
 
 
 async def setup(bot):
