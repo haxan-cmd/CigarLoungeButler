@@ -885,7 +885,7 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
         if personal_bests['td'] > 0:
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
         if personal_bests['lethality'] > 0:
-            lines.append(f"• ⚔️ Lethality — **{personal_bests['lethality']}%**")
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Lethality — **{personal_bests['lethality']}%**")
         lines.append("")
 
     if lobby_stats:
