@@ -1916,7 +1916,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     thread_id = r[2].strip() or None
                     break
 
-            update_butlers_archive_row(
+            await update_butlers_archive_row(
                 _user_id, _user_name, thread_id,
                 total_marks, submission_count, last_submission,
                 weapon_marks_str, class_marks_str
