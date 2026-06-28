@@ -156,7 +156,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
     def lethality_label(p):
         shares = team_kill_shares.get(p, [])
         avg = sum(shares) / len(shares) if shares else 0
-        return f"{p} -- {avg:.1f}% kill share"
+        return f"{p} -- {avg:.1f}%"
 
     most_lethal_top5 = [lethality_label(p) for p in lethal_ranked[:5]]
 
@@ -168,7 +168,7 @@ def calculate_butler_stats(week_start=None, week_end=None):
     for p in dom_ranked[:5]:
         shares = team_td_shares.get(p, [])
         avg = sum(shares) / len(shares) if shares else 0
-        most_dominant.append(f"{p} -- {avg:.1f}% TD share")
+        most_dominant.append(f"{p} -- {avg:.1f}%")
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -342,7 +342,7 @@ def build_favourites_embed(stats):
     # Lethality (full width)
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
     embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Lethality  *(avg kill share of team)*",
+        name="<a:mostlethal:1520490418817601658> Lethality  *(kill share of team %)*",
         value=lethal_text,
         inline=False,
     )
@@ -350,7 +350,7 @@ def build_favourites_embed(stats):
     # Warlord (full width)
     warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough team data yet*"
     embed.add_field(
-        name="<:warlord:1520490364039860347> Warlord  *(avg TD share of team)*",
+        name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
         value=warlord_text,
         inline=False,
     )
