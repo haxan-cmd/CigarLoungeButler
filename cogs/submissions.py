@@ -1404,14 +1404,27 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Guard: weapon or class is None means the form flow was incomplete (vision failed and user
     # bypassed selection somehow). Abort cleanly rather than logging a None entry to the sheet.
     if not selected_weapon or not selected_class:
-        print(f"[FINALISE] Aborted — weapon={selected_weapon!r} class={selected_class!r} for {interaction.user.display_name}")
+        print(f"[FINALISE] Missing weapon/class — routing back to picker for {interaction.user.display_name}")
         try:
-            await interaction.edit_original_response(
-                content="⚠️ Weapon or class was not recorded. Please submit again and select your class and weapon from the dropdowns.",
-                view=None
-            )
-        except Exception:
-            pass
+            vd = vision_data or {}
+            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
+            if selected_class and not selected_weapon:
+                # Have class, need weapon
+                weapons = get_all_weapons_for_class(selected_class)
+                view = WeaponSelectView(original_message, prompt_msg, selected_class, weapons, vision_data=vd)
+                await interaction.edit_original_response(
+                    content=f"Class: `{selected_class}` — which weapon were you using?",
+                    view=view
+                )
+            else:
+                # Need class (and possibly weapon)
+                view = ClassSelectView(original_message, prompt_msg, "all", all_classes, vision_data=vd)
+                await interaction.edit_original_response(
+                    content="Vision couldn't read your class — which were you playing?",
+                    view=view
+                )
+        except Exception as e:
+            print(f"[FINALISE] Picker reroute failed: {e}")
         return
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
