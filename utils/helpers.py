@@ -137,7 +137,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
         r = _gemini_client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents=[prompt, image_part],
             config=_gtypes.GenerateContentConfig(
                 temperature=0,
@@ -167,7 +167,11 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
                 data[list_field] = []
         return {**empty, **data}
     except Exception as e:
-        print(f"[VISION] Error: {e}")
+        err = str(e)
+        if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+            print(f"[VISION] Gemini quota exhausted — user will need to enter stats manually")
+        else:
+            print(f"[VISION] Error: {e}")
         return empty
 
 
