@@ -1592,6 +1592,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         is_new_player = False
         print(f"Sheet logging error: {e}")
 
+    # Dedup: if this was a duplicate run, still check bounty (weapon may differ from first attempt) then bail
+    if submission_row is None:
+        if not is_ranged:
+            try:
+                from cogs.bounty import update_bounty
+                bounty_hit = await update_bounty(
+                    interaction.guild, selected_weapon,
+                    interaction.user.display_name, interaction.user.id, takedowns
+                )
+                print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon}")
+                if bounty_hit:
+                    await original_message.add_reaction("🐱")
+            except Exception as e:
+                print(f"[BOUNTY/DEDUP] Bounty check error: {e}")
+        print(f"[DEDUP] Duplicate submission fully skipped for {interaction.user.display_name}")
+        return
+
     # Anomaly check — alert butlers-notes if stats look suspicious
     try:
         await check_submission_anomaly(
@@ -1996,25 +2013,24 @@ class SubmissionsCog(commands.Cog):
         # content_type isn't always populated (especially on mobile) — fall back to extension
         _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
         has_image = any(
-            (att.content_type and att.content_type.startswith("image/"))
-            or att.filename.lower().endswith(_image_exts)
+            (att.content_type or '').startswith('image/') or att.filename.lower().endswith(_image_exts)
             for att in message.attachments
         )
         if not has_image:
             return
-        view = SubmitView(original_message=message)
-        embed = discord.Embed(
-            title="Run Detected",
-            description=f"Ready to log your engagement, {message.author.display_name}.",
-            color=0xc8a96e,
-        )
-        embed.set_footer(text="Window closes in 5 minutes  ·  Cigar Lounge Butler")
-        prompt = await message.reply(
-            embed=embed,
-            view=view,
-            mention_author=False,
-        )
-        view.prompt_msg = prompt
+        if message.id in self._prompted_messages:
+            return
+        self._prompted_messages.add(message.id)
+        try:
+            view = WeaponTypeView(message, None)
+            prompt = await message.reply(
+                "📋 Scorecard detected! Click below to submit your run.",
+                mention_author=False,
+                view=view
+            )
+            view.prompt_msg = prompt
+        except Exception as e:
+            print(f"[ON_MESSAGE] Prompt error: {e}")
 
 
 async def setup(bot):
