@@ -1448,27 +1448,28 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     blurb_parts = []
 
-    # --- Team rank ---
+    # --- Team rank + TD share ---
     if _team_td:
         team_rank = sum(1 for s in _team_td if s >= takedowns) + 1
         team_size = len(_team_td) + 1
+        total_team_td = takedowns + sum(_team_td)
+        td_share = round(takedowns / total_team_td * 100, 1) if total_team_td > 0 else None
+        td_share_str = f" · {td_share}% TD share" if td_share is not None else ""
         if team_rank == 1:
-            sorted_team = sorted(_team_td, reverse=True)
-            gap = takedowns - sorted_team[0] if sorted_team else 0
-            gap_str = f" +{gap} TD" if gap > 0 else ""
-            # Warlord emoji if 1st on team by 30+ TD gap
-            warlord_prefix = "<:warlord:1520490364039860347> " if gap >= 30 else ""
-            blurb_parts.append(f"{warlord_prefix}1st on team{gap_str}")
+            # Warlord emoji if TD share >= 30%
+            warlord_prefix = "<:warlord:1520490364039860347> " if td_share and td_share >= 30 else ""
+            blurb_parts.append(f"{warlord_prefix}1st on team{td_share_str}")
         else:
-            blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}")
+            blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}{td_share_str}")
 
-    # --- Kill share ---
-    total_kills = kills + sum(_all_k) if (kills and _all_k) else None
-    if total_kills and total_kills > 0 and kills:
-        kill_share = round(kills / total_kills * 100, 1)
+    # --- Kill share (team only) ---
+    total_team_kills = kills + sum(_team_k) if (kills and _team_k) else None
+    if total_team_kills and total_team_kills > 0 and kills:
+        kill_share = round(kills / total_team_kills * 100, 1)
         # Lethality emoji if kill share >= 5%
         lethal_prefix = "<a:mostlethal:1520490418817601658> " if kill_share >= 5.0 else ""
         blurb_parts.append(f"{lethal_prefix}{kill_share}% kill share")
+
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
     if _all_td:
