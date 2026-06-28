@@ -44,7 +44,11 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 - D: Deaths — typically 0–50
 - PING: last column, network latency in ms — ignore this
 
-CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background, different colour tint, or a star/crown/icon marker next to their name. This highlighted row is NOT necessarily the top row. It can appear anywhere on the scoreboard. Do NOT default to the top-ranked player. Scan every row and identify the one that looks visually distinct from all others.
+CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. This highlighted row is NOT necessarily the top row. It can appear anywhere on the scoreboard. Do NOT default to the top-ranked player.
+
+Step 1: Scan every row on both teams and identify which one looks visually distinct. Note that player's NAME.
+Step 2: Read the T, K, D values ONLY from that exact row — do not read from any row above or below it.
+Step 3: That same player must NOT appear in team_scores or team_kills — those arrays are for all OTHER teammates only.
 
 Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown — may appear as an icon tooltip or text; null if not visible)
@@ -60,6 +64,24 @@ The scoreboard shows TWO teams side by side. For ALL other rows (excluding the h
 - team_kills: K column integers for players on the SAME team as the highlighted player
 - enemy_scores: T column integers for players on the ENEMY team
 - enemy_kills: K column integers for players on the ENEMY team
+
+COLUMN READING EXAMPLES — study these carefully before reading the image:
+
+Example 1 (highlighted row is rank 2, not rank 1):
+  Row data visible: RANK=1,000  NAME=mlowy  SCORE=11,653  T=124  K=54  D=6  PING=8
+  Correct output: takedowns=124, kills=54, deaths=6
+  WRONG output would be: takedowns=11653 (that is SCORE, not T), or takedowns=1000 (that is RANK)
+
+Example 2 (highlighted row is mid-table):
+  Row data visible: RANK=266  NAME=SauceCode  SCORE=9,029  T=79  K=29  D=21  PING=12
+  Correct output: takedowns=79, kills=29, deaths=21
+  WRONG output would be: takedowns=266 (RANK) or takedowns=9029 (SCORE)
+
+Example 3 (highlighted row is near bottom):
+  Row data visible: RANK=88  NAME=ColdestQmurray  SCORE=2,947  T=31  K=9  D=14  PING=60
+  Correct output: takedowns=31, kills=9, deaths=14
+
+The T column (takedowns) is always a small integer, typically 10–400. The SCORE column is always a large number (thousands). Never confuse them.
 
 Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
@@ -94,13 +116,12 @@ def vision_parse_scorecard(image_url: str) -> dict:
                 image_bytes = resp.read()
                 content_type = resp.headers.get('Content-Type', 'image/png').split(';')[0].strip()
             print(f"[VISION] Fetched {len(image_bytes)} bytes, type={content_type}")
-            # Resize large images to max 1200px wide — scorecard text is large UI elements,
-            # resolution beyond this doesn't improve accuracy but slows the API call.
+            # Resize large images to max 1600px wide — higher res improves row-level accuracy.
             try:
                 import io
                 from PIL import Image as _PILImage
                 img = _PILImage.open(io.BytesIO(image_bytes))
-                max_w = 1200
+                max_w = 1600
                 if img.width > max_w:
                     ratio = max_w / img.width
                     new_h = int(img.height * ratio)
@@ -170,16 +191,39 @@ def vision_parse_scorecard(image_url: str) -> dict:
 def parse_submission_text(text):
     # Sort aliases longest-first so "war bow" matches before "bow" — otherwise
     # shorter aliases steal the match from longer ones that overlap.
+    from difflib import get_close_matches
     text_lower = text.lower().strip()
+    words = text_lower.split()
     detected_weapon   = None
     detected_subclass = None
 
+    # 1. Exact alias substring match (original behaviour)
     for alias in sorted(config.WEAPON_ALIASES.keys(), key=len, reverse=True):
         if alias in text_lower:
             detected_weapon = config.WEAPON_ALIASES[alias]
             break
 
+    # 2. Fuzzy fallback — check each word against all weapon aliases
+    if not detected_weapon:
+        all_weapon_aliases = list(config.WEAPON_ALIASES.keys())
+        for word in words:
+            if len(word) < 3:
+                continue
+            matches = get_close_matches(word, all_weapon_aliases, n=1, cutoff=0.82)
+            if matches:
+                detected_weapon = config.WEAPON_ALIASES[matches[0]]
+                break
+        # Also try two-word combinations for aliases like "war bow"
+        if not detected_weapon:
+            for i in range(len(words) - 1):
+                phrase = words[i] + ' ' + words[i+1]
+                matches = get_close_matches(phrase, all_weapon_aliases, n=1, cutoff=0.82)
+                if matches:
+                    detected_weapon = config.WEAPON_ALIASES[matches[0]]
+                    break
+
     detected_parent = None
+    # 3. Exact alias substring match for subclass
     for alias in sorted(config.SUBCLASS_ALIASES.keys(), key=len, reverse=True):
         if alias in text_lower:
             raw = config.SUBCLASS_ALIASES[alias]
@@ -188,6 +232,21 @@ def parse_submission_text(text):
             else:
                 detected_subclass = raw
             break
+
+    # 4. Fuzzy fallback for subclass
+    if not detected_subclass and not detected_parent:
+        all_sub_aliases = list(config.SUBCLASS_ALIASES.keys())
+        for word in words:
+            if len(word) < 3:
+                continue
+            matches = get_close_matches(word, all_sub_aliases, n=1, cutoff=0.82)
+            if matches:
+                raw = config.SUBCLASS_ALIASES[matches[0]]
+                if raw in config.PARENT_TO_SUBCLASSES:
+                    detected_parent = raw
+                else:
+                    detected_subclass = raw
+                break
 
     # If they said a parent class (e.g. "vanguard") and a weapon, try to narrow
     # it down to the specific subclass automatically — saves them having to type it.
