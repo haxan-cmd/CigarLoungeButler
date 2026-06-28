@@ -78,7 +78,7 @@ A weapon mark is earned by completing a **100 takedown game** with the following
 • <a:200tkd:1363648828414230538> +1 for 200 Takedowns
 • <a:100kill:1361412390339608686> +1 for 100 Kills
 • <a:triple:1365532698260668466> +1 for Triple
-• <:highscore:1360312918545269057> +1 for Leaderboard High Score
+• <a:highscore:1360312918545269057> +1 for Leaderboard High Score
 
 **Note:**
 Goedendag counts for Polearms and Engineer (Footman).
