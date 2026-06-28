@@ -336,13 +336,39 @@ class VisionConfirmView(discord.ui.View):
             await interaction.response.edit_message(
                 content=f"Class: `{p['subclass']}` | Weapon: `{p['weapon']}` | Map: `{p['map']}`\nWhich faction?", view=view)
         else:
-            # Always show the stats modal as the final step so the player
-            # can verify vision's numbers — never auto-submit from vision alone
-            await interaction.response.send_modal(
-                StatsModal(self.original_message, self.prompt_msg, p['subclass'], p['weapon'], p['map'], p['faction'],
-                           prefill_td=p.get('takedowns'), prefill_k=p.get('kills'), prefill_d=p.get('deaths'),
-                           vision_data=p)
-            )
+            td = p.get('takedowns')
+            kills = p.get('kills')
+            deaths = p.get('deaths')
+            if td is not None and kills is not None and deaths is not None:
+                # Vision already read the stats and user clicked Confirm — route through
+                # VIP/triple checks then finalise, same as StatsModal does
+                needs_vip = (p['map'], p['faction']) in VIP_MAPS
+                if td >= 150 and kills >= 100:
+                    view = TripleCheckView(
+                        self.original_message, self.prompt_msg, p['subclass'], p['weapon'],
+                        p['map'], p['faction'], td, kills, deaths, needs_vip=needs_vip,
+                        vision_data=p,
+                    )
+                    await interaction.response.edit_message(content="Score over 20,000 points?", view=view)
+                elif needs_vip:
+                    view = VIPView(
+                        self.original_message, self.prompt_msg, p['subclass'], p['weapon'],
+                        p['map'], p['faction'], td, kills, deaths, vision_data=p,
+                    )
+                    await interaction.response.edit_message(content="Were you VIP this round?", view=view)
+                else:
+                    await finalise_submission(
+                        interaction, self.original_message, self.prompt_msg,
+                        p['subclass'], p['weapon'], p['map'], p['faction'],
+                        td, kills, deaths, vip=False, score_over_20k=False, vision_data=p
+                    )
+            else:
+                # Stats missing — show modal so user can enter them
+                await interaction.response.send_modal(
+                    StatsModal(self.original_message, self.prompt_msg, p['subclass'], p['weapon'], p['map'], p['faction'],
+                               prefill_td=td, prefill_k=kills, prefill_d=deaths,
+                               vision_data=p)
+                )
 
     @discord.ui.button(label='Confirm', style=discord.ButtonStyle.green, emoji='✅')
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -543,14 +569,16 @@ def _fuzzy_match(query, options):
 
 async def _proceed_weapon(interaction, original_message, prompt_msg, selected_class, selected_weapon, vision_data):
     """Shared logic after a weapon is confirmed."""
-    vd = {**vision_data, 'weapon': selected_weapon}
+    vd = {**vision_data, 'subclass': selected_class, 'weapon': selected_weapon}
     if vd.get('map') and vd.get('faction'):
-        await interaction.response.send_modal(
-            StatsModal(original_message, prompt_msg, selected_class, selected_weapon,
-                       vd['map'], vd['faction'],
-                       prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
-                       vision_data=vd)
+        # All fields confirmed — return to VisionConfirmView so user can review before final submit
+        view = VisionConfirmView(original_message, prompt_msg, vd)
+        content = (
+            f"📋 **Review your submission:**\n"
+            f"Class: `{selected_class}` | Weapon: `{selected_weapon}` | Map: `{vd['map']}` | Faction: `{vd['faction']}`\n"
+            f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
         )
+        await interaction.response.edit_message(content=content, view=view)
     elif vd.get('map'):
         view = FactionSelectView(original_message, prompt_msg, selected_class, selected_weapon, vd['map'], vision_data=vd)
         await interaction.response.edit_message(
@@ -810,14 +838,15 @@ class MapSelect(discord.ui.Select):
             return
         selected_map = self.values[0]
         vd = {**self.vision_data, 'map': selected_map}
-        # Skip faction step if vision already has it
+        # If vision already has faction, return to review screen instead of firing StatsModal directly
         if vd.get('faction'):
-            await interaction.response.send_modal(
-                StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-                           selected_map, vd['faction'],
-                           prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
-                           vision_data=vd)
+            view = VisionConfirmView(self.original_message, self.prompt_msg, vd)
+            content = (
+                f"📋 **Review your submission:**\n"
+                f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{selected_map}` | Faction: `{vd['faction']}`\n"
+                f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
             )
+            await interaction.response.edit_message(content=content, view=view)
         else:
             view = FactionSelectView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, selected_map, vision_data=vd)
             await interaction.response.edit_message(
@@ -848,19 +877,13 @@ class FactionSelect(discord.ui.Select):
             return
         selected_faction = self.values[0]
         vd = {**self.vision_data, 'faction': selected_faction}
-        await interaction.response.send_modal(
-            StatsModal(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon,
-                       self.selected_map, selected_faction,
-                       prefill_td=vd.get('takedowns'), prefill_k=vd.get('kills'), prefill_d=vd.get('deaths'),
-                       vision_data=vd)
+        view = VisionConfirmView(self.original_message, self.prompt_msg, vd)
+        content = (
+            f"📋 **Review your submission:**\n"
+            f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{self.selected_map}` | Faction: `{selected_faction}`\n"
+            f"TD: `{vd.get('takedowns','?')}` | K: `{vd.get('kills','?')}` | D: `{vd.get('deaths','?')}`"
         )
-        try:
-            await interaction.edit_original_response(
-                content=f"Class: `{self.selected_class}` | Weapon: `{self.selected_weapon}` | Map: `{self.selected_map}` | Faction: `{selected_faction}`",
-                view=None
-            )
-        except Exception:
-            pass
+        await interaction.response.edit_message(content=content, view=view)
 
 class RetryStatsView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, selected_class, selected_weapon, selected_map, faction, error_msg):
