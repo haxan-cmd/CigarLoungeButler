@@ -1461,11 +1461,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         team_size = len(_team_td) + 1
         total_team_td = takedowns + sum(_team_td)
         td_share = round(takedowns / total_team_td * 100, 1) if total_team_td > 0 else None
-        td_share_str = f" · {td_share}% TD share" if td_share is not None else ""
+        warlord_emoji = "<:warlord:1520490364039860347> " if td_share and td_share >= 30 else ""
+        td_share_str = f" · {warlord_emoji}{td_share}% TD share" if td_share is not None else ""
         if team_rank == 1:
-            # Warlord emoji if TD share >= 30%
-            warlord_prefix = "<:warlord:1520490364039860347> " if td_share and td_share >= 30 else ""
-            blurb_parts.append(f"{warlord_prefix}1st on team{td_share_str}")
+            blurb_parts.append(f"1st on team{td_share_str}")
         else:
             blurb_parts.append(f"{team_rank}{_ordinal(team_rank)} on team of {team_size}{td_share_str}")
 
