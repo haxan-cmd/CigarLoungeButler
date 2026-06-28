@@ -295,12 +295,13 @@ def get_butler_titles_for_player(discord_id, stats):
     """Return list of Butler's Favourites titles held by this player."""
     discord_id_str = str(discord_id)
     titles = []
+    _te = config.TITLE_EMOJIS
     title_checks = [
-        ('grand_marshal', '<a:grandmarshal:1519928617407348877> Grand Marshal'),
-        ('weapons_master', '<a:weaponsmaster:1519928521445605488> Weapons Master'),
-        ('campaign_master', '🗺️ Campaign Master'),
-        ('headhunter', '<a:topkill:1360314538364240024> Headhunter'),
-        ('butcher', '<a:200tkd:1363648828414230538> Butcher'),
+        ('grand_marshal',   f"{_te['Grand Marshal']} Grand Marshal"),
+        ('weapons_master',  f"{_te['Weapons Master']} Weapons Master"),
+        ('campaign_master', f"{_te['Campaign Master']} Campaign Master"),
+        ('headhunter',      f"{_te['Headhunter']} Headhunter"),
+        ('butcher',         f"{_te['Butcher']} Butcher"),
     ]
     # stats dict uses display names not IDs — match by display name via players sheet
     rows = players_ws.get_all_values()[1:]
@@ -2259,11 +2260,11 @@ class RegistryCog(commands.Cog):
             return f"{emoji} {label} \u2014 {player_val}{total_str} / {holder_val}{total_str} {holder_name} **(-{diff})**"
 
         title_lines = [
-            fmt_title("<a:grandmarshal:1519928617407348877>", "Grand Marshal", player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
-            fmt_title("<a:weaponsmaster:1519928521445605488>", "Weapons Master", player_weapon_boards, wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
-            fmt_title("\U0001f5fa\ufe0f", "Campaign Master", player_map_boards, cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
-            fmt_title("<a:topkill:1360314538364240024>", "Headhunter", player_kills_best, hh_holder or "N/A", hh_score, resolved_name, is_board=False),
-            fmt_title("<a:200tkd:1363648828414230538>", "Butcher", player_td_best, bt_holder or "N/A", bt_score, resolved_name, is_board=False),
+            fmt_title(config.TITLE_EMOJIS["Grand Marshal"],   "Grand Marshal",   player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
+            fmt_title(config.TITLE_EMOJIS["Weapons Master"],  "Weapons Master",  player_weapon_boards,   wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
+            fmt_title(config.TITLE_EMOJIS["Campaign Master"], "Campaign Master", player_map_boards,      cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
+            fmt_title(config.TITLE_EMOJIS["Headhunter"],      "Headhunter",      player_kills_best,      hh_holder or "N/A", hh_score, resolved_name, is_board=False),
+            fmt_title(config.TITLE_EMOJIS["Butcher"],         "Butcher",         player_td_best,         bt_holder or "N/A", bt_score, resolved_name, is_board=False),
         ]
 
         # Weapon ranks — Gold+ only, top 10

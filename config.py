@@ -240,6 +240,16 @@ SPECIAL_OPS_EMOJIS = {
     "Knife":           "🔪",
 }
 
+TITLE_EMOJIS = {
+    "Grand Marshal":   "<a:grandmarshal:1519928617407348877>",
+    "Weapons Master":  "<a:weaponsmaster:1519928521445605488>",
+    "Campaign Master": "<a:campaignmaster:1520497947115262083>",
+    "Headhunter":      "<a:topkill:1360314538364240024>",
+    "Butcher":         "<a:200tkd:1363648828414230538>",
+    "Lethality":       "<a:mostlethal:1520490418817601658>",
+    "Warlord":         "<:warlord:1520490364039860347>",
+}
+
 FACTION_EMOJIS = {
     "Agatha": "<:agatha:1350669712593260554>",
     "Mason":  "<:mason:1350669458863292426>",
