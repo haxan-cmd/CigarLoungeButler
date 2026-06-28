@@ -1353,7 +1353,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
         flags = []
 
-        all_rows = submissions_ws.get_all_values()[1:]
+        all_rows = cached_submissions()
 
         # Server record: kills
         all_kills = [int(r[8]) for r in all_rows if len(r) > 8 and r[8].strip().lstrip('-').isdigit() and int(r[8]) > 0]
@@ -1815,11 +1815,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _user_name = interaction.user.display_name
 
     async def _bg_tasks():
+        # Pre-warm cache once so all downstream calls share the same fetch
+        try:
+            cached_submissions()
+            cached_players()
+        except Exception:
+            pass
+
         # Update registry card
         try:
             await create_or_update_registry_card(_guild, _user_id, _user_name)
         except Exception as e:
             print(f"Registry card update error: {e}")
+        await asyncio.sleep(1)
 
         # Update bounty cards index
         try:
@@ -1854,8 +1862,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             # Read OLD weapon marks from Players sheet BEFORE updating — used for milestone diff
             old_flat = {}
             try:
-                p_rows = players_ws.get_all_values()
-                for p_row in p_rows[1:]:
+                p_rows = cached_players()
+                for p_row in p_rows:
                     if p_row and p_row[0].strip() == discord_id_str:
                         old_marks_str = p_row[6].strip() if len(p_row) > 6 else ''
                         for part in old_marks_str.split(','):
