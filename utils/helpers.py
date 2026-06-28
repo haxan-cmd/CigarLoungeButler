@@ -121,6 +121,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
         r = _anthropic_client.messages.create(
             model='claude-sonnet-4-6',
             max_tokens=1800,
+            system="You are a JSON-only data extractor. Output ONLY a single valid JSON object. No prose, no explanation, no markdown. Your entire response must start with { and end with }.",
             messages=[
                 {
                     'role': 'user',
@@ -128,11 +129,6 @@ def vision_parse_scorecard(image_url: str) -> dict:
                         {'type': 'image', 'source': image_source},
                         {'type': 'text',  'text': _SCORECARD_PROMPT},
                     ]
-                },
-                # Prefill forces the model to continue from '{' — guarantees JSON output
-                {
-                    'role': 'assistant',
-                    'content': '{'
                 }
             ]
         )
@@ -140,16 +136,16 @@ def vision_parse_scorecard(image_url: str) -> dict:
         if not r.content:
             print("[VISION] Empty content list from API")
             return empty
-        raw = '{' + r.content[0].text.strip()
+        raw = r.content[0].text.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
         if not raw:
             print("[VISION] Empty text block from API")
             return empty
         # Strip markdown code fences if model wraps output
-        if '```' in raw:
+        if raw.startswith('```'):
             raw = raw.split('```')[1]
             if raw.startswith('json'):
-                raw = raw[4:]
+                raw = raw[4:].strip()
         data = _json.loads(raw)
         # Coerce numeric fields to int, ignore bad values
         for field in ('takedowns', 'kills', 'deaths'):
