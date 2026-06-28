@@ -26,4 +26,4 @@ urllib3==2.7.0
 yarl==1.24.2
 anthropic
 Pillow
-google-generativeai
+google-genai

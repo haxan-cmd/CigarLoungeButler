@@ -15,9 +15,8 @@ except Exception:
 # Gemini client for vision (scorecard parsing)
 _gemini_client = None
 try:
-    import google.generativeai as _genai
-    _genai.configure(api_key=os.environ['GOOGLE_AI_API_KEY'])
-    _gemini_client = _genai.GenerativeModel('gemini-2.0-flash')
+    from google import genai as _genai
+    _gemini_client = _genai.Client(api_key=os.environ['GOOGLE_AI_API_KEY'])
 except Exception:
     pass
 
@@ -128,14 +127,15 @@ def vision_parse_scorecard(image_url: str) -> dict:
             print(f"[VISION] Image fetch failed: {fetch_err}")
             return empty
 
-        import google.generativeai as _genai
-        image_part = {'mime_type': content_type, 'data': image_bytes}
-        r = _gemini_client.generate_content(
-            [_SCORECARD_PROMPT, image_part],
-            generation_config={
-                'temperature': 0,
-                'response_mime_type': 'application/json',
-            }
+        from google.genai import types as _gtypes
+        image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
+        r = _gemini_client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[_SCORECARD_PROMPT, image_part],
+            config=_gtypes.GenerateContentConfig(
+                temperature=0,
+                response_mime_type='application/json',
+            )
         )
         raw = r.text.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
