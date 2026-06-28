@@ -120,26 +120,33 @@ def vision_parse_scorecard(image_url: str) -> dict:
 
         r = _anthropic_client.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=1200,
-            messages=[{
-                'role': 'user',
-                'content': [
-                    {'type': 'image', 'source': image_source},
-                    {'type': 'text',  'text': _SCORECARD_PROMPT},
-                ]
-            }]
+            max_tokens=1800,
+            messages=[
+                {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'image', 'source': image_source},
+                        {'type': 'text',  'text': _SCORECARD_PROMPT},
+                    ]
+                },
+                # Prefill forces the model to continue from '{' — guarantees JSON output
+                {
+                    'role': 'assistant',
+                    'content': '{'
+                }
+            ]
         )
         print(f"[VISION] stop_reason={r.stop_reason} content_blocks={len(r.content)}")
         if not r.content:
             print("[VISION] Empty content list from API")
             return empty
-        raw = r.content[0].text.strip()
+        raw = '{' + r.content[0].text.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
         if not raw:
             print("[VISION] Empty text block from API")
             return empty
         # Strip markdown code fences if model wraps output
-        if raw.startswith('```'):
+        if '```' in raw:
             raw = raw.split('```')[1]
             if raw.startswith('json'):
                 raw = raw[4:]
