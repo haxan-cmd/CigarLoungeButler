@@ -44,9 +44,9 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 - D: Deaths — typically 0–50
 - PING: last column, network latency in ms — ignore this
 
-CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. This highlighted row is NOT necessarily the top row. It can appear anywhere on the scoreboard. Do NOT default to the top-ranked player.
+CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE — top, middle, or bottom of the scoreboard.
 
-Step 1: Scan every row on both teams and identify which one looks visually distinct. Note that player's NAME.
+Step 1: Scan every row on both teams and identify which one looks visually distinct from all others. Note that player's NAME. It may be the first row, last row, or anywhere in between.
 Step 2: Read the T, K, D values ONLY from that exact row — do not read from any row above or below it.
 Step 3: That same player must NOT appear in team_scores or team_kills — those arrays are for all OTHER teammates only.
 
