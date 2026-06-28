@@ -37,19 +37,41 @@ flowchart TD
     H --> L[Update registry card]
     H --> M[Bounty check]
 
-    J --> J1{Feats earned?}
+    J --> J0[cigar — always]
+    J --> J1{Stat feats?}
     J1 -->|0 deaths| J2[flawless]
     J1 -->|100+ kills| J3[100 kills]
     J1 -->|200+ TDs| J4[200 TDs]
-    J1 -->|150 TD · 0D| J5[predator]
-    J1 -->|Triple criteria| J6[triple]
+    J1 -->|150 TD · 0 deaths| J5[predator]
+    J1 -->|150 TD · 100K · 20k score| J6[triple]
     J1 -->|30+ deaths| J7[lounger]
     J1 -->|Kills > next teammate TDs| J8[TUFF]
 
-    K --> K1{New placement?}
-    K1 -->|Yes| K2[weapon HS react\nEdit summary with placement]
+    J --> J9{Personal best\non weapon board?}
+    J9 -->|Yes — not VIP · not ranged| J10[weapon HS]
+
+    K --> K1{Leaderboard\nupdated?}
+    K1 -->|Yes| K2[high score react\nPlacement added to summary]
+
     M --> M1{Bounty weapon hit?}
-    M1 -->|Yes| M2[bounty react\nCheck completion]
+    M1 -->|Yes| M2[bounty react]
+    M2 --> M3{All weapons\ncomplete?}
+    M3 -->|Yes| M4[Bounty completion\nannounced in main]
+
+    classDef default fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
+    classDef decision fill:#313244,stroke:#cba6f7,color:#cdd6f4
+    classDef action fill:#1e3a5f,stroke:#89b4fa,color:#cdd6f4
+    classDef sheets fill:#1a3a2a,stroke:#a6e3a1,color:#a6e3a1
+    classDef summary fill:#3a2a1a,stroke:#fab387,color:#fab387
+    classDef feat fill:#2a1a3a,stroke:#cba6f7,color:#cba6f7
+    classDef start fill:#313244,stroke:#f38ba8,color:#f38ba8
+
+    class A start
+    class C,F,J1,K1,M1 decision
+    class D,E,G action
+    class H sheets
+    class I,K,L,M,K2,M2 summary
+    class J2,J3,J4,J5,J6,J7,J8 feat
 ```
 
 ### 🏆 Leaderboards
