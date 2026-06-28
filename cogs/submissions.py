@@ -152,10 +152,13 @@ class SubmitView(discord.ui.View):
 
     async def on_timeout(self):
         try:
-            await self.prompt_msg.edit(
-                content="*Submission window expired. Post again to start a new one.*",
-                view=None,
+            expired_embed = discord.Embed(
+                title="Window Expired",
+                description="Post your screenshot again to open a new submission.",
+                color=0x36393f,
             )
+            expired_embed.set_footer(text="Cigar Lounge Butler")
+            await self.prompt_msg.edit(content=None, embed=expired_embed, view=None)
         except Exception:
             pass
         self.stop()
@@ -1981,8 +1984,14 @@ class SubmissionsCog(commands.Cog):
         if not has_image:
             return
         view = SubmitView(original_message=message)
+        embed = discord.Embed(
+            title="Run Detected",
+            description=f"Ready to log your engagement, {message.author.display_name}.",
+            color=0xc8a96e,
+        )
+        embed.set_footer(text="Window closes in 5 minutes  ·  Cigar Lounge Butler")
         prompt = await message.reply(
-            "\U0001f4cb **Submit this run?**",
+            embed=embed,
             view=view,
             mention_author=False,
         )
