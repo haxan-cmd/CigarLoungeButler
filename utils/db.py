@@ -428,6 +428,201 @@ async def upsert_index_post(forum_name, channel_id, message_id):
 
 # ── Snapshots ─────────────────────────────────────────────────────────────────
 
+async def add_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
+    """Always insert a new row (used for unlimited boards like 100 Kills / 200 Takedowns)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO leaderboard_data (board_name, player_name, discord_id, score, message_link, weapon)
+            VALUES ($1,$2,$3,$4,$5,$6)
+        """, board_name, player_name, str(discord_id), score, message_link, weapon)
+
+
+async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_id: str):
+    """Delete the oldest entry for a player on a board (top-10 pruning)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            DELETE FROM leaderboard_data
+            WHERE id = (
+                SELECT id FROM leaderboard_data
+                WHERE board_name=$1 AND discord_id=$2
+                ORDER BY id ASC LIMIT 1
+            )
+        """, board_name, str(discord_id))
+
+
+async def delete_leaderboard_entries_by_link(message_link: str) -> list[str]:
+    """Delete all leaderboard_data rows matching a message_link; return affected board names."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT board_name FROM leaderboard_data WHERE message_link=$1", message_link
+        )
+        board_names = [r['board_name'] for r in rows]
+        await conn.execute("DELETE FROM leaderboard_data WHERE message_link=$1", message_link)
+    return board_names
+
+
+async def update_submission_feats_by_link(message_link: str, feats: str):
+    """Update feats string for a submission identified by message_link."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE submissions SET feats=$1 WHERE message_link=$2", feats, message_link
+        )
+
+
+# ── Players extras ────────────────────────────────────────────────────────────
+
+async def update_player_stats(discord_id, total_marks, submission_count, last_submission_str,
+                               weapon_marks_str, class_marks_str, forum_thread_id=None):
+    """Update stats columns on the players table."""
+    pool = _pool_check()
+    last_sub = None
+    if last_submission_str:
+        try:
+            last_sub = datetime.strptime(str(last_submission_str).strip(), '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            pass
+    async with pool.acquire() as conn:
+        if forum_thread_id:
+            await conn.execute("""
+                UPDATE players
+                SET total_marks=$1, submission_count=$2, last_submission=$3,
+                    weapon_marks=$4, class_marks=$5,
+                    forum_thread_id=COALESCE($6, forum_thread_id)
+                WHERE discord_id=$7
+            """, total_marks, submission_count, last_sub,
+                 weapon_marks_str, class_marks_str,
+                 str(forum_thread_id), str(discord_id))
+        else:
+            await conn.execute("""
+                UPDATE players
+                SET total_marks=$1, submission_count=$2, last_submission=$3,
+                    weapon_marks=$4, class_marks=$5
+                WHERE discord_id=$6
+            """, total_marks, submission_count, last_sub,
+                 weapon_marks_str, class_marks_str, str(discord_id))
+
+
+async def get_registry_card(discord_id: str) -> list | None:
+    """Get [discord_id, player_name, forum_thread_id] for one player, or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT * FROM registry_cards WHERE discord_id=$1", str(discord_id)
+        )
+    return [r['discord_id'], r['player_name'] or '', r['forum_thread_id'] or ''] if r else None
+
+
+# ── Legacy tables ─────────────────────────────────────────────────────────────
+
+async def get_legacy_marks_for_player(player_name: str) -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM legacy_marks WHERE LOWER(player_name)=LOWER($1)", player_name
+        )
+    return [[r['player_name'], r['weapon'] or '', r['subclass'] or '',
+             str(r['marks']) if r['marks'] is not None else '0'] for r in rows]
+
+
+async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: int):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow(
+            "SELECT id FROM legacy_marks WHERE LOWER(player_name)=LOWER($1) AND weapon=$2 LIMIT 1",
+            player_name, weapon
+        )
+        if not exists:
+            await conn.execute(
+                "INSERT INTO legacy_marks (player_name, weapon, subclass, marks) VALUES ($1,$2,$3,$4)",
+                player_name, weapon, subclass or '', marks
+            )
+
+
+async def get_legacy_feats_for_player(player_name: str) -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM legacy_feats WHERE LOWER(player_name)=LOWER($1)", player_name
+        )
+    return [[r['player_name'], r['emojis'] or '', r['message_link'] or ''] for r in rows]
+
+
+async def add_legacy_feat(player_name: str, emojis: str, link: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow(
+            "SELECT id FROM legacy_feats WHERE LOWER(player_name)=LOWER($1) AND message_link=$2 LIMIT 1",
+            player_name, link or ''
+        )
+        if not exists:
+            await conn.execute(
+                "INSERT INTO legacy_feats (player_name, emojis, message_link) VALUES ($1,$2,$3)",
+                player_name, emojis, link or ''
+            )
+
+
+async def get_legacy_bounties_for_player(player_name: str) -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM legacy_bounties WHERE LOWER(player_name)=LOWER($1)", player_name
+        )
+    return [[r['player_name'], r['bounty_title'] or '',
+             str(r['completed']) if r['completed'] is not None else ''] for r in rows]
+
+
+async def add_legacy_bounty(player_name: str, bounty_title: str, placement):
+    pool = _pool_check()
+    placement_int = None
+    if placement:
+        try:
+            placement_int = int(placement)
+        except (ValueError, TypeError):
+            pass
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow(
+            "SELECT id FROM legacy_bounties WHERE LOWER(player_name)=LOWER($1) AND LOWER(bounty_title)=LOWER($2) LIMIT 1",
+            player_name, bounty_title
+        )
+        if not exists:
+            await conn.execute(
+                "INSERT INTO legacy_bounties (player_name, bounty_title, completed) VALUES ($1,$2,$3)",
+                player_name, bounty_title, placement_int
+            )
+
+
+# ── ChallengeRules ────────────────────────────────────────────────────────────
+
+async def get_challenge_rule_msg_ids() -> list[int]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT message_id FROM challenge_rules ORDER BY id")
+    result = []
+    for r in rows:
+        try:
+            result.append(int(r['message_id']))
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
+async def save_challenge_rules(msg_ids: list, labels: list):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM challenge_rules")
+        for msg_id, label in zip(msg_ids, labels):
+            await conn.execute(
+                "INSERT INTO challenge_rules (message_id, section) VALUES ($1,$2)",
+                str(msg_id), label
+            )
+
+
+# ── Snapshots ─────────────────────────────────────────────────────────────────
+
 async def add_snapshot(snapshot_date, total_subs, weekly_subs, active_players,
                         top_weapons, top_maps, avg_td, avg_kills,
                         highscores_set, boards_updated, trend_weapons):
