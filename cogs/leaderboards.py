@@ -564,7 +564,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 # post extra messages, then repost the decoration at the end.
                 try:
                     async for old_msg in thread.history(limit=5, oldest_first=False):
-                        if old_msg.attachments:
+                        if old_msg.attachments and old_msg.author == self.bot.user:
                             await old_msg.delete()
                             break
                 except Exception as e:
@@ -865,7 +865,7 @@ class LeaderboardsCog(commands.Cog):
                     # Need more slots — delete bottom decoration, post new messages, repost decoration
                     try:
                         async for old_msg in thread.history(limit=5, oldest_first=False):
-                            if old_msg.attachments:
+                            if old_msg.attachments and old_msg.author == self.bot.user:
                                 await old_msg.delete()
                                 break
                     except Exception as e:
