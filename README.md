@@ -15,26 +15,26 @@ A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.c
 ## Features
 
 ### 📋 Submission Flow
-Players post a screenshot of their in-game scorecard. The Butler walks them through an ephemeral form (class, weapon, map, faction, stats), detects feats automatically, and logs the run to Google Sheets. Includes VIP detection, triple-kill verification, emoji reactions, and a formatted confirmation reply with an edit button.
+Players post a screenshot of their in-game scorecard. Vision AI (Claude) reads the stats automatically. Players confirm class and weapon, then the Butler logs the run to Google Sheets. Includes VIP detection, triple-kill verification, emoji reactions, and a formatted confirmation reply with an edit button. Vision failures fall back to a manual entry form.
 
 ### 🏆 Leaderboards
 Live weapon leaderboards for all 1H and 2H weapons, plus map boards and feat boards. Multi-message chunking handles large boards. Shared weapons across subclasses are deduplicated by `(weapon, subclass)` key.
 
 ### 📇 Registry Cards
-Per-player forum threads in the Butler's Archive. Weapon marks are merged from live submissions, leaderboard data, and legacy records. Includes class rank progression and Best Placements sorted by dominance gap.
+Per-player forum threads in the Butler's Archive. Weapon marks are merged from live submissions, leaderboard data, and legacy records. Includes class rank progression, personal bests, and Best Placements sorted by dominance gap (gap between 1st and 2nd place). `/repair_marks` backfills missing High Score marks in bulk.
 
-### 🎖️ Butler's Favourites
-Prestige titles recalculated after every submission. One holder per title at a time.
+### 🎖️ Butler's Report
+Weekly stats and all-time prestige titles posted as a Discord embed. Titles recalculated after every submission — one holder per title at a time. Weekly stats reset each Monday.
 
 | Title | Criteria |
 |---|---|
-| **Grand Marshal** | Most leaderboard breadth -- 15+ boards across all categories, ranked by average placement |
+| **Grand Marshal** | Most leaderboard breadth — 15+ boards across all categories, ranked by average placement |
 | **Weapons Master** | 9+ weapon leaderboards, ranked by average placement |
 | **Campaign Master** | 6+ map leaderboards, ranked by average placement |
 | **Headhunter** | #1 on the 100 Kills board, ranked by average kills weighted by submission count |
 | **Butcher** | #1 on the 200 Takedowns board, ranked by average takedowns weighted by submission count |
 
-Weekly Lethality Rating (kill rate %) and Warlord (TD/kill ratio) are also tracked, with a 3-run minimum.
+Weekly stats include Lethality Rating, Warlord (TD/kill ratio), Busiest player, Top Weapons, and Top Maps — all with a 3-run minimum.
 
 ### 🎯 Bounty System
 Monthly bounty cards with per-player progress tracking, a live Top Hunters board, and archival on completion. Supports per-weapon custom targets. Player commands: `/bounty_hunt`, `/my_bounty`, `/bounty_status`.
@@ -49,7 +49,7 @@ Hourly summary posted to a private channel covering submissions, milestones, But
 Flags suspicious runs to a private notes channel when stats exceed 2x the server record or a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries.
 
 ### 🃏 Butler Personality
-Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Powered by Claude Haiku.
+Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, and Hundred Handed progress using live sheet data as context. Powered by Claude Haiku.
 
 ---
 
