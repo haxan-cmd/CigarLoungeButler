@@ -394,6 +394,38 @@ class PersonalityCog(commands.Cog):
             if not ch:
                 print("[NERVE] channel not found")
                 return
+
+            # Scan feedback + main channel for complaints/bug reports in last hour
+            FEEDBACK_CHANNEL_ID = 1518293898177413262
+            scan_channel_ids = [FEEDBACK_CHANNEL_ID, MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
+            bug_keywords = [
+                'broke', 'broken', 'bug', 'didn\'t work', 'not working', 'didn\'t register',
+                'failed', 'error', 'wrong', 'missing', 'disappeared', 'crash', 'issue',
+                'fix', 'broken', 'help', 'why didn\'t', 'why did', 'not showing',
+                'didn\'t submit', 'lost', 'glitch', 'wtf', 'messed up'
+            ]
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+            flagged = []
+            try:
+                for ch_id in scan_channel_ids:
+                    scan_ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
+                    if not scan_ch:
+                        continue
+                    async for msg in scan_ch.history(after=cutoff, limit=200):
+                        if msg.author.bot:
+                            continue
+                        lower = msg.content.lower()
+                        if any(kw in lower for kw in bug_keywords):
+                            ts = msg.created_at.strftime('%H:%M')
+                            chan_label = 'feedback' if ch_id == FEEDBACK_CHANNEL_ID else ('#100' if ch_id == SUBMISSIONS_CHANNEL_ID else 'main')
+                            flagged.append(f"`{ts}` **{msg.author.display_name}** [{chan_label}]: {msg.content[:120]}")
+            except Exception as scan_err:
+                print(f"[NERVE] channel scan error: {scan_err}")
+
+            if flagged:
+                flag_block = "\n\n**⚠️ User Reports (last hour)**\n" + "\n".join(flagged[:10])
+                digest = digest + flag_block
+
             await ch.send(digest[:1900])
             print("[NERVE] sent OK")
         except Exception as e:
