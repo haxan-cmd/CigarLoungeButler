@@ -77,6 +77,14 @@ async def on_app_command_error(
 
 async def main():
     await run_healthcheck()
+    # Initialise Postgres pool if DATABASE_URL is configured
+    if os.environ.get('DATABASE_URL'):
+        from utils.db import db_init, db_close
+        await db_init()
+        bot._db_close = db_close
+    else:
+        bot._db_close = None
+        print("⚠️  DATABASE_URL not set — Postgres pool skipped")
     async with bot:
         for cog in COGS:
             try:
@@ -85,7 +93,11 @@ async def main():
             except Exception as e:
                 print(f"❌ Failed to load {cog}: {e}")
                 traceback.print_exc()
-        await bot.start(config.TOKEN)
+        try:
+            await bot.start(config.TOKEN)
+        finally:
+            if bot._db_close:
+                await bot._db_close()
 
 
 if __name__ == "__main__":

@@ -11,15 +11,17 @@ from discord.ext import commands
 from datetime import datetime, timezone, timedelta
 
 import config
-from utils.sheets import (
-    _sheet_cache, _registry_lock,
-    submissions_ws, players_ws, leaderboard_data_ws,
-    bounty_ws, bounty_players_ws, registry_ws,
-    leaderboards_ws, index_posts_ws,
-    _submission_queues, _submission_workers, get_submission_queue,
-    cached_submissions, cached_players, cached_leaderboard_data,
-    gspread_retry,
-)
+import utils.db as _db
+
+# ── Submission queue / lock (was in utils.sheets, now local) ──────────────────
+_submission_queues: dict  = {}
+_submission_workers: dict = {}
+_registry_lock            = asyncio.Lock()
+
+def get_submission_queue(guild_id):
+    if guild_id not in _submission_queues:
+        _submission_queues[guild_id] = asyncio.Queue()
+    return _submission_queues[guild_id]
 from utils.helpers import (
     parse_submission_text, format_weapon_marks,
     detect_weapon_milestones, build_milestone_message,
@@ -71,78 +73,63 @@ def get_all_weapons_for_class(selected_class):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
     return sorted(class_weapons)
 
-def upsert_player(discord_id, discord_name):
+async def upsert_player(discord_id, discord_name):
     """Returns True if this is a new player."""
     try:
-        rows = cached_players()
-        discord_id_str = str(discord_id)
-        for i, row in enumerate(rows, start=2):
-            if row and row[0] == discord_id_str:
-                if len(row) < 2 or row[1] != discord_name:
-                    players_ws.update_cell(i, 2, discord_name)
-                    _sheet_cache.invalidate(players_ws)
-                return False
-        players_ws.append_row([discord_id_str, discord_name, ""])
-        _sheet_cache.invalidate(players_ws)
+        existing = await _db.get_player(str(discord_id))
+        if existing:
+            if existing[1] != discord_name:
+                await _db.upsert_player(discord_id, discord_name,
+                    forum_thread_id=existing[2] or None,
+                    total_marks=int(existing[3] or 0),
+                    submission_count=int(existing[4] or 0),
+                    last_submission=existing[5] or None,
+                    weapon_marks=existing[6] or None,
+                    class_marks=existing[7] or None,
+                )
+            return False
+        await _db.upsert_player(discord_id, discord_name)
         return True
     except Exception as e:
         print(f"Player upsert error: {e}")
         return False
 
-def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
-                   takedowns, kills, deaths, vip, feats, message_link,
-                   lobby_rank=None, lobby_size=None, kills_rank=None,
-                   team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
-                   team_kill_share=None, team_td_share=None):
-    from datetime import datetime as _dt, timedelta as _td
+async def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
+                         takedowns, kills, deaths, vip, feats, message_link,
+                         lobby_rank=None, lobby_size=None, kills_rank=None,
+                         team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
+                         team_kill_share=None, team_td_share=None):
+    from datetime import datetime as _dt
     now = _dt.utcnow()
-    timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
 
-    # Deduplicate: skip if this player already has an identical run (same TD/kills/deaths/map/faction)
-    # logged in the last 5 minutes — prevents double-write when vision fails then user resubmits.
+    # Deduplicate: skip if identical run logged in the last 5 minutes
     try:
-        existing = submissions_ws.get_all_values()
-        cutoff = now - _td(minutes=5)
-        for row in reversed(existing[1:]):  # skip header, check newest first
-            if len(row) < 10:
-                continue
-            try:
-                row_time = _dt.strptime(row[0], '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                continue
-            if row_time < cutoff:
-                break  # rows are chronological; no point checking further back
-            if (str(row[2]) == str(discord_id)
-                    and str(row[7]) == str(takedowns)
-                    and str(row[8]) == str(kills)
-                    and str(row[9]) == str(deaths)
-                    and str(row[5]).lower() == str(map_name or '').lower()
-                    and str(row[6]).lower() == str(faction or '').lower()):
-                print(f"[DEDUP] Skipping duplicate submission for {discord_name} ({takedowns} TD, {kills}K, {deaths}D)")
-                return
+        is_dup = await _db.check_duplicate_submission(
+            str(discord_id), takedowns, kills, deaths, map_name, faction
+        )
+        if is_dup:
+            print(f"[DEDUP] Skipping duplicate submission for {discord_name} ({takedowns} TD, {kills}K, {deaths}D)")
+            return None
     except Exception as dedup_err:
         print(f"[DEDUP] Check failed (non-fatal): {dedup_err}")
-    vip_str   = "Yes" if vip else "No"
+
     feats_str = ", ".join(feats) if feats else "None"
     nerve_log_submission(discord_name, weapon)
-    # Get row count before append so we can return the exact row index
-    existing_rows = submissions_ws.get_all_values()
-    row_index = len(existing_rows) + 1  # 1-based, header is row 1
-    submissions_ws.append_row([
-        timestamp, discord_name, str(discord_id), weapon, cls,
-        map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link,
-        lobby_rank        if lobby_rank        is not None else '',
-        lobby_size        if lobby_size        is not None else '',
-        kills_rank        if kills_rank        is not None else '',
-        team_rank         if team_rank         is not None else '',
-        team_size         if team_size         is not None else '',
-        total_lobby_kills if total_lobby_kills is not None else '',
-        round(team_score_ratio, 3) if team_score_ratio is not None else '',
-        round(team_kill_share, 1) if team_kill_share is not None else '',
-        round(team_td_share, 1)   if team_td_share   is not None else '',
-    ])
-    _sheet_cache.invalidate(submissions_ws)
-    return row_index
+
+    row_id = await _db.add_submission(
+        now, discord_name, discord_id, weapon, cls, map_name, faction,
+        takedowns, kills, deaths, vip, feats_str, message_link,
+        lobby_rank=lobby_rank,
+        lobby_size=lobby_size,
+        kills_rank=kills_rank,
+        team_rank=team_rank,
+        team_size=team_size,
+        total_lobby_kills=total_lobby_kills,
+        team_td_ratio=round(team_score_ratio, 3) if team_score_ratio is not None else None,
+        team_kill_share=round(team_kill_share, 1) if team_kill_share is not None else None,
+        team_td_share=round(team_td_share, 1) if team_td_share is not None else None,
+    )
+    return row_id
 
 class SubmitView(discord.ui.View):
     def __init__(self, original_message, prompt_msg=None):
@@ -1264,22 +1251,17 @@ class EditVIPView(discord.ui.View):
 
 
 async def _apply_edit(interaction, ev):
-    """Write the updated submission back to the sheet and update the summary message."""
+    """Write the updated submission back to the DB and update the summary message."""
     try:
         if ev.submission_row:
-            vip_str = "Yes" if ev.vip else "No"
             feats_str = ", ".join(ev.feats) if ev.feats else "None"
-            submissions_ws.update_cell(ev.submission_row, 4, ev.weapon)
-            submissions_ws.update_cell(ev.submission_row, 5, ev.cls)
-            submissions_ws.update_cell(ev.submission_row, 6, ev.map_name)
-            submissions_ws.update_cell(ev.submission_row, 7, ev.faction)
-            submissions_ws.update_cell(ev.submission_row, 8, ev.takedowns)
-            submissions_ws.update_cell(ev.submission_row, 9, ev.kills)
-            submissions_ws.update_cell(ev.submission_row, 10, ev.deaths)
-            submissions_ws.update_cell(ev.submission_row, 11, vip_str)
-            submissions_ws.update_cell(ev.submission_row, 12, feats_str)
+            await _db.update_submission_fields(
+                ev.submission_row,
+                ev.weapon, ev.cls, ev.map_name, ev.faction,
+                ev.takedowns, ev.kills, ev.deaths, ev.vip, feats_str,
+            )
     except Exception as e:
-        print(f"Edit sheet update error: {e}")
+        print(f"Edit DB update error: {e}")
 
     # Rebuild summary
     new_summary = (
@@ -1363,7 +1345,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
         flags = []
 
-        all_rows = cached_submissions()
+        all_rows = await _db.get_all_submissions()
 
         # Server record: kills
         all_kills = [int(r[8]) for r in all_rows if len(r) > 8 and r[8].strip().lstrip('-').isdigit() and int(r[8]) > 0]
@@ -1382,7 +1364,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
                 flags.append(f"**Takedowns:** {takedowns} — server record is {record_tds} (+{pct}%)")
 
         # Weapon leaderboard: would this be 1st place by 20%+ gap?
-        ld_rows = leaderboard_data_ws.get_all_values()[1:]
+        ld_rows = await _db.get_all_leaderboard_data()
         weapon_scores = [int(r[3]) for r in ld_rows if r[0] == selected_weapon and len(r) > 3 and r[3].strip().isdigit()]
         if weapon_scores:
             current_best = max(weapon_scores)
@@ -1571,10 +1553,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     except Exception as _edit_err:
         print(f"[FINALISE] edit_original_response failed: {_edit_err}")
 
-    # Log to Google Sheets first so we get the row index
+    # Log to Postgres first so we get the row id
     submission_row = None
     try:
-        log_result = log_submission(
+        log_result = await log_submission(
             interaction.user.display_name,
             interaction.user.id,
             selected_weapon,
@@ -1657,8 +1639,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
     # and beats the player's own existing score on that board
     if not vip and not is_ranged:
-        all_values = leaderboard_data_ws.get_all_values()
-        weapon_entries = [row for row in all_values[1:] if row[0] == selected_weapon]
+        all_ld = await _db.get_all_leaderboard_data()
+        weapon_entries = [row for row in all_ld if row[0] == selected_weapon]
         scores = sorted(
             [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
             reverse=True
@@ -1695,13 +1677,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _high_score_written = False
         if submission_row:
             try:
-                current_feats = submissions_ws.cell(submission_row, 12).value or ''
+                current_feats = await _db.get_submission_feats(submission_row)
                 if 'High Score' not in current_feats:
-                    updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
                     if current_feats in ('', 'None'):
                         updated_feats = 'High Score'
-                    submissions_ws.update_cell(submission_row, 12, updated_feats)
-                    _sheet_cache.invalidate(submissions_ws)
+                    else:
+                        updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
+                    await _db.update_submission_feats(submission_row, updated_feats)
                     _high_score_written = True
             except Exception as e:
                 print(f"Highscore feat write error: {e}")
@@ -1835,10 +1817,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _user_name = interaction.user.display_name
 
     async def _bg_tasks():
-        # Pre-warm cache once so all downstream calls share the same fetch
+        # Pre-fetch once so downstream calls share the same data
         try:
-            cached_submissions()
-            cached_players()
+            await _db.get_all_submissions()
+            await _db.get_all_players()
         except Exception:
             pass
 
@@ -1872,17 +1854,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
         # Update ButlersArchive summary sheet + milestone detection
         try:
-            subs = cached_submissions()
+            subs = await _db.get_all_submissions()
             discord_id_str = str(_user_id)
             player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
             submission_count = len(player_subs)
             last_submission = player_subs[-1][0] if player_subs else ''
             is_new_player = submission_count == 1
 
-            # Read OLD weapon marks from Players sheet BEFORE updating — used for milestone diff
+            # Read OLD weapon marks from Players DB BEFORE updating — used for milestone diff
             old_flat = {}
             try:
-                p_rows = cached_players()
+                p_rows = await _db.get_all_players()
                 for p_row in p_rows:
                     if p_row and p_row[0].strip() == discord_id_str:
                         old_marks_str = p_row[6].strip() if len(p_row) > 6 else ''
@@ -1920,7 +1902,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             total_marks = sum(flat_marks.values()) if flat_marks else 0
 
             # Thread ID from registry
-            reg_rows = registry_ws.get_all_values()[1:]
+            reg_rows = await _db.get_all_registry_cards()
             thread_id = None
             for r in reg_rows:
                 if len(r) > 2 and r[0].strip() == discord_id_str:

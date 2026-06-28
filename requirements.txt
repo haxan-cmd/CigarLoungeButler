@@ -27,3 +27,4 @@ yarl==1.24.2
 anthropic
 Pillow
 google-genai
+asyncpg

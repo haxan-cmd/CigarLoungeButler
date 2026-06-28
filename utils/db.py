@@ -1,0 +1,451 @@
+"""
+utils/db.py — Async Postgres layer replacing utils/sheets.py.
+
+Drop-in replacement: same data shapes returned, no SheetCache needed.
+Connection pool is initialised once on bot startup via db_init().
+"""
+
+import os
+import json
+import asyncpg
+from datetime import datetime
+
+_pool: asyncpg.Pool | None = None
+
+
+async def db_init():
+    """Call once at bot startup to create the connection pool."""
+    global _pool
+    _pool = await asyncpg.create_pool(
+        os.environ['DATABASE_URL'],
+        min_size=2,
+        max_size=10,
+    )
+    print("[DB] Postgres pool ready.")
+
+
+async def db_close():
+    """Call on bot shutdown."""
+    if _pool:
+        await _pool.close()
+
+
+def _pool_check():
+    if not _pool:
+        raise RuntimeError("DB pool not initialised — call db_init() first.")
+    return _pool
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _row_to_submission(r) -> list:
+    """Convert asyncpg Record to the same list format the cogs expect from Sheets."""
+    return [
+        str(r['submitted_at']) if r['submitted_at'] else '',
+        r['player_name'] or '',
+        r['discord_id'] or '',
+        r['weapon'] or '',
+        r['subclass'] or '',
+        r['map'] or '',
+        r['faction'] or '',
+        str(r['takedowns']) if r['takedowns'] is not None else '',
+        str(r['kills']) if r['kills'] is not None else '',
+        str(r['deaths']) if r['deaths'] is not None else '',
+        'Yes' if r['vip'] else 'No',
+        r['feats'] or '',
+        r['message_link'] or '',
+        str(r['lobby_rank']) if r['lobby_rank'] is not None else '',
+        str(r['lobby_size']) if r['lobby_size'] is not None else '',
+        str(r['kills_rank']) if r['kills_rank'] is not None else '',
+        str(r['team_rank']) if r['team_rank'] is not None else '',
+        str(r['team_size']) if r['team_size'] is not None else '',
+        str(r['total_lobby_kills']) if r['total_lobby_kills'] is not None else '',
+        str(r['team_td_ratio']) if r['team_td_ratio'] is not None else '',
+        str(r['team_kill_share']) if r['team_kill_share'] is not None else '',
+        str(r['team_td_share']) if r['team_td_share'] is not None else '',
+        str(r['id']),  # row index equivalent
+    ]
+
+
+def _row_to_player(r) -> list:
+    return [
+        r['discord_id'] or '',
+        r['player_name'] or '',
+        r['forum_thread_id'] or '',
+        str(r['total_marks']) if r['total_marks'] is not None else '0',
+        str(r['submission_count']) if r['submission_count'] is not None else '0',
+        str(r['last_submission']) if r['last_submission'] else '',
+        r['weapon_marks'] or '',
+        r['class_marks'] or '',
+    ]
+
+
+# ── Submissions ───────────────────────────────────────────────────────────────
+
+async def get_all_submissions() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM submissions ORDER BY id")
+    return [_row_to_submission(r) for r in rows]
+
+
+async def add_submission(
+    timestamp, discord_name, discord_id, weapon, cls, map_name, faction,
+    takedowns, kills, deaths, vip, feats, message_link,
+    lobby_rank=None, lobby_size=None, kills_rank=None,
+    team_rank=None, team_size=None, total_lobby_kills=None,
+    team_td_ratio=None, team_kill_share=None, team_td_share=None
+) -> int:
+    """Insert a submission and return its id (replaces sheet row index)."""
+    pool = _pool_check()
+    vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
+    if isinstance(timestamp, str):
+        try: timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+        except: timestamp = None
+    async with pool.acquire() as conn:
+        row_id = await conn.fetchval("""
+            INSERT INTO submissions
+            (submitted_at, player_name, discord_id, weapon, subclass, map, faction,
+             takedowns, kills, deaths, vip, feats, message_link,
+             lobby_rank, lobby_size, kills_rank, team_rank, team_size,
+             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+            RETURNING id
+        """,
+            timestamp, discord_name, str(discord_id), weapon, cls, map_name, faction,
+            takedowns, kills, deaths, vip_bool, feats, message_link,
+            lobby_rank, lobby_size, kills_rank, team_rank, team_size,
+            total_lobby_kills, team_td_ratio, team_kill_share, team_td_share
+        )
+    return row_id
+
+
+async def get_submission_feats(submission_id: int) -> str:
+    """Return the feats string for a submission by id (empty string if not found)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        val = await conn.fetchval("SELECT feats FROM submissions WHERE id=$1", submission_id)
+    return val or ''
+
+
+async def update_submission_feats(submission_id: int, feats: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE submissions SET feats=$1 WHERE id=$2", feats, submission_id
+        )
+
+
+async def update_submission_fields(submission_id: int, weapon: str, cls: str,
+                                   map_name: str, faction: str, takedowns: int,
+                                   kills: int, deaths: int, vip: bool, feats: str):
+    """Update all editable fields on a submission row (used by edit flow)."""
+    pool = _pool_check()
+    vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE submissions
+            SET weapon=$1, subclass=$2, map=$3, faction=$4,
+                takedowns=$5, kills=$6, deaths=$7, vip=$8, feats=$9
+            WHERE id=$10
+        """, weapon, cls, map_name, faction, takedowns, kills, deaths, vip_bool, feats, submission_id)
+
+
+async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int,
+                                     deaths: int, map_name: str, faction: str,
+                                     cutoff_minutes: int = 5) -> bool:
+    """Return True if an identical submission exists within the last N minutes."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id FROM submissions
+            WHERE discord_id=$1
+              AND takedowns=$2 AND kills=$3 AND deaths=$4
+              AND LOWER(map)=$5 AND LOWER(faction)=$6
+              AND submitted_at > NOW() - ($7 || ' minutes')::INTERVAL
+            LIMIT 1
+        """, str(discord_id), takedowns, kills, deaths,
+             (map_name or '').lower(), (faction or '').lower(),
+             str(cutoff_minutes))
+    return row is not None
+
+
+async def delete_submission_by_link(message_link: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM submissions WHERE message_link=$1", message_link
+        )
+
+
+# ── Players ───────────────────────────────────────────────────────────────────
+
+async def get_all_players() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM players ORDER BY player_name")
+    return [_row_to_player(r) for r in rows]
+
+
+async def get_player(discord_id: str) -> list | None:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT * FROM players WHERE discord_id=$1", str(discord_id))
+    return _row_to_player(r) if r else None
+
+
+async def upsert_player(discord_id, player_name, forum_thread_id=None,
+                         total_marks=0, submission_count=0, last_submission=None,
+                         weapon_marks=None, class_marks=None):
+    pool = _pool_check()
+    if isinstance(last_submission, str):
+        try: last_submission = datetime.strptime(last_submission, '%Y-%m-%d %H:%M:%S')
+        except: last_submission = None
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO players
+            (discord_id, player_name, forum_thread_id, total_marks, submission_count,
+             last_submission, weapon_marks, class_marks)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            ON CONFLICT (discord_id) DO UPDATE SET
+                player_name=EXCLUDED.player_name,
+                forum_thread_id=COALESCE(EXCLUDED.forum_thread_id, players.forum_thread_id),
+                total_marks=EXCLUDED.total_marks,
+                submission_count=EXCLUDED.submission_count,
+                last_submission=EXCLUDED.last_submission,
+                weapon_marks=EXCLUDED.weapon_marks,
+                class_marks=EXCLUDED.class_marks
+        """,
+            str(discord_id), player_name, forum_thread_id, total_marks,
+            submission_count, last_submission, weapon_marks, class_marks
+        )
+
+
+async def update_player_thread(discord_id: str, thread_id: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE players SET forum_thread_id=$1 WHERE discord_id=$2",
+            thread_id, str(discord_id)
+        )
+
+
+# ── Leaderboards ──────────────────────────────────────────────────────────────
+
+async def get_all_leaderboards() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM leaderboards ORDER BY id")
+    return [[r['board_name'], r['thread_id'] or '', r['message_ids'] or '', r['board_type'] or ''] for r in rows]
+
+
+async def upsert_leaderboard(board_name, thread_id, message_ids, board_type):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM leaderboards WHERE board_name=$1", board_name
+        )
+        if existing:
+            await conn.execute(
+                "UPDATE leaderboards SET thread_id=$1, message_ids=$2, board_type=$3 WHERE board_name=$4",
+                thread_id, message_ids, board_type, board_name
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO leaderboards (board_name, thread_id, message_ids, board_type) VALUES ($1,$2,$3,$4)",
+                board_name, thread_id, message_ids, board_type
+            )
+
+
+async def update_leaderboard_messages(board_name: str, message_ids: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE leaderboards SET message_ids=$1 WHERE board_name=$2",
+            message_ids, board_name
+        )
+
+
+# ── LeaderboardData ───────────────────────────────────────────────────────────
+
+async def get_all_leaderboard_data() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM leaderboard_data ORDER BY id")
+    return [
+        [r['board_name'], r['player_name'], r['discord_id'] or '',
+         str(r['score']) if r['score'] is not None else '', r['message_link'] or '', r['weapon'] or '']
+        for r in rows
+    ]
+
+
+async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM leaderboard_data WHERE board_name=$1 AND discord_id=$2",
+            board_name, str(discord_id)
+        )
+        if existing:
+            await conn.execute("""
+                UPDATE leaderboard_data
+                SET player_name=$1, score=$2, message_link=$3, weapon=$4
+                WHERE board_name=$5 AND discord_id=$6
+            """, player_name, score, message_link, weapon, board_name, str(discord_id))
+        else:
+            await conn.execute("""
+                INSERT INTO leaderboard_data (board_name, player_name, discord_id, score, message_link, weapon)
+                VALUES ($1,$2,$3,$4,$5,$6)
+            """, board_name, player_name, str(discord_id), score, message_link, weapon)
+
+
+async def delete_leaderboard_entry(entry_id: int):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM leaderboard_data WHERE id=$1", entry_id)
+
+
+# ── Bounties ──────────────────────────────────────────────────────────────────
+
+async def get_all_bounties() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM bounties ORDER BY id")
+    return [
+        [r['title'], r['channel_id'] or '', r['message_id'] or '', r['theme_emoji'] or '',
+         r['weapons'] or '', r['special_challenge'] or '', '1' if r['special_done'] else '0',
+         r['completions'] or '', 'TRUE' if r['active'] else 'FALSE', r['role_id'] or '',
+         r['forum_channel_id'] or '', r['completions_msg_id'] or '', r['bonus_msg_id'] or '',
+         r['progress_msg_id'] or '', str(r['start_date']) if r['start_date'] else '',
+         str(r['id'])]
+        for r in rows
+    ]
+
+
+async def update_bounty_field(bounty_id: int, field: str, value):
+    pool = _pool_check()
+    allowed = {'weapons', 'special_done', 'completions', 'active', 'message_id',
+               'completions_msg_id', 'bonus_msg_id', 'progress_msg_id', 'channel_id'}
+    if field not in allowed:
+        raise ValueError(f"Field {field} not allowed")
+    async with pool.acquire() as conn:
+        await conn.execute(f"UPDATE bounties SET {field}=$1 WHERE id=$2", value, bounty_id)
+
+
+async def add_bounty(title, channel_id, message_id, theme_emoji, weapons,
+                     special_challenge, active, role_id, forum_channel_id, start_date) -> int:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("""
+            INSERT INTO bounties
+            (title, channel_id, message_id, theme_emoji, weapons, special_challenge,
+             active, role_id, forum_channel_id, start_date)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            RETURNING id
+        """, title, channel_id, message_id, theme_emoji, weapons, special_challenge,
+             active, role_id, forum_channel_id, start_date)
+
+
+# ── BountyPlayers ─────────────────────────────────────────────────────────────
+
+async def get_all_bounty_players() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM bounty_players ORDER BY id")
+    return [[r['bounty_title'] or '', r['discord_id'] or '', r['player_name'] or '',
+             r['forum_post_id'] or '', r['progress'] or ''] for r in rows]
+
+
+async def upsert_bounty_player(bounty_title, discord_id, player_name, forum_post_id, progress):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM bounty_players WHERE bounty_title=$1 AND discord_id=$2",
+            bounty_title, str(discord_id)
+        )
+        if existing:
+            await conn.execute("""
+                UPDATE bounty_players SET player_name=$1, forum_post_id=$2, progress=$3
+                WHERE bounty_title=$4 AND discord_id=$5
+            """, player_name, forum_post_id, progress, bounty_title, str(discord_id))
+        else:
+            await conn.execute("""
+                INSERT INTO bounty_players (bounty_title, discord_id, player_name, forum_post_id, progress)
+                VALUES ($1,$2,$3,$4,$5)
+            """, bounty_title, str(discord_id), player_name, forum_post_id, progress)
+
+
+# ── RegistryCards ─────────────────────────────────────────────────────────────
+
+async def get_all_registry_cards() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM registry_cards ORDER BY player_name")
+    return [[r['discord_id'], r['player_name'] or '', r['forum_thread_id'] or ''] for r in rows]
+
+
+async def upsert_registry_card(discord_id, player_name, forum_thread_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO registry_cards (discord_id, player_name, forum_thread_id)
+            VALUES ($1,$2,$3)
+            ON CONFLICT (discord_id) DO UPDATE SET
+                player_name=EXCLUDED.player_name,
+                forum_thread_id=COALESCE(EXCLUDED.forum_thread_id, registry_cards.forum_thread_id)
+        """, str(discord_id), player_name, forum_thread_id)
+
+
+# ── SpecialOps ────────────────────────────────────────────────────────────────
+
+async def get_all_special_ops() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM special_ops ORDER BY id")
+    return [[r['discord_id'], r['player_name'] or '', r['achievement'] or ''] for r in rows]
+
+
+# ── IndexPosts ────────────────────────────────────────────────────────────────
+
+async def get_all_index_posts() -> list[list]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM index_posts")
+    return [[r['forum_name'], r['channel_id'] or '', r['message_id'] or ''] for r in rows]
+
+
+async def upsert_index_post(forum_name, channel_id, message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO index_posts (forum_name, channel_id, message_id)
+            VALUES ($1,$2,$3)
+            ON CONFLICT (forum_name) DO UPDATE SET
+                channel_id=EXCLUDED.channel_id,
+                message_id=EXCLUDED.message_id
+        """, forum_name, channel_id, message_id)
+
+
+# ── Snapshots ─────────────────────────────────────────────────────────────────
+
+async def add_snapshot(snapshot_date, total_subs, weekly_subs, active_players,
+                        top_weapons, top_maps, avg_td, avg_kills,
+                        highscores_set, boards_updated, trend_weapons):
+    pool = _pool_check()
+    tw = (top_weapons + [''] * 5)[:5]
+    tm = (top_maps + [''] * 3)[:3]
+    tr = (trend_weapons + [''] * 3)[:3]
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO snapshots
+            (snapshot_date, total_subs, weekly_subs, active_players,
+             top_weapon_1, top_weapon_2, top_weapon_3, top_weapon_4, top_weapon_5,
+             top_map_1, top_map_2, top_map_3,
+             avg_td, avg_kills, highscores_set, boards_updated,
+             trend_weapon_1, trend_weapon_2, trend_weapon_3)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        """, snapshot_date, total_subs, weekly_subs, active_players,
+             tw[0], tw[1], tw[2], tw[3], tw[4],
+             tm[0], tm[1], tm[2],
+             avg_td, avg_kills, highscores_set, boards_updated,
+             tr[0], tr[1], tr[2])
