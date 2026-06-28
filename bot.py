@@ -41,6 +41,9 @@ COGS = [
 
 @bot.event
 async def on_ready():
+    from datetime import datetime, timezone
+    bot.session_start = datetime.now(timezone.utc)
+    print(f"✅ Session started at {bot.session_start.isoformat()}")
     try:
         guild = discord.Object(id=config.GUILD_ID)
         bot.tree.copy_global_to(guild=guild)
