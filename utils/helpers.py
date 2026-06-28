@@ -44,9 +44,9 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 - D: Deaths — typically 0–50
 - PING: last column, network latency in ms — ignore this
 
-The submitting player's row is visually highlighted (brighter background, different colour, or has a star/icon marker).
+CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background, different colour tint, or a star/crown/icon marker next to their name. This highlighted row is NOT necessarily the top row. It can appear anywhere on the scoreboard. Do NOT default to the top-ranked player. Scan every row and identify the one that looks visually distinct from all others.
 
-Extract ONLY from the highlighted row:
+Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown — may appear as an icon tooltip or text; null if not visible)
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
 - map (full map name shown on screen e.g. "The Battle of Darkforest", "Galencourt")
