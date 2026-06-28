@@ -296,8 +296,17 @@ class SubmitView(discord.ui.View):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
             return
-        await self.prompt_msg.delete()
-        await interaction.response.defer()
+        try:
+            await self.prompt_msg.delete()
+        except Exception:
+            pass
+        try:
+            await interaction.response.edit_message(content=None, embed=None, view=None)
+        except Exception:
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
 
 
 class VisionConfirmView(discord.ui.View):
