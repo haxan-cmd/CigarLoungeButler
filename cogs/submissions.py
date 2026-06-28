@@ -213,15 +213,16 @@ class SubmitView(discord.ui.View):
         parsed = None
         try:
             print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
+            player_display_name = self.original_message.author.display_name
             for att in self.original_message.attachments:
                 if att.content_type and att.content_type.startswith('image/'):
-                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
+                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, player_display_name)
                     print(f"[VISION] Raw parsed result: {parsed}")
                     break
                 elif not att.content_type:
                     # content_type can be None — fall back to filename extension check
                     if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url)
+                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, player_display_name)
                         print(f"[VISION] Raw parsed result (ext check): {parsed}")
                         break
     

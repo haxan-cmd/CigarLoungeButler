@@ -96,9 +96,10 @@ Your response must be ONLY the JSON object below — no explanation, no preamble
 {"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
 
 
-def vision_parse_scorecard(image_url: str) -> dict:
+def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     """
-    Pass a Discord image URL to Claude vision and extract scorecard fields.
+    Pass a Discord image URL to Gemini vision and extract scorecard fields.
+    player_name: Discord display name of the submitting player — used as a hint to find their row.
     Returns a dict with keys: weapon, subclass, map, faction, takedowns, kills, deaths, other_scores.
     Any field that couldn't be read confidently is None.
     """
@@ -129,9 +130,15 @@ def vision_parse_scorecard(image_url: str) -> dict:
 
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
+        name_hint = (
+            f"\n\nIMPORTANT: The submitting player's Discord display name is '{player_name}'. "
+            f"Look for a row whose NAME column closely matches '{player_name}' AND is visually highlighted. "
+            f"Use the name as your primary anchor — the highlight is secondary confirmation."
+        ) if player_name else ""
+        prompt = _SCORECARD_PROMPT + name_hint
         r = _gemini_client.models.generate_content(
             model='gemini-2.0-flash',
-            contents=[_SCORECARD_PROMPT, image_part],
+            contents=[prompt, image_part],
             config=_gtypes.GenerateContentConfig(
                 temperature=0,
                 response_mime_type='application/json',
