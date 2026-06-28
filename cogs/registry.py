@@ -15,15 +15,11 @@ from config import (
     WEAPONS_1H_FORUM_ID, WEAPONS_2H_FORUM_ID,
     MAP_RECORDS_FORUM_ID, FEATS_FORUM_ID, BOUNTY_CARDS_FORUM_ID,
 )
-from utils.sheets import (
-    _sheet_cache, _registry_lock, sheet,
-    submissions_ws, players_ws, leaderboard_data_ws, bounty_ws,
-    bounty_players_ws, registry_ws, special_ops_ws, index_posts_ws,
-    butlers_archive_ws, gspread_retry,
-    cached_submissions, cached_players, cached_leaderboard_data,
-    cached_bounty_players,
-)
+import utils.db as _db
 from utils.helpers import format_weapon_marks, nerve_log_error
+
+# Local lock for registry card updates (was imported from utils.sheets)
+_registry_lock = asyncio.Lock()
 
 # Short aliases for config constants
 REGISTRY_WEAPON_MAP    = config.REGISTRY_WEAPON_MAP
@@ -74,10 +70,10 @@ def get_player_title(bounties_completed):
     idx = min(bounties_completed, len(PLAYER_TITLES) - 1)
     return PLAYER_TITLES[idx]
 
-def calculate_weapon_marks_for_player(discord_id, cached_data=None):
+async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     """
     Count weapon marks per weapon for a player.
-    Sources: Submissions sheet + LeaderboardData sheet + LegacyMarks sheet.
+    Sources: Submissions + LeaderboardData + LegacyMarks.
     1 mark per submission + 1 bonus for 200 Takedowns feat + 1 for 100 Kills + 1 for Triple.
     LeaderboardData entries count as 1 mark each (historical pre-Submissions data).
     Returns dict: weapon_name -> total_marks
@@ -85,8 +81,8 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     discord_id_str = str(discord_id)
     weapon_marks = {}
 
-    # --- Source 1: Submissions sheet ---
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    # --- Source 1: Submissions ---
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     for row in subs:
         if len(row) < 13:
             continue
@@ -119,11 +115,11 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         key = subclass_key if subclass_key else weapon
         weapon_marks[key] = weapon_marks.get(key, 0) + marks
 
-    # --- Source 2: LeaderboardData sheet (historical entries, 1 mark each) ---
+    # --- Source 2: LeaderboardData (historical entries, 1 mark each) ---
     # Only add plain weapon key if no subclass-keyed entry already exists for this weapon
     # (avoids double-counting shared weapons like Greatsword across Knight/Vanguard)
     try:
-        ld_rows = (cached_data or {}).get('leaderboard_data') or cached_leaderboard_data()
+        ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
         for row in ld_rows:
             if len(row) < 6:
                 continue
@@ -142,25 +138,24 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     except Exception as e:
         print(f"LeaderboardData mark read error: {e}")
 
-    # --- Source 3: LegacyMarks sheet ---
+    # --- Source 3: LegacyMarks ---
     try:
-        if cached_data and 'legacy_marks' in cached_data:
-            legacy_rows = cached_data['legacy_marks']
-        else:
-            legacy_ws = sheet.worksheet('LegacyMarks')
-            legacy_rows = legacy_ws.get_all_values()[1:]
-        if cached_data and 'players' in cached_data:
-            player_rows = cached_data['players']
-        else:
-            player_rows = players_ws.get_all_values()[1:]
+        player_rows = (cached_data or {}).get('players') or await _db.get_all_players()
         player_name = None
         for row in player_rows:
             if row and row[0].strip() == discord_id_str:
                 player_name = row[1].strip() if len(row) > 1 else None
                 break
         if player_name:
+            if cached_data and 'legacy_marks' in cached_data:
+                legacy_rows = cached_data['legacy_marks']
+            else:
+                legacy_rows = await _db.get_legacy_marks_for_player(player_name)
             for row in legacy_rows:
-                if len(row) < 4 or row[0].strip().lower() != player_name.lower():
+                if len(row) < 4:
+                    continue
+                # DB rows are already filtered to this player — check anyway for safety
+                if row[0].strip().lower() != player_name.lower():
                     continue
                 weapon = row[1].strip()
                 subclass = row[2].strip() if len(row) > 2 else ''
@@ -178,10 +173,10 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
 
     return weapon_marks
 
-def calculate_weapon_shares_for_player(discord_id, cached_data=None):
+async def calculate_weapon_shares_for_player(discord_id, cached_data=None):
     """Return per-weapon avg kill share % and TD share % from submissions (cols 20/21)."""
     discord_id_str = str(discord_id)
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     kill_shares = {}   # weapon -> [share %]
     td_shares   = {}   # weapon -> [share %]
     for row in subs:
@@ -207,10 +202,10 @@ def calculate_weapon_shares_for_player(discord_id, cached_data=None):
     return avg_kill, avg_td
 
 
-def calculate_registry_stats(discord_id, cached_data=None):
+async def calculate_registry_stats(discord_id, cached_data=None):
     """Calculate all progression stats for a player."""
-    weapon_marks = calculate_weapon_marks_for_player(discord_id, cached_data)
-    avg_kill_shares, avg_td_shares = calculate_weapon_shares_for_player(discord_id, cached_data)
+    weapon_marks = await calculate_weapon_marks_for_player(discord_id, cached_data)
+    avg_kill_shares, avg_td_shares = await calculate_weapon_shares_for_player(discord_id, cached_data)
 
     class_stats = {}
     for cls, subclasses in REGISTRY_CLASS_MAP.items():
@@ -259,13 +254,13 @@ def calculate_registry_stats(discord_id, cached_data=None):
 
     return class_stats, weapon_marks
 
-def get_player_bounties_completed(discord_id):
+async def get_player_bounties_completed(discord_id):
     """Count distinct bounties completed by player."""
     try:
-        rows = bounty_players_ws.get_all_values()[1:]
+        rows = await _db.get_all_bounty_players()
         discord_id_str = str(discord_id)
         completed = set()
-        bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
+        bounty_rows = await _db.get_all_bounties()
         for row in rows:
             if len(row) < 5:
                 continue
@@ -291,7 +286,7 @@ def get_player_bounties_completed(discord_id):
     except Exception:
         return 0
 
-def get_butler_titles_for_player(discord_id, stats):
+async def get_butler_titles_for_player(discord_id, stats, cached_data=None):
     """Return list of Butler's Favourites titles held by this player."""
     discord_id_str = str(discord_id)
     titles = []
@@ -303,8 +298,7 @@ def get_butler_titles_for_player(discord_id, stats):
         ('headhunter',      f"{_te['Headhunter']} Headhunter"),
         ('butcher',         f"{_te['Butcher']} Butcher"),
     ]
-    # stats dict uses display names not IDs — match by display name via players sheet
-    rows = players_ws.get_all_values()[1:]
+    rows = (cached_data or {}).get('players') or await _db.get_all_players()
     player_name = None
     for row in rows:
         if row and row[0] == discord_id_str:
@@ -317,9 +311,9 @@ def get_butler_titles_for_player(discord_id, stats):
             titles.append(label)
     return titles
 
-def get_special_ops_for_player(discord_id, cached_data=None):
+async def get_special_ops_for_player(discord_id, cached_data=None):
     """Find qualifying Special Ops submissions (feat weapons with 100+ TD)."""
-    subs = (cached_data or {}).get('submissions') or submissions_ws.get_all_values()[1:]
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
     special_ops = {}  # weapon -> best submission link
     feat_weapons = {"Fist and Shield", "Healing Horn", "Mallet", "Knife"}
@@ -340,9 +334,9 @@ def get_special_ops_for_player(discord_id, cached_data=None):
             if weapon not in special_ops:
                 special_ops[weapon] = link
 
-    # Also check SpecialOps sheet for manually awarded achievements
+    # Also check SpecialOps DB table for manually awarded achievements
     try:
-        rows = special_ops_ws.get_all_values()[1:] if special_ops_ws else []
+        rows = (cached_data or {}).get('special_ops') or await _db.get_all_special_ops()
         for row in rows:
             if len(row) < 3 or row[0].strip() != discord_id_str:
                 continue
@@ -354,13 +348,13 @@ def get_special_ops_for_player(discord_id, cached_data=None):
             elif achievement == 'MalletOp' and 'Mallet' not in special_ops:
                 special_ops['Mallet'] = ''
     except Exception as e:
-        print(f"SpecialOps sheet read error: {e}")
+        print(f"SpecialOps DB read error: {e}")
 
     return special_ops
 
-def get_feats_for_player(discord_id, cached_data=None):
+async def get_feats_for_player(discord_id, cached_data=None):
     """Get all feat submissions (200TD, 100K, Triple, Predator, Flawless) with links."""
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
     feats = []  # list of (feat_combo_emojis, link)
     seen_links = set()  # deduplicate across all sources by link
@@ -396,7 +390,7 @@ def get_feats_for_player(discord_id, cached_data=None):
         'Flawless':      FEAT_EMOJIS['Flawless'],
     }
     try:
-        ld_rows = (cached_data or {}).get('leaderboard_data') or cached_leaderboard_data()
+        ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
         for row in ld_rows:
             if len(row) < 5 or row[2].strip() != discord_id_str:
                 continue
@@ -411,26 +405,27 @@ def get_feats_for_player(discord_id, cached_data=None):
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
 
-    # Also pull from LegacyFeats sheet
+    # Also pull from LegacyFeats DB table
     try:
-        legacy_feats_ws = sheet.worksheet('LegacyFeats')
-        lf_rows = legacy_feats_ws.get_all_values()[1:]
-        player_rows = players_ws.get_all_values()[1:]
+        player_rows = (cached_data or {}).get('players') or await _db.get_all_players()
         player_name = None
         for row in player_rows:
             if row and row[0].strip() == discord_id_str:
                 player_name = row[1].strip() if len(row) > 1 else None
                 break
         if player_name:
+            lf_rows = (cached_data or {}).get('legacy_feats') or await _db.get_legacy_feats_for_player(player_name)
             for row in lf_rows:
-                if len(row) < 2 or row[0].strip().lower() != player_name.lower():
+                if len(row) < 2:
+                    continue
+                if row[0].strip().lower() != player_name.lower():
                     continue
                 emojis = row[1].strip()
                 link = row[2].strip() if len(row) > 2 else ''
                 if emojis:
                     feats.append((emojis, link))
     except Exception as e:
-        print(f"LegacyFeats read error: {e}")
+        print(f"LegacyFeats DB read error: {e}")
 
     # Deduplicate by link — keep the entry with the most emojis (richest combo) per link
     link_to_best = {}  # link -> (emojis, link)
@@ -469,9 +464,9 @@ def is_primary_weapon(weapon, subclass):
     return weapon in primaries
 
 
-def get_mastered_weapons_for_player(discord_id, cached_data=None):
-    """Weapons with 100+ primary-weapon submissions. Checks Submissions sheet and LegacyMarks."""
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+async def get_mastered_weapons_for_player(discord_id, cached_data=None):
+    """Weapons with 100+ primary-weapon submissions. Checks Submissions and LegacyMarks."""
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
     weapon_counts = {}
     for row in subs:
@@ -490,15 +485,14 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
 
     # Also check LegacyMarks — 100+ marks = 100+ submissions
     try:
-        legacy_ws = sheet.worksheet('LegacyMarks')
-        legacy_rows = legacy_ws.get_all_values()[1:]
-        player_rows = players_ws.get_all_values()[1:]
+        player_rows = (cached_data or {}).get('players') or await _db.get_all_players()
         player_name = None
         for row in player_rows:
             if row and row[0].strip() == discord_id_str:
                 player_name = row[1].strip() if len(row) > 1 else None
                 break
         if player_name:
+            legacy_rows = (cached_data or {}).get('legacy_marks') or await _db.get_legacy_marks_for_player(player_name)
             for row in legacy_rows:
                 if len(row) < 4 or row[0].strip().lower() != player_name.lower():
                     continue
@@ -508,16 +502,15 @@ def get_mastered_weapons_for_player(discord_id, cached_data=None):
                 except ValueError:
                     continue
                 if marks >= 100:
-                    # Use max of legacy marks and submission count
                     weapon_counts[weapon] = max(weapon_counts.get(weapon, 0), marks)
     except Exception as e:
         print(f"LegacyMarks mastered check error: {e}")
 
     return [w for w, c in weapon_counts.items() if c >= 100]
 
-def get_lobby_stats_for_player(discord_id, cached_data=None):
+async def get_lobby_stats_for_player(discord_id, cached_data=None):
     """Return best/avg lobby finish for TD and kills from submissions with lobby data."""
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
     td_finishes = []    # [(rank, size), ...]
     kill_finishes = []  # [(rank, size), ...]
@@ -548,9 +541,9 @@ def get_lobby_stats_for_player(discord_id, cached_data=None):
     }
 
 
-def get_personal_bests(discord_id, cached_data=None):
+async def get_personal_bests(discord_id, cached_data=None):
     """Return dict with highest kills, highest TDs, and best lethality from all submissions."""
-    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
     best_kills = 0
     best_td = 0
@@ -578,11 +571,11 @@ def get_personal_bests(discord_id, cached_data=None):
     }
 
 
-def get_best_placements_for_player(discord_id, top_n=5):
+async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
     """Get top N best leaderboard placements for a player across all boards."""
     discord_id_str = str(discord_id)
     try:
-        all_rows = leaderboard_data_ws.get_all_values()[1:]
+        all_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
     except Exception:
         return []
 
@@ -628,13 +621,13 @@ def get_best_placements_for_player(discord_id, top_n=5):
     return placements[:top_n]
 
 
-def get_bounty_completions_for_player(discord_id):
+async def get_bounty_completions_for_player(discord_id, cached_data=None):
     """Return list of (bounty_name, placement) tuples completed by player, including legacy."""
     try:
-        rows = bounty_players_ws.get_all_values()[1:]
+        rows = (cached_data or {}).get('bounty_players') or await _db.get_all_bounty_players()
         discord_id_str = str(discord_id)
         completions = []  # list of (title, placement)
-        bounty_rows = bounty_ws.get_all_values()[1:] if bounty_ws else []
+        bounty_rows = (cached_data or {}).get('bounties') or await _db.get_all_bounties()
 
         # Build emoji lookup from Bounty sheet
         bounty_emoji = {}
@@ -681,16 +674,15 @@ def get_bounty_completions_for_player(discord_id):
             except Exception:
                 pass
 
-        # Also pull from LegacyBounties sheet
+        # Also pull from LegacyBounties DB table
         try:
-            lb_ws = sheet.worksheet('LegacyBounties')
-            lb_rows = lb_ws.get_all_values()[1:]
-            player_rows = players_ws.get_all_values()[1:]
+            player_rows = (cached_data or {}).get('players') or await _db.get_all_players()
             player_name = None
             for r in player_rows:
                 if r and r[0].strip() == discord_id_str:
                     player_name = r[1].strip() if len(r) > 1 else None
                     break
+            lb_rows = (await _db.get_legacy_bounties_for_player(player_name)) if player_name else []
             if player_name:
                 existing_titles = {t.lower() for t, _, _ in completions}
                 # Build emoji lookup from bounty sheet
@@ -753,22 +745,22 @@ def format_weapon_marks(marks):
         return str(marks)        # plain for Bronze/Silver
 
 
-def build_registry_messages(player_name, discord_id, cached_data=None):
+async def build_registry_messages(player_name, discord_id, cached_data=None):
     """Build list of message strings for a player's registry card (one per class + header)."""
-    class_stats, weapon_marks = calculate_registry_stats(discord_id, cached_data)
-    bounties_done = get_bounty_completions_for_player(discord_id)
+    class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
+    bounties_done = await get_bounty_completions_for_player(discord_id, cached_data)
     player_title = get_player_title(len(bounties_done))
-    mastered = get_mastered_weapons_for_player(discord_id, cached_data)
-    named_feats, feat_submissions = get_feats_for_player(discord_id, cached_data)
-    special_ops = get_special_ops_for_player(discord_id, cached_data)
-    best_placements = get_best_placements_for_player(discord_id)
-    personal_bests = get_personal_bests(discord_id, cached_data)
-    lobby_stats = get_lobby_stats_for_player(discord_id, cached_data)
+    mastered = await get_mastered_weapons_for_player(discord_id, cached_data)
+    named_feats, feat_submissions = await get_feats_for_player(discord_id, cached_data)
+    special_ops = await get_special_ops_for_player(discord_id, cached_data)
+    best_placements = await get_best_placements_for_player(discord_id, cached_data=cached_data)
+    personal_bests = await get_personal_bests(discord_id, cached_data)
+    lobby_stats = await get_lobby_stats_for_player(discord_id, cached_data)
 
     try:
         from cogs.favourites import calculate_butler_stats  # lazy to avoid circular
-        butler_stats = calculate_butler_stats()
-        butler_titles = get_butler_titles_for_player(discord_id, butler_stats)
+        butler_stats = await calculate_butler_stats()
+        butler_titles = await get_butler_titles_for_player(discord_id, butler_stats, cached_data)
     except Exception:
         butler_titles = []
 
@@ -953,75 +945,41 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
 
     return messages
 
-def get_registry_thread_id(discord_id):
+async def get_registry_thread_id(discord_id):
     """Get existing forum thread ID for player, or None."""
     try:
-        rows = registry_ws.get_all_values()[1:]
-        discord_id_str = str(discord_id)
-        for row in rows:
-            if row and row[0] == discord_id_str:
-                return int(row[2]) if len(row) > 2 and row[2] else None
+        record = await _db.get_registry_card(str(discord_id))
+        if record and len(record) > 2 and record[2]:
+            return int(record[2])
     except Exception:
-        return None
+        pass
     return None
 
-def save_registry_thread_id(discord_id, player_name, thread_id):
-    """Save or update the thread ID in RegistryCards sheet."""
+async def save_registry_thread_id(discord_id, player_name, thread_id):
+    """Save or update the registry thread ID for a player."""
     try:
-        rows = registry_ws.get_all_values()
-        discord_id_str = str(discord_id)
-        for i, row in enumerate(rows[1:], start=2):
-            if row and row[0] == discord_id_str:
-                registry_ws.update_cell(i, 2, player_name)
-                registry_ws.update_cell(i, 3, str(thread_id))
-                return
-        registry_ws.append_row([discord_id_str, player_name, str(thread_id)])
+        await _db.upsert_registry_card(str(discord_id), player_name, str(thread_id))
     except Exception as e:
-        print(f"Registry sheet save error: {e}")
+        print(f"Registry thread ID save error: {e}")
 
 
-def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks,
-                                submission_count, last_submission,
-                                weapon_marks_str, class_marks_str):
-    """Write snapshot columns D–H into the Players sheet row for this player."""
-    import time as _time
-    discord_id_str = str(discord_id)
-    # Use cache instead of raw get_all_values to avoid rate limit storms
-    rows = cached_players()
-    row_idx = None
-    row_data = None
-    for i, row in enumerate(rows, start=2):
-        if row and row[0].strip() == discord_id_str:
-            row_idx = i
-            row_data = row
-            break
-
-    for attempt in range(4):
-        try:
-            if row_idx:
-                players_ws.update(
-                    f'D{row_idx}:H{row_idx}',
-                    [[total_marks, submission_count, last_submission,
-                      weapon_marks_str, class_marks_str]]
-                )
-                if thread_id and row_data and (len(row_data) < 3 or not row_data[2].strip()):
-                    players_ws.update_cell(row_idx, 3, str(thread_id))
-            else:
-                players_ws.append_row([
-                    discord_id_str, player_name,
-                    str(thread_id) if thread_id else '',
-                    total_marks, submission_count, last_submission,
-                    weapon_marks_str, class_marks_str
-                ])
-            _sheet_cache.invalidate(players_ws)
-            return
-        except Exception as e:
-            if '429' in str(e) and attempt < 3:
-                _time.sleep(2 ** attempt * 3)  # 3s, 6s, 12s backoff
-            else:
-                nerve_log_error("ButlersArchive", e)
-                print(f"update_butlers_archive_row error: {e}")
-                return
+async def update_butlers_archive_row(discord_id, player_name, thread_id, total_marks,
+                                      submission_count, last_submission,
+                                      weapon_marks_str, class_marks_str):
+    """Write snapshot stats into the Players table row for this player."""
+    try:
+        await _db.update_player_stats(
+            discord_id=str(discord_id),
+            total_marks=total_marks,
+            submission_count=submission_count,
+            last_submission_str=str(last_submission) if last_submission else '',
+            weapon_marks_str=weapon_marks_str,
+            class_marks_str=class_marks_str,
+            forum_thread_id=str(thread_id) if thread_id else None,
+        )
+    except Exception as e:
+        nerve_log_error("ButlersArchive", e)
+        print(f"update_butlers_archive_row error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1070,21 +1028,24 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
 
 async def update_archive_index(guild):
     """Build or update the pinned index post in butlers-archive."""
-    if not index_posts_ws:
-        return
     try:
         forum = guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
         if not forum:
             return
 
-        rows = registry_ws.get_all_values()[1:]
+        # Build entries from registry_cards table (anyone with a thread)
+        registry_rows = await _db.get_all_registry_cards()
         entries = []
-        for row in rows:
-            if len(row) < 3 or not row[2].strip():
+        for row in registry_rows:
+            if len(row) < 3 or not row[2] or not row[2].strip():
                 continue
-            player_name = row[1].strip()
-            thread_id = int(row[2].strip())
-            entries.append((player_name, thread_id))
+            player_name = row[1].strip() if len(row) > 1 else ''
+            try:
+                thread_id = int(row[2].strip())
+            except (ValueError, TypeError):
+                continue
+            if player_name:
+                entries.append((player_name, thread_id))
 
         entries.sort(key=lambda x: x[0].lower())
 
@@ -1135,14 +1096,17 @@ async def update_archive_index(guild):
         embeds = _build_embeds(embed_fields)
         content = None  # using embeds instead of text
 
-        index_rows = index_posts_ws.get_all_values()[1:]
+        # Find existing index thread by searching Discord directly
         existing_thread_id = None
-        existing_row_idx = None
-        for i, row in enumerate(index_rows, start=2):
-            if len(row) >= 2 and row[1].strip() == str(REGISTRY_FORUM_CHANNEL_ID):
-                existing_thread_id = int(row[2]) if len(row) > 2 and row[2].strip() else None
-                existing_row_idx = i
+        for t in forum.threads:
+            if t.name == "📋 Player Index":
+                existing_thread_id = t.id
                 break
+        if not existing_thread_id:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == "📋 Player Index":
+                    existing_thread_id = t.id
+                    break
 
         if existing_thread_id:
             try:
@@ -1168,39 +1132,7 @@ async def update_archive_index(guild):
             except Exception as e:
                 print(f"Index edit error: {e} — will create new thread")
 
-        # Check Discord directly before creating a new thread
-        existing_by_name = None
-        async for thread in forum.archived_threads(limit=None):
-            if thread.name == "📋 Player Index":
-                existing_by_name = thread
-                break
-        if not existing_by_name:
-            for thread in forum.threads:
-                if thread.name == "📋 Player Index":
-                    existing_by_name = thread
-                    break
-
-        if existing_by_name:
-            # Recover the thread — update sheet and resend all content embeds
-            thread_id = existing_by_name.id
-            if existing_row_idx:
-                index_posts_ws.update_cell(existing_row_idx, 3, str(thread_id))
-            else:
-                index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(thread_id)])
-            msgs = []
-            async for msg in existing_by_name.history(limit=50, oldest_first=True):
-                msgs.append(msg)
-            for msg in msgs[1:]:
-                try:
-                    await msg.delete()
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
-            for embed in embeds:
-                await asyncio.sleep(0.5)
-                await existing_by_name.send(embed=embed)
-            print("Archive index recovered from Discord")
-            return
+        # If still not found, fall through to create new
 
         result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
@@ -1209,7 +1141,7 @@ async def update_archive_index(guild):
             await asyncio.sleep(0.5)
             await result.thread.send(embed=embed)
 
-        thread_id = result.thread.id
+        _index_thread_id = result.thread.id
 
         await asyncio.sleep(0.5)
         readme = (
@@ -1224,10 +1156,6 @@ async def update_archive_index(guild):
         )
         await result.thread.send(readme)
 
-        if existing_row_idx:
-            index_posts_ws.update_cell(existing_row_idx, 3, str(thread_id))
-        else:
-            index_posts_ws.append_row(['archive', str(REGISTRY_FORUM_CHANNEL_ID), str(thread_id)])
         print("Archive index created")
 
     except Exception as e:
@@ -1248,8 +1176,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
             return
 
-        messages = build_registry_messages(player_name, discord_id, cached_data)
-        thread_id = get_registry_thread_id(discord_id)
+        messages = await build_registry_messages(player_name, discord_id, cached_data)
+        thread_id = await get_registry_thread_id(discord_id)
 
         top_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Top.png')
         bot_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Bottom.png')
@@ -1288,7 +1216,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                 if thread.name != player_name:
                     await thread.edit(name=player_name)
 
-                save_registry_thread_id(discord_id, player_name, thread.id)
+                await save_registry_thread_id(discord_id, player_name, thread.id)
                 print(f"Registry card updated for {player_name}")
                 if not skip_index:
                     asyncio.create_task(update_archive_index(guild))
@@ -1337,7 +1265,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     await asyncio.sleep(0.5)
                     await thread.send(chunk)
 
-        save_registry_thread_id(discord_id, player_name, thread.id)
+        await save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
         if not skip_index:
             asyncio.create_task(update_archive_index(guild))
@@ -1366,34 +1294,7 @@ def get_all_weapons_for_class(selected_class):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
     return sorted([w for w in class_weapons if w not in FEAT_WEAPONS])
 
-def upsert_player(discord_id, discord_name):
-    """Returns True if this is a new player."""
-    try:
-        rows = cached_players()
-        discord_id_str = str(discord_id)
-        for i, row in enumerate(rows, start=2):
-            if row and row[0] == discord_id_str:
-                if len(row) < 2 or row[1] != discord_name:
-                    players_ws.update_cell(i, 2, discord_name)
-                    _sheet_cache.invalidate(players_ws)
-                return False
-        players_ws.append_row([discord_id_str, discord_name, ""])
-        _sheet_cache.invalidate(players_ws)
-        return True
-    except Exception as e:
-        print(f"Player upsert error: {e}")
-        return False
-
-def log_submission(discord_name, discord_id, weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    vip_str = "Yes" if vip else "No"
-    feats_str = ", ".join(feats) if feats else "None"
-    nerve_log_submission(discord_name, weapon)
-    submissions_ws.append_row([
-        timestamp, discord_name, str(discord_id), weapon, cls,
-        map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link
-    ])
-    _sheet_cache.invalidate(submissions_ws)
+# upsert_player and log_submission are now in utils.db as _db.upsert_player / _db.add_submission
 
 
 async def _process_registry_thread(guild, thread, cached_data=None, player_name=None, discord_id=None):
@@ -1544,7 +1445,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
 
     # Use passed discord_id, or fall back to name lookup
     if discord_id is None:
-        player_rows_data = (cached_data or {}).get('players') or players_ws.get_all_values()[1:]
+        player_rows_data = (cached_data or {}).get('players') or await _db.get_all_players()
         for row in player_rows_data:
             if len(row) > 1 and row[1].strip().lower() == player_name.lower():
                 try:
@@ -1561,37 +1462,23 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
 
 
 async def _save_legacy_marks(player_name, guild, legacy_marks):
-    """Save legacy weapon marks to LegacyMarks sheet, avoiding duplicates."""
+    """Save legacy weapon marks to LegacyMarks DB, avoiding duplicates."""
     try:
-        try:
-            legacy_ws = sheet.worksheet('LegacyMarks')
-        except Exception:
-            legacy_ws = sheet.add_worksheet(title='LegacyMarks', rows=1000, cols=4)
-            gspread_retry(legacy_ws.append_row, ['PlayerName', 'Weapon', 'Subclass', 'Marks'])
-
-        existing = gspread_retry(legacy_ws.get_all_values)[1:]
+        existing = await _db.get_legacy_marks_for_player(player_name)
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
-
         for (weapon, subclass), marks in legacy_marks.items():
             key = (player_name, weapon)
             if key not in existing_keys:
-                gspread_retry(legacy_ws.append_row, [player_name, weapon, subclass, marks])
+                await _db.add_legacy_mark(player_name, weapon, subclass, marks)
     except Exception as e:
         print(f"Legacy marks save error for {player_name}: {e}")
 
 
 async def _save_legacy_bounties(player_name, legacy_bounties):
-    """Save legacy bounty completions to LegacyBounties sheet, avoiding duplicates."""
+    """Save legacy bounty completions to LegacyBounties DB, avoiding duplicates."""
     try:
-        try:
-            lb_ws = sheet.worksheet('LegacyBounties')
-        except Exception:
-            lb_ws = sheet.add_worksheet(title='LegacyBounties', rows=500, cols=3)
-            gspread_retry(lb_ws.append_row, ['PlayerName', 'BountyTitle', 'Placement'])
-
-        existing = gspread_retry(lb_ws.get_all_values)[1:]
+        existing = await _db.get_legacy_bounties_for_player(player_name)
         existing_keys = {(r[0].strip(), r[1].strip()) for r in existing if len(r) >= 2}
-
         for bounty_name, placement in legacy_bounties:
             import re as _re
             clean_name = _re.sub(r'<[^>]+>', '', bounty_name)
@@ -1603,27 +1490,20 @@ async def _save_legacy_bounties(player_name, legacy_bounties):
                 continue
             key = (player_name, clean_name)
             if key not in existing_keys:
-                gspread_retry(lb_ws.append_row, [player_name, clean_name, placement or ''])
+                await _db.add_legacy_bounty(player_name, clean_name, placement or '')
     except Exception as e:
         print(f"Legacy bounties save error for {player_name}: {e}")
 
 
 async def _save_legacy_feats(player_name, legacy_feats):
-    """Save legacy feats of legend to LegacyFeats sheet, avoiding duplicates."""
+    """Save legacy feats of legend to LegacyFeats DB, avoiding duplicates."""
     try:
-        try:
-            feats_ws = sheet.worksheet('LegacyFeats')
-        except Exception:
-            feats_ws = sheet.add_worksheet(title='LegacyFeats', rows=500, cols=3)
-            gspread_retry(feats_ws.append_row, ['PlayerName', 'Emojis', 'Link'])
-
-        existing = gspread_retry(feats_ws.get_all_values)[1:]
+        existing = await _db.get_legacy_feats_for_player(player_name)
         existing_keys = {(r[0].strip(), r[2].strip()) for r in existing if len(r) >= 3}
-
         for emojis, link in legacy_feats:
             key = (player_name, link)
             if key not in existing_keys:
-                gspread_retry(feats_ws.append_row, [player_name, emojis, link])
+                await _db.add_legacy_feat(player_name, emojis, link)
     except Exception as e:
         print(f"Legacy feats save error for {player_name}: {e}")
 
@@ -1652,7 +1532,7 @@ class RegistryCog(commands.Cog):
             discord_id_str = str(interaction.user.id)
 
             # Check player is registered
-            rows = players_ws.get_all_values()[1:]
+            rows = await _db.get_all_players()
             registered = any(row and row[0].strip() == discord_id_str for row in rows)
             if not registered:
                 await interaction.followup.send("No card on file. Submit a run first.", ephemeral=True)
@@ -1691,14 +1571,14 @@ class RegistryCog(commands.Cog):
                 except Exception as e:
                     print(f"Error deleting archived thread {thread.name}: {e}")
 
-            # Clear thread IDs from RegistryCards sheet so import doesn't get 404s
+            # Clear thread IDs from registry_cards so import doesn't get 404s
             try:
-                rows = registry_ws.get_all_values()
-                for i, row in enumerate(rows[1:], start=2):
-                    if len(row) > 2 and row[2]:
-                        registry_ws.update_cell(i, 3, '')
+                reg_rows = await _db.get_all_registry_cards()
+                for row in reg_rows:
+                    if row and len(row) > 2 and row[2]:
+                        await _db.upsert_registry_card(row[0], row[1], '')
             except Exception as e:
-                print(f"Error clearing RegistryCards thread IDs: {e}")
+                print(f"Error clearing registry thread IDs: {e}")
 
             await interaction.followup.send(f"Purge complete — deleted {deleted} threads.", ephemeral=True)
         except Exception as e:
@@ -1734,7 +1614,7 @@ class RegistryCog(commands.Cog):
         bounty_blurb = "**What is this?** A roughly monthly community challenge. Only specific weapons count for each bounty."
         try:
             from cogs.bounty import get_active_bounty
-            active_bounty = get_active_bounty()
+            active_bounty = await get_active_bounty()
             if active_bounty:
                 weapon_list = ', '.join(active_bounty['weapons'].keys())
                 bounty_blurb = (
@@ -1774,34 +1654,37 @@ class RegistryCog(commands.Cog):
                 await interaction.followup.send("Could not find butlers-archive channel.", ephemeral=True)
                 return
 
-            rows = registry_ws.get_all_values()[1:]
+            rows = await _db.get_all_registry_cards()
             deleted = 0
             skipped = 0
 
-            for i, row in enumerate(rows, start=2):
-                if len(row) < 3 or not row[0].strip() or not row[2].strip():
+            for row in rows:
+                if len(row) < 3 or not row[0].strip() or not row[2] or not row[2].strip():
                     continue
                 try:
                     discord_id = int(row[0].strip())
                 except ValueError:
                     continue
-                thread_id = int(row[2].strip())
+                try:
+                    thread_id = int(row[2].strip())
+                except (ValueError, TypeError):
+                    continue
 
-                weapon_marks = calculate_weapon_marks_for_player(discord_id)
+                weapon_marks = await calculate_weapon_marks_for_player(discord_id)
                 if weapon_marks:
                     skipped += 1
                     continue
 
-                # No marks — delete the thread and clear the registry row
+                # No marks — delete the thread and clear the thread ID
                 try:
-                    thread = guild_obj = interaction.guild.get_thread(thread_id)
+                    thread = interaction.guild.get_thread(thread_id)
                     if not thread:
                         thread = await interaction.guild.fetch_channel(thread_id)
                     await thread.delete()
                 except Exception as e:
                     print(f"Could not delete thread {thread_id}: {e}")
 
-                registry_ws.update_cell(i, 3, '')
+                await _db.upsert_registry_card(row[0], row[1], '')
                 deleted += 1
                 print(f"Purged blank card for {row[1].strip()} (discord_id={discord_id})")
                 await asyncio.sleep(1)
@@ -1819,9 +1702,9 @@ class RegistryCog(commands.Cog):
     async def rebuild_archive(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            player_rows = players_ws.get_all_values()[1:]
+            player_rows = await _db.get_all_players()
             if not player_rows:
-                await interaction.followup.send("No players found in Players sheet.", ephemeral=True)
+                await interaction.followup.send("No players found.", ephemeral=True)
                 return
 
             total = 0
@@ -1837,7 +1720,7 @@ class RegistryCog(commands.Cog):
                 player_name = row[1].strip()
 
                 try:
-                    weapon_marks = calculate_weapon_marks_for_player(discord_id)
+                    weapon_marks = await calculate_weapon_marks_for_player(discord_id)
                     if not weapon_marks:
                         print(f"Skipping {player_name} — no marks data")
                         continue
@@ -1871,16 +1754,16 @@ class RegistryCog(commands.Cog):
                 await interaction.followup.send("Could not find the-registry channel.", ephemeral=True)
                 return
 
-            player_rows = players_ws.get_all_values()[1:]
+            player_rows = await _db.get_all_players()
             id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
             name_to_id = {row[1].strip().lower(): row[0].strip() for row in player_rows if len(row) > 1}
 
             cached_data = {
                 'players': player_rows,
-                'submissions': submissions_ws.get_all_values()[1:],
-                'leaderboard_data': leaderboard_data_ws.get_all_values()[1:],
-                'bounty_players': bounty_players_ws.get_all_values()[1:],
-                'bounty': bounty_ws.get_all_values()[1:] if bounty_ws else [],
+                'submissions': await _db.get_all_submissions(),
+                'leaderboard_data': await _db.get_all_leaderboard_data(),
+                'bounty_players': await _db.get_all_bounty_players(),
+                'bounties': await _db.get_all_bounties(),
             }
 
             # Find matching thread
@@ -1931,16 +1814,16 @@ class RegistryCog(commands.Cog):
                 "[legacy] shieldy": "Shieldy",
             }
 
-            # Build name -> discord_id map from Players sheet (lowercase for matching)
-            player_rows = players_ws.get_all_values()[1:]
+            # Build name -> discord_id map from Players DB (lowercase for matching)
+            player_rows = await _db.get_all_players()
             id_to_name = {row[0].strip(): row[1].strip() for row in player_rows if len(row) > 1}
             name_to_id = {row[1].strip().lower(): row[0].strip() for row in player_rows if len(row) > 1}
 
             # All registered player names are eligible
             players_eligible = set(name_to_id.keys())
 
-            # Also add anyone with submissions even if not in Players sheet
-            subs = submissions_ws.get_all_values()[1:]
+            # Also add anyone with submissions even if not in Players table
+            subs = await _db.get_all_submissions()
             for row in subs:
                 discord_id = row[2].strip() if len(row) > 2 else ''
                 name = row[1].strip().lower() if len(row) > 1 else ''
@@ -1954,14 +1837,14 @@ class RegistryCog(commands.Cog):
             imported = 0
             skipped = 0
 
-            # Pre-load all sheet data once to avoid rate limits during import
-            print("Pre-loading sheet data...")
+            # Pre-load all data once to avoid repeated DB queries during import
+            print("Pre-loading data...")
             cached_data = {
                 'players': player_rows,
                 'submissions': subs,
-                'leaderboard_data': leaderboard_data_ws.get_all_values()[1:],
-                'bounty_players': bounty_players_ws.get_all_values()[1:],
-                'bounty': bounty_ws.get_all_values()[1:] if bounty_ws else [],
+                'leaderboard_data': await _db.get_all_leaderboard_data(),
+                'bounty_players': await _db.get_all_bounty_players(),
+                'bounties': await _db.get_all_bounties(),
             }
             await asyncio.sleep(2)
 
@@ -2008,17 +1891,17 @@ class RegistryCog(commands.Cog):
     async def bulk_refresh_cards(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            rows = registry_ws.get_all_values()[1:]
+            rows = await _db.get_all_players()
             total = 0
             failed = 0
             for row in rows:
-                if len(row) < 3 or not row[0].strip() or not row[2].strip():
+                if not row or not row[0].strip():
                     continue
                 try:
                     discord_id = int(row[0].strip())
                 except ValueError:
                     continue
-                player_name = row[1].strip()
+                player_name = row[1].strip() if len(row) > 1 else str(discord_id)
                 try:
                     await create_or_update_registry_card(interaction.guild, discord_id, player_name, skip_index=True)
                     total += 1
@@ -2045,18 +1928,10 @@ class RegistryCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            if not butlers_archive_ws:
-                await interaction.followup.send("ButlersArchive sheet not found.", ephemeral=True)
-                return
-            players = players_ws.get_all_values()[1:]
-            subs = cached_submissions()
-            reg_rows = registry_ws.get_all_values()[1:]
-            ld_rows = cached_leaderboard_data()
-            try:
-                legacy_rows = sheet.worksheet('LegacyMarks').get_all_values()[1:]
-            except Exception:
-                legacy_rows = []
-            cached_data = {'submissions': subs, 'leaderboard_data': ld_rows, 'legacy_marks': legacy_rows, 'players': players}
+            players = await _db.get_all_players()
+            subs = await _db.get_all_submissions()
+            ld_rows = await _db.get_all_leaderboard_data()
+            cached_data = {'submissions': subs, 'leaderboard_data': ld_rows, 'players': players}
             total = 0
             failed = 0
             for player_row in players:
@@ -2068,7 +1943,7 @@ class RegistryCog(commands.Cog):
                     player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
                     submission_count = len(player_subs)
                     last_submission = player_subs[-1][0] if player_subs else ""
-                    weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str), cached_data=cached_data)
+                    weapon_marks_data = await calculate_weapon_marks_for_player(int(discord_id_str), cached_data=cached_data)
                     # Flatten tuple keys to weapon name only for display
                     flat_marks = {}
                     for k, v in weapon_marks_data.items():
@@ -2083,12 +1958,9 @@ class RegistryCog(commands.Cog):
                             class_counts[base] = class_counts.get(base, 0) + 1
                     class_marks_str = ", ".join(f"{c}: {n}" for c, n in sorted(class_counts.items(), key=lambda x: -x[1]))
                     total_marks = sum(flat_marks.values()) if flat_marks else 0
-                    thread_id = None
-                    for r in reg_rows:
-                        if len(r) > 2 and r[0].strip() == discord_id_str:
-                            thread_id = r[2].strip() or None
-                            break
-                    update_butlers_archive_row(
+                    # thread_id comes from the players row itself (col 2)
+                    thread_id = player_row[2].strip() if len(player_row) > 2 and player_row[2] else None
+                    await update_butlers_archive_row(
                         discord_id_str, player_name, thread_id,
                         total_marks, submission_count, last_submission,
                         weapon_marks_str, class_marks_str
@@ -2111,7 +1983,7 @@ class RegistryCog(commands.Cog):
         await interaction.response.defer()
 
         # ── Resolve player ────────────────────────────────────────────────────────
-        all_players = players_ws.get_all_values()[1:]
+        all_players = await _db.get_all_players()
         discord_id_str = None
         resolved_name = None
 
@@ -2135,7 +2007,7 @@ class RegistryCog(commands.Cog):
                 return
 
         # ── Weapon rank progress ──────────────────────────────────────────────────
-        weapon_marks_data = calculate_weapon_marks_for_player(int(discord_id_str))
+        weapon_marks_data = await calculate_weapon_marks_for_player(int(discord_id_str))
         flat_marks = {}
         for k, v in weapon_marks_data.items():
             w = k[0] if isinstance(k, tuple) else k
@@ -2163,7 +2035,7 @@ class RegistryCog(commands.Cog):
                 weapon_lines.append(f"{rank_emoji} **{weapon}** — {marks_fmt} *(+{delta} to {next_rank})*")
 
         # ── Title standings ───────────────────────────────────────────────────────
-        ld = cached_leaderboard_data()
+        ld = await _db.get_all_leaderboard_data()
         SKIP_LB = {"100 Kills", "200 Takedowns"}
         WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
         NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn"}
@@ -2295,25 +2167,23 @@ class RegistryCog(commands.Cog):
                 break
 
         # \u2500\u2500 Personal bests from submissions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        all_subs = cached_submissions()
+        all_subs = await _db.get_all_submissions()
         discord_id_str_for_subs = discord_id_str
         player_subs = [r for r in all_subs if len(r) > 8 and r[2].strip() == discord_id_str_for_subs]
         sub_count = len(player_subs)
 
-        # Add legacy run count from LegacyMarks (each value = runs on that weapon pre-system)
+        # Add legacy run count from LegacyMarks
         try:
-            legacy_ws = sheet.worksheet('LegacyMarks')
-            legacy_rows = legacy_ws.get_all_values()[1:]
             p_name = None
-            for pr in players_ws.get_all_values()[1:]:
+            for pr in all_players:
                 if pr and pr[0].strip() == discord_id_str:
                     p_name = pr[1].strip() if len(pr) > 1 else None
                     break
             if p_name:
+                legacy_rows = await _db.get_legacy_marks_for_player(p_name)
                 legacy_run_count = sum(
                     int(r[3]) for r in legacy_rows
-                    if len(r) > 3 and r[0].strip().lower() == p_name.lower()
-                    and r[3].strip().isdigit()
+                    if len(r) > 3 and r[3].strip().isdigit()
                 )
                 sub_count += legacy_run_count
         except Exception:
@@ -2337,7 +2207,7 @@ class RegistryCog(commands.Cog):
                 pb_kills = rk; best_kills_row = r
 
         # Legacy LeaderboardData check for best TD
-        ld_all = cached_leaderboard_data()
+        ld_all = ld  # already fetched above
         for ld_r in ld_all:
             if len(ld_r) < 4:
                 continue
@@ -2406,9 +2276,9 @@ class RegistryCog(commands.Cog):
             biggest_lead_str = ''
 
         # \u2500\u2500 Special Ops \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        special_ops = get_special_ops_for_player(int(discord_id_str))
+        special_ops = await get_special_ops_for_player(int(discord_id_str))
         # \u2500\u2500 Bounties completed \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        bounties_done = get_player_bounties_completed(int(discord_id_str))
+        bounties_done = await get_player_bounties_completed(int(discord_id_str))
         # \u2500\u2500 Butler titles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         try:
             from cogs.favourites import calculate_butler_stats

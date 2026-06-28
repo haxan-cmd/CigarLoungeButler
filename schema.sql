@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     total_lobby_kills INTEGER,
     team_td_ratio     REAL,
     team_kill_share   REAL,
-    team_td_share     REAL
+    team_td_share     REAL,
+    second_place_td   INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS players (
@@ -159,5 +160,4 @@ CREATE INDEX IF NOT EXISTS idx_submissions_discord_id ON submissions(discord_id)
 CREATE INDEX IF NOT EXISTS idx_submissions_weapon ON submissions(weapon);
 CREATE INDEX IF NOT EXISTS idx_submissions_map ON submissions(map);
 CREATE INDEX IF NOT EXISTS idx_leaderboard_data_board ON leaderboard_data(board_name);
-CREATE INDEX IF NOT EXISTS idx_leaderboard_data_discord ON leaderboard_data(discord_id);
-CREATE INDEX IF NOT EXISTS idx_bounty_players_discord ON bounty_players(discord_id);
+CREATE INDEX 

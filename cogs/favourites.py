@@ -6,11 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils.sheets import (
-    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
-    bounty_players_ws, cached_players, cached_submissions,
-    cached_leaderboard_data, cached_bounty_players, gspread_retry,
-)
+import utils.db as _db
 
 MOD_ROLE_ID                = config.MOD_ROLE_ID
 MAIN_CHANNEL_ID            = config.MAIN_CHANNEL_ID
@@ -30,11 +26,11 @@ BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
 
 _butlers_report_cooldowns = {}
 
-def calculate_butler_stats(week_start=None, week_end=None):
+async def calculate_butler_stats(week_start=None, week_end=None):
     # week_start/end are UTC timestamps — if passed, submission stats are scoped to that window.
     # Title holders (Grand Marshal etc.) always use all-time data regardless.
-    all_subs = cached_submissions()
-    ld = cached_leaderboard_data()
+    all_subs = await _db.get_all_submissions()
+    ld = await _db.get_all_leaderboard_data()
 
     # Filter subs to week window if provided
     if week_start is not None and week_end is not None:
@@ -201,11 +197,9 @@ def calculate_butler_stats(week_start=None, week_end=None):
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # Title calculations from LeaderboardData
-    # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
-    # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
-    weapon_placements = {}   # player -> [placements] — weapon + feat boards
-    map_placements = {}      # player -> [placements] — map boards
-    non_weapon_feat_placements = {}  # player -> [placements] — Flawless/Healing Horn (grand marshal only)
+    weapon_placements = {}
+    map_placements = {}
+    non_weapon_feat_placements = {}
 
     WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}
     NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn'}
@@ -230,15 +224,11 @@ def calculate_butler_stats(week_start=None, week_end=None):
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
             elif lb_name in NON_WEAPON_FEAT_BOARDS:
-                # Flawless and Healing Horn count toward Grand Marshal only
                 non_weapon_feat_placements.setdefault(player, []).append(placement)
             else:
-                # Regular weapon boards + Mallet/Knife count toward Weapons Master
                 weapon_placements.setdefault(player, []).append(placement)
 
     def best_placement_title(d, min_boards=1, breadth_first=False):
-        # breadth_first=True: show up on the most boards, tiebreak by avg placement (Grand Marshal style)
-        # breadth_first=False: best avg placement wins, tiebreak by board count (Weapons Master style)
         if not d:
             return None
         qualified = {p: v for p, v in d.items() if len(v) >= min_boards}
@@ -263,8 +253,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
 
     # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
     # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
-    kills_scores = {}    # player -> [kill scores]
-    td_scores = {}       # player -> [takedown scores]
+    kills_scores = {}
+    td_scores = {}
 
     for row in ld:
         if len(row) < 3:
@@ -281,8 +271,6 @@ def calculate_butler_stats(week_start=None, week_end=None):
             td_scores.setdefault(player, []).append(score)
 
     def best_score_title(d):
-        # Weight avg score by log(submissions) so someone with 50 entries and a
-        # slightly lower avg beats someone with 1 lucky outlier.
         if not d:
             return None
         import math
@@ -312,7 +300,6 @@ def calculate_butler_stats(week_start=None, week_end=None):
     }
 
 
-
 def build_favourites_embed(stats):
     import discord as _discord
 
@@ -336,10 +323,8 @@ def build_favourites_embed(stats):
         color=0x8b6914,
     )
 
-    # ── Weekly section header ──
     embed.add_field(name="─── This Week ───", value="​", inline=False)
 
-    # Lethality (full width)
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
     embed.add_field(
         name="<a:mostlethal:1520490418817601658> Lethality  *(kill share of team %)*",
@@ -347,7 +332,6 @@ def build_favourites_embed(stats):
         inline=False,
     )
 
-    # Warlord (full width)
     warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough team data yet*"
     embed.add_field(
         name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
@@ -355,7 +339,6 @@ def build_favourites_embed(stats):
         inline=False,
     )
 
-    # Per-weapon kill share and TD share (side by side)
     def _fmt_weapon_shares(lst):
         if not lst:
             return "*Not enough data yet*"
@@ -373,7 +356,6 @@ def build_favourites_embed(stats):
     )
     embed.add_field(name="​", value="​", inline=False)  # spacer
 
-    # 2-column row: Busiest | Highest TD
     embed.add_field(
         name="🏃 Busiest",
         value=fmt_list(stats['top_busiest'], "runs") or "*—*",
@@ -384,9 +366,8 @@ def build_favourites_embed(stats):
         value=fmt_list(stats['top_td_list'], "TD") or "*—*",
         inline=True,
     )
-    embed.add_field(name="​", value="​", inline=True)  # spacer to force next pair onto new row
+    embed.add_field(name="​", value="​", inline=True)
 
-    # 2-column row: Top Weapons | Top Maps
     embed.add_field(
         name="⚔️ Top Weapons",
         value=fmt_list(stats['top_weapons'], "runs") or "*—*",
@@ -397,9 +378,8 @@ def build_favourites_embed(stats):
         value=fmt_list(stats['top_maps'], "runs") or "*—*",
         inline=True,
     )
-    embed.add_field(name="​", value="​", inline=True)  # spacer
+    embed.add_field(name="​", value="​", inline=True)
 
-    # ── All-Time Titles ──
     embed.add_field(name="─── All-Time Titles ───", value="​", inline=False)
     embed.add_field(
         name="​",
@@ -416,9 +396,7 @@ def build_favourites_embed(stats):
     return embed
 
 
-
 async def update_title_roles(guild, stats):
-    # Called after every /butlers_report — reassigns title roles if the holder changed.
     main_channel = guild.get_channel(MAIN_CHANNEL_ID)
 
     title_configs = [
@@ -443,10 +421,8 @@ async def update_title_roles(guild, stats):
         if not role:
             continue
 
-        # Find current holder
         current_holders = [m for m in guild.members if role in m.roles]
 
-        # Find new holder by display name
         new_member = discord.utils.find(
             lambda m: new_holder_name and (m.nick or m.display_name or '').lower() == new_holder_name.lower(),
             guild.members
@@ -454,24 +430,20 @@ async def update_title_roles(guild, stats):
         if not new_member:
             continue
 
-        # Check if it changed hands
         if current_holders and new_member in current_holders:
-            continue  # Same person, no change
+            continue
 
-        # Remove from old holders
         for old_member in current_holders:
             try:
                 await old_member.remove_roles(role)
             except Exception:
                 pass
 
-        # Give to new holder
         try:
             await new_member.add_roles(role)
         except Exception:
             pass
 
-        # Announce in main
         if main_channel and current_holders:
             old_mention = current_holders[0].mention
             new_mention = new_member.mention
@@ -490,11 +462,9 @@ class FavouritesCog(commands.Cog):
     async def butlers_report(self, interaction: discord.Interaction):
         import time
 
-        # Check if user is in Players sheet
-        player_ids = set()
-        for row in cached_players()[1:]:
-            if row and row[0]:
-                player_ids.add(row[0].strip())
+        # Check if user is in Players table
+        player_rows = await _db.get_all_players()
+        player_ids = {row[0].strip() for row in player_rows if row and row[0]}
 
         if str(interaction.user.id) not in player_ids:
             await interaction.response.send_message(
@@ -525,14 +495,12 @@ class FavouritesCog(commands.Cog):
             if week_start_dt > _now:
                 week_start_dt -= timedelta(weeks=1)
             week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+            stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
             stats['week_label'] = week_label
             embed_text = build_favourites_embed(stats)
 
-            # Post publicly in the channel
             await interaction.followup.send(embed=embed_text)
 
-            # Update pinned favourites channel if set
             if BUTLERS_FAVOURITES_CHANNEL_ID:
                 fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
@@ -546,7 +514,6 @@ class FavouritesCog(commands.Cog):
                     except Exception as e:
                         print(f"Favourites channel update error: {e}")
 
-            # Update title roles
             try:
                 await update_title_roles(interaction.guild, stats)
             except Exception as e:
@@ -554,7 +521,6 @@ class FavouritesCog(commands.Cog):
 
         except Exception as e:
             await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
-
 
 
 async def setup(bot):

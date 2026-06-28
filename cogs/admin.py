@@ -6,16 +6,13 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils.sheets import (
-    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
-    registry_ws, index_posts_ws, leaderboards_ws,
-    cached_players, cached_submissions, gspread_retry,
-)
+import utils.db as _db
 
 MOD_ROLE_ID             = config.MOD_ROLE_ID
 GUILD_ID                = config.GUILD_ID
 CHALLENGE_RULES_CHANNEL_ID = config.CHALLENGE_RULES_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
+BOUNTY_FORUM_CHANNEL_ID = config.BOUNTY_FORUM_CHANNEL_ID
 # Asset paths are relative to the repo root, not the cogs/ subdirectory
 _ASSETS_DIR     = os.path.join(os.path.dirname(__file__), '..', 'assets')
 DECORATION_TOP  = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
@@ -151,29 +148,19 @@ Monthly objectives tracked on separate bounty cards. Complete them — that's ho
 ]
 
 
-def get_challenge_rules_message_ids():
-    # We store the message IDs so /update_challenge_rules can edit in place
+async def get_challenge_rules_message_ids():
     try:
-        ws = sheet.worksheet('ChallengeRules')
-        rows = ws.get_all_values()[1:]
-        return [int(r[0]) for r in rows if r and r[0]]
+        return await _db.get_challenge_rule_msg_ids()
     except Exception:
         return []
 
-def save_challenge_rules_message_ids(msg_ids):
+async def save_challenge_rules_message_ids(msg_ids):
+    labels = ['Intro + Weapon Ranks', 'Earning Marks', 'Subclass & Class Progression',
+              'Subclass Ranks', 'Class Ranks', 'Player Titles', 'Feats of Legend', 'Bounties']
     try:
-        try:
-            ws = sheet.worksheet('ChallengeRules')
-            ws.clear()
-        except Exception:
-            ws = sheet.add_worksheet(title='ChallengeRules', rows=20, cols=2)
-        ws.append_row(['MessageID', 'Section'])
-        labels = ['Intro + Weapon Ranks', 'Earning Marks', 'Subclass & Class Progression',
-                  'Subclass Ranks', 'Class Ranks', 'Player Titles', 'Feats of Legend', 'Bounties']
-        for msg_id, label in zip(msg_ids, labels):
-            ws.append_row([str(msg_id), label])
+        await _db.save_challenge_rules(msg_ids, labels)
     except Exception as e:
-        print(f"ChallengeRules sheet save error: {e}")
+        print(f"ChallengeRules DB save error: {e}")
 
 
 
@@ -195,10 +182,10 @@ class AdminCog(commands.Cog):
                 await interaction.followup.send("❌ Role not found.", ephemeral=True)
                 return
 
-            existing_rows = players_ws.get_all_values()
-            existing_ids = set(row[0] for row in existing_rows[1:] if row)
+            existing_rows = await _db.get_all_players()
+            existing_ids = set(row[0] for row in existing_rows if row)
 
-            rows_to_add = []
+            added = 0
             skipped = 0
 
             for member in role.members:
@@ -209,14 +196,12 @@ class AdminCog(commands.Cog):
                     skipped += 1
                     continue
 
-                rows_to_add.append([discord_id, display_name, ""])
-
-            if rows_to_add:
-                players_ws.append_rows(rows_to_add, value_input_option="RAW")
+                await _db.upsert_player(discord_id, display_name)
+                added += 1
 
             await interaction.followup.send(
-                f"✅ Seeded **{len(rows_to_add)}** players from role.\n"
-                f"⏭️ Skipped **{skipped}** already in the sheet.",
+                f"✅ Seeded **{added}** players from role.\n"
+                f"⏭️ Skipped **{skipped}** already registered.",
                 ephemeral=True
             )
 
@@ -261,7 +246,7 @@ class AdminCog(commands.Cog):
                 await asyncio.sleep(0.5)
 
             await channel.send(file=discord.File(DECORATION_BOTTOM))
-            save_challenge_rules_message_ids(msg_ids)
+            await save_challenge_rules_message_ids(msg_ids)
             await interaction.followup.send(f"Posted {len(msg_ids)} challenge rules messages.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
@@ -276,7 +261,7 @@ class AdminCog(commands.Cog):
                 await interaction.followup.send("Could not find challenge-rules channel.", ephemeral=True)
                 return
 
-            msg_ids = get_challenge_rules_message_ids()
+            msg_ids = await get_challenge_rules_message_ids()
             if not msg_ids:
                 await interaction.followup.send("No challenge rules messages found — run /post_challenge_rules first.", ephemeral=True)
                 return
@@ -347,13 +332,17 @@ class AdminCog(commands.Cog):
         report = []
 
         try:
+            from cogs.bounty import (get_active_bounty, get_player_bounty_progress,
+                                     save_player_bounty_progress, save_bounty_state,
+                                     build_player_bounty_card)
+            from cogs.leaderboards import get_leaderboard_entries, format_leaderboard_text, pack_chunks_into_slots, _get_lb_records
+            from cogs.registry import create_or_update_registry_card
+
             # 1. find and delete the submission row
-            sub_rows = submissions_ws.get_all_values()
-            sub_row_idx = None
+            sub_rows = await _db.get_all_submissions()
             sub_data = None
-            for i, row in enumerate(sub_rows[1:], start=2):
+            for row in sub_rows:
                 if len(row) >= 13 and row[12].strip() == message_link.strip():
-                    sub_row_idx = i
                     sub_data = row
                     break
 
@@ -370,32 +359,23 @@ class AdminCog(commands.Cog):
             except Exception:
                 takedowns = 0
 
-            submissions_ws.delete_rows(sub_row_idx)
+            await _db.delete_submission_by_link(message_link.strip())
             report.append(f"✅ Submissions: row deleted ({player_name}, {weapon}, {map_name})")
 
             # 2. strip it from LeaderboardData
-            ld_rows = leaderboard_data_ws.get_all_values()
-            ld_deleted = 0
-            affected_lb_names = set()
-            # Iterate in reverse so row deletion doesn't shift indices
-            for i in range(len(ld_rows) - 1, 0, -1):
-                row = ld_rows[i]
-                if len(row) >= 5 and row[4].strip() == message_link.strip():
-                    affected_lb_names.add(row[0].strip())
-                    leaderboard_data_ws.delete_rows(i + 1)
-                    ld_deleted += 1
-            report.append(f"✅ LeaderboardData: {ld_deleted} row(s) deleted, affected boards: {', '.join(affected_lb_names) or 'none'}")
+            affected_lb_names = await _db.delete_leaderboard_entries_by_link(message_link.strip())
+            report.append(f"✅ LeaderboardData: deleted entries, affected boards: {', '.join(affected_lb_names) or 'none'}")
 
             # 3. rebuild any leaderboard threads that had this score in them
             if affected_lb_names:
-                all_lb_rows = leaderboards_ws.get_all_records()
+                all_lb_rows = await _get_lb_records()
                 rebuilt = []
                 for lb_name in affected_lb_names:
                     lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
                     if not lb_row:
                         continue
                     try:
-                        entries = get_leaderboard_entries(lb_name)
+                        entries = await get_leaderboard_entries(lb_name)
                         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
                         overflow = 0
                         if lb_name in ("100 Kills", "200 Takedowns"):
@@ -418,18 +398,18 @@ class AdminCog(commands.Cog):
                 report.append(f"✅ Leaderboards rebuilt: {', '.join(rebuilt) or 'none'}")
 
             # 4. roll back bounty progress if it counted toward an active bounty
-            bounty = get_active_bounty()
+            bounty = await get_active_bounty()
             if bounty:
                 matched_key = next((k for k in bounty['weapons'] if k.lower() == weapon.lower()), None)
                 if matched_key and takedowns >= 100:
-                    player_row = get_player_bounty_progress(bounty['title'], discord_id)
+                    player_row = await get_player_bounty_progress(bounty['title'], discord_id)
                     if player_row:
                         progress = player_row['progress']
                         raw = progress.get(matched_key, 0)
                         cur = raw['current'] if isinstance(raw, dict) else int(raw)
                         if cur > 0:
                             progress[matched_key] = cur - 1
-                            save_player_bounty_progress(player_row['row'], player_name, player_row['forum_post_id'], progress)
+                            await save_player_bounty_progress(bounty['title'], discord_id, player_name, player_row['forum_post_id'], progress)
                             # Update bounty card in forum
                             forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
                             forum_channel = guild.get_channel(forum_channel_id)
@@ -448,7 +428,7 @@ class AdminCog(commands.Cog):
                             weapons = bounty['weapons']
                             if matched_key in weapons:
                                 weapons[matched_key]['current'] = max(0, weapons[matched_key]['current'] - 1)
-                                save_bounty_state(bounty['row'], weapons, bounty['special_done'], bounty['completions'])
+                                await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
                             report.append(f"✅ Bounty: decremented {matched_key} for {player_name}")
                         else:
                             report.append(f"⚠️ Bounty: {player_name} already at 0 for {matched_key}, skipped")
@@ -457,8 +437,9 @@ class AdminCog(commands.Cog):
                 else:
                     report.append(f"ℹ️ Bounty: weapon {weapon} not on active bounty or TDs < 100, skipped")
 
-            # 5. rebuild their registry card so the mark count reflects the removal
+            # 5. rebuild registry card so mark count reflects the removal
             try:
+                from cogs.registry import create_or_update_registry_card
                 discord_id_int = int(discord_id)
                 await create_or_update_registry_card(guild, discord_id_int, player_name)
                 report.append(f"✅ Registry card refreshed for {player_name}")

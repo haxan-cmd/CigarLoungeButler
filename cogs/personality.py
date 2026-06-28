@@ -13,15 +13,12 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta
 
 import config
-from utils.sheets import (
-    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
-    bounty_ws, special_ops_ws, snapshots_ws,
-    cached_submissions, cached_players, cached_leaderboard_data,
-)
+import utils.db as _db
 from utils.helpers import (
     build_manual_content, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
 from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
+from cogs.bounty import get_active_bounty
 
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
@@ -97,10 +94,10 @@ try:
 except Exception as _e:
     print(f"Butler AI unavailable: {_e}")
 
-def count_qualifying_runs(weapon_name, min_td=100):
+def count_qualifying_runs(weapon_name, ld_rows, min_td=100):
     """Count runs with TD >= min_td for a weapon using LeaderboardData (includes legacy)."""
     try:
-        ld = cached_leaderboard_data()
+        ld = ld_rows or []
         count = 0
         for row in ld:
             if len(row) < 4:
@@ -144,10 +141,10 @@ def extract_stats_from_message(text):
     return kills, tds
 
 
-def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
+def find_submission_from_stats(discord_id, subs_data, ld_data, kills=None, tds=None, weapon=None, player_name_ref=''):
     """Find a recent submission matching the given stats. Returns context string or empty."""
     try:
-        subs = cached_submissions()
+        subs = subs_data or []
         discord_id_str = str(discord_id)
         player_subs = [r for r in subs if len(r) > 8 and r[2].strip() == discord_id_str]
         if not player_subs:
@@ -179,7 +176,7 @@ def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, pl
                 # Check leaderboard position for this weapon
                 lb_ctx = ''
                 try:
-                    ld = cached_leaderboard_data()
+                    ld = ld_data or []
                     weapon_entries = [(r[1].strip(), int(r[3])) for r in ld
                                       if len(r) > 3 and r[0].strip() == sub_weapon
                                       and r[3].strip().isdigit()]
@@ -445,9 +442,7 @@ class PersonalityCog(commands.Cog):
 
     @tasks.loop(hours=168)  # 7 days
     async def weekly_snapshot(self):
-        """Write a weekly snapshot row to the Snapshots sheet."""
-        if not snapshots_ws:
-            return
+        """Write a weekly snapshot row to the Snapshots DB table."""
         try:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
@@ -455,7 +450,7 @@ class PersonalityCog(commands.Cog):
             if now.weekday() != 0:
                 return
 
-            subs = cached_submissions()
+            subs = await _db.get_all_submissions()
             total_submissions = len(subs)
 
             # Submissions in the last 7 days using timestamp column (col 0)
@@ -519,8 +514,7 @@ class PersonalityCog(commands.Cog):
 
             # Leaderboard velocity — high scores set this week from LeaderboardData
             try:
-                ld_rows = leaderboard_data_ws.get_all_values()[1:]
-                # Count unique board updates this week via submission links cross-referencing weekly submissions
+                ld_rows = await _db.get_all_leaderboard_data()
                 weekly_links = {row[12].strip() for row in weekly_rows if len(row) > 12 and row[12].strip()}
                 hs_set = sum(1 for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links)
                 boards_updated = len({row[0].strip() for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links})
@@ -555,14 +549,19 @@ class PersonalityCog(commands.Cog):
             while len(top_trending) < 3: top_trending.append('')
 
             date_str = now.strftime('%Y-%m-%d')
-            snapshots_ws.append_row([
-                date_str, total_submissions, weekly_count, active_count,
-                top_weapons[0], top_weapons[1], top_weapons[2], top_weapons[3], top_weapons[4],
-                top_maps[0], top_maps[1], top_maps[2],
-                avg_td, avg_kills,
-                hs_set, boards_updated,
-                top_trending[0], top_trending[1], top_trending[2]
-            ])
+            await _db.add_snapshot(
+                snapshot_date=date_str,
+                total_subs=total_submissions,
+                weekly_subs=weekly_count,
+                active_players=active_count,
+                top_weapons=top_weapons[:5],
+                top_maps=top_maps[:3],
+                avg_td=avg_td,
+                avg_kills=avg_kills,
+                highscores_set=hs_set,
+                boards_updated=boards_updated,
+                trend_weapons=top_trending[:3]
+            )
             print(f"Weekly snapshot written for {date_str}")
 
             # Update Butler's Favourites with weekly stats
@@ -574,7 +573,7 @@ class PersonalityCog(commands.Cog):
                     week_start_ts = week_end_ts - 7 * 86400
                     week_start_dt = now - timedelta(days=7)
                     week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
-                    weekly_stats = calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
+                    weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
                     weekly_stats['week_label'] = week_label
                     embed_text = build_favourites_embed(weekly_stats)
                     fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
@@ -640,10 +639,8 @@ class PersonalityCog(commands.Cog):
                 return
 
             discord_id_str = str(message.author.id)
-            is_registered = any(
-                row and row[0].strip() == discord_id_str
-                for row in cached_players()
-            )
+            _all_players = await _db.get_all_players()
+            is_registered = any(row and row[0].strip() == discord_id_str for row in _all_players)
             if not is_registered:
                 return
 
@@ -690,8 +687,10 @@ class PersonalityCog(commands.Cog):
 
                 # Pull player stats for context — lets Butler roast braggers with receipts
                 player_stats_ctx = ''
+                _subs_ctx = []
+                _ld_ctx = []
                 try:
-                    p_rows = players_ws.get_all_values()[1:]
+                    p_rows = _all_players  # already fetched above
                     # Current player stats
                     for p_row in p_rows:
                         if p_row and p_row[0].strip() == discord_id_str:
@@ -705,8 +704,11 @@ class PersonalityCog(commands.Cog):
                             pb_td = 0
                             best_td_game = None    # full row of their highest-TD submission
                             best_kills_game = None # full row of their highest-kills submission
+                            # Fetch data once for this stats block
+                            _subs_ctx = await _db.get_all_submissions()
+                            _ld_ctx = await _db.get_all_leaderboard_data()
                             try:
-                                subs_for_pb = cached_submissions()
+                                subs_for_pb = _subs_ctx
                                 player_subs_pb = [
                                     r for r in subs_for_pb
                                     if len(r) > 8 and r[2].strip() == discord_id_str
@@ -730,7 +732,7 @@ class PersonalityCog(commands.Cog):
                             # the submissions sheet — a player's actual best game might
                             # only exist there, not in submissions.
                             player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
-                            ld_for_pb = cached_leaderboard_data()
+                            ld_for_pb = _ld_ctx
                             try:
                                 for ld_row in ld_for_pb:
                                     if len(ld_row) < 4:
@@ -836,7 +838,7 @@ class PersonalityCog(commands.Cog):
                             # Per-weapon avg kill share and TD share
                             try:
                                 from cogs.registry import calculate_weapon_shares_for_player
-                                w_kill, w_td = calculate_weapon_shares_for_player(discord_id_str)
+                                w_kill, w_td = await calculate_weapon_shares_for_player(discord_id_str)
                                 all_weapons = set(w_kill) | set(w_td)
                                 if all_weapons:
                                     share_lines = []
@@ -853,8 +855,8 @@ class PersonalityCog(commands.Cog):
 
                             break
                     # Build rich per-player summary for comparisons
-                    subs_all = cached_submissions()
-                    ld_all = cached_leaderboard_data()
+                    subs_all = _subs_ctx
+                    ld_all = _ld_ctx
 
                     # Unique weapons and subclasses per player from submissions
                     player_weapon_diversity = {}  # name -> set of weapons
@@ -980,19 +982,18 @@ class PersonalityCog(commands.Cog):
 
                     # SpecialOps achievements per player
                     try:
-                        if special_ops_ws:
-                            so_rows = special_ops_ws.get_all_values()[1:]
-                            so_by_player = {}
-                            for so_row in so_rows:
-                                if len(so_row) > 2:
-                                    pname = so_row[1].strip()
-                                    achievement = so_row[2].strip()
-                                    if pname not in so_by_player:
-                                        so_by_player[pname] = []
-                                    so_by_player[pname].append(achievement)
-                            if so_by_player:
-                                so_lines = [f"{p}: {', '.join(a)}" for p, a in so_by_player.items()]
-                                player_stats_ctx += f"\n\nSpecial achievements (Fist and Shield, Knife, etc):\n" + "\n".join(so_lines)
+                        so_rows = await _db.get_all_special_ops()
+                        so_by_player = {}
+                        for so_row in so_rows:
+                            if len(so_row) > 2:
+                                pname = so_row[1].strip()
+                                achievement = so_row[2].strip()
+                                if pname not in so_by_player:
+                                    so_by_player[pname] = []
+                                so_by_player[pname].append(achievement)
+                        if so_by_player:
+                            so_lines = [f"{p}: {', '.join(a)}" for p, a in so_by_player.items()]
+                            player_stats_ctx += f"\n\nSpecial achievements (Fist and Shield, Knife, etc):\n" + "\n".join(so_lines)
                     except Exception:
                         pass
                 except Exception:
@@ -1001,7 +1002,7 @@ class PersonalityCog(commands.Cog):
                 # Try to find a matching submission if player mentioned stats
                 msg_kills, msg_tds = extract_stats_from_message(resolved_message)
                 if msg_kills or msg_tds:
-                    sub_ctx = find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
+                    sub_ctx = find_submission_from_stats(discord_id_str, _subs_ctx, _ld_ctx, msg_kills, msg_tds, player_name_ref=player_name)
                     if sub_ctx:
                         player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
 
@@ -1009,7 +1010,7 @@ class PersonalityCog(commands.Cog):
                 if any(w in resolved_message.lower() for w in ['how many', 'count', 'most kills', 'highest', 'most takedowns', '100 takedown']):
                     _bw = extract_weapon_from_message(resolved_message)
                     if _bw:
-                        bomb_count = count_qualifying_runs(_bw, 100)
+                        bomb_count = count_qualifying_runs(_bw, _ld_ctx, 100)
                         if bomb_count is not None:
                             player_stats_ctx += f"\nServer-wide 100+ TD runs with {_bw}: {bomb_count}"
 
@@ -1019,7 +1020,7 @@ class PersonalityCog(commands.Cog):
                 mentioned_weapon = extract_weapon_from_message(resolved_message)
                 if mentioned_weapon:
                     try:
-                        ld_ctx = cached_leaderboard_data()
+                        ld_ctx = _ld_ctx
                         weapon_entries = []
                         for r in ld_ctx:
                             if len(r) < 4 or r[0].strip() != mentioned_weapon:
@@ -1071,7 +1072,7 @@ class PersonalityCog(commands.Cog):
         image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
         # Check if this is an art post in the active bounty channel
-        bounty = get_active_bounty()
+        bounty = await get_active_bounty()
         if bounty and message.channel.id == bounty['channel_id']:
             has_image = any(
                 att.filename.lower().endswith(image_extensions)
@@ -1106,9 +1107,9 @@ class PersonalityCog(commands.Cog):
                         f"```"
                     )
                     progress_msg = await message.channel.send(progress_placeholder)
-                    bounty_ws.update_cell(bounty['row'], 12, str(comp_msg.id))
-                    bounty_ws.update_cell(bounty['row'], 13, str(bonus_msg.id))
-                    bounty_ws.update_cell(bounty['row'], 14, str(progress_msg.id))
+                    await _db.update_bounty_field(bounty['id'], 'completions_msg_id', str(comp_msg.id))
+                    await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', str(bonus_msg.id))
+                    await _db.update_bounty_field(bounty['id'], 'progress_msg_id', str(progress_msg.id))
                 except Exception as e:
                     print(f"Bounty placeholder post error: {e}")
             return
@@ -1138,5 +1139,4 @@ class PersonalityCog(commands.Cog):
         print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger'][:60]}' | response: '{entry['response'][:60]}'")
 
 
-async def setup(bot):
-    await bot.add_cog(PersonalityCog(bot))
+asyn

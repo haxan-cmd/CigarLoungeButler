@@ -98,7 +98,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          takedowns, kills, deaths, vip, feats, message_link,
                          lobby_rank=None, lobby_size=None, kills_rank=None,
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
-                         team_kill_share=None, team_td_share=None):
+                         team_kill_share=None, team_td_share=None, second_place_td=None):
     from datetime import datetime as _dt
     now = _dt.utcnow()
 
@@ -128,6 +128,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
         team_td_ratio=round(team_score_ratio, 3) if team_score_ratio is not None else None,
         team_kill_share=round(team_kill_share, 1) if team_kill_share is not None else None,
         team_td_share=round(team_td_share, 1) if team_td_share is not None else None,
+        second_place_td=second_place_td,
     )
     return row_id
 
@@ -1514,6 +1515,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if total_team_kills > 0:
             _team_kill_share = round(kills / total_team_kills * 100, 1)
 
+    # TUFF: gap between player kills and 2nd place teammate's takedowns
+    _second_place_td = None
+    if _team_td:
+        _second_place_td = sorted(_team_td, reverse=True)[0]
+
     if blurb_parts:
         lobby_line = " · ".join(blurb_parts)
 
@@ -1578,6 +1584,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_score_ratio=_team_score_ratio,
             team_kill_share=_team_kill_share,
             team_td_share=_team_td_share,
+            second_place_td=_second_place_td,
         )
         # log_submission returns the exact row index it wrote to (or None if dedup skipped)
         submission_row = log_result
@@ -1667,6 +1674,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 takedowns, kills, deaths, vip, feats,
                 interaction.user.display_name, message_link,
                 bot_user=interaction.client.user,
+                second_place_td=_second_place_td,
             )
         except Exception as e:
             print(f"Leaderboard update error: {e}")
@@ -1958,55 +1966,4 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         await fav_channel.send(embed_text)
                     await update_title_roles(_guild, stats)
         except Exception as e:
-            print(f"Butler favourites update error: {e}")
-
-    asyncio.create_task(_bg_tasks())
-
-
-_active_vision: set[int] = set()  # prevents double-processing same message
-_queued_msgs: set[int] = set()  # prevents same message being finalised twice
-
-class SubmissionsCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._prompted_messages: set[int] = set()
-
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        """Trigger submission flow when a player posts an image in the submissions channel."""
-        if message.author.bot:
-            return
-        if message.channel.id != SUBMISSIONS_CHANNEL_ID:
-            return
-        if message.id in self._prompted_messages:
-            return
-        self._prompted_messages.add(message.id)
-        # Prevent unbounded growth — keep only the last 200 message IDs
-        if len(self._prompted_messages) > 200:
-            self._prompted_messages = set(list(self._prompted_messages)[-200:])
-        # content_type isn't always populated (especially on mobile) — fall back to extension
-        _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
-        has_image = any(
-            (att.content_type and att.content_type.startswith("image/"))
-            or att.filename.lower().endswith(_image_exts)
-            for att in message.attachments
-        )
-        if not has_image:
-            return
-        view = SubmitView(original_message=message)
-        embed = discord.Embed(
-            title="Run Detected",
-            description=f"Ready to log your engagement, {message.author.display_name}.",
-            color=0xc8a96e,
-        )
-        embed.set_footer(text="Window closes in 5 minutes  ·  Cigar Lounge Butler")
-        prompt = await message.reply(
-            embed=embed,
-            view=view,
-            mention_author=False,
-        )
-        view.prompt_msg = prompt
-
-
-async def setup(bot):
-    await bot.add_cog(SubmissionsCog(bot))
+            pri
