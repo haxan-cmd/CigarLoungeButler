@@ -77,7 +77,7 @@ def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_do
 
 async def save_bounty_state(bounty_id, weapons, special_done, completions, message_id=None):
     await _db.update_bounty_field(bounty_id, 'weapons', json.dumps(weapons))
-    await _db.update_bounty_field(bounty_id, 'special_done', '1' if special_done else '0')
+    await _db.update_bounty_field(bounty_id, 'special_done', bool(special_done))
     await _db.update_bounty_field(bounty_id, 'completions', json.dumps(completions))
     if message_id:
         await _db.update_bounty_field(bounty_id, 'message_id', str(message_id))
