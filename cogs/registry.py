@@ -178,9 +178,39 @@ def calculate_weapon_marks_for_player(discord_id, cached_data=None):
 
     return weapon_marks
 
+def calculate_weapon_shares_for_player(discord_id, cached_data=None):
+    """Return per-weapon avg kill share % and TD share % from submissions (cols 20/21)."""
+    discord_id_str = str(discord_id)
+    subs = (cached_data or {}).get('submissions') or cached_submissions()
+    kill_shares = {}   # weapon -> [share %]
+    td_shares   = {}   # weapon -> [share %]
+    for row in subs:
+        if len(row) < 4 or row[2].strip() != discord_id_str:
+            continue
+        weapon = row[3].strip()
+        if not weapon:
+            continue
+        try:
+            ks = float(row[20]) if len(row) > 20 and row[20] else None
+            if ks and 0 < ks <= 100:
+                kill_shares.setdefault(weapon, []).append(ks)
+        except (ValueError, TypeError):
+            pass
+        try:
+            ts = float(row[21]) if len(row) > 21 and row[21] else None
+            if ts and 0 < ts <= 100:
+                td_shares.setdefault(weapon, []).append(ts)
+        except (ValueError, TypeError):
+            pass
+    avg_kill = {w: round(sum(v)/len(v), 1) for w, v in kill_shares.items() if len(v) >= 2}
+    avg_td   = {w: round(sum(v)/len(v), 1) for w, v in td_shares.items()   if len(v) >= 2}
+    return avg_kill, avg_td
+
+
 def calculate_registry_stats(discord_id, cached_data=None):
     """Calculate all progression stats for a player."""
     weapon_marks = calculate_weapon_marks_for_player(discord_id, cached_data)
+    avg_kill_shares, avg_td_shares = calculate_weapon_shares_for_player(discord_id, cached_data)
 
     class_stats = {}
     for cls, subclasses in REGISTRY_CLASS_MAP.items():
@@ -201,7 +231,13 @@ def calculate_registry_stats(discord_id, cached_data=None):
                 # Count how many rank tiers this weapon has achieved
                 tiers_achieved = sum(1 for threshold, _ in WEAPON_RANK_THRESHOLDS if marks >= threshold)
                 subclass_marks += tiers_achieved
-                weapon_details[w] = {'marks': marks, 'rank': rank_name, 'tiers': tiers_achieved}
+                weapon_details[w] = {
+                    'marks': marks,
+                    'rank': rank_name,
+                    'tiers': tiers_achieved,
+                    'avg_kill_share': avg_kill_shares.get(w),
+                    'avg_td_share': avg_td_shares.get(w),
+                }
 
             sub_rank, sub_level = get_subclass_rank(subclass_marks, num_weapons)
             class_marks_total += sub_level
@@ -902,8 +938,14 @@ def build_registry_messages(player_name, discord_id, cached_data=None):
                 if next_threshold:
                     progress_str = f"{mark_str}/{next_threshold}"
                 else:
-                    progress_str = mark_str  # Iridescent — just show marks
-                lines.append(f"• {w_emoji} {w} — {progress_str}")
+                    progress_str = mark_str
+                share_parts = []
+                if wdata.get('avg_kill_share') is not None:
+                    share_parts.append(f"{wdata['avg_kill_share']}% K")
+                if wdata.get('avg_td_share') is not None:
+                    share_parts.append(f"{wdata['avg_td_share']}% TD")
+                share_str = f" `{' · '.join(share_parts)}`" if share_parts else ""
+                lines.append(f"• {w_emoji} {w} — {progress_str}{share_str}")
             lines.append("")
 
         messages.append("\n".join(lines))
@@ -2374,14 +2416,13 @@ class RegistryCog(commands.Cog):
         except Exception:
             butler_titles = []
 
-        # \u2500\u2500 Total marks \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        # -- Total marks
         total_marks = sum(flat_marks.values())
 
-        # \u2500\u2500 Build output \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        # -- Build output
         cigar = "<:cigar:1444893851427803298>"
-        lines = [f"{cigar} **{resolved_name}** \u2014 {sub_count} submissions", ""]
+        lines = [f"{cigar} **{resolved_name}** — {sub_count} submissions", ""]
 
-        # Butler titles held
         if butler_titles:
             lines.append("**Current Titles**")
             lines.extend(butler_titles)
@@ -2398,7 +2439,6 @@ class RegistryCog(commands.Cog):
             lines.append("")
             lines.append("*No weapon marks recorded yet.*")
 
-        # Personal bests
         pb_td_str = _pb_str(best_td_row)
         pb_kills_row = best_kills_row
         if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or biggest_lead_str:
@@ -2409,9 +2449,8 @@ class RegistryCog(commands.Cog):
             if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
                 lines.append(f"<a:topkill:1360314538364240024> {_pb_str(pb_kills_row)}")
             if biggest_lead_str:
-                lines.append(f"\ud83c\udfc6 {biggest_lead_str}")
+                lines.append(f"🏆 {biggest_lead_str}")
 
-        # Special Ops
         if special_ops:
             lines.append("")
             lines.append("**Special Ops**")
@@ -2424,10 +2463,9 @@ class RegistryCog(commands.Cog):
                     ops_parts.append(f"{emoji} {feat}")
             lines.append("  ".join(ops_parts))
 
-        # Bounties
         if bounties_done:
             lines.append("")
-            lines.append(f"**Bounties** \u2014 \ud83c\udfc6 {bounties_done} completed")
+            lines.append(f"**Bounties** — 🏆 {bounties_done} completed")
 
         output = "\n".join(lines)
         await interaction.followup.send(output[:1900])

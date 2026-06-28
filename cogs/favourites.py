@@ -67,6 +67,8 @@ def calculate_butler_stats(week_start=None, week_end=None):
     kill_efficiency = {}     # player -> [(your_kills, total_lobby_kills, lobby_size)]
     team_kill_shares = {}    # player -> [team kill share %]
     team_td_shares = {}      # player -> [team TD share %]
+    weapon_kill_shares = {}  # weapon -> [kill share %]
+    weapon_td_shares = {}    # weapon -> [TD share %]
 
     for row in subs:
         if len(row) < 9:
@@ -117,14 +119,28 @@ def calculate_butler_stats(week_start=None, week_end=None):
             tks = float(row[20]) if len(row) > 20 and row[20] else None
             if tks and 0 < tks <= 100:
                 team_kill_shares.setdefault(player, []).append(tks)
+                if weapon:
+                    weapon_kill_shares.setdefault(weapon, []).append(tks)
         except (ValueError, TypeError):
             pass
         try:
             tds = float(row[21]) if len(row) > 21 and row[21] else None
             if tds and 0 < tds <= 100:
                 team_td_shares.setdefault(player, []).append(tds)
+                if weapon:
+                    weapon_td_shares.setdefault(weapon, []).append(tds)
         except (ValueError, TypeError):
             pass
+
+    # ── PER-WEAPON averages (min 3 runs) ──
+    def _weapon_avg(d, min_runs=3):
+        return {w: round(sum(v)/len(v), 1) for w, v in d.items() if len(v) >= min_runs}
+
+    weapon_kill_avgs = _weapon_avg(weapon_kill_shares)
+    weapon_td_avgs   = _weapon_avg(weapon_td_shares)
+
+    top_weapons_by_kill_share = sorted(weapon_kill_avgs.items(), key=lambda x: -x[1])[:5]
+    top_weapons_by_td_share   = sorted(weapon_td_avgs.items(),   key=lambda x: -x[1])[:5]
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -288,9 +304,11 @@ def calculate_butler_stats(week_start=None, week_end=None):
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
-        'high_lethality': high_lethality if high_lethality else [],
+        'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
         'most_dominant': most_dominant if most_dominant else [],
+        'top_weapons_by_kill_share': top_weapons_by_kill_share,
+        'top_weapons_by_td_share': top_weapons_by_td_share,
     }
 
 
@@ -336,6 +354,24 @@ def build_favourites_embed(stats):
         value=warlord_text,
         inline=False,
     )
+
+    # Per-weapon kill share and TD share (side by side)
+    def _fmt_weapon_shares(lst):
+        if not lst:
+            return "*Not enough data yet*"
+        return "\n".join(f"**{w}** — {avg:.1f}%" for w, avg in lst)
+
+    embed.add_field(
+        name="⚔️ Top Weapons  *(avg kill share)*",
+        value=_fmt_weapon_shares(stats.get('top_weapons_by_kill_share', [])),
+        inline=True,
+    )
+    embed.add_field(
+        name="💀 Top Weapons  *(avg TD share)*",
+        value=_fmt_weapon_shares(stats.get('top_weapons_by_td_share', [])),
+        inline=True,
+    )
+    embed.add_field(name="​", value="​", inline=False)  # spacer
 
     # 2-column row: Busiest | Highest TD
     embed.add_field(
@@ -456,7 +492,7 @@ class FavouritesCog(commands.Cog):
 
         # Check if user is in Players sheet
         player_ids = set()
-        for row in players_ws.get_all_values()[1:]:
+        for row in cached_players()[1:]:
             if row and row[0]:
                 player_ids.add(row[0].strip())
 

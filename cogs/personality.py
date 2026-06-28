@@ -810,6 +810,24 @@ class PersonalityCog(commands.Cog):
                             except Exception:
                                 pass
 
+                            # Per-weapon avg kill share and TD share
+                            try:
+                                from cogs.registry import calculate_weapon_shares_for_player
+                                w_kill, w_td = calculate_weapon_shares_for_player(discord_id_str)
+                                all_weapons = set(w_kill) | set(w_td)
+                                if all_weapons:
+                                    share_lines = []
+                                    for w in sorted(all_weapons):
+                                        parts = []
+                                        if w in w_kill:
+                                            parts.append(f"{w_kill[w]}% kill share")
+                                        if w in w_td:
+                                            parts.append(f"{w_td[w]}% TD share")
+                                        share_lines.append(f"{w}: {', '.join(parts)}")
+                                    player_stats_ctx += f"\nPer-weapon averages: {'; '.join(share_lines)}"
+                            except Exception:
+                                pass
+
                             break
                     # Build rich per-player summary for comparisons
                     subs_all = cached_submissions()
@@ -1037,11 +1055,10 @@ class PersonalityCog(commands.Cog):
                 for att in message.attachments
             )
             if has_image and not bounty['completions_msg_id'] and not bounty['bonus_msg_id']:
-                # Post placeholder completions and bonus boards
                 completions_placeholder = (
                     f"```\n"
                     f"╭──────────────────────────────╮\n"
-                    f"  {bounty['theme_emoji']} COMPLETIONS {bounty['theme_emoji']}\n"
+                    f"  {{bounty['theme_emoji']}} COMPLETIONS {{bounty['theme_emoji']}}\n"
                     f"╰──────────────────────────────╯\n"
                     f"No completions yet.\n"
                     f"```"
@@ -1049,7 +1066,7 @@ class PersonalityCog(commands.Cog):
                 bonus_placeholder = (
                     f"```\n"
                     f"╭──────────────────────────────╮\n"
-                    f"  {bounty['theme_emoji']} BONUS COMPLETIONS {bounty['theme_emoji']}\n"
+                    f"  {{bounty['theme_emoji']}} BONUS COMPLETIONS {{bounty['theme_emoji']}}\n"
                     f"╰──────────────────────────────╯\n"
                     f"No bonus completions yet.\n"
                     f"```"
@@ -1060,13 +1077,12 @@ class PersonalityCog(commands.Cog):
                     progress_placeholder = (
                         f"```\n"
                         f"╭──────────────────────────────╮\n"
-                        f"  {bounty['theme_emoji']} TOP HUNTERS {bounty['theme_emoji']}\n"
+                        f"  {{bounty['theme_emoji']}} TOP HUNTERS {{bounty['theme_emoji']}}\n"
                         f"╰──────────────────────────────╯\n"
                         f"No submissions yet.\n"
                         f"```"
                     )
                     progress_msg = await message.channel.send(progress_placeholder)
-                    # Save message IDs to sheet (cols 12, 13, 14)
                     bounty_ws.update_cell(bounty['row'], 12, str(comp_msg.id))
                     bounty_ws.update_cell(bounty['row'], 13, str(bonus_msg.id))
                     bounty_ws.update_cell(bounty['row'], 14, str(progress_msg.id))
@@ -1085,7 +1101,6 @@ class PersonalityCog(commands.Cog):
         emoji_str = str(reaction.emoji)
         entry = BUTLER_RESPONSE_LOG[msg_id]
         entry['reactions'].append(emoji_str)
-        # Classify engagement
         positive = {'😂', '😆', '🤣', '👍', '❤️', '🔥', '💀', '😭', '👏'}
         negative = {'👎', '🙄', '😐'}
         middle_finger = {'🖕'}
@@ -1094,7 +1109,7 @@ class PersonalityCog(commands.Cog):
         elif emoji_str in negative:
             sentiment = 'negative'
         elif emoji_str in middle_finger:
-            sentiment = 'middle_finger'  # also positive for the Butler
+            sentiment = 'middle_finger'
         else:
             sentiment = 'neutral'
         print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger'][:60]}' | response: '{entry['response'][:60]}'")
