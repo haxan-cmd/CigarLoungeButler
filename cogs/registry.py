@@ -1079,17 +1079,38 @@ async def update_archive_index(guild):
             embed_fields.extend(_make_fields('#', other))
 
         # Build embed(s) — Discord allows max 25 fields per embed
+        EMBED_TITLE = "📋 Player Registry Index"
+        EMBED_DESC = "Jump to a player's card"
+        EMBED_OVERHEAD = len(EMBED_TITLE) + len(EMBED_DESC)
+        EMBED_CHAR_LIMIT = 5800
+
         def _build_embeds(fields):
             embeds = []
-            for i in range(0, len(fields), 25):
-                chunk = fields[i:i + 25]
+            current_fields = []
+            current_chars = EMBED_OVERHEAD
+            for fname, fval in fields:
+                cost = len(fname) + len(fval)
+                if current_fields and (current_chars + cost > EMBED_CHAR_LIMIT or len(current_fields) >= 25):
+                    e = discord.Embed(
+                        title=EMBED_TITLE,
+                        description=EMBED_DESC,
+                        colour=discord.Colour.from_str("#2b2d31"),
+                    )
+                    for fn, fv in current_fields:
+                        e.add_field(name=fn, value=fv, inline=False)
+                    embeds.append(e)
+                    current_fields = []
+                    current_chars = EMBED_OVERHEAD
+                current_fields.append((fname, fval))
+                current_chars += cost
+            if current_fields:
                 e = discord.Embed(
-                    title="📋 Player Registry Index",
-                    description="Jump to a player's card",
+                    title=EMBED_TITLE,
+                    description=EMBED_DESC,
                     colour=discord.Colour.from_str("#2b2d31"),
                 )
-                for fname, fval in chunk:
-                    e.add_field(name=fname, value=fval, inline=False)
+                for fn, fv in current_fields:
+                    e.add_field(name=fn, value=fv, inline=False)
                 embeds.append(e)
             return embeds
 
@@ -1130,9 +1151,10 @@ async def update_archive_index(guild):
                 print("Archive index updated")
                 return
             except Exception as e:
-                print(f"Index edit error: {e} — will create new thread")
+                print(f"Index edit error: {e}")
+                return  # found thread but failed to update — don't create a duplicate
 
-        # If still not found, fall through to create new
+        # Thread not found at all — create new
 
         result = await forum.create_thread(name="📋 Player Index", content="**➜ GUIDANCE HERE**")
         await asyncio.sleep(0.5)
