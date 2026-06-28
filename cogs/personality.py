@@ -330,7 +330,7 @@ class PersonalityCog(commands.Cog):
                 return
             main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
             if main_ch:
-                line = _DRY_WEATHER_LINES[_dry_weather_line_idx % len(_DRY_WEATHER_LINES)]
+                line = self._DRY_WEATHER_LINES[_dry_weather_line_idx % len(self._DRY_WEATHER_LINES)]
                 _dry_weather_line_idx += 1
                 await main_ch.send(f"*{line}*")
                 submission_state['dry_spell_posted'] = True

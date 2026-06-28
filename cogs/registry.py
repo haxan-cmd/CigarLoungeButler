@@ -305,8 +305,7 @@ def get_special_ops_for_player(discord_id, cached_data=None):
 
     # Also check SpecialOps sheet for manually awarded achievements
     try:
-        if special_ops_ws:
-            rows = special_ops_ws.get_all_values()[1:]
+        rows = special_ops_ws.get_all_values()[1:] if special_ops_ws else []
         for row in rows:
             if len(row) < 3 or row[0].strip() != discord_id_str:
                 continue

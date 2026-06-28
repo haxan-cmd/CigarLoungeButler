@@ -397,7 +397,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
 
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
-                              player_name, message_link):
+                              player_name, message_link, bot_user=None):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
     any_updated = False
@@ -564,7 +564,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 # post extra messages, then repost the decoration at the end.
                 try:
                     async for old_msg in thread.history(limit=5, oldest_first=False):
-                        if old_msg.attachments and old_msg.author == self.bot.user:
+                        if old_msg.attachments and (bot_user is None or old_msg.author == bot_user):
                             await old_msg.delete()
                             break
                 except Exception as e:
@@ -865,7 +865,7 @@ class LeaderboardsCog(commands.Cog):
                     # Need more slots — delete bottom decoration, post new messages, repost decoration
                     try:
                         async for old_msg in thread.history(limit=5, oldest_first=False):
-                            if old_msg.attachments and old_msg.author == self.bot.user:
+                            if old_msg.attachments and (bot_user is None or old_msg.author == bot_user):
                                 await old_msg.delete()
                                 break
                     except Exception as e:

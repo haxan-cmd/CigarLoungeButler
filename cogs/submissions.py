@@ -124,6 +124,9 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
     vip_str   = "Yes" if vip else "No"
     feats_str = ", ".join(feats) if feats else "None"
     nerve_log_submission(discord_name, weapon)
+    # Get row count before append so we can return the exact row index
+    existing_rows = submissions_ws.get_all_values()
+    row_index = len(existing_rows) + 1  # 1-based, header is row 1
     submissions_ws.append_row([
         timestamp, discord_name, str(discord_id), weapon, cls,
         map_name, faction, takedowns, kills, deaths, vip_str, feats_str, message_link,
@@ -136,6 +139,7 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
         round(team_score_ratio, 3) if team_score_ratio is not None else '',
     ])
     _sheet_cache.invalidate(submissions_ws)
+    return row_index
 
 class SubmitView(discord.ui.View):
     def __init__(self, original_message, prompt_msg=None):
@@ -1536,7 +1540,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Log to Google Sheets first so we get the row index
     submission_row = None
     try:
-        is_new_player = log_submission(
+        log_result = log_submission(
             interaction.user.display_name,
             interaction.user.id,
             selected_weapon,
@@ -1557,8 +1561,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             total_lobby_kills=_total_lobby_kills,
             team_score_ratio=_team_score_ratio,
         )
-        # Row index is last row in submissions sheet
-        submission_row = len(submissions_ws.get_all_values())
+        # log_submission returns the exact row index it wrote to (or None if dedup skipped)
+        submission_row = log_result
+        is_new_player = False  # determined later from submission_count == 1
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")
@@ -1642,7 +1647,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             any_updated, placements = await update_leaderboards(
                 interaction, selected_weapon, selected_map, faction,
                 takedowns, kills, deaths, vip, feats,
-                interaction.user.display_name, message_link
+                interaction.user.display_name, message_link,
+                bot_user=interaction.client.user,
             )
         except Exception as e:
             print(f"Leaderboard update error: {e}")
@@ -1827,6 +1833,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             player_subs = [r for r in subs if len(r) > 2 and r[2].strip() == discord_id_str]
             submission_count = len(player_subs)
             last_submission = player_subs[-1][0] if player_subs else ''
+            is_new_player = submission_count == 1
 
             # Read OLD weapon marks from Players sheet BEFORE updating — used for milestone diff
             old_flat = {}
