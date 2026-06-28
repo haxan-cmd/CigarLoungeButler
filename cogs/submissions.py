@@ -92,7 +92,8 @@ def upsert_player(discord_id, discord_name):
 def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
                    takedowns, kills, deaths, vip, feats, message_link,
                    lobby_rank=None, lobby_size=None, kills_rank=None,
-                   team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None):
+                   team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
+                   team_kill_share=None, team_td_share=None):
     from datetime import datetime as _dt, timedelta as _td
     now = _dt.utcnow()
     timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
@@ -137,6 +138,8 @@ def log_submission(discord_name, discord_id, weapon, cls, map_name, faction,
         team_size         if team_size         is not None else '',
         total_lobby_kills if total_lobby_kills is not None else '',
         round(team_score_ratio, 3) if team_score_ratio is not None else '',
+        round(team_kill_share, 1) if team_kill_share is not None else '',
+        round(team_td_share, 1)   if team_td_share   is not None else '',
     ])
     _sheet_cache.invalidate(submissions_ws)
     return row_index
@@ -1489,14 +1492,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _team_size_val = None
     _total_lobby_kills = None
     _team_score_ratio = None
+    _team_kill_share = None
+    _team_td_share = None
     if _team_td:
         _team_rank_val = sum(1 for s in _team_td if s >= takedowns) + 1
         _team_size_val = len(_team_td) + 1
         avg_teammate = sum(_team_td) / len(_team_td) if _team_td else None
         if avg_teammate and avg_teammate > 0:
             _team_score_ratio = takedowns / avg_teammate
+        total_team_td = takedowns + sum(_team_td)
+        if total_team_td > 0:
+            _team_td_share = round(takedowns / total_team_td * 100, 1)
     if _all_k:
         _total_lobby_kills = (kills or 0) + sum(_all_k)
+    if _team_k and kills:
+        total_team_kills = kills + sum(_team_k)
+        if total_team_kills > 0:
+            _team_kill_share = round(kills / total_team_kills * 100, 1)
 
     if blurb_parts:
         lobby_line = " · ".join(blurb_parts)
@@ -1560,6 +1572,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_size=_team_size_val,
             total_lobby_kills=_total_lobby_kills,
             team_score_ratio=_team_score_ratio,
+            team_kill_share=_team_kill_share,
+            team_td_share=_team_td_share,
         )
         # log_submission returns the exact row index it wrote to (or None if dedup skipped)
         submission_row = log_result
