@@ -445,9 +445,7 @@ class PersonalityCog(commands.Cog):
 
     @tasks.loop(hours=168)  # 7 days
     async def weekly_snapshot(self):
-        """Write a weekly snapshot row to the Snapshots sheet."""
-        if not snapshots_ws:
-            return
+        """Write a weekly snapshot row to the DB and update Butler's Favourites."""
         try:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
@@ -455,58 +453,37 @@ class PersonalityCog(commands.Cog):
             if now.weekday() != 0:
                 return
 
-            subs = cached_submissions()
+            subs = await _db.get_all_submissions()
             total_submissions = len(subs)
 
-            # Submissions in the last 7 days using timestamp column (col 0)
+            # Submissions in the last 7 days
             week_ago = now.timestamp() - 7 * 86400
-            weekly_count = 0
-            for row in subs:
-                if not row or not row[0].strip():
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    if ts.timestamp() >= week_ago:
-                        weekly_count += 1
-                except Exception:
-                    pass
-
-            # Active players this week — unique discord IDs with submissions in last 7 days
-            active_ids = set()
-            for row in subs:
-                if not row or not row[0].strip() or len(row) < 3:
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    if ts.timestamp() >= week_ago and row[2].strip():
-                        active_ids.add(row[2].strip())
-                except Exception:
-                    pass
-            active_count = len(active_ids)
-
-            # Top weapons and maps this week + submission quality
-            from collections import Counter
             weekly_rows = []
             for row in subs:
                 if not row or not row[0].strip():
                     continue
                 try:
                     from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
                     if ts.timestamp() >= week_ago:
                         weekly_rows.append(row)
                 except Exception:
                     pass
+            weekly_count = len(weekly_rows)
 
+            # Active players this week
+            active_ids = {row[2].strip() for row in weekly_rows if len(row) > 2 and row[2].strip()}
+            active_count = len(active_ids)
+
+            # Top weapons and maps
+            from collections import Counter
             weapon_counts = Counter(row[3].strip() for row in weekly_rows if len(row) > 3 and row[3].strip())
             top_weapons = [w for w, _ in weapon_counts.most_common(5)]
 
             map_counts = Counter(row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip())
             top_maps = [m for m, _ in map_counts.most_common(3)]
 
-            # Submission quality — avg TD and kills this week
+            # Avg TD and kills
             tds, kills_list = [], []
             for row in weekly_rows:
                 try:
@@ -517,18 +494,18 @@ class PersonalityCog(commands.Cog):
             avg_td = round(sum(tds) / len(tds), 1) if tds else 0
             avg_kills = round(sum(kills_list) / len(kills_list), 1) if kills_list else 0
 
-            # Leaderboard velocity — high scores set this week from LeaderboardData
+            # Leaderboard velocity from DB
             try:
-                ld_rows = leaderboard_data_ws.get_all_values()[1:]
-                # Count unique board updates this week via submission links cross-referencing weekly submissions
-                weekly_links = {row[12].strip() for row in weekly_rows if len(row) > 12 and row[12].strip()}
+                ld_rows = await _db.get_all_leaderboard_data()
+                weekly_links = {row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip()}
+                # leaderboard_data row: [board_name, player_name, discord_id, score, weapon, message_link, ...]
                 hs_set = sum(1 for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links)
                 boards_updated = len({row[0].strip() for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links})
             except Exception:
                 hs_set = 0
                 boards_updated = 0
 
-            # Weapon trend — compare this week vs previous week
+            # Weapon trend vs previous week
             prev_week_ago = week_ago - 7 * 86400
             prev_rows = []
             for row in subs:
@@ -536,33 +513,34 @@ class PersonalityCog(commands.Cog):
                     continue
                 try:
                     from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
                     if prev_week_ago <= ts.timestamp() < week_ago:
                         prev_rows.append(row)
                 except Exception:
                     pass
             prev_weapon_counts = Counter(row[3].strip() for row in prev_rows if len(row) > 3 and row[3].strip())
-            # Trending = biggest increase in count vs previous week
-            trend_scores = {}
-            for w, count in weapon_counts.items():
-                prev = prev_weapon_counts.get(w, 0)
-                trend_scores[w] = count - prev
+            trend_scores = {w: count - prev_weapon_counts.get(w, 0) for w, count in weapon_counts.items()}
             top_trending = [w for w, _ in sorted(trend_scores.items(), key=lambda x: x[1], reverse=True)[:3]]
 
-            # Pad lists to required lengths
+            # Pad
             while len(top_weapons) < 5: top_weapons.append('')
             while len(top_maps) < 3: top_maps.append('')
             while len(top_trending) < 3: top_trending.append('')
 
             date_str = now.strftime('%Y-%m-%d')
-            snapshots_ws.append_row([
-                date_str, total_submissions, weekly_count, active_count,
-                top_weapons[0], top_weapons[1], top_weapons[2], top_weapons[3], top_weapons[4],
-                top_maps[0], top_maps[1], top_maps[2],
-                avg_td, avg_kills,
-                hs_set, boards_updated,
-                top_trending[0], top_trending[1], top_trending[2]
-            ])
+            await _db.add_snapshot(
+                snapshot_date=date_str,
+                total_subs=total_submissions,
+                weekly_subs=weekly_count,
+                active_players=active_count,
+                top_weapons=top_weapons,
+                top_maps=top_maps,
+                avg_td=avg_td,
+                avg_kills=avg_kills,
+                highscores_set=hs_set,
+                boards_updated=boards_updated,
+                trend_weapons=top_trending,
+            )
             print(f"Weekly snapshot written for {date_str}")
 
             # Update Butler's Favourites with weekly stats
