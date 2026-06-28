@@ -438,7 +438,28 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         existing_entry = existing_score is not None
 
         if unlimited_top50:
-            await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            # Enforce top-50 cap: only add if score beats the 50th entry or board has < 50
+            board_entries_all = sorted(
+                [r for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]],
+                key=lambda x: int(x[3]), reverse=True
+            )
+            if len(board_entries_all) >= 50:
+                lowest_score = int(board_entries_all[49][3])
+                if score <= lowest_score:
+                    continue
+                # Bump out the lowest entry
+                lowest_discord_id = board_entries_all[49][2] if len(board_entries_all[49]) > 2 else ''
+                await _db.delete_leaderboard_entry_by_board_and_player(lb_name, lowest_discord_id)
+                all_values = await _db.get_all_leaderboard_data()
+            # Update if player already on board, otherwise insert
+            if existing_entry:
+                if score > existing_score:
+                    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+                else:
+                    continue
+            else:
+                await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            any_updated = True
             all_board = [int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]]
             all_board.append(score)
             all_board.sort(reverse=True)
@@ -494,20 +515,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 entries.append({
                     'player': row[1] if len(row) > 1 else '',
                     'score': int(row[3]) if len(row) > 3 and row[3] else 0,
-                    'link': row[4] if len(row) > 4 else ''
+                    'link': row[4] if len(row) > 4 else '',
+                    'weapon': row[5] if len(row) > 5 else '',
                 })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-        if lb_name in ("100 Kills", "200 Takedowns"):
-            display_entries = entries[:50]
-            overflow = len(entries) - 50
-            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=True)
-            packed = pack_chunks_into_slots(chunks, 1)
-        else:
-            display_entries = entries
-            overflow = 0
-            chunks = format_leaderboard_text(display_entries, overflow, show_weapon=False)
-            packed = None
+        show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+        overflow = max(0, len(entries) - 50) if show_weapon else 0
+        display_entries = entries[:50] if show_weapon else entries
+        score_prefix = "+" if lb_name == "TUFF" else ""
+        embed = format_leaderboard_embed(lb_name, display_entries, overflow, show_weapon, score_prefix)
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -519,56 +536,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-
-            if packed is not None:
-                if message_ids:
-                    try:
-                        msg = await thread.fetch_message(message_ids[0])
-                        await msg.edit(content=packed[0])
-                    except Exception as e:
-                        print(f"Discord edit error for {lb_name} msg {message_ids[0]}: {e}")
-            elif len(chunks) <= len(message_ids):
-                packed = pack_chunks_into_slots(chunks, len(message_ids))
-                for idx, mid in enumerate(message_ids):
-                    try:
-                        msg = await thread.fetch_message(mid)
-                        await msg.edit(content=packed[idx])
-                    except Exception as e:
-                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
+            if message_ids:
+                try:
+                    msg = await thread.fetch_message(message_ids[0])
+                    await msg.edit(content="", embed=embed)
+                except Exception as e:
+                    print(f"Discord edit error for {lb_name}: {e}")
             else:
-                try:
-                    async for old_msg in thread.history(limit=5, oldest_first=False):
-                        if old_msg.attachments and (bot_user is None or old_msg.author == bot_user):
-                            await old_msg.delete()
-                            break
-                except Exception as e:
-                    print(f"Decoration delete error for {lb_name}: {e}")
-
-                for idx, mid in enumerate(message_ids):
-                    try:
-                        msg = await thread.fetch_message(mid)
-                        await msg.edit(content=chunks[idx])
-                    except Exception as e:
-                        print(f"Discord edit error for {lb_name} msg {mid}: {e}")
-
-                new_msg_ids = list(message_ids)
-                for extra_chunk in chunks[len(message_ids):]:
-                    new_msg = await thread.send(extra_chunk)
-                    new_msg_ids.append(new_msg.id)
-                    await asyncio.sleep(0.5)
-
-                try:
-                    await thread.send(file=discord.File(DECORATION_BOTTOM))
-                except Exception as e:
-                    print(f"Decoration repost error for {lb_name}: {e}")
-
-                try:
-                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_msg_ids))
-                except Exception as e:
-                    print(f"Leaderboards DB update error for {lb_name}: {e}")
-
-                print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
-
+                new_msg = await thread.send(embed=embed)
+                await _db.update_leaderboard_messages(lb_name, str(new_msg.id))
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
@@ -649,17 +625,18 @@ def pack_chunks_into_slots(chunks, num_slots):
     return packed
 
 
-def format_leaderboard_text(entries, overflow=0, show_weapon=False):
+def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix=""):
     if not entries:
         return ["No entries yet."]
 
     lines = []
     for e in entries:
         weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"• {e['player']} — [{e['score']}]({e['link']}){weapon_str}")
+            lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"• {e['player']} — {e['score']}{weapon_str}")
+            lines.append(f"• {e['player']} — {score_str}{weapon_str}")
 
     if overflow > 0:
         lines.append(f"*...and {overflow} more entries*")
@@ -676,6 +653,27 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False):
         chunks.append(current)
 
     return chunks
+
+
+EMBED_GOLD = 0xC8952C
+
+def format_leaderboard_embed(lb_name, entries, overflow=0, show_weapon=False, score_prefix=""):
+    """Return a single discord.Embed for a leaderboard board."""
+    if not entries:
+        description = "*No entries yet.*"
+    else:
+        lines = []
+        for e in entries:
+            weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+            score_str = f"{score_prefix}{e['score']}"
+            if e['link']:
+                lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
+            else:
+                lines.append(f"• {e['player']} — {score_str}{weapon_str}")
+        if overflow > 0:
+            lines.append(f"*...and {overflow} more entries*")
+        description = "\n".join(lines)
+    return discord.Embed(title=lb_name, description=description, colour=EMBED_GOLD)
 
 
 class LeaderboardsCog(commands.Cog):
@@ -718,36 +716,31 @@ class LeaderboardsCog(commands.Cog):
             attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
             defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
 
+            attack_embed = format_leaderboard_embed(attack_name, attack_entries)
+            defense_embed = format_leaderboard_embed(defense_name, defense_entries)
+
             await thread.send(file=discord.File(DECORATION_TOP))
-            await thread.send(attack_header)
-            attack_msg_ids = []
-            for chunk in attack_chunks:
-                attack_msg = await thread.send(chunk)
-                attack_msg_ids.append(str(attack_msg.id))
-            await thread.send(file=discord.File(DECORATION_BOTTOM))
-            await thread.send(defense_header)
-            defense_msg_ids = []
-            for chunk in defense_chunks:
-                defense_msg = await thread.send(chunk)
-                defense_msg_ids.append(str(defense_msg.id))
+            attack_msg = await thread.send(embed=attack_embed)
+            defense_msg = await thread.send(embed=defense_embed)
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            await _db.upsert_leaderboard(attack_name, str(thread.id), "|".join(attack_msg_ids), "map")
-            await _db.upsert_leaderboard(defense_name, str(thread.id), "|".join(defense_msg_ids), "map")
+            await _db.upsert_leaderboard(attack_name, str(thread.id), str(attack_msg.id), "map")
+            await _db.upsert_leaderboard(defense_name, str(thread.id), str(defense_msg.id), "map")
 
             await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
 
         else:
             entries = await get_leaderboard_entries(name)
-            chunks = format_leaderboard_text(entries, show_weapon=(name in ("100 Kills", "200 Takedowns")))
+            show_weapon = name in ("100 Kills", "200 Takedowns")
+            display_entries = entries[:50] if show_weapon else entries
+            overflow = max(0, len(entries) - 50) if show_weapon else 0
+            score_prefix = "+" if name == "TUFF" else ""
+            embed = format_leaderboard_embed(name, display_entries, overflow, show_weapon, score_prefix)
             await thread.send(file=discord.File(DECORATION_TOP))
-            msg_ids = []
-            for chunk in chunks:
-                lb_msg = await thread.send(chunk)
-                msg_ids.append(str(lb_msg.id))
+            lb_msg = await thread.send(embed=embed)
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            await _db.upsert_leaderboard(name, str(thread.id), "|".join(msg_ids), type)
+            await _db.upsert_leaderboard(name, str(thread.id), str(lb_msg.id), type)
 
             await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
@@ -784,16 +777,11 @@ class LeaderboardsCog(commands.Cog):
             entries = await get_leaderboard_entries(lb_name)
             entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
-            if lb_name in ("100 Kills", "200 Takedowns"):
-                overflow = max(0, len(entries) - 50)
-                display_entries = entries[:50]
-                chunks = format_leaderboard_text(display_entries, overflow, show_weapon=True)
-                refresh_packed = pack_chunks_into_slots(chunks, 1)
-            else:
-                overflow = 0
-                display_entries = entries
-                chunks = format_leaderboard_text(display_entries, overflow, show_weapon=False)
-                refresh_packed = None
+            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+            display_entries = entries[:50] if show_weapon else entries
+            overflow = max(0, len(entries) - 50) if show_weapon else 0
+            score_prefix = "+" if lb_name == "TUFF" else ""
+            embed = format_leaderboard_embed(lb_name, display_entries, overflow, show_weapon, score_prefix)
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -801,55 +789,15 @@ class LeaderboardsCog(commands.Cog):
             try:
                 guild = interaction.guild
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-
-                if refresh_packed is not None:
-                    if message_ids:
-                        try:
-                            msg = await thread.fetch_message(message_ids[0])
-                            await msg.edit(content=refresh_packed[0])
-                        except Exception as e:
-                            print(f"Refresh edit error for {lb_name} msg {message_ids[0]}: {e}")
-                elif len(chunks) <= len(message_ids):
-                    packed = pack_chunks_into_slots(chunks, len(message_ids))
-                    for idx, mid in enumerate(message_ids):
-                        try:
-                            msg = await thread.fetch_message(mid)
-                            await msg.edit(content=packed[idx])
-                        except Exception as e:
-                            print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
+                if message_ids:
+                    try:
+                        msg = await thread.fetch_message(message_ids[0])
+                        await msg.edit(content="", embed=embed)
+                    except Exception as e:
+                        print(f"Refresh edit error for {lb_name}: {e}")
                 else:
-                    try:
-                        async for old_msg in thread.history(limit=5, oldest_first=False):
-                            if old_msg.attachments:
-                                await old_msg.delete()
-                                break
-                    except Exception as e:
-                        print(f"Decoration delete error for {lb_name}: {e}")
-
-                    for idx, mid in enumerate(message_ids):
-                        try:
-                            msg = await thread.fetch_message(mid)
-                            await msg.edit(content=chunks[idx])
-                        except Exception as e:
-                            print(f"Refresh edit error for {lb_name} msg {mid}: {e}")
-
-                    new_msg_ids = list(message_ids)
-                    for extra_chunk in chunks[len(message_ids):]:
-                        new_msg = await thread.send(extra_chunk)
-                        new_msg_ids.append(new_msg.id)
-                        await asyncio.sleep(0.5)
-
-                    try:
-                        await thread.send(file=discord.File(DECORATION_BOTTOM))
-                    except Exception as e:
-                        print(f"Decoration repost error for {lb_name}: {e}")
-
-                    try:
-                        await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_msg_ids))
-                    except Exception as e:
-                        print(f"Leaderboards DB update error for {lb_name}: {e}")
-
-                    print(f"Expanded {lb_name} board to {len(new_msg_ids)} message slots")
+                    new_msg = await thread.send(embed=embed)
+                    await _db.update_leaderboard_messages(lb_name, str(new_msg.id))
 
             except Exception as e:
                 await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
