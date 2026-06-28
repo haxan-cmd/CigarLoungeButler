@@ -836,7 +836,7 @@ class PersonalityCog(commands.Cog):
                             # Per-weapon avg kill share and TD share
                             try:
                                 from cogs.registry import calculate_weapon_shares_for_player
-                                w_kill, w_td = calculate_weapon_shares_for_player(discord_id_str)
+                                w_kill, w_td = await calculate_weapon_shares_for_player(discord_id_str)
                                 all_weapons = set(w_kill) | set(w_td)
                                 if all_weapons:
                                     share_lines = []

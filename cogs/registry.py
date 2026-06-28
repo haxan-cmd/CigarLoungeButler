@@ -2282,8 +2282,8 @@ class RegistryCog(commands.Cog):
         # \u2500\u2500 Butler titles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         try:
             from cogs.favourites import calculate_butler_stats
-            fav_stats = calculate_butler_stats()
-            butler_titles = get_butler_titles_for_player(int(discord_id_str), fav_stats)
+            fav_stats = await calculate_butler_stats()
+            butler_titles = await get_butler_titles_for_player(int(discord_id_str), fav_stats)
         except Exception:
             butler_titles = []
 
