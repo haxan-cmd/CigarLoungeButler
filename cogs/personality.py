@@ -771,6 +771,40 @@ class PersonalityCog(commands.Cog):
                                 pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                             player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons by marks: {top_weapons}{pb_str}"
+
+                            # Hundred Handed progress — which primary weapon+subclass combos are missing
+                            try:
+                                cwm = config.CLASS_WEAPON_MAP
+                                ranged = set(getattr(config, 'RANGED_WEAPONS', []))
+                                done_pairs = set()
+                                for sub_r in player_subs_pb:
+                                    if len(sub_r) > 4:
+                                        done_pairs.add((sub_r[4].strip(), sub_r[3].strip()))
+                                missing_by_class = {}
+                                for cls_name, weapons in cwm.items():
+                                    for w in weapons:
+                                        if w in ranged:
+                                            continue
+                                        if (cls_name, w) not in done_pairs:
+                                            missing_by_class.setdefault(cls_name, []).append(w)
+                                total_needed = sum(len(v) for v in missing_by_class.values())
+                                total_possible = sum(
+                                    len([w for w in weapons if w not in ranged])
+                                    for weapons in cwm.values()
+                                )
+                                completed = total_possible - total_needed
+                                if total_needed == 0:
+                                    hh_str = "Hundred Handed: COMPLETE — all primary weapon/subclass combos submitted."
+                                else:
+                                    missing_lines = "; ".join(
+                                        f"{cls}: {', '.join(sorted(ws))}"
+                                        for cls, ws in sorted(missing_by_class.items())
+                                    )
+                                    hh_str = f"Hundred Handed progress: {completed}/{total_possible} combos done. Missing — {missing_lines}"
+                                player_stats_ctx += f"\n{hh_str}"
+                            except Exception:
+                                pass
+
                             break
                     # Build rich per-player summary for comparisons
                     subs_all = cached_submissions()
