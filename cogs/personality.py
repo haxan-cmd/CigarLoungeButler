@@ -380,30 +380,20 @@ class PersonalityCog(commands.Cog):
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
 
-    @tasks.loop(time=[dt_time(h, 0) for h in range(24)])
+    @tasks.loop(hours=1)
     async def nerve_center_digest(self):
         """Post hourly digest to nerve center channel."""
-        print(f"[NERVE] digest loop firing at {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
+        print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         try:
             digest = nerve_flush()
-            if not digest:
-                print("[NERVE] nerve_flush returned empty — skipping")
-                return
             guild = self.bot.get_guild(GUILD_ID)
             if not guild:
-                print(f"[NERVE] guild {GUILD_ID} not found")
+                print("[NERVE] guild not found")
                 return
-            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
-                  or guild.get_thread(NERVE_CENTER_CHANNEL_ID)
-                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            ch = guild.get_channel(NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID)
             if not ch:
-                print(f"[NERVE] channel {NERVE_CENTER_CHANNEL_ID} not found")
+                print("[NERVE] channel not found")
                 return
-            # Unarchive if it's a thread that went dormant
-            if isinstance(ch, discord.Thread) and ch.archived:
-                print("[NERVE] thread is archived — unarchiving")
-                await ch.edit(archived=False)
-            print(f"[NERVE] sending to #{ch.name} ({type(ch).__name__})")
             await ch.send(digest[:1900])
             print("[NERVE] sent OK")
         except Exception as e:
@@ -416,7 +406,7 @@ class PersonalityCog(commands.Cog):
 
     @nerve_center_digest.error
     async def nerve_center_digest_error(self, error):
-        print(f"Nerve center task crashed, restarting: {error}")
+        print(f"[NERVE] task crashed: {error}")
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.restart()
 

@@ -448,7 +448,7 @@ async def update_title_roles(guild, stats):
 
         # Find new holder by display name
         new_member = discord.utils.find(
-            lambda m: (m.nick or m.display_name).lower() == new_holder_name.lower(),
+            lambda m: new_holder_name and (m.nick or m.display_name or '').lower() == new_holder_name.lower(),
             guild.members
         )
         if not new_member:
