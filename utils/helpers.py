@@ -119,7 +119,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
             image_source = {'type': 'url', 'url': image_url}
 
         r = _anthropic_client.messages.create(
-            model='claude-sonnet-4-6',
+            model='claude-sonnet-4-5',
             max_tokens=1800,
             system="You are a JSON-only data extractor. Output ONLY a single valid JSON object. No prose, no explanation, no markdown. Your entire response must start with { and end with }.",
             messages=[
@@ -129,6 +129,10 @@ def vision_parse_scorecard(image_url: str) -> dict:
                         {'type': 'image', 'source': image_source},
                         {'type': 'text',  'text': _SCORECARD_PROMPT},
                     ]
+                },
+                {
+                    'role': 'assistant',
+                    'content': '{'
                 }
             ]
         )
@@ -136,7 +140,7 @@ def vision_parse_scorecard(image_url: str) -> dict:
         if not r.content:
             print("[VISION] Empty content list from API")
             return empty
-        raw = r.content[0].text.strip()
+        raw = '{' + r.content[0].text.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
         if not raw:
             print("[VISION] Empty text block from API")
