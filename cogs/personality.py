@@ -775,7 +775,8 @@ class PersonalityCog(commands.Cog):
                             elif best_kills_game is not None and best_kills_game is best_td_game:
                                 pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
-                            player_stats_ctx = f"Player stats — Total marks: {total_marks}, Top weapons by marks: {top_weapons}{pb_str}"
+                            logged_runs = len(player_subs_pb)
+                            player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in submissions sheet: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
 
                             # Hundred Handed progress — which primary weapon+subclass combos are missing
                             try:
