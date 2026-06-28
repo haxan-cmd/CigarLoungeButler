@@ -9,13 +9,16 @@ A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.c
 ![Railway](https://img.shields.io/badge/hosted-Railway-0B0D0E?logo=railway&logoColor=white)
 ![Google Sheets](https://img.shields.io/badge/data-Google_Sheets-34A853?logo=googlesheets&logoColor=white)
 ![Claude](https://img.shields.io/badge/AI-Claude_Haiku-D97706)
+![Gemini](https://img.shields.io/badge/AI-Gemini_Flash-4285F4?logo=google&logoColor=white)
 
 ---
 
 ## Features
 
 ### 📋 Submission Flow
-Players post a screenshot of their in-game scorecard. Vision AI (Claude) reads the stats automatically. Players confirm class and weapon, then the Butler logs the run to Google Sheets. Includes VIP detection, triple-kill verification, emoji reactions, and a formatted confirmation reply with an edit button. Vision failures fall back to a manual entry form.
+Players post a screenshot of their in-game scorecard. Vision AI (Gemini) reads the stats automatically. Players confirm class and weapon, then the Butler logs the run to Google Sheets. Includes VIP detection, triple-kill verification, emoji reactions, and a formatted confirmation reply with an edit button. Vision failures fall back to a manual entry form.
+
+The submission blurb includes live team context parsed from the scoreboard image: warlord emoji + TD share percentage, kill share percentage with lethality emoji, and feat reactions for notable runs.
 
 ### 🏆 Leaderboards
 Live weapon leaderboards for all 1H and 2H weapons, plus map boards and feat boards. Multi-message chunking handles large boards. Shared weapons across subclasses are deduplicated by `(weapon, subclass)` key.
@@ -60,7 +63,8 @@ Dry, sardonic responses to pings and unprompted one-liners in the main channel e
 | Language | Python 3.11 |
 | Bot framework | discord.py 2.x |
 | Data | Google Sheets (gspread) |
-| AI | Anthropic Claude Haiku |
+| AI — Butler chat | Anthropic Claude Haiku |
+| AI — Scoreboard vision | Google Gemini Flash |
 | Hosting | Railway (auto-deploy on push) |
 | Version control | GitHub |
 
