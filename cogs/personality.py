@@ -380,9 +380,14 @@ class PersonalityCog(commands.Cog):
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
 
-    @tasks.loop(hours=1)
+    _last_nerve_post: float = 0.0  # epoch seconds, tracks last successful post
+
+    @tasks.loop(minutes=15)
     async def nerve_center_digest(self):
-        """Post hourly digest to nerve center channel."""
+        """Post hourly digest to nerve center channel. Checks every 15 min, posts once per hour."""
+        now_ts = datetime.now(timezone.utc).timestamp()
+        if now_ts - self._last_nerve_post < 3600:
+            return  # not yet an hour since last post
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         try:
             digest = nerve_flush()
@@ -427,6 +432,7 @@ class PersonalityCog(commands.Cog):
                 digest = digest + flag_block
 
             await ch.send(digest[:1900])
+            self._last_nerve_post = datetime.now(timezone.utc).timestamp()
             print("[NERVE] sent OK")
         except Exception as e:
             import traceback
@@ -563,7 +569,6 @@ class PersonalityCog(commands.Cog):
                                 break
                         else:
                             await fav_channel.send(embed_text)
-                    await update_title_roles(guild, weekly_stats)
                     print(f"Butler's Favourites updated for week of {week_label}")
             except Exception as e:
                 print(f"Favourites weekly update error: {e}")
