@@ -142,6 +142,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             config=_gtypes.GenerateContentConfig(
                 temperature=0,
                 response_mime_type='application/json',
+                thinking_config=_gtypes.ThinkingConfig(thinking_budget=0),
             )
         )
         raw = r.text.strip()
