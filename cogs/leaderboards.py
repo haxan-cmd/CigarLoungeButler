@@ -524,7 +524,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         overflow = max(0, len(entries) - 50) if show_weapon else 0
         display_entries = entries[:50] if show_weapon else entries
         score_prefix = "+" if lb_name == "TUFF" else ""
-        embed = format_leaderboard_embed(lb_name, display_entries, overflow, show_weapon, score_prefix)
+        embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -536,15 +536,21 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            if message_ids:
-                try:
-                    msg = await thread.fetch_message(message_ids[0])
-                    await msg.edit(content="", embed=embed)
-                except Exception as e:
-                    print(f"Discord edit error for {lb_name}: {e}")
-            else:
-                new_msg = await thread.send(embed=embed)
-                await _db.update_leaderboard_messages(lb_name, str(new_msg.id))
+            new_ids = []
+            for i, emb in enumerate(embeds):
+                if i < len(message_ids):
+                    try:
+                        msg = await thread.fetch_message(message_ids[i])
+                        await msg.edit(content="", embed=emb)
+                        new_ids.append(message_ids[i])
+                    except Exception:
+                        msg = await thread.send(embed=emb)
+                        new_ids.append(msg.id)
+                else:
+                    msg = await thread.send(embed=emb)
+                    new_ids.append(msg.id)
+            if new_ids != message_ids:
+                await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
 
@@ -656,24 +662,40 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 
 
 EMBED_GOLD = 0xC8952C
+EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
-def format_leaderboard_embed(lb_name, entries, overflow=0, show_weapon=False, score_prefix=""):
-    """Return a single discord.Embed for a leaderboard board."""
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix=""):
+    """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     if not entries:
-        description = "*No entries yet.*"
-    else:
-        lines = []
-        for e in entries:
-            weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
-            score_str = f"{score_prefix}{e['score']}"
-            if e['link']:
-                lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
-            else:
-                lines.append(f"• {e['player']} — {score_str}{weapon_str}")
-        if overflow > 0:
-            lines.append(f"*...and {overflow} more entries*")
-        description = "\n".join(lines)
-    return discord.Embed(title=lb_name, description=description, colour=EMBED_GOLD)
+        return [discord.Embed(title=lb_name, description="*No entries yet.*", colour=EMBED_GOLD)]
+
+    lines = []
+    for e in entries:
+        weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        score_str = f"{score_prefix}{e['score']}"
+        if e['link']:
+            lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
+        else:
+            lines.append(f"• {e['player']} — {score_str}{weapon_str}")
+    if overflow > 0:
+        lines.append(f"*...and {overflow} more entries*")
+
+    embeds = []
+    current_lines = []
+    current_len = 0
+    for line in lines:
+        cost = len(line) + 1
+        if current_lines and current_len + cost > EMBED_DESC_LIMIT:
+            title = lb_name if not embeds else f"{lb_name} (cont.)"
+            embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+            current_lines = []
+            current_len = 0
+        current_lines.append(line)
+        current_len += cost
+    if current_lines:
+        title = lb_name if not embeds else f"{lb_name} (cont.)"
+        embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+    return embeds
 
 
 class LeaderboardsCog(commands.Cog):
@@ -716,16 +738,22 @@ class LeaderboardsCog(commands.Cog):
             attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
             defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
 
-            attack_embed = format_leaderboard_embed(attack_name, attack_entries)
-            defense_embed = format_leaderboard_embed(defense_name, defense_entries)
+            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries)
+            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries)
 
             await thread.send(file=discord.File(DECORATION_TOP))
-            attack_msg = await thread.send(embed=attack_embed)
-            defense_msg = await thread.send(embed=defense_embed)
+            attack_ids = []
+            for emb in attack_embeds:
+                m = await thread.send(embed=emb)
+                attack_ids.append(str(m.id))
+            defense_ids = []
+            for emb in defense_embeds:
+                m = await thread.send(embed=emb)
+                defense_ids.append(str(m.id))
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            await _db.upsert_leaderboard(attack_name, str(thread.id), str(attack_msg.id), "map")
-            await _db.upsert_leaderboard(defense_name, str(thread.id), str(defense_msg.id), "map")
+            await _db.upsert_leaderboard(attack_name, str(thread.id), '|'.join(attack_ids), "map")
+            await _db.upsert_leaderboard(defense_name, str(thread.id), '|'.join(defense_ids), "map")
 
             await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
 
@@ -735,12 +763,15 @@ class LeaderboardsCog(commands.Cog):
             display_entries = entries[:50] if show_weapon else entries
             overflow = max(0, len(entries) - 50) if show_weapon else 0
             score_prefix = "+" if name == "TUFF" else ""
-            embed = format_leaderboard_embed(name, display_entries, overflow, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(name, display_entries, overflow, show_weapon, score_prefix)
             await thread.send(file=discord.File(DECORATION_TOP))
-            lb_msg = await thread.send(embed=embed)
+            msg_ids = []
+            for emb in embeds:
+                m = await thread.send(embed=emb)
+                msg_ids.append(str(m.id))
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
-            await _db.upsert_leaderboard(name, str(thread.id), str(lb_msg.id), type)
+            await _db.upsert_leaderboard(name, str(thread.id), '|'.join(msg_ids), type)
 
             await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
@@ -781,7 +812,7 @@ class LeaderboardsCog(commands.Cog):
             display_entries = entries[:50] if show_weapon else entries
             overflow = max(0, len(entries) - 50) if show_weapon else 0
             score_prefix = "+" if lb_name == "TUFF" else ""
-            embed = format_leaderboard_embed(lb_name, display_entries, overflow, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -789,15 +820,21 @@ class LeaderboardsCog(commands.Cog):
             try:
                 guild = interaction.guild
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                if message_ids:
-                    try:
-                        msg = await thread.fetch_message(message_ids[0])
-                        await msg.edit(content="", embed=embed)
-                    except Exception as e:
-                        print(f"Refresh edit error for {lb_name}: {e}")
-                else:
-                    new_msg = await thread.send(embed=embed)
-                    await _db.update_leaderboard_messages(lb_name, str(new_msg.id))
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(message_ids):
+                        try:
+                            msg = await thread.fetch_message(message_ids[i])
+                            await msg.edit(content="", embed=emb)
+                            new_ids.append(message_ids[i])
+                        except Exception:
+                            msg = await thread.send(embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(embed=emb)
+                        new_ids.append(msg.id)
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
 
             except Exception as e:
                 await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
@@ -837,6 +874,79 @@ class LeaderboardsCog(commands.Cog):
             lines.append(f"{prefix}**{e['player']}** — {e['score']}")
 
         await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="migrate_boards", description="Convert all leaderboard boards from text to embeds (admin only).")
+    async def migrate_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        all_lb_rows = await _get_lb_records()
+        all_ld = await _db.get_all_leaderboard_data()
+        guild = interaction.guild
+        done, skipped, failed = [], [], []
+
+        for lb_row in all_lb_rows:
+            lb_name = lb_row['Leaderboard Name']
+            thread_id_str = lb_row['Thread ID']
+            if not thread_id_str:
+                skipped.append(lb_name)
+                continue
+            try:
+                thread_id = int(thread_id_str)
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            except Exception as e:
+                failed.append(f"{lb_name}: can't fetch thread ({e})")
+                continue
+
+            entries = []
+            for row in all_ld:
+                if row[0] == lb_name:
+                    entries.append({
+                        'player': row[1] if len(row) > 1 else '',
+                        'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                        'link': row[4] if len(row) > 4 else '',
+                        'weapon': row[5] if len(row) > 5 else '',
+                    })
+            entries.sort(key=lambda x: x['score'], reverse=True)
+
+            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+            display_entries = entries[:50] if show_weapon else entries
+            overflow = max(0, len(entries) - 50) if show_weapon else 0
+            score_prefix = "+" if lb_name == "TUFF" else ""
+            embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
+
+            old_ids_str = lb_row['Message ID']
+            old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
+
+            try:
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(old_ids):
+                        try:
+                            msg = await thread.fetch_message(old_ids[i])
+                            await msg.edit(content="", embed=emb)
+                            new_ids.append(old_ids[i])
+                        except Exception:
+                            # Old message gone or is text — send fresh embed
+                            msg = await thread.send(embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(embed=emb)
+                        new_ids.append(msg.id)
+                await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
+                await asyncio.sleep(0.4)
+            except Exception as e:
+                failed.append(f"{lb_name}: {e}")
+
+        report = f"✅ Migrated {len(done)} boards."
+        if skipped:
+            report += f"\n⚠️ Skipped (no thread): {len(skipped)}"
+        if failed:
+            report += f"\n❌ Failed:\n" + "\n".join(failed[:10])
+        await interaction.edit_original_response(content=report)
 
     @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
     async def create_missing_boards(self, interaction: discord.Interaction):
