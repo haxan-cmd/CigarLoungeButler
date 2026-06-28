@@ -20,6 +20,38 @@ Players post a screenshot of their in-game scorecard. Vision AI (Gemini) reads t
 
 The submission blurb includes live team context parsed from the scoreboard image: warlord emoji + TD share percentage, kill share percentage with lethality emoji, and feat reactions for notable runs.
 
+```mermaid
+flowchart TD
+    A([Player posts screenshot]) --> B[Gemini Vision reads scoreboard]
+    B --> C{Stats detected?}
+    C -->|Yes| D[Confirm screen\nclass · weapon · map · faction · stats]
+    C -->|No| E[Manual entry form\nclass → weapon → map → faction → stats]
+    D --> F{Player confirms}
+    E --> F
+    F -->|Change| G[Edit fields] --> F
+    F -->|Confirm| H[Write to Google Sheets]
+
+    H --> I[Post summary reply\nwarlord · TD share · kill share]
+    H --> J[React to screenshot]
+    H --> K[Update leaderboards]
+    H --> L[Update registry card]
+    H --> M[Bounty check]
+
+    J --> J1{Feats earned?}
+    J1 -->|0 deaths| J2[flawless]
+    J1 -->|100+ kills| J3[100 kills]
+    J1 -->|200+ TDs| J4[200 TDs]
+    J1 -->|150 TD · 0D| J5[predator]
+    J1 -->|Triple criteria| J6[triple]
+    J1 -->|30+ deaths| J7[lounger]
+    J1 -->|Kills > next teammate TDs| J8[TUFF]
+
+    K --> K1{New placement?}
+    K1 -->|Yes| K2[weapon HS react\nEdit summary with placement]
+    M --> M1{Bounty weapon hit?}
+    M1 -->|Yes| M2[bounty react\nCheck completion]
+```
+
 ### 🏆 Leaderboards
 Live weapon leaderboards for all 1H and 2H weapons, plus map boards and feat boards. Multi-message chunking handles large boards. Shared weapons across subclasses are deduplicated by `(weapon, subclass)` key.
 
