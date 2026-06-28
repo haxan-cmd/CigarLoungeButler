@@ -586,6 +586,11 @@ class PersonalityCog(commands.Cog):
         await asyncio.sleep(wait_seconds)
 
     @commands.Cog.listener()
+    async def on_message_delete(self, message):
+        if message.channel.id == SUBMISSIONS_CHANNEL_ID:
+            print(f"[DELETE] Message deleted in submissions channel — author: {message.author} (bot={message.author.bot}) | content: {message.content[:80]!r} | attachments: {[a.filename for a in message.attachments]}")
+
+    @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot:
             return
