@@ -304,10 +304,18 @@ def build_favourites_embed(stats):
     import discord as _discord
 
     def fmt_list(items, suffix, n=3):
-        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
+        return "\n".join(f"{i+1}. **{name}** — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
 
     def fmt_plain(items, n=3):
-        return "\n".join(f"{i+1}. {p}" for i, p in enumerate(items[:n]))
+        # entries are like "kc -- 13.2%" — bold the name before the separator
+        lines = []
+        for i, p in enumerate(items[:n]):
+            if ' -- ' in p:
+                name, rest = p.split(' -- ', 1)
+                lines.append(f"{i+1}. **{name}** — {rest}")
+            else:
+                lines.append(f"{i+1}. **{p}**")
+        return "\n".join(lines)
 
     week_label = stats.get('week_label', '')
     desc = (
@@ -327,7 +335,7 @@ def build_favourites_embed(stats):
 
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
     embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Lethality  *(kill share of team %)*",
+        name="<a:mostlethal:1520490418817601658> Kill/TD Ratio  *(kills ÷ takedowns %)*",
         value=lethal_text,
         inline=False,
     )
@@ -342,7 +350,7 @@ def build_favourites_embed(stats):
     def _fmt_weapon_shares(lst):
         if not lst:
             return "*Not enough data yet*"
-        return "\n".join(f"**{w}** — {avg:.1f}%" for w, avg in lst)
+        return "\n".join(f"{w} — {avg:.1f}%" for w, avg in lst)
 
     embed.add_field(
         name="⚔️ Top Weapons  *(avg kill share)*",
@@ -384,11 +392,11 @@ def build_favourites_embed(stats):
     embed.add_field(
         name="​",
         value=(
-            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
-            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — {stats['campaign_master']}\n"
-            f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
-            f"<a:200tkd:1363648828414230538> **Butcher** — {stats['butcher']}"
+            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — **{stats['grand_marshal']}**\n"
+            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — **{stats['weapons_master']}**\n"
+            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — **{stats['campaign_master']}**\n"
+            f"<a:topkill:1360314538364240024> **Headhunter** — **{stats['headhunter']}**\n"
+            f"<a:200tkd:1363648828414230538> **Butcher** — **{stats['butcher']}**"
         ),
         inline=False,
     )
@@ -513,11 +521,6 @@ class FavouritesCog(commands.Cog):
                             await fav_channel.send(embed=embed_text)
                     except Exception as e:
                         print(f"Favourites channel update error: {e}")
-
-            try:
-                await update_title_roles(interaction.guild, stats)
-            except Exception as e:
-                print(f"Title role update error: {e}")
 
         except Exception as e:
             await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
