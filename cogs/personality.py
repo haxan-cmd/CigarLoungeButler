@@ -389,13 +389,13 @@ class PersonalityCog(commands.Cog):
 
     _last_nerve_post: float = 0.0  # epoch seconds, tracks last successful post
 
-    @tasks.loop(minutes=15)
+    @tasks.loop(minutes=1)
     async def nerve_center_digest(self):
-        """Post hourly digest to nerve center channel. Checks every 15 min, posts once per hour."""
+        """Post to nerve center channel every minute (debug mode)."""
         now_ts = datetime.now(timezone.utc).timestamp()
         print(f"[NERVE] tick — last_post={self._last_nerve_post:.0f} now={now_ts:.0f} diff={now_ts - self._last_nerve_post:.0f}s")
-        if now_ts - self._last_nerve_post < 3600:
-            return  # not yet an hour since last post
+        if now_ts - self._last_nerve_post < 60:
+            return  # not yet a minute since last post
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         try:
             digest = nerve_flush()
