@@ -509,35 +509,31 @@ async def get_mastered_weapons_for_player(discord_id, cached_data=None):
     return [w for w, c in weapon_counts.items() if c >= 100]
 
 async def get_lobby_stats_for_player(discord_id, cached_data=None):
-    """Return best/avg lobby finish for TD and kills from submissions with lobby data."""
+    """Return avg team TD/kill share percentages from submissions with lobby data."""
     subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
-    td_finishes = []    # [(rank, size), ...]
-    kill_finishes = []  # [(rank, size), ...]
+    td_shares = []    # team_td_share values (0–100)
+    kill_shares = []  # team_kill_share values (0–100)
     for row in subs:
         if not row or row[2].strip() != discord_id_str:
             continue
         try:
-            lr = int(row[13]) if len(row) > 13 and row[13] else None
-            ls = int(row[14]) if len(row) > 14 and row[14] else None
-            kr = int(row[15]) if len(row) > 15 and row[15] else None
-            if lr and ls and ls > 1:
-                td_finishes.append((lr, ls))
-            if kr and ls and ls > 1:
-                kill_finishes.append((kr, ls))
+            td_share  = float(row[21]) if len(row) > 21 and row[21] else None
+            kill_share = float(row[20]) if len(row) > 20 and row[20] else None
+            if td_share is not None:
+                td_shares.append(td_share)
+            if kill_share is not None:
+                kill_shares.append(kill_share)
         except (ValueError, TypeError):
             pass
-    if not td_finishes:
+    if not td_shares:
         return None
-    best_r, best_s = min(td_finishes, key=lambda x: (x[0], -x[1]))
-    avg_td_pct  = sum((s - r) / (s - 1) * 100 for r, s in td_finishes  if s > 1) / len(td_finishes)
-    avg_k_pct   = (sum((s - r) / (s - 1) * 100 for r, s in kill_finishes if s > 1) / len(kill_finishes)) if kill_finishes else None
+    avg_td_share   = sum(td_shares) / len(td_shares)
+    avg_kill_share = (sum(kill_shares) / len(kill_shares)) if kill_shares else None
     return {
-        'best_rank':   best_r,
-        'best_size':   best_s,
-        'avg_td_pct':  avg_td_pct,
-        'avg_k_pct':   avg_k_pct,
-        'games':       len(td_finishes),
+        'avg_td_share':   avg_td_share,
+        'avg_kill_share': avg_kill_share,
+        'games':          len(td_shares),
     }
 
 
@@ -882,9 +878,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
 
     if lobby_stats:
         lines.append("**Lobby Stats:**")
-        lines.append(f"• Avg TD rank — **top {100 - lobby_stats['avg_td_pct']:.0f}%**")
-        if lobby_stats.get('avg_k_pct') is not None:
-            lines.append(f"• Avg kill rank — **top {100 - lobby_stats['avg_k_pct']:.0f}%**")
+        lines.append(f"• Avg TD share of team — **{lobby_stats['avg_td_share']:.0f}%**")
+        if lobby_stats.get('avg_kill_share') is not None:
+            lines.append(f"• Avg kill share of team — **{lobby_stats['avg_kill_share']:.0f}%**")
         lines.append(f"*({lobby_stats['games']} tracked games)*")
         lines.append("")
 
