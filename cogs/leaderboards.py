@@ -148,8 +148,7 @@ async def build_ledger_entrance(guild):
             row("🏛️", "feats-of-war",       ch_url(idx_feats.id) if idx_feats else None),
         ]
 
-        embed = discord.Embed(description="
-".join(lines), color=0x8b6914)
+        embed = discord.Embed(description="\n".join(lines), color=0x8b6914)
 
         mid = _entrance_message_ids.get('entrance')
         if not mid:
