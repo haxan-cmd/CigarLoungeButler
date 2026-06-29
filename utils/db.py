@@ -78,6 +78,10 @@ def _row_to_player(r) -> list:
         str(r['last_submission']) if r['last_submission'] else '',
         r['weapon_marks'] or '',
         r['class_marks'] or '',
+        # indices 8, 9, 10 — manual feat count overrides (None = not set, use auto)
+        r['kills_100_count'] if 'kills_100_count' in r.keys() and r['kills_100_count'] is not None else None,
+        r['takedowns_200_count'] if 'takedowns_200_count' in r.keys() and r['takedowns_200_count'] is not None else None,
+        r['triple_count'] if 'triple_count' in r.keys() and r['triple_count'] is not None else None,
     ]
 
 
@@ -255,6 +259,52 @@ async def save_player_ign(discord_id: str, ign: str):
             print(f"[IGN] Appended alias '{ign}' for discord_id={discord_id}")
         except Exception as e:
             print(f"[IGN] save failed: {e}")
+
+
+async def increment_manual_feat_count(discord_id: str, feat: str):
+    """Increment a manual feat count by 1 — only if the column is already set (not NULL).
+    If NULL, does nothing so auto-detection continues to work for untracked players."""
+    col_map = {
+        '100 kills':      'kills_100_count',
+        '200 takedowns':  'takedowns_200_count',
+        'triple':         'triple_count',
+    }
+    col = col_map.get(feat.lower().strip())
+    if not col:
+        return
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"UPDATE players SET {col}={col}+1 WHERE discord_id=$1 AND {col} IS NOT NULL",
+            str(discord_id)
+        )
+
+
+async def set_manual_feat_count(discord_id: str, feat: str, count: int):
+    """Set a manual override count for 100 Kills, 200 Takedowns, or Triple on a player row."""
+    col_map = {
+        '100 kills':      'kills_100_count',
+        '200 takedowns':  'takedowns_200_count',
+        'triple':         'triple_count',
+    }
+    col = col_map.get(feat.lower().strip())
+    if not col:
+        raise ValueError(f"Unknown feat '{feat}'. Use: 100 Kills, 200 Takedowns, Triple")
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS kills_100_count INTEGER"
+        )
+        await conn.execute(
+            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS takedowns_200_count INTEGER"
+        )
+        await conn.execute(
+            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS triple_count INTEGER"
+        )
+        await conn.execute(
+            f"UPDATE players SET {col}=$1 WHERE discord_id=$2",
+            count, str(discord_id)
+        )
 
 
 async def update_player_thread(discord_id: str, thread_id: str):

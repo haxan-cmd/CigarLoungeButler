@@ -1617,6 +1617,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # log_submission returns the exact row index it wrote to (or None if dedup skipped)
         submission_row = log_result
         is_new_player = False  # determined later from submission_count == 1
+
+        # Auto-increment manual feat counts if already set for this player
+        discord_id_str = str(interaction.user.id)
+        if 'Triple' in feats:
+            await _db.increment_manual_feat_count(discord_id_str, 'triple')
+        else:
+            if '100 Kills' in feats:
+                await _db.increment_manual_feat_count(discord_id_str, '100 kills')
+            if '200 Takedowns' in feats:
+                await _db.increment_manual_feat_count(discord_id_str, '200 takedowns')
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")
