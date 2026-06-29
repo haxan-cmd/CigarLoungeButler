@@ -515,7 +515,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         if not lb_row:
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
-        is_map = lb_row.get('Type', '').strip().lower() == 'map'
+        is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
         embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
         thread_id = int(lb_row['Thread ID'])
@@ -806,7 +806,7 @@ class LeaderboardsCog(commands.Cog):
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
-            is_map = lb_row.get('Type', '').strip().lower() == 'map'
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
             embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
             thread_id = int(lb_row['Thread ID'])
@@ -861,7 +861,7 @@ class LeaderboardsCog(commands.Cog):
                 entries = sorted(entries, key=lambda x: x['score'], reverse=True)
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
-                is_map = lb_row.get('Type', '').strip().lower() == 'map'
+                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
                 embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
                 thread_id = int(thread_id_raw)
@@ -964,7 +964,7 @@ class LeaderboardsCog(commands.Cog):
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
-            is_map = lb_row.get('Type', '').strip().lower() == 'map'
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
             embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
             old_ids_str = lb_row['Message ID']

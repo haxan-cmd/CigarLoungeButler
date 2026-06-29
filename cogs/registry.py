@@ -873,7 +873,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         if personal_bests['td'] > 0:
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
         if personal_bests['lethality'] > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Lethality — **{personal_bests['lethality']}%**")
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill/TD Ratio — **{personal_bests['lethality']}%**")
         lines.append("")
 
     if lobby_stats:
@@ -2295,7 +2295,7 @@ class RegistryCog(commands.Cog):
         # \u2500\u2500 Special Ops \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         special_ops = await get_special_ops_for_player(int(discord_id_str))
         # \u2500\u2500 Bounties completed \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        bounties_done = await get_player_bounties_completed(int(discord_id_str))
+        bounties_done = len(await get_bounty_completions_for_player(int(discord_id_str)))
         # \u2500\u2500 Butler titles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         try:
             from cogs.favourites import calculate_butler_stats
