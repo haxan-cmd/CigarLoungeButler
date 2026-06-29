@@ -1105,6 +1105,44 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary)
 
+    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
+    async def backfill_feat_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        FEAT_MAP = {"100 Kills": "kills", "200 Takedowns": "takedowns"}
+        sub_rows = await _db.get_all_submissions()
+        lb_rows  = await _db.get_all_leaderboard_data()
+
+        existing = {(r[0], r[4]) for r in lb_rows if len(r) > 4}
+
+        added = 0
+        for row in sub_rows:
+            if len(row) < 13:
+                continue
+            feats_str  = row[11] or ""
+            link       = (row[12] or "").strip()
+            player     = row[1] or ""
+            discord_id = row[2] or ""
+            kills      = int(row[8]) if row[8] else 0
+            takedowns  = int(row[7]) if row[7] else 0
+            weapon     = row[3] or ""
+            if not link:
+                continue
+            for board, stat in FEAT_MAP.items():
+                if board not in feats_str:
+                    continue
+                if (board, link) in existing:
+                    continue
+                score = kills if stat == "kills" else takedowns
+                await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
+                existing.add((board, link))
+                added += 1
+
+        await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
+
 
 async def setup(bot):
     await bot.add_cog(LeaderboardsCog(bot))
