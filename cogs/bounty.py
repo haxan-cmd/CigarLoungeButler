@@ -239,6 +239,31 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
     if not matched_key:
         print(f"[BOUNTY] Weapon '{weapon}' not in bounty '{bounty['title']}' — keys: {list(weapons.keys())}")
+        # Still check special challenge even if weapon isn't a bounty weapon
+        if not bounty['special_done'] and bounty.get('special_challenge'):
+            import re as _re
+            sc = bounty['special_challenge'].lower()
+            td_match = _re.search(r'(\d+)\s*takedown', sc)
+            sc_min_td = int(td_match.group(1)) if td_match else 100
+            if weapon and weapon.lower() in sc and takedowns >= sc_min_td:
+                bounty['special_done'] = True
+                print(f"[BOUNTY] Special challenge auto-completed by {player_name} — {weapon} {takedowns}TD")
+                bounty_channel = guild.get_channel(bounty['channel_id'])
+                if not bounty_channel and bounty['channel_id']:
+                    try:
+                        bounty_channel = await guild.fetch_channel(bounty['channel_id'])
+                    except Exception:
+                        bounty_channel = None
+                if bounty_channel:
+                    try:
+                        bounty_role = guild.get_role(bounty.get('role_id')) if bounty.get('role_id') else None
+                        mention = bounty_role.mention if bounty_role else ''
+                        await bounty_channel.send(
+                            f"{mention} ⭐ **{player_name}** has completed the special challenge: **{bounty['special_challenge']}**!"
+                        )
+                    except Exception as e:
+                        print(f"[BOUNTY] Special challenge ping error: {e}")
+                await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
         return False
 
     # Increment global participation counter
@@ -732,11 +757,9 @@ class BountyCog(commands.Cog):
         player_id = str(member.id)
 
         player_row = await get_player_bounty_progress(bounty['title'], player_id)
-        if not player_row:
-            await interaction.followup.send(f"No bounty data found for **{player_name}**. Use /bounty_add_card first.", ephemeral=True)
-            return
-
-        player_progress = player_row['progress']
+        # Allow even if player has no prior bounty data — create fresh progress
+        player_progress = player_row['progress'] if player_row else {}
+        forum_post_id = player_row.get('forum_post_id') if player_row else None
 
         if player_progress.get('__special__', 0) >= 1:
             await interaction.followup.send(f"**{player_name}** has already completed the bonus.", ephemeral=True)
@@ -744,7 +767,10 @@ class BountyCog(commands.Cog):
 
         player_progress['__special__'] = 1
 
-        forum_post_id = player_row.get('forum_post_id')
+        # Update global bounty special_done flag
+        bounty['special_done'] = True
+        await save_bounty_state(bounty['id'], bounty['weapons'], True, bounty['completions'])
+
         forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
         forum_channel = guild.get_channel(forum_channel_id)
 
