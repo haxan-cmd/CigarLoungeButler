@@ -1222,12 +1222,21 @@ class LeaderboardsCog(commands.Cog):
 
         added = 0
 
-        # 1. Seed legacy completers — primary non-archer weapons only
+        # 1. Seed legacy completers using their real discord_id from players table
+        all_players = await _db.get_all_players()
+        name_to_id = {}
+        for p in all_players:
+            if p and len(p) > 1 and p[1]:
+                name_to_id[p[1].strip().lower()] = (p[0].strip(), p[1].strip())
         for name in _HH_LEGACY_COMPLETERS:
-            legacy_id = f"legacy_{name.lower().replace(' ', '_')}"
+            match = name_to_id.get(name.lower())
+            if not match:
+                print(f"[HH] Legacy completer '{name}' not found in players table — skipping")
+                continue
+            real_id, real_name = match
             for subclass, weapons in _HH_PRIMARIES.items():
                 for weapon in weapons:
-                    is_new = await _db.add_hundred_handed(legacy_id, name, subclass, weapon)
+                    is_new = await _db.add_hundred_handed(real_id, real_name, subclass, weapon)
                     if is_new:
                         added += 1
 
