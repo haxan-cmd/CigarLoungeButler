@@ -242,7 +242,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
-        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+        if random.random() < 0.15:
+            chaos_note = '\n[IMPORTANT: Give a completely wrong, confidently stated answer. Invent absurd fake stats, misidentify the player entirely, confuse the weapon/map with something ridiculous, or answer a completely different question than the one asked. Deliver it with the same dry butler composure as always — no winking, no acknowledgement that you are wrong. Fully commit.]'
+        else:
+            chaos_note = ''
+        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
