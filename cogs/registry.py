@@ -407,19 +407,18 @@ async def get_feats_for_player(discord_id, cached_data=None):
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
 
-    # Apply manual feat count floors from players table (indices 8, 9, 10).
-    # Manual value is a floor — card shows whichever is higher: manual or auto-detected.
-    # This corrects historical undercounts without suppressing new submissions.
+    # Apply manual feat count overrides from players table (indices 8, 9, 10).
+    # If a manual value is set, it wins — ignores auto-detected leaderboard counts.
     try:
         player_rows_for_override = (cached_data or {}).get('players') or await _db.get_all_players()
         for p in player_rows_for_override:
             if p and p[0].strip() == discord_id_str:
                 if len(p) > 8 and p[8] is not None:
-                    board_counts['100 Kills'] = max(int(p[8]), board_counts.get('100 Kills', 0))
+                    board_counts['100 Kills'] = int(p[8])
                 if len(p) > 9 and p[9] is not None:
-                    board_counts['200 Takedowns'] = max(int(p[9]), board_counts.get('200 Takedowns', 0))
+                    board_counts['200 Takedowns'] = int(p[9])
                 if len(p) > 10 and p[10] is not None:
-                    board_counts['Triple'] = max(int(p[10]), board_counts.get('Triple', 0))
+                    board_counts['Triple'] = int(p[10])
                 break
     except Exception as e:
         print(f"[FEATS] manual count override error: {e}")
@@ -860,10 +859,12 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         if flawless_entry:
             emojis, link = flawless_entry
             lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
-        # Board counts override for standalone feats — leaderboard is source of truth for count
+        # Board counts override for standalone feats.
+        # If manual DB value > 0, it wins. Otherwise fall back to feat_counts (submission scan).
         _board_count_map = {
             ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
             ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
+            ''.join(sorted([_e['Triple']])):        board_counts.get('Triple') or None,
         }
         for normalized, count in feat_counts.items():
             # Strip hhanded emoji before label lookup
@@ -874,8 +875,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 label = "Hundred-Handed"
             else:
                 label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
-            # For standalone 100 Kills / 200 Takedowns, use the leaderboard entry count
-            display_count = _board_count_map.get(normalized, count)
+            # For standalone 100 Kills / 200 Takedowns / Triple, prefer DB manual count if > 0
+            _db_override = _board_count_map.get(normalized)
+            display_count = _db_override if _db_override is not None else count
             if display_count >= 5:
                 label_str = f"**{label}**"
             else:
