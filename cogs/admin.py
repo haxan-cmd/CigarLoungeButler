@@ -495,15 +495,20 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         try:
             await _db.set_manual_feat_count(str(player.id), feat, count)
-            # Refresh their registry card
+        except Exception as e:
+            await interaction.followup.send(f"❌ DB error: {e}", ephemeral=True)
+            return
+        card_status = "and refreshed their card"
+        try:
             from cogs.registry import create_or_update_registry_card
             await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
-            await interaction.followup.send(
-                f"✅ Set **{feat}** count to **{count}** for **{player.display_name}** and refreshed their card.",
-                ephemeral=True
-            )
         except Exception as e:
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            card_status = f"but card refresh failed: {e}"
+            print(f"[SET_FEAT] card refresh error for {player.display_name}: {e}")
+        await interaction.followup.send(
+            f"✅ Set **{feat}** count to **{count}** for **{player.display_name}** {card_status}.",
+            ephemeral=True
+        )
 
 
 async def setup(bot):
