@@ -149,14 +149,14 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # ── LETHALITY -- avg team kill share %, min 3 runs with team data ──
-    lethal_candidates = {p for p, v in team_kill_shares.items() if len(v) >= 3}
-    lethal_ranked = sorted(lethal_candidates, key=lambda p: -(sum(team_kill_shares[p]) / len(team_kill_shares[p])))
+    # ── LETHALITY -- avg kills ÷ takedowns %, min 3 runs ──
+    lethal_candidates = {p for p, v in lethal_ratios.items() if len(v) >= 3}
+    lethal_ranked = sorted(lethal_candidates, key=lambda p: -(sum(lethal_ratios[p]) / len(lethal_ratios[p])))
 
     def lethality_label(p):
-        shares = team_kill_shares.get(p, [])
-        avg = sum(shares) / len(shares) if shares else 0
-        return f"{p} -- {avg:.1f}%"
+        ratios = lethal_ratios.get(p, [])
+        avg = sum(ratios) / len(ratios) if ratios else 0
+        return f"{p} -- {avg * 100:.1f}%"
 
     most_lethal_top5 = [lethality_label(p) for p in lethal_ranked[:5]]
 
