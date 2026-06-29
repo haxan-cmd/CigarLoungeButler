@@ -144,6 +144,28 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             print(f"[VISION] Image fetch failed: {fetch_err}")
             return empty
 
+        # Pre-process image: upscale small images and sharpen for better OCR accuracy
+        try:
+            from PIL import Image as _PImage, ImageEnhance as _PIEnhance, ImageFilter as _PIFilter
+            import io as _io
+            img = _PImage.open(_io.BytesIO(image_bytes)).convert('RGB')
+            w, h = img.size
+            # Upscale if smaller than 1920px wide — large lobbies have tiny text
+            if w < 1920:
+                scale = max(2.0, 1920 / w)
+                img = img.resize((int(w * scale), int(h * scale)), _PImage.LANCZOS)
+            # Sharpen and boost contrast slightly
+            img = img.filter(_PIFilter.SHARPEN)
+            img = _PIEnhance.Contrast(img).enhance(1.3)
+            img = _PIEnhance.Sharpness(img).enhance(2.0)
+            buf = _io.BytesIO()
+            img.save(buf, format='PNG')
+            image_bytes = buf.getvalue()
+            content_type = 'image/png'
+            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} PNG")
+        except Exception as pp_err:
+            print(f"[VISION] Pre-process skipped: {pp_err}")
+
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
@@ -163,7 +185,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             config=_gtypes.GenerateContentConfig(
                 temperature=0,
                 response_mime_type='application/json',
-                thinking_config=_gtypes.ThinkingConfig(thinking_budget=0),
+                thinking_config=_gtypes.ThinkingConfig(thinking_budget=2048),
             )
         )
         raw = r.text.strip()
