@@ -470,8 +470,8 @@ class FavouritesCog(commands.Cog):
         # Rate limit — 5 minutes
         now = time.time()
         last = _butlers_report_cooldowns.get(interaction.user.id, 0)
-        if now - last < 300:
-            remaining = int(300 - (now - last))
+        if now - last < 30:
+            remaining = int(30 - (now - last))
             await interaction.response.send_message(
                 f"Do you really think my manager would stand for this kind of excessive nagging? Try again in {remaining} seconds.",
                 ephemeral=True
