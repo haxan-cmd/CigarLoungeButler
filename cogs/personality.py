@@ -393,53 +393,23 @@ class PersonalityCog(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def _run_nerve_logic(self):
-        """Core nerve center post logic. Called on startup and by the hourly loop."""
-        print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+        """Core nerve center post logic."""
+        print("[NERVE] _run_nerve_logic called")
         try:
-            digest = nerve_flush()
             guild = self.bot.get_guild(GUILD_ID)
+            print(f"[NERVE] guild={guild}")
             if not guild:
                 print("[NERVE] guild not found")
                 return
             ch = guild.get_channel(NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID)
+            print(f"[NERVE] channel={ch}")
             if not ch:
                 print("[NERVE] channel not found")
                 return
             if isinstance(ch, discord.Thread) and ch.archived:
+                print("[NERVE] unarchiving thread")
                 await ch.edit(archived=False)
-            FEEDBACK_CHANNEL_ID = 1518293898177413262
-            scan_channel_ids = [FEEDBACK_CHANNEL_ID, MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
-            bug_keywords = [
-                'broke', 'broken', 'bug', "didn't work", 'not working', "didn't register",
-                'failed', 'error', 'wrong', 'missing', 'disappeared', 'crash', 'issue',
-                'fix', 'help', "why didn't", 'why did', 'not showing',
-                "didn't submit", 'lost', 'glitch', 'wtf', 'messed up'
-            ]
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-            flagged = []
-            try:
-                for ch_id in scan_channel_ids:
-                    scan_ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
-                    if not scan_ch:
-                        continue
-                    async for msg in scan_ch.history(after=cutoff, limit=200):
-                        if msg.author.bot:
-                            continue
-                        lower = msg.content.lower()
-                        if any(kw in lower for kw in bug_keywords):
-                            ts = msg.created_at.strftime('%H:%M')
-                            chan_label = 'feedback' if ch_id == FEEDBACK_CHANNEL_ID else ('#100' if ch_id == SUBMISSIONS_CHANNEL_ID else 'main')
-                            flagged.append(f"`{ts}` **{msg.author.display_name}** [{chan_label}]: {msg.content[:120]}")
-            except Exception as scan_err:
-                print(f"[NERVE] channel scan error: {scan_err}")
-            now_dt = datetime.now(timezone.utc)
-            embed = discord.Embed(title="📋  Butler's Nerve Center", color=0x8b6914, timestamp=now_dt)
-            embed.description = digest if digest and digest.strip() else "Nothing to report this hour."
-            if flagged:
-                embed.add_field(name="⚠️ User Reports (last hour)", value="\n".join(flagged[:10])[:1024], inline=False)
-            embed.set_footer(text="Hourly digest")
-            await ch.send(embed=embed)
-            self._last_nerve_post = datetime.now(timezone.utc).timestamp()
+            await ch.send("🔧 Nerve center online.")
             print("[NERVE] sent OK")
         except Exception as e:
             import traceback
