@@ -179,16 +179,32 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
 
-        r = _gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[prompt, image_part],
-            config=_gtypes.GenerateContentConfig(
-                temperature=0,
-                response_mime_type='application/json',
-                thinking_config=_gtypes.ThinkingConfig(thinking_budget=2048),
-            )
-        )
-        raw = r.text.strip()
+        import time as _time
+        raw = None
+        for _attempt in range(3):
+            try:
+                r = _gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, image_part],
+                    config=_gtypes.GenerateContentConfig(
+                        temperature=0,
+                        response_mime_type='application/json',
+                        thinking_config=_gtypes.ThinkingConfig(thinking_budget=2048),
+                    )
+                )
+                raw = r.text.strip()
+                break
+            except Exception as _e:
+                _es = str(_e)
+                if '503' in _es or 'UNAVAILABLE' in _es:
+                    print(f"[VISION] 503 on attempt {_attempt+1}, retrying in {5 * (_attempt+1)}s...")
+                    _time.sleep(5 * (_attempt + 1))
+                else:
+                    raise
+        if raw is None:
+            print("[VISION] All retries failed (503)")
+            return empty
+        raw = raw.strip()
         print(f"[VISION] Raw response ({len(raw)} chars): {raw[:200]}")
         if not raw:
             print("[VISION] Empty response from Gemini")
