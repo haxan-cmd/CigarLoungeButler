@@ -1863,10 +1863,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # Edit the summary reply to include placements
     if placements:
-        placement_lines = "\n".join(
-            f"{'🏆' if ' - ' in lb else '<:weapon_hs:1350656128635375698>'} {lb} — #{pos}"
-            for lb, pos in placements
-        )
+        def _placement_line(lb, pos):
+            if ' - ' in lb:
+                return f"🏆 {lb} — #{pos}"
+            elif lb == "TUFF":
+                return f"<a:TUFF2:1520779243879927898> — #{pos}"
+            else:
+                return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
+        placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
         try:
             # Find the reply we sent and edit it
             async for msg in original_message.channel.history(limit=10, after=original_message):
