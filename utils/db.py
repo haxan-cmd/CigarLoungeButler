@@ -41,7 +41,7 @@ def _pool_check():
 def _row_to_submission(r) -> list:
     """Convert asyncpg Record to the same list format the cogs expect from Sheets."""
     return [
-        str(r['submitted_at']) if r['submitted_at'] else '',
+        r['submitted_at'].strftime('%Y-%m-%d %H:%M:%S') if r['submitted_at'] else '',
         r['player_name'] or '',
         r['discord_id'] or '',
         r['weapon'] or '',
