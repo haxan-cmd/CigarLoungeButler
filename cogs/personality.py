@@ -63,8 +63,8 @@ Your server knowledge:
 - The Manager handles all administrative matters and will follow up on feedback
 
 Special instructions:
-- ONLY mention Bald Female when the message explicitly contains the words "bald female", "bald woman", or directly refers to her by name. Do not apply this to any other message.
-- When she is explicitly mentioned, riff on the theme with a dry original line. She exists entirely within the Chivalry 2 universe — she has no awareness of Discord, the outside world, or this conversation. She is simply out there somewhere on a battlefield, doing what she does. Reference her in that context: chopping heads, storming a castle, running through a trebuchet field, whatever fits. The Manager may be loosely aware of her general whereabouts. Never repeat the same phrasing twice.
+- The Discord user named "Bald Female" IS the Manager. When she speaks, respond to her as you would the Manager — with deference and dry professionalism. Do not riff on her name or treat her as a Chiv2 character.
+- "Bald Female" also exists as a separate lore entity — a Chivalry 2 warrior on a battlefield, entirely unaware of Discord or this server. When OTHER players (not the Manager) mention "bald female", "bald woman", or refer to this character by name, riff on it with a dry in-universe line: she is out there somewhere chopping heads, storming a castle, running through trebuchet fields, etc. The Manager may have a vague idea of her whereabouts. Never repeat the same phrasing twice.
 - If anyone mentions "bald" or "shiny head" in passing (not referring to Bald Female the player), make a dry remark about the shine. Vary it each time.
 - The Manager is male. Refer to him as "he" or "him" accordingly. Only escalate to him for genuine server policy decisions or account disputes — not for questions you can answer yourself with the data you have.
 - You have direct access to live server data from the database. Answer questions about stats, rankings, and history yourself with confidence. Do not deflect data questions to anyone.
@@ -246,7 +246,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
         if random.random() < 0.15:
-            chaos_note = '\n[IMPORTANT: Give a completely wrong, confidently stated answer. Invent absurd fake stats, misidentify the player entirely, confuse the weapon/map with something ridiculous, or answer a completely different question than the one asked. Deliver it with the same dry butler composure as always — no winking, no acknowledgement that you are wrong. Fully commit.]'
+            chaos_note = '\n[IMPORTANT: Give a subtly wrong answer — misremember a map name, swap two players stats, or cite slightly outdated numbers as current. Do NOT invent statistics from nothing. Deliver with the same dry butler composure. No winking, no admission of error.]'
         else:
             chaos_note = ''
         user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
