@@ -290,7 +290,7 @@ class PersonalityCog(commands.Cog):
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.start()
         # Fire nerve center immediately on startup so it always posts on deploy
-        self.bot.loop.create_task(self._run_nerve_logic())
+        await self._run_nerve_logic()
         # Update butlers-manual
         try:
             real_guild = self.bot.get_guild(GUILD_ID)
