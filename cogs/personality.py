@@ -437,13 +437,20 @@ class PersonalityCog(commands.Cog):
             except Exception as scan_err:
                 print(f"[NERVE] channel scan error: {scan_err}")
 
-            if flagged:
-                flag_block = "\n\n**⚠️ User Reports (last hour)**\n" + "\n".join(flagged[:10])
-                digest = digest + flag_block
+            now_dt = datetime.now(timezone.utc)
+            embed = discord.Embed(
+                title="📋  Butler's Nerve Center",
+                color=0x8b6914,
+                timestamp=now_dt,
+            )
+            embed.description = digest if digest and digest.strip() else "Nothing to report this hour."
 
-            if not digest or not digest.strip():
-                digest = "Nothing to report this hour."
-            await ch.send(digest[:1900])
+            if flagged:
+                flag_text = "\n".join(flagged[:10])
+                embed.add_field(name="⚠️ User Reports (last hour)", value=flag_text[:1024], inline=False)
+
+            embed.set_footer(text="Hourly digest")
+            await ch.send(embed=embed)
             self._last_nerve_post = datetime.now(timezone.utc).timestamp()
             print("[NERVE] sent OK")
         except Exception as e:
