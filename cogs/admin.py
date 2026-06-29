@@ -525,7 +525,6 @@ class AdminCog(commands.Cog):
                 return
 
             all_subs = await _db.get_all_submissions()
-            # Group weapons by player
             player_weapons: dict[str, set] = {}
             for r in all_subs:
                 if len(r) > 3 and r[2].strip() and r[3].strip():
@@ -559,4 +558,6 @@ class AdminCog(commands.Cog):
 
 
 async def setup(bot):
+    await bot.add_cog(AdminCog(bot))
+
     await bot.add_cog(AdminCog(bot))
