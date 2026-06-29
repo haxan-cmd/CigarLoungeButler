@@ -1441,16 +1441,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     from cogs.favourites import calculate_butler_stats, update_title_roles, build_favourites_embed
     feats = []
-    if kills >= 100:
-        feats.append("100 Kills")
-    if takedowns >= 200:
-        feats.append("200 Takedowns")
+    is_triple = takedowns >= 150 and kills >= 100 and score_over_20k
+    if is_triple:
+        feats.append("Triple")
+    else:
+        # Only credit 100 Kills / 200 Takedowns on non-Triple games
+        if kills >= 100:
+            feats.append("100 Kills")
+        if takedowns >= 200:
+            feats.append("200 Takedowns")
     if deaths == 0:
         feats.append("Flawless")
     if takedowns >= 150 and deaths == 0:
         feats.append("Predator")
-    if takedowns >= 150 and kills >= 100 and score_over_20k:
-        feats.append("Triple")
     if selected_weapon in FEAT_WEAPONS and kills >= 100:
         feats.append(selected_weapon)
 
@@ -1674,14 +1677,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     await safe_react("<:cigar:1444893851427803298>")
     if deaths == 0:
         await safe_react("<a:flawless:1360358300834599062>")
+    _is_triple = takedowns >= 150 and kills >= 100 and score_over_20k
+    if _is_triple:
+        await safe_react("<a:triple:1365532698260668466>")
     if kills >= 100:
         await safe_react("<a:100kill:1361412390339608686>")
     if takedowns >= 200:
         await safe_react("<a:200tkd:1363648828414230538>")
     if takedowns >= 150 and deaths == 0:
         await safe_react("<a:predator:1366794896081555567>")
-    if takedowns >= 150 and kills >= 100 and score_over_20k:
-        await safe_react("<a:triple:1365532698260668466>")
 
     is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
 
