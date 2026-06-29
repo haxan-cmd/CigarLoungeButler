@@ -4,7 +4,7 @@ from datetime import datetime
 
 import config
 
-# Shared Anthropic client — initialised once, used by any cog that needs a quick Butler line
+# Shared Anthropic client - initialised once, used by any cog that needs a quick Butler line
 _anthropic_client = None
 try:
     import anthropic as _anthropic
@@ -22,7 +22,7 @@ except Exception:
 
 
 _BUTLER_SYSTEM_BRIEF = (
-    "You are the Butler — dry, sardonic, one or two sentences max. "
+    "You are the Butler - dry, sardonic, one or two sentences max. "
     "Never say 'great', 'awesome', or use exclamation marks. Never break character."
 )
 
@@ -45,40 +45,40 @@ def butler_quip(prompt: str, fallback: str = '') -> str:
 _SCORECARD_PROMPT = """You are reading a Chivalry 2 end-of-round scoreboard screenshot.
 
 The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
-- RANK: leftmost column, a rank number (e.g. 1,000 or 74) — do NOT use this as score or takedowns
+- RANK: leftmost column, a rank number (e.g. 1,000 or 74) - do NOT use this as score or takedowns
 - NAME: player name
-- SCORE: large point value (often 1,000–20,000) — do NOT use this as takedowns
-- T: Takedowns — the number of kills+assists, typically the largest combat stat (50–400 for top players)
-- K: Kills — always less than or equal to T
-- D: Deaths — typically 0–50
-- PING: last column, network latency in ms — ignore this
+- SCORE: large point value (often 1,000–20,000) - do NOT use this as takedowns
+- T: Takedowns - the number of kills+assists, typically the largest combat stat (50–400 for top players)
+- K: Kills - always less than or equal to T
+- D: Deaths - typically 0–50
+- PING: last column, network latency in ms - ignore this
 
-CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE — top, middle, or bottom of the scoreboard.
+CRITICAL: The submitting player's row is visually highlighted - it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE - top, middle, or bottom of the scoreboard.
 
-LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In large lobbies the text is small — read carefully. Do not skip rows.
+LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In large lobbies the text is small - read carefully. Do not skip rows.
 
-STEAM DECK / CONTROLLER UI: Some screenshots show "PRESS A TO INTERACT", "PRESS B", "PRESS X", or similar controller button prompts at the bottom of the screen. These are UI overlays — ignore them completely, they are not part of the scoreboard.
+STEAM DECK / CONTROLLER UI: Some screenshots show "PRESS A TO INTERACT", "PRESS B", "PRESS X", or similar controller button prompts at the bottom of the screen. These are UI overlays - ignore them completely, they are not part of the scoreboard.
 
-SCREEN OVERLAYS TO IGNORE — these are NOT scoreboard rows:
+SCREEN OVERLAYS TO IGNORE - these are NOT scoreboard rows:
 - Discord/streaming voice overlays on the left or right edges (small cards showing player names with icons like arrows, diamonds, or letters like "E")
 - A "SPECTATORS" panel that may appear on the right side listing players who are spectating
 - Any name that appears outside the main two-column scoreboard table
 Only read names and stats from inside the RANK | NAME | SCORE | T | K | D | PING table columns.
 
 FINDING THE PLAYER (use BOTH methods, prefer name match if highlight is ambiguous):
-Method 1 — Visual highlight: scan every row for the one with a distinctly brighter/gold background or a marker icon.
-Method 2 — Name match: if a player name hint is provided, find the row whose NAME column most closely matches it (exact or partial match, case-insensitive, ignoring clan tags or decorators).
+Method 1 - Visual highlight: scan every row for the one with a distinctly brighter/gold background or a marker icon.
+Method 2 - Name match: if a player name hint is provided, find the row whose NAME column most closely matches it (exact or partial match, case-insensitive, ignoring clan tags or decorators).
 If both methods point to the same row, high confidence. If only one method works, use that. If the highlight is subtle or unclear on this screenshot, rely primarily on the name match.
 
 Step 1: Using both methods above, identify the submitting player's row.
-Step 2: Read the T, K, D values ONLY from that exact row — do not read from any row above or below it.
-Step 3: That same player must NOT appear in team_scores or team_kills — those arrays are for all OTHER teammates only.
+Step 2: Read the T, K, D values ONLY from that exact row - do not read from any row above or below it.
+Step 3: That same player must NOT appear in team_scores or team_kills - those arrays are for all OTHER teammates only.
 
 Extract ONLY from that highlighted row:
-- weapon (exact weapon name if shown — may appear as an icon tooltip or text; null if not visible)
+- weapon (exact weapon name if shown - may appear as an icon tooltip or text; null if not visible)
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
 - map (full map name shown on screen e.g. "The Battle of Darkforest", "Galencourt")
-- faction (Agatha, Mason, or Tenosia — whichever team side the highlighted row is on)
+- faction (Agatha, Mason, or Tenosia - whichever team side the highlighted row is on)
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
 - deaths (integer from D column of highlighted row)
@@ -89,7 +89,7 @@ The scoreboard shows TWO teams side by side. For ALL other rows (excluding the h
 - enemy_scores: T column integers for players on the ENEMY team
 - enemy_kills: K column integers for players on the ENEMY team
 
-COLUMN READING EXAMPLES — study these carefully before reading the image:
+COLUMN READING EXAMPLES - study these carefully before reading the image:
 
 Example 1 (highlighted row is rank 2, not rank 1):
   Row data visible: RANK=1,000  NAME=mlowy  SCORE=11,653  T=124  K=54  D=6  PING=8
@@ -107,7 +107,7 @@ Example 3 (highlighted row is near bottom):
 
 The T column (takedowns) is always a small integer, typically 10–400. The SCORE column is always a large number (thousands). Never confuse them.
 
-Your response must be ONLY the JSON object below — no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
+Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
 {"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
 
@@ -115,7 +115,7 @@ Your response must be ONLY the JSON object below — no explanation, no preamble
 def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     """
     Pass a Discord image URL to Gemini vision and extract scorecard fields.
-    player_name: Discord display name of the submitting player — used as a hint to find their row.
+    player_name: Discord display name of the submitting player - used as a hint to find their row.
     Returns a dict with keys: weapon, subclass, map, faction, takedowns, kills, deaths, other_scores.
     Any field that couldn't be read confidently is None.
     """
@@ -126,14 +126,14 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _gemini_client:
-        print("[VISION] No Gemini client — skipping")
+        print("[VISION] No Gemini client - skipping")
         return empty
     try:
         import json as _json
         import urllib.request
         import io
 
-        # Fetch image bytes — Discord CDN URLs with expiry tokens must be fetched immediately
+        # Fetch image bytes - Discord CDN URLs with expiry tokens must be fetched immediately
         try:
             req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -151,7 +151,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             f"Scan every row on both teams for a NAME that matches or closely resembles '{player_name}' "
             f"(partial match, case-insensitive, ignore clan tags or prefixes). "
             f"Use this name match as your primary method to find the correct row. "
-            f"The visual highlight (gold/bright background) should agree — if they conflict, trust the name match."
+            f"The visual highlight (gold/bright background) should agree - if they conflict, trust the name match."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
 
@@ -189,7 +189,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     except Exception as e:
         err = str(e)
         if '429' in err or 'RESOURCE_EXHAUSTED' in err:
-            print(f"[VISION] Gemini quota exhausted — user will need to enter stats manually")
+            print(f"[VISION] Gemini quota exhausted - user will need to enter stats manually")
         else:
             print(f"[VISION] Error: {e}")
         return empty
@@ -201,7 +201,7 @@ def build_manual_content():
     lines = [
         "```",
         "╭──────────────────────────────────────╮",
-        "   🎩  BUTLER'S MANUAL — PLAYER COMMANDS",
+        "   🎩  BUTLER'S MANUAL - PLAYER COMMANDS",
         "╰──────────────────────────────────────╯",
         "",
     ]
@@ -212,7 +212,7 @@ def build_manual_content():
 
 
 def parse_submission_text(text):
-    # Sort aliases longest-first so "war bow" matches before "bow" — otherwise
+    # Sort aliases longest-first so "war bow" matches before "bow" - otherwise
     # shorter aliases steal the match from longer ones that overlap.
     from difflib import get_close_matches
     text_lower = text.lower().strip()
@@ -226,7 +226,7 @@ def parse_submission_text(text):
             detected_weapon = config.WEAPON_ALIASES[alias]
             break
 
-    # 2. Fuzzy fallback — check each word against all weapon aliases
+    # 2. Fuzzy fallback - check each word against all weapon aliases
     if not detected_weapon:
         all_weapon_aliases = list(config.WEAPON_ALIASES.keys())
         for word in words:
@@ -272,7 +272,7 @@ def parse_submission_text(text):
                 break
 
     # If they said a parent class (e.g. "vanguard") and a weapon, try to narrow
-    # it down to the specific subclass automatically — saves them having to type it.
+    # it down to the specific subclass automatically - saves them having to type it.
     if detected_parent and detected_weapon:
         subs = config.PARENT_TO_SUBCLASSES[detected_parent]
         candidates = [s for s in subs if detected_weapon in config.CLASS_WEAPON_MAP.get(s, [])]
@@ -283,7 +283,7 @@ def parse_submission_text(text):
 
 
 def format_weapon_marks(marks):
-    # Formatting tiers map to rank thresholds — bold at Gold (12), italic+bold at
+    # Formatting tiers map to rank thresholds - bold at Gold (12), italic+bold at
     # Crimson (60), plus prestige multiplier suffix past Iridescent (150).
     if marks >= 150:
         prestige = sum(1 for t in config.PRESTIGE_THRESHOLDS if marks >= t)
@@ -297,7 +297,7 @@ def format_weapon_marks(marks):
         return str(marks)
 
 
-# Only these thresholds get milestone announcements — not every rank crossing,
+# Only these thresholds get milestone announcements - not every rank crossing,
 # just the ones that actually mean something: first mark, Crimson, Prestige, Iridescent.
 _MILESTONE_THRESHOLDS = {1, 60, 80, 150}
 
@@ -312,7 +312,7 @@ def detect_weapon_milestones(old_flat, new_flat):
         for threshold, rank_name in config.WEAPON_RANK_THRESHOLDS:
             if threshold in _MILESTONE_THRESHOLDS and old < threshold <= new:
                 milestones.append((weapon, threshold, rank_name))
-        # Prestige multiplier — fire each time they cross another prestige threshold past 150
+        # Prestige multiplier - fire each time they cross another prestige threshold past 150
         if old >= 150:
             old_x = sum(1 for t in config.PRESTIGE_THRESHOLDS if old >= t)
             new_x = sum(1 for t in config.PRESTIGE_THRESHOLDS if new >= t)
@@ -327,7 +327,7 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
         mark_count = (config.PRESTIGE_THRESHOLDS[n - 1]
                       if n <= len(config.PRESTIGE_THRESHOLDS)
                       else config.PRESTIGE_THRESHOLDS[-1])
-        return f"**{player_name}** — **{weapon}** ×{n}. {mark_count} marks. The bald woman would be proud."
+        return f"**{player_name}** - **{weapon}** ×{n}. {mark_count} marks. The bald woman would be proud."
     messages = {
         1:   f"*Noted.* **{player_name}** has drawn first blood with the **{weapon}**.",
         60:  f"**{player_name}** has reached Crimson rank on the **{weapon}**. 60 marks. I approve. Quietly.",
@@ -342,7 +342,7 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
 submission_state = {'last_submission_time': None, 'dry_spell_posted': False}
 
 # In-memory log for the hourly digest posted to nerve center.
-# Nothing persists across restarts — intentional, digest is ephemeral.
+# Nothing persists across restarts - intentional, digest is ephemeral.
 _nerve_events = {
     'submissions':         [],  # (timestamp, player, weapon)
     'butler_interactions': [],  # (trigger[:60], response[:60])
@@ -368,7 +368,7 @@ def nerve_log_milestone(player, weapon, rank):
 
 
 async def nerve_alert(bot_instance, context, error):
-    # Fire-and-forget critical error to nerve center — don't let this crash anything else
+    # Fire-and-forget critical error to nerve center - don't let this crash anything else
     try:
         guild = bot_instance.get_guild(config.GUILD_ID)
         if not guild:
@@ -379,7 +379,7 @@ async def nerve_alert(bot_instance, context, error):
             import discord as _discord
             if isinstance(ch, _discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-            await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
+            await ch.send(f"⚠️ **Critical Error** - {context}\n```{str(error)[:300]}```")
     except Exception:
         pass
 
@@ -432,9 +432,6 @@ async def nerve_alert(bot_instance, context, error):
             import discord as _discord
             if isinstance(ch, _discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-            await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
-    except Exception:
-        pass
-itical Error** — {context}\n```{str(error)[:300]}```")
+            await ch.send(f"⚠️ **Critical Error** - {context}\n```{str(error)[:300]}```")
     except Exception:
         pass
