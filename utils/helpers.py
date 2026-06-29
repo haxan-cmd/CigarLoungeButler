@@ -195,6 +195,22 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         return empty
 
 
+def build_manual_content():
+    """Build the butler's-manual channel post listing all player-facing slash commands."""
+    import config as _config
+    lines = [
+        "```",
+        "╭──────────────────────────────────────╮",
+        "   🎩  BUTLER'S MANUAL — PLAYER COMMANDS",
+        "╰──────────────────────────────────────╯",
+        "",
+    ]
+    for cmd, desc in _config.PLAYER_COMMANDS:
+        lines.append(f"  {cmd:<20} {desc}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
 def parse_submission_text(text):
     # Sort aliases longest-first so "war bow" matches before "bow" — otherwise
     # shorter aliases steal the match from longer ones that overlap.
@@ -406,7 +422,6 @@ def nerve_flush():
 
 
 async def nerve_alert(bot_instance, context, error):
-    # Fire-and-forget critical error to nerve center — don't let this crash anything else
     try:
         guild = bot_instance.get_guild(config.GUILD_ID)
         if not guild:
@@ -418,5 +433,8 @@ async def nerve_alert(bot_instance, context, error):
             if isinstance(ch, _discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
             await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
+    except Exception:
+        pass
+itical Error** — {context}\n```{str(error)[:300]}```")
     except Exception:
         pass
