@@ -1242,17 +1242,6 @@ class LeaderboardsCog(commands.Cog):
         await interaction.edit_original_response(content=f"\u2705 Removed **{removed}** duplicate entries from **{name}**. Run `/refresh` to update the board.")
 
 
-HH_TOTAL = sum(len(v) for v in config.CLASS_WEAPON_MAP.values())  # 87
-
-# Known completers from the manual list (name only — no discord_id available)
-# These will be seeded with discord_id='legacy_<name>' as placeholders
-_HH_LEGACY_COMPLETERS = [
-    "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
-    "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
-    "C10H15N", "BallsMajoney"
-]
-
-
     @app_commands.command(name="backfill_hundred_handed", description="Seed Hundred Handed from submissions + legacy list (mod only).")
     async def backfill_hundred_handed(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
