@@ -395,9 +395,41 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
         except Exception as e:
             print(f"Completions board update error: {e}")
 
+    # Update bonus completions board if special just got done
+    if bounty['special_done'] and bounty_channel and bounty.get('bonus_msg_id'):
+        try:
+            bonus_text = await _build_bonus_board_text(bounty, guild)
+            bonus_msg = await bounty_channel.fetch_message(bounty['bonus_msg_id'])
+            await bonus_msg.edit(content=bonus_text)
+        except Exception as e:
+            print(f"Bonus board update error: {e}")
+
     await update_progress_board(bounty, bounty_channel)
 
     return True
+
+
+async def _build_bonus_board_text(bounty, guild):
+    """Build the BONUS COMPLETIONS board text from player_bounty_progress rows."""
+    rows = await _db.get_all_bounty_progress(bounty['title'])
+    completers = []
+    for r in rows:
+        progress = json.loads(r['progress']) if isinstance(r['progress'], str) else r['progress']
+        if progress.get('__special__', 0) >= 1:
+            completers.append(r['player_name'])
+    lines = [
+        "```",
+        "╭──────────────────────────────╮",
+        f"  {bounty['theme_emoji']} BONUS COMPLETIONS {bounty['theme_emoji']}",
+        "╰──────────────────────────────╯",
+    ]
+    if completers:
+        for idx, name in enumerate(completers, 1):
+            lines.append(f"{idx}. {name}")
+    else:
+        lines.append("No bonus completions yet.")
+    lines.append("```")
+    return "\n".join(lines)
 
 
 class BountyCog(commands.Cog):
@@ -790,6 +822,21 @@ class BountyCog(commands.Cog):
                 print(f"bounty_set_bonus card update error: {e}")
 
         await save_player_bounty_progress(bounty['title'], player_id, player_name, forum_post_id, player_progress)
+
+        # Update the bonus completions board message
+        bounty_channel = guild.get_channel(bounty['channel_id']) if bounty.get('channel_id') else None
+        if not bounty_channel and bounty.get('channel_id'):
+            try:
+                bounty_channel = await guild.fetch_channel(bounty['channel_id'])
+            except Exception:
+                bounty_channel = None
+        if bounty_channel and bounty.get('bonus_msg_id'):
+            try:
+                bonus_text = await _build_bonus_board_text(bounty, guild)
+                bonus_msg = await bounty_channel.fetch_message(bounty['bonus_msg_id'])
+                await bonus_msg.edit(content=bonus_text)
+            except Exception as e:
+                print(f"bounty_set_bonus board update error: {e}")
 
         await interaction.followup.send(f"⚜️ Bonus marked complete for **{player_name}**.", ephemeral=True)
 

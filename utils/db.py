@@ -392,6 +392,16 @@ async def get_all_bounty_players() -> list[list]:
              r['forum_post_id'] or '', r['progress'] or ''] for r in rows]
 
 
+async def get_all_bounty_progress(bounty_title: str) -> list:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT player_name, progress FROM bounty_players WHERE bounty_title=$1",
+            bounty_title
+        )
+    return [{'player_name': r['player_name'], 'progress': r['progress']} for r in rows]
+
+
 async def upsert_bounty_player(bounty_title, discord_id, player_name, forum_post_id, progress):
     pool = _pool_check()
     async with pool.acquire() as conn:
