@@ -1253,7 +1253,33 @@ class LeaderboardsCog(commands.Cog):
                 continue
 
         await refresh_hundred_handed_board(interaction.guild)
-        await interaction.edit_original_response(content=f"✅ Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.")
+
+        # Assign Hundred-Handed role to anyone who qualifies
+        hh_role_assigned = []
+        try:
+            hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+            if hh_role:
+                _all_primaries = {w for weapons in config._SUBCLASS_PRIMARIES.values() for w in weapons}
+                all_subs_for_role = await _db.get_all_submissions()
+                player_weapons: dict[str, set] = {}
+                for r in all_subs_for_role:
+                    if len(r) > 3 and r[2].strip() and r[3].strip():
+                        player_weapons.setdefault(r[2].strip(), set()).add(r[3].strip())
+                for discord_id_str, weapons in player_weapons.items():
+                    if not _all_primaries.issubset(weapons):
+                        continue
+                    try:
+                        member = interaction.guild.get_member(int(discord_id_str)) or await interaction.guild.fetch_member(int(discord_id_str))
+                        if hh_role not in member.roles:
+                            await member.add_roles(hh_role, reason="Backfill: Hundred-Handed role")
+                            hh_role_assigned.append(member.display_name)
+                    except Exception:
+                        continue
+        except Exception as role_e:
+            print(f"[HH] Role backfill error: {role_e}")
+
+        role_msg = f"\n🎖️ Role assigned to: {', '.join(hh_role_assigned)}" if hh_role_assigned else ""
+        await interaction.edit_original_response(content=f"✅ Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
 
 
 async def refresh_hundred_handed_board(guild):
