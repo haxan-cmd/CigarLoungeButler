@@ -345,6 +345,8 @@ def build_favourites_embed(stats):
         inline=False,
     )
 
+    embed.add_field(name="​", value="​", inline=False)
+
     embed.add_field(
         name="⚔️ Most Kills",
         value=fmt_list(stats['top_kills_list'], "K") or "*—*",
