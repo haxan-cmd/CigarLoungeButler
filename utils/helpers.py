@@ -426,19 +426,22 @@ def nerve_flush():
 
     parts = []
     if subs:
-        names = ', '.join(s['player'] for s in subs[:5])
-        extra = f" (+{len(subs)-5} more)" if len(subs) > 5 else ""
-        parts.append(f"📋 **{len(subs)} submission(s):** {names}{extra}")
+        parts.append(f"📋 **Submissions** — {len(subs)} this hour")
+        for ts, player, weapon in subs:
+            parts.append(f"  {ts}  **{player}** — {weapon}")
     if interactions:
-        parts.append(f"💬 **{len(interactions)} butler interaction(s)**")
+        parts.append(f"💬 **Butler Interactions** — {len(interactions)}")
     if milestones:
-        for m in milestones:
-            parts.append(f"🏆 {m}")
+        parts.append(f"🏆 **Milestones**")
+        for player, weapon, rank in milestones:
+            parts.append(f"  **{player}** — {weapon} ({rank})")
     if errors:
-        parts.append(f"⚠️ **{len(errors)} error(s) logged**")
+        parts.append(f"⚠️ **Errors** — {len(errors)}")
+        for ts, err in errors:
+            parts.append(f"  {ts}  {err}")
 
     _nerve_events['submissions'].clear()
-    _nerve_events['interactions'].clear()
+    _nerve_events['butler_interactions'].clear()
     _nerve_events['errors'].clear()
     _nerve_events['milestones'].clear()
 
