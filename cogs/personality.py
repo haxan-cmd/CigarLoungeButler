@@ -83,7 +83,7 @@ Special instructions:
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it.
 - If someone is rude, insulting, or hostile toward you, give a single dry dismissal. Do not use any emoji in your response. Do not engage further.
-- Players with the Idiot role should be addressed slowly and simply, as if explaining something to a confused child. Be condescending but patient. Do not use emoji."""
+- Players with the Idiot role earned it by failing to count correctly in the counting channel. They should be addressed slowly and simply, as if explaining something to a confused child. Be condescending but patient. You may occasionally reference their counting failure — obliquely, not directly. E.g. "I'll keep the numbers small for you." Do not use emoji."""
 
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
@@ -635,6 +635,20 @@ class PersonalityCog(commands.Cog):
                 for row in cached_players()
             )
             if not is_registered:
+                now_ts = time.time()
+                last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
+                if now_ts - last > BUTLER_AI_COOLDOWN_SECONDS:
+                    BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
+                    unregistered_responses = [
+                        "You're not in the registry. I don't speak to strangers.",
+                        "No registry card, no audience. Move along.",
+                        "I don't know who you are, and I find I don't particularly care.",
+                        "Unregistered. You're essentially shouting into an empty hall.",
+                        "The registry has no record of you. Neither does my attention.",
+                        "You haven't submitted a single run and you're talking to me. Bold.",
+                        "I'm afraid I only acknowledge players. You appear to be neither.",
+                    ]
+                    await message.channel.send(random.choice(unregistered_responses))
                 return
 
             now_ts = time.time()
