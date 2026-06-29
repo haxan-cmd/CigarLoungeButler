@@ -513,5 +513,3 @@ class AdminCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
-
-    await bot.add_cog(AdminCog(bot))
