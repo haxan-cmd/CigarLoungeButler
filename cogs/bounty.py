@@ -796,9 +796,7 @@ class BountyCog(commands.Cog):
         player_progress = player_row['progress'] if player_row else {}
         forum_post_id = player_row.get('forum_post_id') if player_row else None
 
-        if player_progress.get('__special__', 0) >= 1:
-            await interaction.followup.send(f"**{player_name}** has already completed the bonus.", ephemeral=True)
-            return
+        already_done = player_progress.get('__special__', 0) >= 1
 
         player_progress['__special__'] = 1
 
@@ -807,7 +805,11 @@ class BountyCog(commands.Cog):
 
         # Append to bonus_completions list (same pattern as completions)
         bonus_completions = bounty.get('bonus_completions', [])
-        if not any(str(e.get('id') if isinstance(e, dict) else '') == str(player_id) for e in bonus_completions):
+        already_in_list = any(str(e.get('id') if isinstance(e, dict) else '') == str(player_id) for e in bonus_completions)
+        if already_done and already_in_list:
+            await interaction.followup.send(f"**{player_name}** has already completed the bonus.", ephemeral=True)
+            return
+        if not already_in_list:
             bonus_completions.append({'id': str(player_id), 'name': player_name})
         bounty['bonus_completions'] = bonus_completions
         await save_bounty_state(bounty['id'], bounty['weapons'], True, bounty['completions'])
