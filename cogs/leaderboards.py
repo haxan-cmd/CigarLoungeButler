@@ -169,22 +169,26 @@ async def build_ledger_entrance(guild):
                 return f"[→ Full {label} Index](https://discord.com/channels/{guild_id}/{thread.id})"
             return f"*{label} index not yet built*"
 
-        embed = discord.Embed(
-            title="<:cigar:1444893851427803298>  The Ledger",
-            color=0x8b6914,
-        )
+        def section_link(label, thread, full_label):
+            """Return a bold markdown hyperlink for a section, or plain label if no thread."""
+            if thread:
+                url = f"https://discord.com/channels/{guild_id}/{thread.id}"
+                return f"**[{label}]({url})**"
+            return f"**{label}**"
+
+        embed = discord.Embed(color=0x8b6914)
 
         sections = [
-            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",       index_link(idx_reg, 'Registry')),
-            ("🐱  BOUNTY CARDS",                                     index_link(idx_bounty, 'Bounty Cards')),
-            ("<a:campaignmaster:1520497947115262083>  MAP RECORDS",  index_link(idx_maps, 'Maps')),
-            ("TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
-            ("ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
-            ("<a:toptkd:1360312666475728958>  FEATS",                index_link(idx_feats, 'Feats')),
+            section_link("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE", idx_reg, 'Registry'),
+            section_link("🐱  BOUNTY CARDS",                               idx_bounty, 'Bounty Cards'),
+            section_link("<a:campaignmaster:1520497947115262083>  MAP RECORDS", idx_maps, 'Maps'),
+            section_link("⚔️  TWO-HANDED WEAPONS",                         idx_2h, '2H'),
+            section_link("🗡️  ONE-HANDED WEAPONS",                         idx_1h, '1H'),
+            section_link("🏛️  FEATS",                                      idx_feats, 'Feats'),
         ]
 
-        for name, value in sections:
-            embed.add_field(name=name, value=value, inline=False)
+        for value in sections:
+            embed.add_field(name="​", value=value, inline=False)
             embed.add_field(name="​", value="​", inline=False)
 
         mid = _entrance_message_ids.get('entrance')
