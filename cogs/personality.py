@@ -276,11 +276,7 @@ class PersonalityCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        guild = discord.Object(id=GUILD_ID)
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        await bot.tree.sync()
-        print(f'Logged in as {self.bot.user}')
+        print(f'[PERSONALITY] on_ready fired, starting tasks')
         if not self.weekly_snapshot.is_running():
             self.weekly_snapshot.start()
         if not self.dry_weather_check.is_running():
