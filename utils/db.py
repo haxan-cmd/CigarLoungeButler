@@ -501,6 +501,17 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
         """, board_name, str(discord_id))
 
 
+async def delete_leaderboard_entry_by_link(board_name: str, message_link: str):
+    """Delete one entry on a specific board by message link (for deduplication)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM leaderboard_data WHERE board_name=$1 AND message_link=$2 AND id = "
+            "(SELECT id FROM leaderboard_data WHERE board_name=$1 AND message_link=$2 ORDER BY id ASC LIMIT 1)",
+            board_name, message_link
+        )
+
+
 async def delete_leaderboard_entries_by_link(message_link: str) -> list[str]:
     """Delete all leaderboard_data rows matching a message_link; return affected board names."""
     pool = _pool_check()
@@ -668,6 +679,53 @@ async def save_challenge_rules(msg_ids: list, labels: list):
                 "INSERT INTO challenge_rules (message_id, section) VALUES ($1,$2)",
                 str(msg_id), label
             )
+
+
+# ── Hundred Handed ────────────────────────────────────────────────────────────
+
+async def add_hundred_handed(discord_id: str, player_name: str, subclass: str, weapon: str) -> bool:
+    """Insert a subclass+weapon completion. Returns True if it was new."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS hundred_handed ("
+            "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
+            "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
+            "UNIQUE(discord_id, subclass, weapon))"
+        )
+        existing = await conn.fetchval(
+            "SELECT COUNT(*) FROM hundred_handed WHERE discord_id=$1 AND subclass=$2 AND weapon=$3",
+            str(discord_id), subclass, weapon
+        )
+        if existing:
+            return False
+        await conn.execute(
+            "INSERT INTO hundred_handed (discord_id, player_name, subclass, weapon) VALUES ($1,$2,$3,$4)",
+            str(discord_id), player_name, subclass, weapon
+        )
+        return True
+
+
+async def get_hundred_handed_progress(discord_id: str) -> list:
+    """Return list of (subclass, weapon) tuples completed by this player."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT subclass, weapon FROM hundred_handed WHERE discord_id=$1 ORDER BY achieved_at",
+            str(discord_id)
+        )
+    return [(r['subclass'], r['weapon']) for r in rows]
+
+
+async def get_hundred_handed_leaderboard() -> list:
+    """Return [(discord_id, player_name, count)] sorted by count desc."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT discord_id, player_name, COUNT(*) as cnt "
+            "FROM hundred_handed GROUP BY discord_id, player_name ORDER BY cnt DESC"
+        )
+    return [(r['discord_id'], r['player_name'], int(r['cnt'])) for r in rows]
 
 
 # ── Snapshots ─────────────────────────────────────────────────────────────────

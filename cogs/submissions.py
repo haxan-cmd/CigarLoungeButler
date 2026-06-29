@@ -1431,7 +1431,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[FINALISE] Picker reroute failed: {e}")
         return
     # Cross-cog lazy imports to avoid circular dependencies at module load
-    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance
+    from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, refresh_hundred_handed_board as _refresh_hundred_handed_board
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1715,6 +1715,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             )
         except Exception as e:
             print(f"Leaderboard update error: {e}")
+
+    # Hundred Handed: track 100+TD subclass+weapon combos
+    if takedowns and takedowns >= 100 and selected_weapon and selected_class and not selected_class.startswith("Marksman"):
+        try:
+            is_new = await _db.add_hundred_handed(
+                str(interaction.user.id), interaction.user.display_name,
+                selected_class, selected_weapon
+            )
+            if is_new:
+                print(f"[HUNDRED_HANDED] New combo: {interaction.user.display_name} — {selected_class} / {selected_weapon}")
+                await _refresh_hundred_handed_board(interaction.guild)
+        except Exception as e:
+            print(f"[HUNDRED_HANDED] Error: {e}")
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")

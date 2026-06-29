@@ -149,6 +149,16 @@ CREATE TABLE IF NOT EXISTS snapshots (
     trend_weapon_3 TEXT
 );
 
+CREATE TABLE IF NOT EXISTS hundred_handed (
+    id          SERIAL PRIMARY KEY,
+    discord_id  TEXT NOT NULL,
+    player_name TEXT,
+    subclass    TEXT NOT NULL,
+    weapon      TEXT NOT NULL,
+    achieved_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(discord_id, subclass, weapon)
+);
+
 CREATE TABLE IF NOT EXISTS index_posts (
     forum_name TEXT PRIMARY KEY,
     channel_id TEXT,

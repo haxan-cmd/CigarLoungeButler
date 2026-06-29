@@ -438,7 +438,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         existing_entry = existing_score is not None
 
         if unlimited_top50:
-            # No cap — every qualifying submission gets its own entry forever
+            # No cap — but skip exact duplicates (same player, score, weapon)
+            already_exists = any(
+                r[0] == lb_name and r[2] == discord_id
+                and (int(r[3]) if r[3] else 0) == score
+                and (r[5] if len(r) > 5 else '') == (selected_weapon or '')
+                for r in all_values
+            )
+            if already_exists:
+                continue
             await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             any_updated = True
             all_board = [int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]]
@@ -515,18 +523,19 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            msg_content = _map_header(lb_name) if is_map else ""
             new_ids = []
             for i, emb in enumerate(embeds):
                 if i < len(message_ids):
                     try:
                         msg = await thread.fetch_message(message_ids[i])
-                        await msg.edit(content="", embed=emb)
+                        await msg.edit(content=msg_content, embed=emb)
                         new_ids.append(message_ids[i])
                     except Exception:
-                        msg = await thread.send(embed=emb)
+                        msg = await thread.send(content=msg_content, embed=emb)
                         new_ids.append(msg.id)
                 else:
-                    msg = await thread.send(embed=emb)
+                    msg = await thread.send(content=msg_content, embed=emb)
                     new_ids.append(msg.id)
             if new_ids != message_ids:
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -642,6 +651,15 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 
 EMBED_GOLD = 0xC8952C
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
+
+
+def _map_header(lb_name: str) -> str:
+    """Return the text content label for a map board message, e.g. '🔵 Bridgetown — Agatha'."""
+    if ' - ' not in lb_name:
+        return lb_name
+    map_name, faction = lb_name.split(' - ', 1)
+    emoji = FACTION_EMOJIS.get(faction, '⚔️')
+    return f"{emoji} **{map_name} — {faction}**"
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
@@ -802,13 +820,13 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(message_ids):
                         try:
                             msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content="", embed=emb)
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
                             new_ids.append(message_ids[i])
                         except Exception:
-                            msg = await thread.send(embed=emb)
+                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
                             new_ids.append(msg.id)
                     else:
-                        msg = await thread.send(embed=emb)
+                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
                         new_ids.append(msg.id)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -855,13 +873,13 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(message_ids):
                         try:
                             msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content="", embed=emb)
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
                             new_ids.append(message_ids[i])
                         except Exception:
-                            msg = await thread.send(embed=emb)
+                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
                             new_ids.append(msg.id)
                     else:
-                        msg = await thread.send(embed=emb)
+                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
                         new_ids.append(msg.id)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -958,7 +976,7 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(old_ids):
                         try:
                             msg = await thread.fetch_message(old_ids[i])
-                            await msg.edit(content="", embed=emb)
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
                             new_ids.append(old_ids[i])
                         except Exception:
                             # Old message gone or is text — send fresh embed
@@ -1201,6 +1219,122 @@ class LeaderboardsCog(commands.Cog):
                 added += 1
 
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
+
+    @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
+    @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
+    async def dedupe_board(self, interaction: discord.Interaction, name: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        all_values = await _db.get_all_leaderboard_data()
+        rows = [r for r in all_values if r[0] == name]
+        seen = set()
+        removed = 0
+        for r in rows:
+            key = (r[2], int(r[3]) if r[3] else 0, r[5] if len(r) > 5 else '')
+            if key in seen:
+                # duplicate \u2014 delete by message link (unique enough)
+                await _db.delete_leaderboard_entry_by_link(name, r[4] if len(r) > 4 else '')
+                removed += 1
+            else:
+                seen.add(key)
+        await interaction.edit_original_response(content=f"\u2705 Removed **{removed}** duplicate entries from **{name}**. Run `/refresh` to update the board.")
+
+
+HH_TOTAL = sum(len(v) for v in config.CLASS_WEAPON_MAP.values())  # 87
+
+# Known completers from the manual list (name only — no discord_id available)
+# These will be seeded with discord_id='legacy_<name>' as placeholders
+_HH_LEGACY_COMPLETERS = [
+    "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
+    "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
+    "C10H15N", "BallsMajoney"
+]
+
+
+    @app_commands.command(name="backfill_hundred_handed", description="Seed Hundred Handed from submissions + legacy list (mod only).")
+    async def backfill_hundred_handed(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        added = 0
+
+        # 1. Seed legacy completers — mark all 87 combos for each
+        for name in _HH_LEGACY_COMPLETERS:
+            legacy_id = f"legacy_{name.lower().replace(' ', '_')}"
+            for subclass, weapons in config.CLASS_WEAPON_MAP.items():
+                for weapon in weapons:
+                    is_new = await _db.add_hundred_handed(legacy_id, name, subclass, weapon)
+                    if is_new:
+                        added += 1
+
+        # 2. Scan submissions for 100+ TD with known subclass+weapon
+        all_subs = await _db.get_all_submissions()
+        for row in all_subs:
+            try:
+                discord_id = str(row[1]) if len(row) > 1 and row[1] else None
+                player_name = str(row[2]) if len(row) > 2 and row[2] else None
+                weapon = str(row[5]) if len(row) > 5 and row[5] else None
+                subclass = str(row[6]) if len(row) > 6 and row[6] else None
+                takedowns = int(row[7]) if len(row) > 7 and row[7] else 0
+                if not discord_id or not weapon or not subclass or takedowns < 100:
+                    continue
+                if subclass.startswith("Marksman"):
+                    continue
+                if subclass not in config.CLASS_WEAPON_MAP:
+                    continue
+                if weapon not in config.CLASS_WEAPON_MAP[subclass]:
+                    continue
+                is_new = await _db.add_hundred_handed(discord_id, player_name or '', subclass, weapon)
+                if is_new:
+                    added += 1
+            except Exception:
+                continue
+
+        await refresh_hundred_handed_board(interaction.guild)
+        await interaction.edit_original_response(content=f"✅ Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.")
+
+
+async def refresh_hundred_handed_board(guild):
+    """Rebuild The Hundred Handed embed in its thread."""
+    all_lb_rows = await _get_lb_records()
+    lb_row = next((r for r in all_lb_rows if r.get('Leaderboard Name') == 'The Hundred Handed'), None)
+    if not lb_row:
+        print("[HUNDRED_HANDED] No leaderboard row found for 'The Hundred Handed'")
+        return
+
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+
+    rows = await _db.get_hundred_handed_leaderboard()
+    if not rows:
+        desc = "*No entries yet.*"
+    else:
+        lines = []
+        for idx, (discord_id, player_name, count) in enumerate(rows, 1):
+            done = "✓" if count >= HH_TOTAL else ""
+            lines.append(f"{idx}. **{player_name}** — {count}/{HH_TOTAL} {done}")
+        desc = "\n".join(lines)
+
+    embed = discord.Embed(title="The Hundred Handed", description=desc, colour=EMBED_GOLD)
+
+    try:
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        if message_ids:
+            try:
+                msg = await thread.fetch_message(message_ids[0])
+                await msg.edit(content="", embed=embed)
+            except Exception:
+                msg = await thread.send(embed=embed)
+                await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+        else:
+            msg = await thread.send(embed=embed)
+            await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+    except Exception as e:
+        print(f"[HUNDRED_HANDED] Board refresh error: {e}")
 
 
 async def setup(bot):
