@@ -335,7 +335,7 @@ def build_favourites_embed(stats):
 
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
     embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Kill/TD Ratio  *(kills ÷ takedowns %)*",
+        name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ takedowns %)*",
         value=lethal_text,
         inline=False,
     )
@@ -347,26 +347,9 @@ def build_favourites_embed(stats):
         inline=False,
     )
 
-    def _fmt_weapon_shares(lst):
-        if not lst:
-            return "*Not enough data yet*"
-        return "\n".join(f"{w} — {avg:.1f}%" for w, avg in lst)
-
     embed.add_field(
-        name="⚔️ Top Weapons  *(avg kill share)*",
-        value=_fmt_weapon_shares(stats.get('top_weapons_by_kill_share', [])),
-        inline=True,
-    )
-    embed.add_field(
-        name="💀 Top Weapons  *(avg TD share)*",
-        value=_fmt_weapon_shares(stats.get('top_weapons_by_td_share', [])),
-        inline=True,
-    )
-    embed.add_field(name="​", value="​", inline=False)  # spacer
-
-    embed.add_field(
-        name="🏃 Busiest",
-        value=fmt_list(stats['top_busiest'], "runs") or "*—*",
+        name="⚔️ Most Kills",
+        value=fmt_list(stats['top_kills_list'], "K") or "*—*",
         inline=True,
     )
     embed.add_field(
@@ -375,6 +358,12 @@ def build_favourites_embed(stats):
         inline=True,
     )
     embed.add_field(name="​", value="​", inline=True)
+
+    embed.add_field(
+        name="🏃 Busiest",
+        value=fmt_list(stats['top_busiest'], "runs") or "*—*",
+        inline=True,
+    )
 
     embed.add_field(
         name="⚔️ Top Weapons",
