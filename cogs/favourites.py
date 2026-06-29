@@ -375,11 +375,8 @@ def build_favourites_embed(stats):
         value=fmt_list(stats['top_maps'], "runs") or "*—*",
         inline=True,
     )
-    embed.add_field(name="​", value="​", inline=True)
-
-    embed.add_field(name="─── All-Time Titles ───", value="​", inline=False)
     embed.add_field(
-        name="​",
+        name="─── All-Time Titles ───",
         value=(
             f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — **{stats['grand_marshal']}**\n"
             f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — **{stats['weapons_master']}**\n"
