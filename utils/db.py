@@ -346,6 +346,9 @@ async def delete_leaderboard_entry(entry_id: int):
 async def get_all_bounties() -> list[list]:
     pool = _pool_check()
     async with pool.acquire() as conn:
+        await conn.execute(
+            "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS bonus_completions TEXT DEFAULT '[]'"
+        )
         rows = await conn.fetch("SELECT * FROM bounties ORDER BY id")
     return [
         [r['title'], r['channel_id'] or '', r['message_id'] or '', r['theme_emoji'] or '',
@@ -353,14 +356,14 @@ async def get_all_bounties() -> list[list]:
          r['completions'] or '', 'TRUE' if r['active'] else 'FALSE', r['role_id'] or '',
          r['forum_channel_id'] or '', r['completions_msg_id'] or '', r['bonus_msg_id'] or '',
          r['progress_msg_id'] or '', str(r['start_date']) if r['start_date'] else '',
-         str(r['id'])]
+         str(r['id']), r['bonus_completions'] or '[]']
         for r in rows
     ]
 
 
 async def update_bounty_field(bounty_id: int, field: str, value):
     pool = _pool_check()
-    allowed = {'weapons', 'special_done', 'completions', 'active', 'message_id',
+    allowed = {'weapons', 'special_done', 'completions', 'bonus_completions', 'active', 'message_id',
                'completions_msg_id', 'bonus_msg_id', 'progress_msg_id', 'channel_id'}
     if field not in allowed:
         raise ValueError(f"Field {field} not allowed")
