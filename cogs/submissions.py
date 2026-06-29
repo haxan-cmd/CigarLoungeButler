@@ -2025,11 +2025,19 @@ class SubmissionsCog(commands.Cog):
             return
         if message.id in self._prompted_messages:
             return
+        # Only trigger on image attachments
+        has_image = any(
+            (att.content_type and att.content_type.startswith('image/'))
+            or (not att.content_type and att.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')))
+            for att in message.attachments
+        )
+        if not has_image:
+            return
+
         self._prompted_messages.add(message.id)
         # Prevent unbounded growth — keep only the last 200 message IDs
         if len(self._prompted_messages) > 200:
-            self._prompted_messages = set(list(
-                self._prompted_messages)[-200:])
+            self._prompted_messages = set(list(self._prompted_messages)[-200:])
 
         view = SubmitView(message)
         prompt = await message.reply(
