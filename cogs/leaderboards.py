@@ -175,12 +175,12 @@ async def build_ledger_entrance(guild):
         )
 
         sections = [
-            ("ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
-            ("TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
-            ("<a:campaignmaster:1520497947115262083>  MAP RECORDS",  index_link(idx_maps, 'Maps')),
-            ("🏅  FEATS",                                            index_link(idx_feats, 'Feats')),
-            ("🐱  BOUNTY CARDS",                                     index_link(idx_bounty, 'Bounty Cards')),
             ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",       index_link(idx_reg, 'Registry')),
+            ("🐱  BOUNTY CARDS",                                     index_link(idx_bounty, 'Bounty Cards')),
+            ("<a:campaignmaster:1520497947115262083>  MAP RECORDS",  index_link(idx_maps, 'Maps')),
+            ("TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
+            ("ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
+            ("<a:toptkd:1360312666475728958>  FEATS",                index_link(idx_feats, 'Feats')),
         ]
 
         for name, value in sections:
