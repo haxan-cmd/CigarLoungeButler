@@ -289,6 +289,8 @@ class PersonalityCog(commands.Cog):
             self.butler_organic_post.start()
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.start()
+        # Fire nerve center immediately on startup so it always posts on deploy
+        self.bot.loop.create_task(self._run_nerve_logic())
         # Update butlers-manual
         try:
             real_guild = self.bot.get_guild(GUILD_ID)
@@ -390,12 +392,8 @@ class PersonalityCog(commands.Cog):
     _last_nerve_post: float = 0.0  # epoch seconds, tracks last successful post
 
     @tasks.loop(minutes=1)
-    async def nerve_center_digest(self):
-        """Post to nerve center channel every minute (debug mode)."""
-        now_ts = datetime.now(timezone.utc).timestamp()
-        print(f"[NERVE] tick — last_post={self._last_nerve_post:.0f} now={now_ts:.0f} diff={now_ts - self._last_nerve_post:.0f}s")
-        if now_ts - self._last_nerve_post < 60:
-            return  # not yet a minute since last post
+    async def _run_nerve_logic(self):
+        """Core nerve center post logic. Called on startup and by the hourly loop."""
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         try:
             digest = nerve_flush()
@@ -407,18 +405,15 @@ class PersonalityCog(commands.Cog):
             if not ch:
                 print("[NERVE] channel not found")
                 return
-            # Unarchive if it's a thread
             if isinstance(ch, discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-
-            # Scan feedback + main channel for complaints/bug reports in last hour
             FEEDBACK_CHANNEL_ID = 1518293898177413262
             scan_channel_ids = [FEEDBACK_CHANNEL_ID, MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
             bug_keywords = [
-                'broke', 'broken', 'bug', 'didn\'t work', 'not working', 'didn\'t register',
+                'broke', 'broken', 'bug', "didn't work", 'not working', "didn't register",
                 'failed', 'error', 'wrong', 'missing', 'disappeared', 'crash', 'issue',
-                'fix', 'broken', 'help', 'why didn\'t', 'why did', 'not showing',
-                'didn\'t submit', 'lost', 'glitch', 'wtf', 'messed up'
+                'fix', 'help', "why didn't", 'why did', 'not showing',
+                "didn't submit", 'lost', 'glitch', 'wtf', 'messed up'
             ]
             cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
             flagged = []
@@ -437,19 +432,11 @@ class PersonalityCog(commands.Cog):
                             flagged.append(f"`{ts}` **{msg.author.display_name}** [{chan_label}]: {msg.content[:120]}")
             except Exception as scan_err:
                 print(f"[NERVE] channel scan error: {scan_err}")
-
             now_dt = datetime.now(timezone.utc)
-            embed = discord.Embed(
-                title="📋  Butler's Nerve Center",
-                color=0x8b6914,
-                timestamp=now_dt,
-            )
+            embed = discord.Embed(title="📋  Butler's Nerve Center", color=0x8b6914, timestamp=now_dt)
             embed.description = digest if digest and digest.strip() else "Nothing to report this hour."
-
             if flagged:
-                flag_text = "\n".join(flagged[:10])
-                embed.add_field(name="⚠️ User Reports (last hour)", value=flag_text[:1024], inline=False)
-
+                embed.add_field(name="⚠️ User Reports (last hour)", value="\n".join(flagged[:10])[:1024], inline=False)
             embed.set_footer(text="Hourly digest")
             await ch.send(embed=embed)
             self._last_nerve_post = datetime.now(timezone.utc).timestamp()
@@ -457,6 +444,11 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             import traceback
             print(f"[NERVE] error: {e}\n{traceback.format_exc()}")
+
+    @tasks.loop(hours=1)
+    async def nerve_center_digest(self):
+        """Post hourly digest to nerve center channel."""
+        await self._run_nerve_logic()
 
     @nerve_center_digest.before_loop
     async def before_nerve_center_digest(self):
