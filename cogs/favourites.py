@@ -1,12 +1,17 @@
-# Stats calculation, Butler's Favourites embed, title role assignment, and /butlers_report.
+"""
+cogs/favourites.py — Butler stats calculation, favourites embed, title roles, /butlers_report.
+"""
 import time
-from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import config
-import utils.db as _db
+from utils.sheets import (
+    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
+    bounty_players_ws, cached_players, cached_submissions,
+    cached_leaderboard_data, cached_bounty_players, gspread_retry,
+)
 
 MOD_ROLE_ID                = config.MOD_ROLE_ID
 MAIN_CHANNEL_ID            = config.MAIN_CHANNEL_ID
@@ -26,11 +31,13 @@ BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
 
 _butlers_report_cooldowns = {}
 
-async def calculate_butler_stats(week_start=None, week_end=None):
-    # week_start/end are UTC timestamps — if passed, submission stats are scoped to that window.
-    # Title holders (Grand Marshal etc.) always use all-time data regardless.
-    all_subs = await _db.get_all_submissions()
-    ld = await _db.get_all_leaderboard_data()
+def calculate_butler_stats(week_start=None, week_end=None):
+    """Pull stats from Submissions and LeaderboardData sheets.
+    If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
+    Titles always use all-time data regardless of window.
+    """
+    all_subs = cached_submissions()
+    ld = cached_leaderboard_data()
 
     # Filter subs to week window if provided
     if week_start is not None and week_end is not None:
@@ -57,14 +64,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     td_scores_sub = {}
     kills_scores_sub = {}
     players_set = set()
-    lethal_ratios = {}       # player -> [kills/td ratios]
-    lobby_finishes = {}      # player -> [(rank, size), ...]
-    team_score_ratios = {}   # player -> [your_td / avg_teammate_td]
-    kill_efficiency = {}     # player -> [(your_kills, total_lobby_kills, lobby_size)]
-    team_kill_shares = {}    # player -> [team kill share %]
-    team_td_shares = {}      # player -> [team TD share %]
-    weapon_kill_shares = {}  # weapon -> [kill share %]
-    weapon_td_shares = {}    # weapon -> [TD share %]
+    lethal_ratios = {}    # player -> [kills/td ratios]
 
     for row in subs:
         if len(row) < 9:
@@ -84,59 +84,9 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         players_set.add(player)
         td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
         kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
-        # Lethality: kill rate (kills/td)
+        # Track lethality ratio: kills/td (higher = more lethal, lower = more dominant/assists)
         if kills > 0 and td > 0:
             lethal_ratios.setdefault(player, []).append(kills / td)
-        # Lobby TD rank for Warlord fallback (cols 14/15, index 13/14)
-        try:
-            lr = int(row[13]) if len(row) > 13 and row[13] else None
-            ls = int(row[14]) if len(row) > 14 and row[14] else None
-            if lr and ls and 1 < ls <= 64:
-                lobby_finishes.setdefault(player, []).append((lr, ls))
-        except (ValueError, TypeError):
-            pass
-        # Warlord: team score ratio (col 20, index 19 — your TD / avg teammate TD)
-        try:
-            tsr = float(row[19]) if len(row) > 19 and row[19] else None
-            if tsr and tsr > 0:
-                team_score_ratios.setdefault(player, []).append(tsr)
-        except (ValueError, TypeError):
-            pass
-        # Lethality v2: kill efficiency vs lobby (col 19 index 18 / col 15 index 14)
-        try:
-            tlk = int(row[18]) if len(row) > 18 and row[18] else None  # total_lobby_kills col 19
-            ls2 = int(row[14]) if len(row) > 14 and row[14] else None
-            if tlk and tlk > 0 and kills > 0 and ls2 and 1 < ls2 <= 64:
-                kill_efficiency.setdefault(player, []).append((kills, tlk, ls2))
-        except (ValueError, TypeError):
-            pass
-        # Team kill share and TD share (cols 20/21)
-        try:
-            tks = float(row[20]) if len(row) > 20 and row[20] else None
-            if tks and 0 < tks <= 100:
-                team_kill_shares.setdefault(player, []).append(tks)
-                if weapon:
-                    weapon_kill_shares.setdefault(weapon, []).append(tks)
-        except (ValueError, TypeError):
-            pass
-        try:
-            tds = float(row[21]) if len(row) > 21 and row[21] else None
-            if tds and 0 < tds <= 100:
-                team_td_shares.setdefault(player, []).append(tds)
-                if weapon:
-                    weapon_td_shares.setdefault(weapon, []).append(tds)
-        except (ValueError, TypeError):
-            pass
-
-    # ── PER-WEAPON averages (min 3 runs) ──
-    def _weapon_avg(d, min_runs=3):
-        return {w: round(sum(v)/len(v), 1) for w, v in d.items() if len(v) >= min_runs}
-
-    weapon_kill_avgs = _weapon_avg(weapon_kill_shares)
-    weapon_td_avgs   = _weapon_avg(weapon_td_shares)
-
-    top_weapons_by_kill_share = sorted(weapon_kill_avgs.items(), key=lambda x: -x[1])[:5]
-    top_weapons_by_td_share   = sorted(weapon_td_avgs.items(),   key=lambda x: -x[1])[:5]
 
     most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
     top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -145,61 +95,55 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # ── LETHALITY -- avg team kill share %, min 3 runs with team data ──
-    lethal_candidates = {p for p, v in team_kill_shares.items() if len(v) >= 3}
-    lethal_ranked = sorted(lethal_candidates, key=lambda p: -(sum(team_kill_shares[p]) / len(team_kill_shares[p])))
+    # Lethality Rating — highest avg kills/td ratio shown as %, min 3 subs
+    qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
+    lethal_ranked = sorted(qualified_lethal.keys(),
+        key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
+    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p])*100:.0f}% Kill Rate)" for p in lethal_ranked[:5]]
 
-    def lethality_label(p):
-        shares = team_kill_shares.get(p, [])
-        avg = sum(shares) / len(shares) if shares else 0
-        return f"{p} -- {avg:.1f}%"
+    # Warlord — lowest avg kills/td ratio shown as TD/Kill, min 5 subs
+    low_ranked = sorted(qualified_lethal.keys(),
+        key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
+    low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
+    most_lethal_top5 = high_lethality
 
-    most_lethal_top5 = [lethality_label(p) for p in lethal_ranked[:5]]
-
-    # ── WARLORD -- avg team TD share %, min 3 runs with team data ──
-    warlord_candidates = {p for p, v in team_td_shares.items() if len(v) >= 3}
-    dom_ranked = sorted(warlord_candidates, key=lambda p: -(sum(team_td_shares[p]) / len(team_td_shares[p])))
-
-    most_dominant = []
-    for p in dom_ranked[:5]:
-        shares = team_td_shares.get(p, [])
-        avg = sum(shares) / len(shares) if shares else 0
-        most_dominant.append(f"{p} -- {avg:.1f}%")
-
-    # Some players have scores in LeaderboardData that predate the Submissions tab —
-    # backfill their counts and best scores so they show up correctly in the report.
-    ld_player_boards = {}  # player -> set of board names they appear on
-    for row in ld:
-        if len(row) < 4:
-            continue
-        lb_name = row[0].strip()
-        player = row[1].strip()
-        if not player:
-            continue
-        try:
-            score = int(row[3])
-        except (ValueError, IndexError):
-            score = 0
-        # Count each unique board entry as a run for busiest
-        ld_player_boards.setdefault(player, set()).add(lb_name)
-        # Backfill best TD and kills scores from their respective boards
-        if lb_name == '200 Takedowns':
-            td_scores_sub[player] = max(td_scores_sub.get(player, 0), score)
-        elif lb_name == '100 Kills':
-            kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), score)
-    # Add LeaderboardData board counts to player_counts (only boards not already in submissions)
-    for player, boards in ld_player_boards.items():
-        players_set.add(player)
-        player_counts[player] = player_counts.get(player, 0) + len(boards)
-    # Recalculate sorted lists after backfill
-    top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
+    # Backfill run counts and best scores from LeaderboardData for legacy entries.
+    # Skip when in weekly mode — ld is all-time data and would contaminate weekly stats.
+    if week_start is None:
+        ld_player_boards = {}  # player -> set of board names they appear on (to count unique runs)
+        for row in ld:
+            if len(row) < 4:
+                continue
+            lb_name = row[0].strip()
+            player = row[1].strip()
+            if not player:
+                continue
+            try:
+                score = int(row[3])
+            except (ValueError, IndexError):
+                score = 0
+            # Count each unique board entry as a run for busiest
+            ld_player_boards.setdefault(player, set()).add(lb_name)
+            # Backfill best TD and kills scores from their respective boards
+            if lb_name == '200 Takedowns':
+                td_scores_sub[player] = max(td_scores_sub.get(player, 0), score)
+            elif lb_name == '100 Kills':
+                kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), score)
+        # Add LeaderboardData board counts to player_counts (only boards not already in submissions)
+        for player, boards in ld_player_boards.items():
+            players_set.add(player)
+            player_counts[player] = player_counts.get(player, 0) + len(boards)
+        # Recalculate sorted lists after backfill
+        top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # Title calculations from LeaderboardData
-    weapon_placements = {}
-    map_placements = {}
-    non_weapon_feat_placements = {}
+    # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
+    # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
+    weapon_placements = {}   # player -> [placements] — weapon + feat boards
+    map_placements = {}      # player -> [placements] — map boards
+    non_weapon_feat_placements = {}  # player -> [placements] — Flawless/Healing Horn (grand marshal only)
 
     WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}
     NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn'}
@@ -224,11 +168,18 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
             elif lb_name in NON_WEAPON_FEAT_BOARDS:
+                # Flawless and Healing Horn count toward Grand Marshal only
                 non_weapon_feat_placements.setdefault(player, []).append(placement)
             else:
+                # Regular weapon boards + Mallet/Knife count toward Weapons Master
                 weapon_placements.setdefault(player, []).append(placement)
 
     def best_placement_title(d, min_boards=1, breadth_first=False):
+        """Return player with best placement title.
+        breadth_first=True: most boards wins, avg placement as tiebreaker.
+        breadth_first=False: best avg wins, most boards as tiebreaker.
+        min_boards: minimum boards required to qualify.
+        """
         if not d:
             return None
         qualified = {p: v for p, v in d.items() if len(v) >= min_boards}
@@ -253,8 +204,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
 
     # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
     # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
-    kills_scores = {}
-    td_scores = {}
+    kills_scores = {}    # player -> [kill scores]
+    td_scores = {}       # player -> [takedown scores]
 
     for row in ld:
         if len(row) < 3:
@@ -271,6 +222,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             td_scores.setdefault(player, []).append(score)
 
     def best_score_title(d):
+        """Return player with best weighted score: avg * log(count+1)."""
         if not d:
             return None
         import math
@@ -292,105 +244,54 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
-        'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
-        'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
-        'most_dominant': most_dominant if most_dominant else [],
-        'top_weapons_by_kill_share': top_weapons_by_kill_share,
-        'top_weapons_by_td_share': top_weapons_by_td_share,
+        'high_lethality': high_lethality if high_lethality else ["N/A"],
+        'low_lethality': low_lethality if low_lethality else ["N/A"],
     }
 
 
-def build_favourites_embed(stats):
-    import discord as _discord
 
+def build_favourites_embed(stats):
     def fmt_list(items, suffix, n=3):
-        return "\n".join(f"{i+1}. **{name}** — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
+        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
 
     def fmt_plain(items, n=3):
-        # entries are like "kc -- 13.2%" — bold the name before the separator
-        lines = []
-        for i, p in enumerate(items[:n]):
-            if ' -- ' in p:
-                name, rest = p.split(' -- ', 1)
-                lines.append(f"{i+1}. **{name}** — {rest}")
-            else:
-                lines.append(f"{i+1}. **{p}**")
-        return "\n".join(lines)
+        return "\n".join(f"{i+1}. {p}" for i, p in enumerate(items[:n]))
 
     week_label = stats.get('week_label', '')
-    desc = (
-        f"Weekly report · {stats['total_runs']} runs · {stats['total_players']} players"
+    header = (
+        f"**📋 The Butler's Favourites** | {week_label}\n"
         if week_label else
-        f"{stats['total_runs']} runs · {stats['total_players']} players"
-    )
-    title = f"📋 The Butler's Favourites" + (f"  |  {week_label}" if week_label else "")
-
-    embed = _discord.Embed(
-        title=title,
-        description=f"*{desc}*",
-        color=0x8b6914,
+        f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
     )
 
-    embed.add_field(name="─── This Week ───", value="​", inline=False)
-
-    lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
-    embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ takedowns %)*",
-        value=lethal_text,
-        inline=False,
+    return (
+        header +
+        f"\n"
+        f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
+        f"\n"
+        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
+        f"\n"
+        f"**<a:topkill:1360314538364240024> Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
+        f"\n"
+        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
+        f"\n"
+        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
+        f"\n"
+        f"**Lethality Rating** *(Kills/TD, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) +
+        f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
+        f"\n\n─────────────────────\n"
+        f"*All-Time Titles*\n"
+        f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
+        f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
+        f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
+        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
+        f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
     )
 
-    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough team data yet*"
-    embed.add_field(
-        name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
-        value=warlord_text,
-        inline=False,
-    )
-
-    embed.add_field(
-        name="⚔️ Most Kills",
-        value=fmt_list(stats['top_kills_list'], "K") or "*—*",
-        inline=True,
-    )
-    embed.add_field(
-        name="<a:toptkd:1360312666475728958> Highest Takedowns",
-        value=fmt_list(stats['top_td_list'], "TD") or "*—*",
-        inline=True,
-    )
-    embed.add_field(name="​", value="​", inline=True)
-
-    embed.add_field(
-        name="🏃 Busiest",
-        value=fmt_list(stats['top_busiest'], "runs") or "*—*",
-        inline=True,
-    )
-
-    embed.add_field(
-        name="⚔️ Top Weapons",
-        value=fmt_list(stats['top_weapons'], "runs") or "*—*",
-        inline=True,
-    )
-    embed.add_field(
-        name="🗺️ Top Maps",
-        value=fmt_list(stats['top_maps'], "runs") or "*—*",
-        inline=True,
-    )
-    embed.add_field(
-        name="─── All-Time Titles ───",
-        value=(
-            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — **{stats['grand_marshal']}**\n"
-            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — **{stats['weapons_master']}**\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — **{stats['campaign_master']}**\n"
-            f"<a:topkill:1360314538364240024> **Headhunter** — **{stats['headhunter']}**\n"
-            f"<a:200tkd:1363648828414230538> **Butcher** — **{stats['butcher']}**"
-        ),
-        inline=False,
-    )
-
-    return embed
 
 
 async def update_title_roles(guild, stats):
+    """Assign title roles and announce changes in #main."""
     main_channel = guild.get_channel(MAIN_CHANNEL_ID)
 
     title_configs = [
@@ -400,8 +301,8 @@ async def update_title_roles(guild, stats):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', HEADHUNTER_ROLE_ID, 'Most Lethal',
-         "The kill tallies have been reviewed. {old}, your edge has been lost. {new}, the Most Lethal title is yours. The butler is mildly impressed."),
+        ('headhunter', HEADHUNTER_ROLE_ID, 'Headhunter',
+         "The tally has been reviewed. {old}, your count has been surpassed. {new}, the Headhunter title is yours. The butler suggests you stop being modest about it."),
         ('butcher', BUTCHER_ROLE_ID, 'Butcher',
          "The battlefield reports are in. {old}, someone has left more bodies behind. {new}, you are hereby declared the Butcher. The butler finds the whole affair rather distasteful, but acknowledges your commitment."),
     ]
@@ -415,29 +316,35 @@ async def update_title_roles(guild, stats):
         if not role:
             continue
 
+        # Find current holder
         current_holders = [m for m in guild.members if role in m.roles]
 
+        # Find new holder by display name
         new_member = discord.utils.find(
-            lambda m: new_holder_name and (m.nick or m.display_name or '').lower() == new_holder_name.lower(),
+            lambda m: (m.nick or m.display_name).lower() == new_holder_name.lower(),
             guild.members
         )
         if not new_member:
             continue
 
+        # Check if it changed hands
         if current_holders and new_member in current_holders:
-            continue
+            continue  # Same person, no change
 
+        # Remove from old holders
         for old_member in current_holders:
             try:
                 await old_member.remove_roles(role)
             except Exception:
                 pass
 
+        # Give to new holder
         try:
             await new_member.add_roles(role)
         except Exception:
             pass
 
+        # Announce in main
         if main_channel and current_holders:
             old_mention = current_holders[0].mention
             new_mention = new_member.mention
@@ -456,9 +363,11 @@ class FavouritesCog(commands.Cog):
     async def butlers_report(self, interaction: discord.Interaction):
         import time
 
-        # Check if user is in Players table
-        player_rows = await _db.get_all_players()
-        player_ids = {row[0].strip() for row in player_rows if row and row[0]}
+        # Check if user is in Players sheet
+        player_ids = set()
+        for row in players_ws.get_all_values()[1:]:
+            if row and row[0]:
+                player_ids.add(row[0].strip())
 
         if str(interaction.user.id) not in player_ids:
             await interaction.response.send_message(
@@ -489,28 +398,29 @@ class FavouritesCog(commands.Cog):
             if week_start_dt > _now:
                 week_start_dt -= timedelta(weeks=1)
             week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+            stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
             stats['week_label'] = week_label
             embed_text = build_favourites_embed(stats)
 
-            await interaction.followup.send(embed=embed_text)
+            # Post publicly in the channel
+            await interaction.followup.send(embed_text)
 
+            # Update pinned favourites channel if set
             if BUTLERS_FAVOURITES_CHANNEL_ID:
                 fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
                     try:
                         async for msg in fav_channel.history(limit=5):
                             if msg.author == interaction.guild.me:
-                                await msg.edit(content=None, embed=embed_text)
+                                await msg.edit(content=embed_text)
                                 break
                         else:
-                            await fav_channel.send(embed=embed_text)
+                            await fav_channel.send(embed_text)
                     except Exception as e:
                         print(f"Favourites channel update error: {e}")
 
-        except Exception as e:
-            await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
-
-
-async def setup(bot):
-    await bot.add_cog(FavouritesCog(bot))
+            # Update title roles
+            try:
+                await update_title_roles(interaction.guild, stats)
+            except Exception as e:
+                pri
