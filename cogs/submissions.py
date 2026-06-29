@@ -2072,3 +2072,12 @@ class SubmissionsCog(commands.Cog):
         prompt = await message.reply(
             "\U0001f4cb Scorecard detected! Click below to submit your run.",
             mention_author=False,
+            view=view
+        )
+        view.prompt_msg = prompt
+
+
+
+
+async def setup(bot):
+    await bot.add_cog(SubmissionsCog(bot))

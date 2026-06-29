@@ -453,133 +453,133 @@ class PersonalityCog(commands.Cog):
             self.nerve_center_digest.restart()
 
 
-    @tasks.loop(hours=168)  # 7 days
+    async def _run_snapshot_logic(self):
+        """Core snapshot logic — called by weekly_snapshot and /force_snapshot."""
+        from datetime import datetime, timezone
+        from collections import Counter
+        now = datetime.now(timezone.utc)
+
+        subs = await _db.get_all_submissions()
+        total_submissions = len(subs)
+
+        # Submissions in the last 7 days
+        week_ago = now.timestamp() - 7 * 86400
+        weekly_rows = []
+        for row in subs:
+            if not row or not row[0].strip():
+                continue
+            try:
+                from datetime import datetime as dt
+                ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                if ts.timestamp() >= week_ago:
+                    weekly_rows.append(row)
+            except Exception:
+                pass
+        weekly_count = len(weekly_rows)
+
+        # Active players this week
+        active_ids = {row[2].strip() for row in weekly_rows if len(row) > 2 and row[2].strip()}
+        active_count = len(active_ids)
+
+        # Top weapons and maps
+        weapon_counts = Counter(row[3].strip() for row in weekly_rows if len(row) > 3 and row[3].strip())
+        top_weapons = [w for w, _ in weapon_counts.most_common(5)]
+
+        map_counts = Counter(row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip())
+        top_maps = [m for m, _ in map_counts.most_common(3)]
+
+        # Avg TD and kills
+        tds, kills_list = [], []
+        for row in weekly_rows:
+            try:
+                tds.append(int(row[7]))
+                kills_list.append(int(row[8]))
+            except Exception:
+                pass
+        avg_td = round(sum(tds) / len(tds), 1) if tds else 0
+        avg_kills = round(sum(kills_list) / len(kills_list), 1) if kills_list else 0
+
+        # Leaderboard velocity from DB
+        try:
+            ld_rows = await _db.get_all_leaderboard_data()
+            weekly_links = {row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip()}
+            hs_set = sum(1 for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links)
+            boards_updated = len({row[0].strip() for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links})
+        except Exception:
+            hs_set = 0
+            boards_updated = 0
+
+        # Weapon trend vs previous week
+        prev_week_ago = week_ago - 7 * 86400
+        prev_rows = []
+        for row in subs:
+            if not row or not row[0].strip():
+                continue
+            try:
+                from datetime import datetime as dt
+                ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                if prev_week_ago <= ts.timestamp() < week_ago:
+                    prev_rows.append(row)
+            except Exception:
+                pass
+        prev_weapon_counts = Counter(row[3].strip() for row in prev_rows if len(row) > 3 and row[3].strip())
+        trend_scores = {w: count - prev_weapon_counts.get(w, 0) for w, count in weapon_counts.items()}
+        top_trending = [w for w, _ in sorted(trend_scores.items(), key=lambda x: x[1], reverse=True)[:3]]
+
+        # Pad
+        while len(top_weapons) < 5: top_weapons.append('')
+        while len(top_maps) < 3: top_maps.append('')
+        while len(top_trending) < 3: top_trending.append('')
+
+        date_str = now.strftime('%Y-%m-%d')
+        await _db.add_snapshot(
+            snapshot_date=date_str,
+            total_subs=total_submissions,
+            weekly_subs=weekly_count,
+            active_players=active_count,
+            top_weapons=top_weapons,
+            top_maps=top_maps,
+            avg_td=avg_td,
+            avg_kills=avg_kills,
+            highscores_set=hs_set,
+            boards_updated=boards_updated,
+            trend_weapons=top_trending,
+        )
+        print(f"Weekly snapshot written for {date_str}")
+
+        # Update Butler's Favourites with weekly stats
+        try:
+            guild = self.bot.get_guild(GUILD_ID)
+            if guild:
+                week_end_ts = now.timestamp()
+                week_start_ts = week_end_ts - 7 * 86400
+                week_start_dt = now - timedelta(days=7)
+                week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
+                weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
+                weekly_stats['week_label'] = week_label
+                embed_text = build_favourites_embed(weekly_stats)
+                fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+                if fav_channel:
+                    async for msg in fav_channel.history(limit=5):
+                        if msg.author == guild.me:
+                            await msg.edit(content=embed_text)
+                            break
+                    else:
+                        await fav_channel.send(embed_text)
+                print(f"Butler's Favourites updated for week of {week_label}")
+        except Exception as e:
+            print(f"Favourites weekly update error: {e}")
+
     async def weekly_snapshot(self):
-        """Write a weekly snapshot row to the DB and update Butler's Favourites."""
+        """Scheduled task — runs on Mondays and calls snapshot logic."""
         try:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            # Only run on Mondays (weekday 0)
             if now.weekday() != 0:
                 return
-
-            subs = await _db.get_all_submissions()
-            total_submissions = len(subs)
-
-            # Submissions in the last 7 days
-            week_ago = now.timestamp() - 7 * 86400
-            weekly_rows = []
-            for row in subs:
-                if not row or not row[0].strip():
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    if ts.timestamp() >= week_ago:
-                        weekly_rows.append(row)
-                except Exception:
-                    pass
-            weekly_count = len(weekly_rows)
-
-            # Active players this week
-            active_ids = {row[2].strip() for row in weekly_rows if len(row) > 2 and row[2].strip()}
-            active_count = len(active_ids)
-
-            # Top weapons and maps
-            from collections import Counter
-            weapon_counts = Counter(row[3].strip() for row in weekly_rows if len(row) > 3 and row[3].strip())
-            top_weapons = [w for w, _ in weapon_counts.most_common(5)]
-
-            map_counts = Counter(row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip())
-            top_maps = [m for m, _ in map_counts.most_common(3)]
-
-            # Avg TD and kills
-            tds, kills_list = [], []
-            for row in weekly_rows:
-                try:
-                    tds.append(int(row[7]))
-                    kills_list.append(int(row[8]))
-                except Exception:
-                    pass
-            avg_td = round(sum(tds) / len(tds), 1) if tds else 0
-            avg_kills = round(sum(kills_list) / len(kills_list), 1) if kills_list else 0
-
-            # Leaderboard velocity from DB
-            try:
-                ld_rows = await _db.get_all_leaderboard_data()
-                weekly_links = {row[5].strip() for row in weekly_rows if len(row) > 5 and row[5].strip()}
-                # leaderboard_data row: [board_name, player_name, discord_id, score, weapon, message_link, ...]
-                hs_set = sum(1 for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links)
-                boards_updated = len({row[0].strip() for row in ld_rows if len(row) > 4 and row[4].strip() in weekly_links})
-            except Exception:
-                hs_set = 0
-                boards_updated = 0
-
-            # Weapon trend vs previous week
-            prev_week_ago = week_ago - 7 * 86400
-            prev_rows = []
-            for row in subs:
-                if not row or not row[0].strip():
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    ts = dt.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    if prev_week_ago <= ts.timestamp() < week_ago:
-                        prev_rows.append(row)
-                except Exception:
-                    pass
-            prev_weapon_counts = Counter(row[3].strip() for row in prev_rows if len(row) > 3 and row[3].strip())
-            trend_scores = {w: count - prev_weapon_counts.get(w, 0) for w, count in weapon_counts.items()}
-            top_trending = [w for w, _ in sorted(trend_scores.items(), key=lambda x: x[1], reverse=True)[:3]]
-
-            # Pad
-            while len(top_weapons) < 5: top_weapons.append('')
-            while len(top_maps) < 3: top_maps.append('')
-            while len(top_trending) < 3: top_trending.append('')
-
-            date_str = now.strftime('%Y-%m-%d')
-            await _db.add_snapshot(
-                snapshot_date=date_str,
-                total_subs=total_submissions,
-                weekly_subs=weekly_count,
-                active_players=active_count,
-                top_weapons=top_weapons,
-                top_maps=top_maps,
-                avg_td=avg_td,
-                avg_kills=avg_kills,
-                highscores_set=hs_set,
-                boards_updated=boards_updated,
-                trend_weapons=top_trending,
-            )
-            print(f"Weekly snapshot written for {date_str}")
-
-            # Update Butler's Favourites with weekly stats
-            try:
-                guild = self.bot.get_guild(GUILD_ID)
-                if guild:
-                    # Week window: last 7 days ending now
-                    week_end_ts = now.timestamp()
-                    week_start_ts = week_end_ts - 7 * 86400
-                    week_start_dt = now - timedelta(days=7)
-                    week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
-                    weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
-                    weekly_stats['week_label'] = week_label
-                    embed_text = build_favourites_embed(weekly_stats)
-                    fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
-                    if fav_channel:
-                        async for msg in fav_channel.history(limit=5):
-                            if msg.author == guild.me:
-                                await msg.edit(content=embed_text)
-                                break
-                        else:
-                            await fav_channel.send(embed_text)
-                    print(f"Butler's Favourites updated for week of {week_label}")
-            except Exception as e:
-                print(f"Favourites weekly update error: {e}")
-
+            await self._run_snapshot_logic()
         except Exception as e:
             print(f"Weekly snapshot error: {e}")
-
 
     @weekly_snapshot.before_loop
     async def before_weekly_snapshot(self):

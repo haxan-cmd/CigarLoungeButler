@@ -460,6 +460,20 @@ class AdminCog(commands.Cog):
         for chunk in CHALLENGE_RULES_CONTENT:
             await interaction.followup.send(chunk, ephemeral=True)
 
+    @app_commands.command(name="force_snapshot", description="Manually trigger the weekly snapshot (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def force_snapshot(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            personality_cog = interaction.client.cogs.get("PersonalityCog")
+            if not personality_cog:
+                await interaction.followup.send("❌ PersonalityCog not loaded.", ephemeral=True)
+                return
+            await personality_cog._run_snapshot_logic()
+            await interaction.followup.send("✅ Snapshot complete — Butler's Favourites updated.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
