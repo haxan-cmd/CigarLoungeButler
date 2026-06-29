@@ -817,6 +817,61 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
 
+    @app_commands.command(name="refresh_all", description="Refresh every leaderboard at once (mod only)")
+    async def refresh_all_leaderboards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Refreshing all leaderboards...", ephemeral=True)
+
+        all_lb_rows = await _get_lb_records()
+        guild = interaction.guild
+        done, failed = [], []
+
+        for lb_row in all_lb_rows:
+            lb_name = lb_row.get('Leaderboard Name')
+            thread_id_raw = lb_row.get('Thread ID')
+            msg_id_raw = lb_row.get('Message ID')
+            if not lb_name or not thread_id_raw or not msg_id_raw:
+                continue
+
+            try:
+                entries = await get_leaderboard_entries(lb_name)
+                entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+                score_prefix = "+" if lb_name == "TUFF" else ""
+                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+
+                thread_id = int(thread_id_raw)
+                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(message_ids):
+                        try:
+                            msg = await thread.fetch_message(message_ids[i])
+                            await msg.edit(content="", embed=emb)
+                            new_ids.append(message_ids[i])
+                        except Exception:
+                            msg = await thread.send(embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(embed=emb)
+                        new_ids.append(msg.id)
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
+            except Exception as e:
+                print(f"[refresh_all] Failed {lb_name}: {e}")
+                failed.append(lb_name)
+
+        summary = f"✅ Refreshed {len(done)} boards."
+        if failed:
+            summary += f"\n❌ Failed: {', '.join(failed)}"
+        await interaction.edit_original_response(content=summary)
+
     @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
     @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
     async def rank_command(self, interaction: discord.Interaction, name: str):
