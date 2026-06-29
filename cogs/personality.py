@@ -287,6 +287,7 @@ class PersonalityCog(commands.Cog):
             self.nerve_center_digest.start()
         # Fire nerve center immediately on startup so it always posts on deploy
         if self._last_nerve_post == 0.0:
+            self._last_nerve_post = -1.0  # sentinel to block re-entry
             await self._run_nerve_logic()
         # Update butlers-manual
         try:
