@@ -570,6 +570,7 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"Favourites weekly update error: {e}")
 
+    @tasks.loop(hours=168)  # 7 days
     async def weekly_snapshot(self):
         """Scheduled task — runs on Mondays and calls snapshot logic."""
         try:

@@ -389,6 +389,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
         '100 Kills':     FEAT_EMOJIS['100 Kills'],
         'Flawless':      FEAT_EMOJIS['Flawless'],
     }
+    board_counts = {}  # lb_name -> count of entries on that board for this player
     try:
         ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
         for row in ld_rows:
@@ -396,6 +397,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 continue
             lb_name = row[0].strip()
             if lb_name in FEAT_BOARD_EMOJIS:
+                board_counts[lb_name] = board_counts.get(lb_name, 0) + 1
                 link = row[4].strip() if len(row) > 4 else ''
                 if link and link in seen_links:
                     continue
@@ -438,7 +440,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
             link_to_best[link] = (emojis, link)
     feats = list(link_to_best.values()) + no_link_feats
 
-    return named_feats, feats
+    return named_feats, feats, board_counts
 
 # Subclass primary weapons — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
@@ -747,7 +749,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     bounties_done = await get_bounty_completions_for_player(discord_id, cached_data)
     player_title = get_player_title(len(bounties_done))
     mastered = await get_mastered_weapons_for_player(discord_id, cached_data)
-    named_feats, feat_submissions = await get_feats_for_player(discord_id, cached_data)
+    named_feats, feat_submissions, board_counts = await get_feats_for_player(discord_id, cached_data)
     special_ops = await get_special_ops_for_player(discord_id, cached_data)
     best_placements = await get_best_placements_for_player(discord_id, cached_data=cached_data)
     personal_bests = await get_personal_bests(discord_id, cached_data)
@@ -841,6 +843,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         if flawless_entry:
             emojis, link = flawless_entry
             lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
+        # Board counts override for standalone feats — leaderboard is source of truth for count
+        _board_count_map = {
+            ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
+            ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
+        }
         for normalized, count in feat_counts.items():
             # Strip hhanded emoji before label lookup
             hhanded_emoji = "<:hhanded:1430199468246044772>"
@@ -850,11 +857,13 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 label = "Hundred-Handed"
             else:
                 label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
-            if count >= 5:
+            # For standalone 100 Kills / 200 Takedowns, use the leaderboard entry count
+            display_count = _board_count_map.get(normalized, count)
+            if display_count >= 5:
                 label_str = f"**{label}**"
             else:
                 label_str = f"*{label}*"
-            suffix = f" ×{count}" if count > 1 else ""
+            suffix = f" ×{display_count}" if display_count > 1 else ""
             display_emojis = feat_display.get(normalized, normalized)
             lines.append(f"• {display_emojis}{suffix} {label_str}")
         lines.append("")
@@ -873,7 +882,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         if personal_bests['td'] > 0:
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
         if personal_bests['lethality'] > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill/TD Ratio — **{personal_bests['lethality']}%**")
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Most Lethal — **{personal_bests['lethality']}%**")
         lines.append("")
 
     if lobby_stats:
