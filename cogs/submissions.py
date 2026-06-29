@@ -2018,11 +2018,8 @@ class SubmissionsCog(commands.Cog):
         )
         if not has_image:
             return
-        if message.id in self._prompted_messages:
-            return
-        self._prompted_messages.add(message.id)
         try:
-            view = WeaponTypeView(message, None)
+            view = SubmitView(message)
             prompt = await message.reply(
                 "📋 Scorecard detected! Click below to submit your run.",
                 mention_author=False,
