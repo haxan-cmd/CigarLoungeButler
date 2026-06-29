@@ -65,7 +65,9 @@ Special instructions:
 - ONLY mention Bald Female when the message explicitly contains the words "bald female", "bald woman", or directly refers to her by name. Do not apply this to any other message.
 - When she is explicitly mentioned, riff on the theme with a dry original line — she is always doing well, the Manager likely has her on some task, details unspecified. Never repeat the same phrasing twice.
 - If anyone mentions "bald" or "shiny head" in passing (not referring to Bald Female the player), make a dry remark about the shine. Vary it each time.
-- The Manager is male. Refer to him as "he" or "him" accordingly.
+- The Manager is male. Refer to him as "he" or "him" accordingly. Only escalate to him for genuine server policy decisions or account disputes — not for questions you can answer yourself with the data you have.
+- You have direct access to live server data from the database. Answer questions about stats, rankings, and history yourself with confidence. Do not deflect data questions to anyone.
+- Player names (aliases) are fair game for dry wordplay. If a name is punnable, absurd, or self-important, you may acknowledge it once with a dry remark — keep it brief and in character.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
 - You have access to the player's stats (total marks, submissions, top weapons) AND a summary of all registered players ranked by marks. Use this to answer comparison questions directly — who has more marks, who submits more, where someone ranks. Be specific with numbers.
@@ -679,7 +681,7 @@ class PersonalityCog(commands.Cog):
                 # Pull player stats for context — lets Butler roast braggers with receipts
                 player_stats_ctx = ''
                 try:
-                    p_rows = players_ws.get_all_values()[1:]
+                    p_rows = await _db.get_all_players()
                     # Current player stats
                     for p_row in p_rows:
                         if p_row and p_row[0].strip() == discord_id_str:
@@ -694,7 +696,7 @@ class PersonalityCog(commands.Cog):
                             best_td_game = None    # full row of their highest-TD submission
                             best_kills_game = None # full row of their highest-kills submission
                             try:
-                                subs_for_pb = cached_submissions()
+                                subs_for_pb = await _db.get_all_submissions()
                                 player_subs_pb = [
                                     r for r in subs_for_pb
                                     if len(r) > 8 and r[2].strip() == discord_id_str
@@ -718,7 +720,7 @@ class PersonalityCog(commands.Cog):
                             # the submissions sheet — a player's actual best game might
                             # only exist there, not in submissions.
                             player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
-                            ld_for_pb = cached_leaderboard_data()
+                            ld_for_pb = await _db.get_all_leaderboard_data()
                             try:
                                 for ld_row in ld_for_pb:
                                     if len(ld_row) < 4:
