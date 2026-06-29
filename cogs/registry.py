@@ -882,7 +882,6 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
 
     if lobby_stats:
         lines.append("**Lobby Stats:**")
-        lines.append(f"• Best finish — **{lobby_stats['best_rank']} of {lobby_stats['best_size']}**")
         lines.append(f"• Avg TD rank — **top {100 - lobby_stats['avg_td_pct']:.0f}%**")
         if lobby_stats.get('avg_k_pct') is not None:
             lines.append(f"• Avg kill rank — **top {100 - lobby_stats['avg_k_pct']:.0f}%**")
