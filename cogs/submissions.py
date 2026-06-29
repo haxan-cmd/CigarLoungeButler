@@ -299,10 +299,11 @@ class SubmitView(discord.ui.View):
         except Exception:
             pass
         try:
-            await interaction.response.edit_message(content=None, embed=None, view=None)
+            await interaction.response.defer()
+            await interaction.delete_original_response()
         except Exception:
             try:
-                await interaction.response.defer()
+                await interaction.response.edit_message(content="​", embed=None, view=None)
             except Exception:
                 pass
 
@@ -1565,9 +1566,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
     try:
-        await interaction.edit_original_response(content="Noted. The record has been updated.", view=None)
-    except Exception as _edit_err:
-        print(f"[FINALISE] edit_original_response failed: {_edit_err}")
+        await interaction.delete_original_response()
+    except Exception:
+        try:
+            await interaction.edit_original_response(content="​", view=None)
+        except Exception as _edit_err:
+            print(f"[FINALISE] edit_original_response failed: {_edit_err}")
+
+    # Delete the "Scorecard detected!" prompt message
+    if prompt_msg:
+        try:
+            await prompt_msg.delete()
+        except Exception:
+            pass
 
     # Log to Postgres first so we get the row id
     submission_row = None
@@ -2046,6 +2057,8 @@ class SubmissionsCog(commands.Cog):
             view=view
         )
         view.prompt_msg = prompt
+
+
 
 
 async def setup(bot):
