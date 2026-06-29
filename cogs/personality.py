@@ -14,11 +14,6 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
-from utils.sheets import (
-    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
-    bounty_ws, special_ops_ws, snapshots_ws,
-    cached_submissions, cached_players, cached_leaderboard_data,
-)
 from utils.helpers import (
     build_manual_content, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
