@@ -197,10 +197,9 @@ async def build_ledger_entrance(guild):
                 bot_id = guild.me.id
                 async for msg in channel.history(limit=20, oldest_first=True):
                     if msg.author.id == bot_id and msg.embeds:
-                        if any('Ledger' in (e.title or '') for e in msg.embeds):
-                            _entrance_message_ids['entrance'] = msg.id
-                            mid = msg.id
-                            break
+                        _entrance_message_ids['entrance'] = msg.id
+                        mid = msg.id
+                        break
             except Exception:
                 pass
 
