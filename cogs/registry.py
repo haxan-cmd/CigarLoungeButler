@@ -860,12 +860,13 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             emojis, link = flawless_entry
             lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
         # Board counts override for standalone feats.
-        # If manual DB value > 0, it wins. Otherwise fall back to feat_counts (submission scan).
+        # If manual DB value > 0, it wins over submission scan count.
+        # Keyed by emoji combo for 100K/200TD; Triple matches by label (combos vary).
         _board_count_map = {
             ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
             ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
-            ''.join(sorted([_e['Triple']])):        board_counts.get('Triple') or None,
         }
+        _triple_db = board_counts.get('Triple') or None  # >0 wins; 0/None = use feat_counts
         for normalized, count in feat_counts.items():
             # Strip hhanded emoji before label lookup
             hhanded_emoji = "<:hhanded:1430199468246044772>"
@@ -875,9 +876,12 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 label = "Hundred-Handed"
             else:
                 label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
-            # For standalone 100 Kills / 200 Takedowns / Triple, prefer DB manual count if > 0
-            _db_override = _board_count_map.get(normalized)
-            display_count = _db_override if _db_override is not None else count
+            # Prefer DB manual count when set
+            if label == "Triple" and _triple_db is not None:
+                display_count = _triple_db
+            else:
+                _db_override = _board_count_map.get(normalized)
+                display_count = _db_override if _db_override is not None else count
             if display_count >= 5:
                 label_str = f"**{label}**"
             else:
