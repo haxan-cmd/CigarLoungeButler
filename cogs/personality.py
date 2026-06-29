@@ -406,6 +406,9 @@ class PersonalityCog(commands.Cog):
             if not ch:
                 print("[NERVE] channel not found")
                 return
+            # Unarchive if it's a thread
+            if isinstance(ch, discord.Thread) and ch.archived:
+                await ch.edit(archived=False)
 
             # Scan feedback + main channel for complaints/bug reports in last hour
             FEEDBACK_CHANNEL_ID = 1518293898177413262
@@ -438,6 +441,8 @@ class PersonalityCog(commands.Cog):
                 flag_block = "\n\n**⚠️ User Reports (last hour)**\n" + "\n".join(flagged[:10])
                 digest = digest + flag_block
 
+            if not digest or not digest.strip():
+                digest = "Nothing to report this hour."
             await ch.send(digest[:1900])
             self._last_nerve_post = datetime.now(timezone.utc).timestamp()
             print("[NERVE] sent OK")
