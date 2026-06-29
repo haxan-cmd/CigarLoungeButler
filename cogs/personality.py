@@ -795,6 +795,38 @@ class PersonalityCog(commands.Cog):
                             logged_runs = len(player_subs_pb)
                             player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in database: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
 
+                            # Build explicit leaderboard standings for this player.
+                            # Group all LD entries by weapon, sort each board by score,
+                            # find the player's rank. This is the authoritative source —
+                            # Claude should use these standings when answering rank questions.
+                            try:
+                                boards = {}
+                                for ld_r in ld_for_pb:
+                                    if len(ld_r) < 4:
+                                        continue
+                                    weapon = ld_r[0].strip()
+                                    if not weapon or ' - ' in weapon:
+                                        continue
+                                    try:
+                                        score = int(ld_r[3])
+                                    except ValueError:
+                                        continue
+                                    boards.setdefault(weapon, []).append((ld_r[1].strip(), score))
+                                standings = []
+                                for weapon, entries in boards.items():
+                                    entries.sort(key=lambda x: -x[1])
+                                    for rank, (pname, score) in enumerate(entries, 1):
+                                        if pname == player_name_for_ld:
+                                            medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
+                                            standings.append(f"{weapon}: {medal} ({score} TDs, {rank}/{len(entries)})")
+                                            break
+                                if standings:
+                                    player_stats_ctx += f"\nLeaderboard standings: {', '.join(standings)}"
+                                else:
+                                    player_stats_ctx += "\nLeaderboard standings: none recorded"
+                            except Exception:
+                                pass
+
                             # Hundred Handed progress — which primary weapon+subclass combos are missing
                             try:
                                 cwm = config.CLASS_WEAPON_MAP
