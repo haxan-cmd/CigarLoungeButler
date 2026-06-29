@@ -404,14 +404,8 @@ class PersonalityCog(commands.Cog):
                 return
             if isinstance(ch, discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-            FEEDBACK_CHANNEL_ID = 1518293898177413262
-            scan_channel_ids = [FEEDBACK_CHANNEL_ID, MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
-            bug_keywords = [
-                'broke', 'broken', 'bug', "didn't work", 'not working', "didn't register",
-                'failed', 'error', 'wrong', 'missing', 'disappeared', 'crash', 'issue',
-                'fix', 'help', "why didn't", 'why did', 'not showing',
-                "didn't submit", 'lost', 'glitch', 'wtf', 'messed up'
-            ]
+            scan_channel_ids = [MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
+            bot_keywords = ['bug', 'bot', 'butler']
             cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
             flagged = []
             try:
@@ -423,9 +417,9 @@ class PersonalityCog(commands.Cog):
                         if msg.author.bot:
                             continue
                         lower = msg.content.lower()
-                        if any(kw in lower for kw in bug_keywords):
+                        if any(kw in lower for kw in bot_keywords):
                             ts = msg.created_at.strftime('%H:%M')
-                            chan_label = 'feedback' if ch_id == FEEDBACK_CHANNEL_ID else ('#100' if ch_id == SUBMISSIONS_CHANNEL_ID else 'main')
+                            chan_label = '#100' if ch_id == SUBMISSIONS_CHANNEL_ID else 'main'
                             flagged.append(f"`{ts}` **{msg.author.display_name}** [{chan_label}]: {msg.content[:120]}")
             except Exception as scan_err:
                 print(f"[NERVE] channel scan error: {scan_err}")
@@ -433,7 +427,7 @@ class PersonalityCog(commands.Cog):
             embed = discord.Embed(title="📋  Butler's Nerve Center", color=0x8b6914, timestamp=now_dt)
             embed.description = digest if digest and digest.strip() else "Nothing to report this hour."
             if flagged:
-                embed.add_field(name="⚠️ User Reports (last hour)", value="\n".join(flagged[:10])[:1024], inline=False)
+                embed.add_field(name="💬 Bot Mentions (last hour)", value="\n".join(flagged[:10])[:1024], inline=False)
             embed.set_footer(text="Hourly digest")
             await ch.send(embed=embed)
             self._last_nerve_post = datetime.now(timezone.utc).timestamp()
