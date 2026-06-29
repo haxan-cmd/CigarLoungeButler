@@ -652,6 +652,13 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 EMBED_GOLD = 0xC8952C
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
+HH_TOTAL = sum(len(v) for v in config.CLASS_WEAPON_MAP.values())
+_HH_LEGACY_COMPLETERS = [
+    "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
+    "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
+    "C10H15N", "BallsMajoney"
+]
+
 
 def _map_header(lb_name: str) -> str:
     """Return the text content label for a map board message, e.g. '🔵 Bridgetown — Agatha'."""
