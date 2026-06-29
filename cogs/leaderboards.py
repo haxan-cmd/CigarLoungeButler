@@ -503,12 +503,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         show_weapon = lb_name in ("100 Kills", "200 Takedowns")
         score_prefix = "+" if lb_name == "TUFF" else ""
-        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
-
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
+        is_map = lb_row.get('Type', '').strip().lower() == 'map'
+        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -643,10 +643,11 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 EMBED_GOLD = 0xC8952C
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix=""):
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     if not entries:
-        return [discord.Embed(title=lb_name, description="*No entries yet.*", colour=EMBED_GOLD)]
+        title = lb_name if show_title else None
+        return [discord.Embed(title=title, description="*No entries yet.*", colour=EMBED_GOLD)]
 
     lines = []
     for idx, e in enumerate(entries, 1):
@@ -665,14 +666,14 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     for line in lines:
         cost = len(line) + 1
         if current_lines and current_len + cost > EMBED_DESC_LIMIT:
-            title = lb_name if not embeds else f"{lb_name} (cont.)"
+            title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
             embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
             current_lines = []
             current_len = 0
         current_lines.append(line)
         current_len += cost
     if current_lines:
-        title = lb_name if not embeds else f"{lb_name} (cont.)"
+        title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
         embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
     return embeds
 
@@ -787,7 +788,8 @@ class LeaderboardsCog(commands.Cog):
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+            is_map = lb_row.get('Type', '').strip().lower() == 'map'
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -841,7 +843,8 @@ class LeaderboardsCog(commands.Cog):
                 entries = sorted(entries, key=lambda x: x['score'], reverse=True)
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
-                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+                is_map = lb_row.get('Type', '').strip().lower() == 'map'
+                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
                 thread_id = int(thread_id_raw)
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
@@ -943,7 +946,8 @@ class LeaderboardsCog(commands.Cog):
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+            is_map = lb_row.get('Type', '').strip().lower() == 'map'
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
