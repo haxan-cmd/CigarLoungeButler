@@ -722,7 +722,7 @@ class PersonalityCog(commands.Cog):
                                 pass
 
                             # Also check LeaderboardData for legacy entries that predate
-                            # the submissions sheet — a player's actual best game might
+                            # the database — a player's actual best game might
                             # only exist there, not in submissions.
                             player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
                             ld_for_pb = await _db.get_all_leaderboard_data()
@@ -793,7 +793,7 @@ class PersonalityCog(commands.Cog):
                                 pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                             logged_runs = len(player_subs_pb)
-                            player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in submissions sheet: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
+                            player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in database: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
 
                             # Hundred Handed progress — which primary weapon+subclass combos are missing
                             try:
