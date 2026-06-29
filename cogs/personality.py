@@ -380,14 +380,10 @@ class PersonalityCog(commands.Cog):
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
 
-    _last_nerve_post: float = 0.0  # epoch seconds, tracks last successful post
-
-    @tasks.loop(minutes=1)
     async def _run_nerve_logic(self):
-        """Core nerve center post logic. Called on startup and by the hourly loop."""
+        """Core nerve center post logic. Called by the hourly loop."""
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         try:
-            digest = nerve_flush()
             guild = self.bot.get_guild(GUILD_ID)
             if not guild:
                 print("[NERVE] guild not found")
@@ -396,6 +392,22 @@ class PersonalityCog(commands.Cog):
             if not ch:
                 print("[NERVE] channel not found")
                 return
+
+            # Cross-container dedup: check last bot post in the channel.
+            # If posted within the last 55 minutes, skip — prevents double-posts on rolling deploys.
+            try:
+                bot_id = guild.me.id
+                async for last_msg in ch.history(limit=10):
+                    if last_msg.author.id == bot_id and last_msg.embeds:
+                        age = (datetime.now(timezone.utc) - last_msg.created_at).total_seconds()
+                        if age < 55 * 60:
+                            print(f"[NERVE] skipping — last post was {int(age//60)}m ago")
+                            return
+                        break
+            except Exception as dedup_err:
+                print(f"[NERVE] dedup check error: {dedup_err}")
+
+            digest = nerve_flush()
             if isinstance(ch, discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
             scan_channel_ids = [MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
