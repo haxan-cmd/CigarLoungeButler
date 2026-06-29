@@ -474,6 +474,37 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
+    @app_commands.command(name="set_feat_count", description="Manually set a player's 100 Kills / 200 Takedowns / Triple count (mod only).")
+    @app_commands.describe(
+        player="@ mention or Discord ID of the player",
+        feat="Which feat: 100 Kills, 200 Takedowns, or Triple",
+        count="Number of times they've achieved this feat"
+    )
+    async def set_feat_count(self, interaction: discord.Interaction, player: discord.Member, feat: str, count: int):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        valid = {'100 kills', '200 takedowns', 'triple'}
+        if feat.lower().strip() not in valid:
+            await interaction.response.send_message(
+                "❌ Feat must be one of: `100 Kills`, `200 Takedowns`, `Triple`", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await _db.set_manual_feat_count(str(player.id), feat, count)
+            # Refresh their registry card
+            from cogs.registry import create_or_update_registry_card
+            await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
+            await interaction.followup.send(
+                f"✅ Set **{feat}** count to **{count}** for **{player.display_name}** and refreshed their card.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
