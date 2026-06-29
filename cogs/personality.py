@@ -393,6 +393,7 @@ class PersonalityCog(commands.Cog):
     async def nerve_center_digest(self):
         """Post hourly digest to nerve center channel. Checks every 15 min, posts once per hour."""
         now_ts = datetime.now(timezone.utc).timestamp()
+        print(f"[NERVE] tick — last_post={self._last_nerve_post:.0f} now={now_ts:.0f} diff={now_ts - self._last_nerve_post:.0f}s")
         if now_ts - self._last_nerve_post < 3600:
             return  # not yet an hour since last post
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
