@@ -1627,6 +1627,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 await _db.increment_manual_feat_count(discord_id_str, '100 kills')
             if '200 Takedowns' in feats:
                 await _db.increment_manual_feat_count(discord_id_str, '200 takedowns')
+
+        # Assign Hundred-Handed role if player now has a submission on every primary weapon
+        try:
+            hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+            if hh_role and hh_role not in interaction.user.roles:
+                from config import _SUBCLASS_PRIMARIES
+                _all_primaries = {w for weapons in _SUBCLASS_PRIMARIES.values() for w in weapons}
+                all_subs = await _db.get_all_submissions()
+                _player_weapons = {r[3].strip() for r in all_subs if len(r) > 3 and r[2].strip() == discord_id_str and r[3].strip()}
+                if _all_primaries and _all_primaries.issubset(_player_weapons):
+                    await interaction.user.add_roles(hh_role, reason="Hundred-Handed — submitted on every primary weapon")
+                    print(f"[HH] Assigned Hundred-Handed role to {interaction.user.display_name}")
+        except Exception as hh_e:
+            print(f"[HH] Role assign error: {hh_e}")
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")
@@ -1836,6 +1850,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
                 )
                 await main_channel.send(line if line.startswith('*') else f"*{line}*")
+                try:
+                    unbound_role = interaction.guild.get_role(config.UNBOUND_ROLE_ID)
+                    member = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
+                    if unbound_role and member and unbound_role not in member.roles:
+                        await member.add_roles(unbound_role, reason="First blood — first submission")
+                        print(f"[UNBOUND] Assigned Unbound role to {player}")
+                except Exception as ub_e:
+                    print(f"[UNBOUND] Role assign error: {ub_e}")
 
             # New #1 on any leaderboard
             new_firsts = [lb for lb, pos in placements if pos == 1]
