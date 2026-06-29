@@ -20,6 +20,7 @@ try:
 except Exception:
     pass
 
+
 _BUTLER_SYSTEM_BRIEF = (
     "You are the Butler — dry, sardonic, one or two sentences max. "
     "Never say 'great', 'awesome', or use exclamation marks. Never break character."
@@ -54,7 +55,16 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 
 CRITICAL: The submitting player's row is visually highlighted — it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE — top, middle, or bottom of the scoreboard.
 
-Step 1: Scan every row on both teams and identify which one looks visually distinct from all others. Note that player's NAME. It may be the first row, last row, or anywhere in between.
+LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In large lobbies the text is small — read carefully. Do not skip rows.
+
+STEAM DECK / CONTROLLER UI: Some screenshots show "PRESS A TO INTERACT", "PRESS B", "PRESS X", or similar controller button prompts at the bottom of the screen. These are UI overlays — ignore them completely, they are not part of the scoreboard.
+
+FINDING THE PLAYER (use BOTH methods, prefer name match if highlight is ambiguous):
+Method 1 — Visual highlight: scan every row for the one with a distinctly brighter/gold background or a marker icon.
+Method 2 — Name match: if a player name hint is provided, find the row whose NAME column most closely matches it (exact or partial match, case-insensitive, ignoring clan tags or decorators).
+If both methods point to the same row, high confidence. If only one method works, use that. If the highlight is subtle or unclear on this screenshot, rely primarily on the name match.
+
+Step 1: Using both methods above, identify the submitting player's row.
 Step 2: Read the T, K, D values ONLY from that exact row — do not read from any row above or below it.
 Step 3: That same player must NOT appear in team_scores or team_kills — those arrays are for all OTHER teammates only.
 
@@ -131,11 +141,14 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
-            f"\n\nIMPORTANT: The submitting player's Discord display name is '{player_name}'. "
-            f"Look for a row whose NAME column closely matches '{player_name}' AND is visually highlighted. "
-            f"Use the name as your primary anchor — the highlight is secondary confirmation."
+            f"\n\nPLAYER NAME HINT: The submitting player's Discord display name is '{player_name}'. "
+            f"Scan every row on both teams for a NAME that matches or closely resembles '{player_name}' "
+            f"(partial match, case-insensitive, ignore clan tags or prefixes). "
+            f"Use this name match as your primary method to find the correct row. "
+            f"The visual highlight (gold/bright background) should agree — if they conflict, trust the name match."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
+
         r = _gemini_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[prompt, image_part],
