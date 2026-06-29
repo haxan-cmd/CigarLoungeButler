@@ -202,15 +202,21 @@ class SubmitView(discord.ui.View):
         try:
             print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
             player_display_name = self.original_message.author.display_name
+            # Use stored IGN as hint if available (more reliable than Discord name)
+            try:
+                stored_ign = await _db.get_player_ign(self.original_message.author.id)
+                vision_name_hint = stored_ign if stored_ign else player_display_name
+            except Exception:
+                vision_name_hint = player_display_name
             for att in self.original_message.attachments:
                 if att.content_type and att.content_type.startswith('image/'):
-                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, player_display_name)
+                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint)
                     print(f"[VISION] Raw parsed result: {parsed}")
                     break
                 elif not att.content_type:
                     # content_type can be None — fall back to filename extension check
                     if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, player_display_name)
+                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint)
                         print(f"[VISION] Raw parsed result (ext check): {parsed}")
                         break
     
@@ -1843,6 +1849,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _user_name = interaction.user.display_name
 
     async def _bg_tasks():
+        # Auto-learn IGN: if vision read a name from the scoreboard that differs from Discord name, save it
+        _vision_name = (vision_data or {}).get('name')
+        if _vision_name and _vision_name.strip().lower() != _user_name.strip().lower():
+            try:
+                await _db.save_player_ign(_user_id, _vision_name.strip())
+                print(f"[IGN] Saved alias for {_user_name}: '{_vision_name}'")
+            except Exception as e:
+                print(f"[IGN] Save error: {e}")
+
         # Pre-fetch once so downstream calls share the same data
         try:
             await _db.get_all_submissions()
@@ -2009,25 +2024,16 @@ class SubmissionsCog(commands.Cog):
         self._prompted_messages.add(message.id)
         # Prevent unbounded growth — keep only the last 200 message IDs
         if len(self._prompted_messages) > 200:
-            self._prompted_messages = set(list(self._prompted_messages)[-200:])
-        # content_type isn't always populated (especially on mobile) — fall back to extension
-        _image_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
-        has_image = any(
-            (att.content_type or '').startswith('image/') or att.filename.lower().endswith(_image_exts)
-            for att in message.attachments
+            self._prompted_messages = set(list(
+                self._prompted_messages)[-200:])
+
+        view = SubmitView(message)
+        prompt = await message.reply(
+            "\U0001f4cb Scorecard detected! Click below to submit your run.",
+            mention_author=False,
+            view=view
         )
-        if not has_image:
-            return
-        try:
-            view = SubmitView(message)
-            prompt = await message.reply(
-                "📋 Scorecard detected! Click below to submit your run.",
-                mention_author=False,
-                view=view
-            )
-            view.prompt_msg = prompt
-        except Exception as e:
-            print(f"[ON_MESSAGE] Prompt error: {e}")
+        view.prompt_msg = prompt
 
 
 async def setup(bot):

@@ -109,7 +109,7 @@ The T column (takedowns) is always a small integer, typically 10–400. The SCOR
 
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
 
 
 def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
@@ -120,7 +120,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     Any field that couldn't be read confidently is None.
     """
     empty = {
-        'weapon': None, 'subclass': None, 'map': None, 'faction': None,
+        'weapon': None, 'subclass': None, 'map': None, 'faction': None, 'name': None,
         'takedowns': None, 'kills': None, 'deaths': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
     }
@@ -147,11 +147,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
-            f"\n\nPLAYER NAME HINT: The submitting player's Discord display name is '{player_name}'. "
-            f"Scan every row on both teams for a NAME that matches or closely resembles '{player_name}' "
-            f"(partial match, case-insensitive, ignore clan tags or prefixes). "
-            f"Use this name match as your primary method to find the correct row. "
-            f"The visual highlight (gold/bright background) should agree - if they conflict, trust the name match."
+            f"\n\nPLAYER NAME HINT: The submitting player's Discord name is '{player_name}'. "
+            f"Their IN-GAME name may be completely different from their Discord name. "
+            f"IMPORTANT: The name hint is a secondary clue only — do NOT try to find '{player_name}' in the scoreboard if no row matches it. "
+            f"NEVER read stats from Discord voice overlay cards (the small name cards on the left/right edges) even if they show a matching name — those are NOT scoreboard rows. "
+            f"PRIMARY method: find the row with the visually highlighted background (gold/bright/tinted row) inside the main RANK|NAME|SCORE|T|K|D|PING table. "
+            f"SECONDARY method: only use name matching if a row inside the scoreboard table closely matches '{player_name}'. "
+            f"If the name hint matches nothing in the scoreboard, rely entirely on the visual highlight."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
 
@@ -432,6 +434,6 @@ async def nerve_alert(bot_instance, context, error):
             import discord as _discord
             if isinstance(ch, _discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-            await ch.send(f"⚠️ **Critical Error** - {context}\n```{str(error)[:300]}```")
+            await ch.send(f"\u26a0\ufe0f **Critical Error** - {context}\n```{str(error)[:300]}```")
     except Exception:
         pass

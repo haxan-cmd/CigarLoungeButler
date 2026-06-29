@@ -222,6 +222,34 @@ async def upsert_player(discord_id, player_name, forum_thread_id=None,
         )
 
 
+async def get_player_ign(discord_id: str) -> str | None:
+    """Return stored in-game name for this player, or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        try:
+            return await conn.fetchval(
+                "SELECT ign FROM players WHERE discord_id=$1", str(discord_id)
+            )
+        except Exception:
+            return None
+
+
+async def save_player_ign(discord_id: str, ign: str):
+    """Persist an in-game name alias for this player."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                "ALTER TABLE players ADD COLUMN IF NOT EXISTS ign TEXT"
+            )
+            await conn.execute(
+                "UPDATE players SET ign=$1 WHERE discord_id=$2",
+                ign, str(discord_id)
+            )
+        except Exception as e:
+            print(f"[IGN] save failed: {e}")
+
+
 async def update_player_thread(discord_id: str, thread_id: str):
     pool = _pool_check()
     async with pool.acquire() as conn:
@@ -626,22 +654,38 @@ async def save_challenge_rules(msg_ids: list, labels: list):
 
 async def add_snapshot(snapshot_date, total_subs, weekly_subs, active_players,
                         top_weapons, top_maps, avg_td, avg_kills,
-                        highscores_set, boards_updated, trend_weapons):
+                        highscores_set, boards_updated, trend_direction, previous_subs):
     pool = _pool_check()
-    tw = (top_weapons + [''] * 5)[:5]
-    tm = (top_maps + [''] * 3)[:3]
-    tr = (trend_weapons + [''] * 3)[:3]
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO snapshots
             (snapshot_date, total_subs, weekly_subs, active_players,
-             top_weapon_1, top_weapon_2, top_weapon_3, top_weapon_4, top_weapon_5,
-             top_map_1, top_map_2, top_map_3,
-             avg_td, avg_kills, highscores_set, boards_updated,
-             trend_weapon_1, trend_weapon_2, trend_weapon_3)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-        """, snapshot_date, total_subs, weekly_subs, active_players,
-             tw[0], tw[1], tw[2], tw[3], tw[4],
-             tm[0], tm[1], tm[2],
-             avg_td, avg_kills, highscores_set, boards_updated,
-             tr[0], tr[1], tr[2])
+             top_weapons, top_maps, avg_td, avg_kills,
+             highscores_set, boards_updated, trend_direction, previous_subs)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            ON CONFLICT (snapshot_date) DO UPDATE SET
+                total_subs=EXCLUDED.total_subs,
+                weekly_subs=EXCLUDED.weekly_subs,
+                active_players=EXCLUDED.active_players,
+                top_weapons=EXCLUDED.top_weapons,
+                top_maps=EXCLUDED.top_maps,
+                avg_td=EXCLUDED.avg_td,
+                avg_kills=EXCLUDED.avg_kills,
+                highscores_set=EXCLUDED.highscores_set,
+                boards_updated=EXCLUDED.boards_updated,
+                trend_direction=EXCLUDED.trend_direction,
+                previous_subs=EXCLUDED.previous_subs
+        """,
+            snapshot_date, total_subs, weekly_subs, active_players,
+            top_weapons, top_maps, avg_td, avg_kills,
+            highscores_set, boards_updated, trend_direction, previous_subs
+        )
+
+
+async def get_snapshots(limit: int = 52) -> list[dict]:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM snapshots ORDER BY snapshot_date DESC LIMIT $1", limit
+        )
+    return [dict(r) for r in rows]
