@@ -511,5 +511,53 @@ class AdminCog(commands.Cog):
         )
 
 
+    @app_commands.command(name="backfill_hundred_handed", description="Assign Hundred-Handed role to all players who've submitted on every primary weapon (mod only).")
+    async def backfill_hundred_handed(self, interaction: discord.Interaction):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            from config import _SUBCLASS_PRIMARIES
+            _all_primaries = {w for weapons in _SUBCLASS_PRIMARIES.values() for w in weapons}
+            hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+            if not hh_role:
+                await interaction.followup.send("❌ Hundred-Handed role not found.", ephemeral=True)
+                return
+
+            all_subs = await _db.get_all_submissions()
+            # Group weapons by player
+            player_weapons: dict[str, set] = {}
+            for r in all_subs:
+                if len(r) > 3 and r[2].strip() and r[3].strip():
+                    player_weapons.setdefault(r[2].strip(), set()).add(r[3].strip())
+
+            assigned = []
+            already = []
+            for discord_id_str, weapons in player_weapons.items():
+                if not _all_primaries.issubset(weapons):
+                    continue
+                try:
+                    member = interaction.guild.get_member(int(discord_id_str)) or await interaction.guild.fetch_member(int(discord_id_str))
+                except Exception:
+                    continue
+                if hh_role in member.roles:
+                    already.append(member.display_name)
+                else:
+                    await member.add_roles(hh_role, reason="Backfill: Hundred-Handed — submitted on every primary weapon")
+                    assigned.append(member.display_name)
+
+            lines = []
+            if assigned:
+                lines.append(f"✅ Assigned to **{len(assigned)}**: {', '.join(assigned)}")
+            if already:
+                lines.append(f"Already had it: {', '.join(already)}")
+            if not assigned and not already:
+                lines.append("No players currently qualify.")
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
