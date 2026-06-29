@@ -615,13 +615,13 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
         return ["No entries yet."]
 
     lines = []
-    for e in entries:
+    for idx, e in enumerate(entries, 1):
         weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"{idx}. **{e['player']}** — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"• {e['player']} — {score_str}{weapon_str}")
+            lines.append(f"{idx}. **{e['player']}** — {score_str}{weapon_str}")
 
     if overflow > 0:
         lines.append(f"*...and {overflow} more entries*")
@@ -649,13 +649,13 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         return [discord.Embed(title=lb_name, description="*No entries yet.*", colour=EMBED_GOLD)]
 
     lines = []
-    for e in entries:
+    for idx, e in enumerate(entries, 1):
         weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"• {e['player']} — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"{idx}. **{e['player']}** — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"• {e['player']} — {score_str}{weapon_str}")
+            lines.append(f"{idx}. **{e['player']}** — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more entries*")
 
