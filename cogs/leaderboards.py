@@ -175,12 +175,12 @@ async def build_ledger_entrance(guild):
         )
 
         sections = [
-            ("⚔️  ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
-            ("🧳  TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
-            ("🗺️  MAP RECORDS",         index_link(idx_maps, 'Maps')),
-            ("🏅  FEATS",               index_link(idx_feats, 'Feats')),
-            ("🎯  BOUNTY CARDS",        index_link(idx_bounty, 'Bounty Cards')),
-            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE", index_link(idx_reg, 'Registry')),
+            ("ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
+            ("TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
+            ("<a:campaignmaster:1520497947115262083>  MAP RECORDS",  index_link(idx_maps, 'Maps')),
+            ("🏅  FEATS",                                            index_link(idx_feats, 'Feats')),
+            ("🐱  BOUNTY CARDS",                                     index_link(idx_bounty, 'Bounty Cards')),
+            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",       index_link(idx_reg, 'Registry')),
         ]
 
         for name, value in sections:
@@ -438,27 +438,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         existing_entry = existing_score is not None
 
         if unlimited_top50:
-            # Enforce top-50 cap: only add if score beats the 50th entry or board has < 50
-            board_entries_all = sorted(
-                [r for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]],
-                key=lambda x: int(x[3]), reverse=True
-            )
-            if len(board_entries_all) >= 50:
-                lowest_score = int(board_entries_all[49][3])
-                if score <= lowest_score:
-                    continue
-                # Bump out the lowest entry
-                lowest_discord_id = board_entries_all[49][2] if len(board_entries_all[49]) > 2 else ''
-                await _db.delete_leaderboard_entry_by_board_and_player(lb_name, lowest_discord_id)
-                all_values = await _db.get_all_leaderboard_data()
-            # Update if player already on board, otherwise insert
-            if existing_entry:
-                if score > existing_score:
-                    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                else:
-                    continue
-            else:
-                await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            # No cap — every qualifying submission gets its own entry forever
+            await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             any_updated = True
             all_board = [int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]]
             all_board.append(score)
@@ -521,10 +502,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
         show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-        overflow = max(0, len(entries) - 50) if show_weapon else 0
-        display_entries = entries[:50] if show_weapon else entries
         score_prefix = "+" if lb_name == "TUFF" else ""
-        embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
+        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
         lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
         if not lb_row:
@@ -760,10 +739,8 @@ class LeaderboardsCog(commands.Cog):
         else:
             entries = await get_leaderboard_entries(name)
             show_weapon = name in ("100 Kills", "200 Takedowns")
-            display_entries = entries[:50] if show_weapon else entries
-            overflow = max(0, len(entries) - 50) if show_weapon else 0
             score_prefix = "+" if name == "TUFF" else ""
-            embeds = format_leaderboard_embeds(name, display_entries, overflow, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(name, entries, 0, show_weapon, score_prefix)
             await thread.send(file=discord.File(DECORATION_TOP))
             msg_ids = []
             for emb in embeds:
@@ -809,10 +786,8 @@ class LeaderboardsCog(commands.Cog):
             entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-            display_entries = entries[:50] if show_weapon else entries
-            overflow = max(0, len(entries) - 50) if show_weapon else 0
             score_prefix = "+" if lb_name == "TUFF" else ""
-            embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -912,10 +887,8 @@ class LeaderboardsCog(commands.Cog):
             entries.sort(key=lambda x: x['score'], reverse=True)
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-            display_entries = entries[:50] if show_weapon else entries
-            overflow = max(0, len(entries) - 50) if show_weapon else 0
             score_prefix = "+" if lb_name == "TUFF" else ""
-            embeds = format_leaderboard_embeds(lb_name, display_entries, overflow, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]

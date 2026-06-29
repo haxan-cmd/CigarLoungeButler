@@ -227,6 +227,9 @@ async def get_player_igns(discord_id: str) -> list[str]:
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
+            await conn.execute(
+                "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'"
+            )
             val = await conn.fetchval(
                 "SELECT igns FROM players WHERE discord_id=$1", str(discord_id)
             )

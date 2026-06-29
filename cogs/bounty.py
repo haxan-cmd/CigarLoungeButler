@@ -321,6 +321,28 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")
 
+    # ── AUTO-CHECK SPECIAL CHALLENGE ─────────────────────────────────────────
+    if not bounty['special_done'] and bounty.get('special_challenge'):
+        sc = bounty['special_challenge'].lower()
+        # Parse minimum TD threshold from challenge text (e.g. "100 Takedowns")
+        import re as _re
+        td_match = _re.search(r'(\d+)\s*takedown', sc)
+        sc_min_td = int(td_match.group(1)) if td_match else 100
+        # Check if current weapon appears anywhere in the challenge text
+        weapon_in_challenge = weapon and weapon.lower() in sc
+        if weapon_in_challenge and takedowns >= sc_min_td:
+            bounty['special_done'] = True
+            print(f"[BOUNTY] Special challenge auto-completed by {player_name} — {weapon} {takedowns}TD")
+            if bounty_channel:
+                try:
+                    bounty_role = guild.get_role(bounty.get('role_id')) if bounty.get('role_id') else None
+                    mention = bounty_role.mention if bounty_role else ''
+                    await bounty_channel.send(
+                        f"{mention} ⭐ **{player_name}** has completed the special challenge: **{bounty['special_challenge']}**!"
+                    )
+                except Exception as e:
+                    print(f"[BOUNTY] Special challenge ping error: {e}")
+
     # Save updated state
     await save_bounty_state(bounty['id'], weapons, bounty['special_done'], completions)
 
@@ -818,30 +840,23 @@ class BountyCog(commands.Cog):
                     forum_post_id = None
             if not forum_post_id:
                 try:
-                    new_thread, _ = await forum_channel.create_thread(
-                        name=player_name, content=bounty['theme_emoji'])
+                    new_thread, first_msg = await forum_channel.create_thread(
+                        name=player_name,
+                        content=bounty['theme_emoji']
+                    )
                     card_text = build_player_bounty_card(bounty, player_progress)
                     await new_thread.send(card_text)
                     forum_post_id = new_thread.id
                 except Exception as e:
-                    print(f"[BOUNTY_CREDIT] Forum card create error: {e}")
+                    print(f"[BOUNTY_CREDIT] Forum post create error: {e}")
 
-        await save_player_bounty_progress(bounty['title'], player_id, player_name, forum_post_id, player_progress)
+        await save_player_bounty_progress(bounty['title'], str(member.id), player_name, forum_post_id, player_progress)
+        await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
 
-        # Check completion
-        completions = bounty['completions']
-        newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
-        if newly_completed:
-            date_str = datetime.now(timezone.utc).strftime('%b %d')
-            completions.append({"id": player_id, "name": player_name, "date": date_str})
-
-        await save_bounty_state(bounty['id'], weapons, bounty['special_done'], completions)
-
-        new_total = cur + 1
-        target = weapons[matched_key]['total']
         await interaction.followup.send(
-            f"✅ Credited **{player_name}** with 1 hit on **{matched_key}** ({new_total}/{target}).", ephemeral=True)
-        print(f"[BOUNTY_CREDIT] {interaction.user.display_name} manually credited {player_name} for {matched_key}")
+            f"\u2705 Credited **{player_name}** with 1 hit on **{weapon}** ({new_total}/{w['total']})",
+            ephemeral=True
+        )
 
 
 async def setup(bot):
