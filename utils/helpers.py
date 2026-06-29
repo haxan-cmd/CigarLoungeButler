@@ -427,41 +427,35 @@ async def nerve_alert(bot_instance, context, error):
 def nerve_flush():
     # Drain the buffer and return a formatted digest string.
     # Called by the hourly task loop in personality.py.
-    subs         = _nerve_events['submissions']
-    interactions = _nerve_events['butler_interactions']
-    errors       = _nerve_events['errors']
-    milestones   = _nerve_events['milestones']
-
-    if not subs and not interactions and not errors and not milestones:
-        quiet_lines = [
-            "All quiet. The Butler appreciates the peace.",
-            "Nothing to report. Most unusual.",
-            "A quiet evening. The accounts are settled.",
-        ]
-        return random.choice(quiet_lines)
+    subs       = _nerve_events['submissions']
+    errors     = _nerve_events['errors']
+    milestones = _nerve_events['milestones']
 
     parts = []
-    if subs:
-        parts.append(f"📋 **Submissions** — {len(subs)} this hour")
-        for ts, player, weapon in subs:
-            parts.append(f"  {ts}  **{player}** — {weapon}")
-    if interactions:
-        parts.append(f"💬 **Butler Interactions** — {len(interactions)}")
-    if milestones:
-        parts.append(f"🏆 **Milestones**")
-        for player, weapon, rank in milestones:
-            parts.append(f"  **{player}** — {weapon} ({rank})")
+
     if errors:
-        parts.append(f"⚠️ **Errors** — {len(errors)}")
+        parts.append(f"⚠️ **Errors — {len(errors)}**")
         for ts, err in errors:
-            parts.append(f"  {ts}  {err}")
+            parts.append(f"  `{ts}` {err}")
+
+    if subs:
+        parts.append(f"📋 **Submissions — {len(subs)}**")
+        for ts, player, weapon in subs:
+            parts.append(f"  `{ts}` **{player}** — {weapon}")
+    else:
+        parts.append("📋 **Submissions — 0**")
+
+    if milestones:
+        parts.append(f"🏆 **Milestones — {len(milestones)}**")
+        for player, weapon, rank in milestones:
+            parts.append(f"  **{player}** — {weapon} → {rank}")
 
     _nerve_events['submissions'].clear()
     _nerve_events['butler_interactions'].clear()
     _nerve_events['errors'].clear()
     _nerve_events['milestones'].clear()
 
-    return "\n".join(parts)
+    return "\n".join(parts) if parts else ""
 
 
 async def nerve_alert(bot_instance, context, error):

@@ -410,30 +410,29 @@ class PersonalityCog(commands.Cog):
             digest = nerve_flush()
             if isinstance(ch, discord.Thread) and ch.archived:
                 await ch.edit(archived=False)
-            scan_channel_ids = [MAIN_CHANNEL_ID, SUBMISSIONS_CHANNEL_ID]
-            bot_keywords = ['bug', 'bot', 'butler']
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-            flagged = []
-            try:
-                for ch_id in scan_channel_ids:
-                    scan_ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
-                    if not scan_ch:
-                        continue
-                    async for msg in scan_ch.history(after=cutoff, limit=200):
-                        if msg.author.bot:
-                            continue
-                        lower = msg.content.lower()
-                        if any(kw in lower for kw in bot_keywords):
-                            ts = msg.created_at.strftime('%H:%M')
-                            chan_label = '#100' if ch_id == SUBMISSIONS_CHANNEL_ID else 'main'
-                            flagged.append(f"`{ts}` **{msg.author.display_name}** [{chan_label}]: {msg.content[:120]}")
-            except Exception as scan_err:
-                print(f"[NERVE] channel scan error: {scan_err}")
+
+            # Health check
             now_dt = datetime.now(timezone.utc)
-            embed = discord.Embed(title="📋  Butler's Nerve Center", color=0x8b6914, timestamp=now_dt)
-            embed.description = digest if digest and digest.strip() else "Nothing to report this hour."
-            if flagged:
-                embed.add_field(name="💬 Bot Mentions (last hour)", value="\n".join(flagged[:10])[:1024], inline=False)
+            loaded_cogs = list(self.bot.cogs.keys())
+            expected_cogs = ['RegistryCog', 'LeaderboardCog', 'BountyCog', 'SubmissionsCog', 'FavouritesCog', 'PersonalityCog', 'AdminCog']
+            missing_cogs = [c for c in expected_cogs if c not in loaded_cogs]
+            health_lines = []
+            health_lines.append(f"🟢 Bot online — {len(loaded_cogs)} cogs loaded")
+            if missing_cogs:
+                health_lines.append(f"🔴 Missing cogs: {', '.join(missing_cogs)}")
+            try:
+                import utils.db as _db_health
+                pool = _db_health._pool
+                health_lines.append(f"🟢 DB pool: {pool.get_size()}/{pool.get_max_size()} connections")
+            except Exception as db_h:
+                health_lines.append(f"🔴 DB pool check failed: {db_h}")
+
+            embed = discord.Embed(title="🧠  Nerve Center", color=0x8b6914, timestamp=now_dt)
+            if digest:
+                embed.description = digest
+            else:
+                embed.description = "📋 **Submissions — 0**"
+            embed.add_field(name="🔧 Health", value="\n".join(health_lines), inline=False)
             embed.set_footer(text="Hourly digest")
             await ch.send(embed=embed)
             self._last_nerve_post = datetime.now(timezone.utc).timestamp()
