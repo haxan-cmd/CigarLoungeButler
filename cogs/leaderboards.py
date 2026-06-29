@@ -1,426 +1,1337 @@
-"""
-cogs/favourites.py — Butler stats calculation, favourites embed, title roles, /butlers_report.
-"""
-import time
+# Leaderboard read/write, Discord thread management, and the index builder.
+# update_leaderboards() is the main entry point — called after every submission.
+import asyncio
+import os
+import re as _re
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils.sheets import (
-    _sheet_cache, players_ws, submissions_ws, leaderboard_data_ws,
-    bounty_players_ws, cached_players, cached_submissions,
-    cached_leaderboard_data, cached_bounty_players, gspread_retry,
-)
+import utils.db as _db
 
-MOD_ROLE_ID                = config.MOD_ROLE_ID
-MAIN_CHANNEL_ID            = config.MAIN_CHANNEL_ID
-BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
-DECORATION_TOP             = config.DECORATION_TOP
-DECORATION_BOTTOM          = config.DECORATION_BOTTOM
-WEAPON_RANK_THRESHOLDS     = config.WEAPON_RANK_THRESHOLDS
-PRESTIGE_THRESHOLDS        = config.PRESTIGE_THRESHOLDS
-CLASS_RANKS                = config.CLASS_RANKS
-SUBCLASS_RANKS             = config.SUBCLASS_RANKS
-PLAYER_TITLES              = config.PLAYER_TITLES
-GRAND_MARSHAL_ROLE_ID      = config.GRAND_MARSHAL_ROLE_ID
-WEAPONS_MASTER_ROLE_ID     = config.WEAPONS_MASTER_ROLE_ID
-CAMPAIGN_MASTER_ROLE_ID    = config.CAMPAIGN_MASTER_ROLE_ID
-HEADHUNTER_ROLE_ID         = config.HEADHUNTER_ROLE_ID
-BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
+MOD_ROLE_ID       = config.MOD_ROLE_ID
+_ASSETS_DIR       = os.path.join(os.path.dirname(__file__), '..', 'assets')
+DECORATION_TOP    = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
+DECORATION_BOTTOM = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Bottom.png')
+_SUBCLASS_PRIMARIES = config._SUBCLASS_PRIMARIES
+FACTION_EMOJIS     = config.FACTION_EMOJIS
+MAP_ATTACK_DEFENSE = config.MAP_ATTACK_DEFENSE
 
-_butlers_report_cooldowns = {}
+WEAPON_FORUM_1H          = config.WEAPONS_1H_FORUM_ID
+WEAPON_FORUM_2H          = config.WEAPONS_2H_FORUM_ID
+MAP_RECORDS_FORUM_ID     = config.MAP_RECORDS_FORUM_ID
+FEATS_FORUM_ID           = config.FEATS_FORUM_ID
+BOUNTY_CARDS_FORUM_ID    = config.BOUNTY_CARDS_FORUM_ID
+REGISTRY_FORUM_ID        = config.REGISTRY_FORUM_CHANNEL_ID
+LEDGER_ENTRANCE_CHANNEL_ID  = config.LEDGER_ENTRANCE_CHANNEL_ID
+REGISTRY_INDEX_THREAD_ID    = config.REGISTRY_INDEX_THREAD_ID
+INDEX_THREAD_2H             = config.INDEX_THREAD_2H
+INDEX_THREAD_1H             = config.INDEX_THREAD_1H
+INDEX_THREAD_FEATS          = config.INDEX_THREAD_FEATS
 
-def calculate_butler_stats(week_start=None, week_end=None):
-    """Pull stats from Submissions and LeaderboardData sheets.
-    If week_start and week_end (UTC timestamps) are provided, filters submissions to that window.
-    Titles always use all-time data regardless of window.
-    """
-    all_subs = cached_submissions()
-    ld = cached_leaderboard_data()
+_WEAPONS_2H = {
+    "Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe",
+    "Highland Sword", "Dane Axe", "Glaive", "Two-Handed Hammer", "Halberd",
+    "Polehammer", "Spear", "Quarterstaff", "Goedendag", "Pole Axe",
+    "War Bow", "Crossbow", "Siege Crossbow", "Sledge Hammer", "Shovel",
+}
+_WEAPONS_1H = {
+    "Longsword", "War Axe", "Warhammer", "Falchion", "Heavy Cavalry Sword",
+    "Axe", "One-Handed Spear", "Messer", "Rapier", "Morning Star", "Sword",
+    "Dagger", "Hatchet", "Cudgel", "Katars", "Short Sword", "Mace",
+    "Javelin", "Throwing Axe", "Pick Axe", "Bow",
+}
 
-    # Filter subs to week window if provided
-    if week_start is not None and week_end is not None:
-        filtered = []
-        for row in all_subs:
-            if not row or not row[0].strip():
-                continue
-            try:
-                ts = datetime.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
-                if week_start <= ts < week_end:
-                    filtered.append(row)
-            except Exception:
-                pass
-        subs = filtered
-    else:
-        subs = all_subs
+def _weapon_forum_id(weapon):
+    if weapon in _WEAPONS_2H:
+        return WEAPON_FORUM_2H
+    return WEAPON_FORUM_1H
 
-    # Submission stats
-    player_counts = {}
-    weapon_counts = {}
-    map_counts = {}
-    top_td = (0, "")
-    top_kills = (0, "")
-    td_scores_sub = {}
-    kills_scores_sub = {}
-    players_set = set()
-    lethal_ratios = {}    # player -> [kills/td ratios]
-
-    for row in subs:
-        if len(row) < 9:
-            continue
-        player = row[1].strip()
-        weapon = row[3].strip()
-        map_name = row[5].strip()
-        try:
-            td = int(row[7])
-            kills = int(row[8])
-        except (ValueError, IndexError):
-            td, kills = 0, 0
-
-        player_counts[player] = player_counts.get(player, 0) + 1
-        weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
-        map_counts[map_name] = map_counts.get(map_name, 0) + 1
-        players_set.add(player)
-        td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
-        kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
-        # Track lethality ratio: kills/td (higher = more lethal, lower = more dominant/assists)
-        if kills > 0 and td > 0:
-            lethal_ratios.setdefault(player, []).append(kills / td)
-
-    most_active = max(player_counts, key=player_counts.get) if player_counts else "N/A"
-    top_weapons = sorted(weapon_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_maps = sorted(map_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
-
-    # Lethality Rating — highest avg kills/td ratio shown as %, min 3 subs
-    qualified_lethal = {p: v for p, v in lethal_ratios.items() if len(v) >= 3}
-    lethal_ranked = sorted(qualified_lethal.keys(),
-        key=lambda p: (-sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    high_lethality = [f"{p} ({sum(qualified_lethal[p])/len(qualified_lethal[p])*100:.0f}% Kill Rate)" for p in lethal_ranked[:5]]
-
-    # Warlord — lowest avg kills/td ratio shown as TD/Kill, min 5 subs
-    low_ranked = sorted(qualified_lethal.keys(),
-        key=lambda p: (sum(qualified_lethal[p]) / len(qualified_lethal[p]), len(qualified_lethal[p])))
-    low_lethality = [f"{p} ({len(qualified_lethal[p]) / sum(qualified_lethal[p]):.1f} TD/Kill)" if sum(qualified_lethal[p]) > 0 else p for p in low_ranked[:5]]
-    most_lethal_top5 = high_lethality
-
-    # Backfill run counts and best scores from LeaderboardData for legacy entries.
-    # Skip when in weekly mode — ld is all-time data and would contaminate weekly stats.
-    if week_start is None:
-        ld_player_boards = {}  # player -> set of board names they appear on (to count unique runs)
-        for row in ld:
-            if len(row) < 4:
-                continue
-            lb_name = row[0].strip()
-            player = row[1].strip()
-            if not player:
-                continue
-            try:
-                score = int(row[3])
-            except (ValueError, IndexError):
-                score = 0
-            # Count each unique board entry as a run for busiest
-            ld_player_boards.setdefault(player, set()).add(lb_name)
-            # Backfill best TD and kills scores from their respective boards
-            if lb_name == '200 Takedowns':
-                td_scores_sub[player] = max(td_scores_sub.get(player, 0), score)
-            elif lb_name == '100 Kills':
-                kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), score)
-        # Add LeaderboardData board counts to player_counts (only boards not already in submissions)
-        for player, boards in ld_player_boards.items():
-            players_set.add(player)
-            player_counts[player] = player_counts.get(player, 0) + len(boards)
-        # Recalculate sorted lists after backfill
-        top_busiest = sorted(player_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
-        top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
-
-    # Title calculations from LeaderboardData
-    # Placement boards: weapon boards, map boards (" - "), and feat top-10 boards (Mallet, Knife, Flawless, Healing Horn)
-    # Excluded from placement titles: 100 Kills, 200 Takedowns (have their own title logic)
-    weapon_placements = {}   # player -> [placements] — weapon + feat boards
-    map_placements = {}      # player -> [placements] — map boards
-    non_weapon_feat_placements = {}  # player -> [placements] — Flawless/Healing Horn (grand marshal only)
-
-    WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}
-    NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn'}
-    SKIP_LB = {'100 Kills', '200 Takedowns'}
-
-    lb_groups = {}
-    for row in ld:
-        if len(row) < 4:
-            continue
-        lb_name = row[0].strip()
-        player = row[1].strip()
-        if lb_name not in lb_groups:
-            lb_groups[lb_name] = []
-        lb_groups[lb_name].append(player)
-
-    for lb_name, players in lb_groups.items():
-        if lb_name in SKIP_LB:
-            continue
-        is_map = ' - ' in lb_name
-        for i, player in enumerate(players[:10]):
-            placement = i + 1
-            if is_map:
-                map_placements.setdefault(player, []).append(placement)
-            elif lb_name in NON_WEAPON_FEAT_BOARDS:
-                # Flawless and Healing Horn count toward Grand Marshal only
-                non_weapon_feat_placements.setdefault(player, []).append(placement)
-            else:
-                # Regular weapon boards + Mallet/Knife count toward Weapons Master
-                weapon_placements.setdefault(player, []).append(placement)
-
-    def best_placement_title(d, min_boards=1, breadth_first=False):
-        """Return player with best placement title.
-        breadth_first=True: most boards wins, avg placement as tiebreaker.
-        breadth_first=False: best avg wins, most boards as tiebreaker.
-        min_boards: minimum boards required to qualify.
-        """
-        if not d:
-            return None
-        qualified = {p: v for p, v in d.items() if len(v) >= min_boards}
-        if not qualified:
-            return None
-        if breadth_first:
-            return min(qualified.keys(), key=lambda p: (-len(qualified[p]), sum(qualified[p]) / len(qualified[p])))
-        else:
-            return min(qualified.keys(), key=lambda p: (sum(qualified[p]) / len(qualified[p]), -len(qualified[p])))
-
-    combined = {}
-    for p, v in weapon_placements.items():
-        combined.setdefault(p, []).extend(v)
-    for p, v in map_placements.items():
-        combined.setdefault(p, []).extend(v)
-    for p, v in non_weapon_feat_placements.items():
-        combined.setdefault(p, []).extend(v)
-
-    grand_marshal = best_placement_title(combined, min_boards=15, breadth_first=True)
-    weapons_master = best_placement_title(weapon_placements, min_boards=9, breadth_first=True)
-    campaign_master = best_placement_title(map_placements, min_boards=6, breadth_first=True)
-
-    # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
-    # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
-    kills_scores = {}    # player -> [kill scores]
-    td_scores = {}       # player -> [takedown scores]
-
-    for row in ld:
-        if len(row) < 3:
-            continue
-        lb_name = row[0].strip()
-        player = row[1].strip()
-        try:
-            score = int(row[2])
-        except (ValueError, IndexError):
-            continue
-        if lb_name == '100 Kills':
-            kills_scores.setdefault(player, []).append(score)
-        elif lb_name == '200 Takedowns':
-            td_scores.setdefault(player, []).append(score)
-
-    def best_score_title(d):
-        """Return player with best weighted score: avg * log(count+1)."""
-        if not d:
-            return None
-        import math
-        return max(d.keys(), key=lambda p: (sum(d[p]) / len(d[p])) * math.log(len(d[p]) + 1))
-
-    headhunter = best_score_title(kills_scores)
-    butcher = best_score_title(td_scores)
-
-    return {
-        'top_busiest': top_busiest,
-        'top_td_list': top_td_list,
-        'top_kills_list': top_kills_list,
-        'top_weapons': [(w, c) for w, c in top_weapons],
-        'top_maps': [(m, c) for m, c in top_maps],
-        'total_runs': len(subs),
-        'total_players': len(players_set),
-        'grand_marshal': grand_marshal or "N/A",
-        'weapons_master': weapons_master or "N/A",
-        'campaign_master': campaign_master or "N/A",
-        'headhunter': headhunter or "N/A",
-        'butcher': butcher or "N/A",
-        'high_lethality': high_lethality if high_lethality else ["N/A"],
-        'low_lethality': low_lethality if low_lethality else ["N/A"],
-    }
+# Persists the entrance message IDs so Butler edits in-place rather than reposting.
+_entrance_message_ids: dict = {}
 
 
-
-def build_favourites_embed(stats):
-    def fmt_list(items, suffix, n=3):
-        return "\n".join(f"{i+1}. {name} — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
-
-    def fmt_plain(items, n=3):
-        return "\n".join(f"{i+1}. {p}" for i, p in enumerate(items[:n]))
-
-    week_label = stats.get('week_label', '')
-    header = (
-        f"**📋 The Butler's Favourites** | {week_label}\n"
-        if week_label else
-        f"**📋 The Butler's Favourites** | {stats['total_runs']} runs · {stats['total_players']} players\n"
-    )
-
-    return (
-        header +
-        f"\n"
-        f"**Busiest**\n" + fmt_list(stats['top_busiest'], "runs") + "\n"
-        f"\n"
-        f"**<a:toptkd:1360312666475728958> Highest Takedowns**\n" + fmt_list(stats['top_td_list'], "TD") + "\n"
-        f"\n"
-        f"**<a:topkill:1360314538364240024> Most Kills**\n" + fmt_list(stats['top_kills_list'], "K") + "\n"
-        f"\n"
-        f"**Top Weapons**\n" + fmt_list(stats['top_weapons'], "runs") + "\n"
-        f"\n"
-        f"**Top Maps**\n" + fmt_list(stats['top_maps'], "runs") + "\n"
-        f"\n"
-        f"**Lethality Rating** *(Kills/TD, min 3 runs)*\n" + fmt_plain(stats['high_lethality']) +
-        f"\n\n**Warlord** *(TD/Kill, min 3 runs)*\n" + fmt_plain(stats['low_lethality']) +
-        f"\n\n─────────────────────\n"
-        f"*All-Time Titles*\n"
-        f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — {stats['grand_marshal']}\n"
-        f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — {stats['weapons_master']}\n"
-        f"🗺️ **Campaign Master** — {stats['campaign_master']}\n"
-        f"<a:topkill:1360314538364240024> **Headhunter** — {stats['headhunter']}\n"
-        f"<a:toptkd:1360312666475728958> **Butcher** — {stats['butcher']}\n"
-    )
-
-
-
-async def update_title_roles(guild, stats):
-    """Assign title roles and announce changes in #main."""
-    main_channel = guild.get_channel(MAIN_CHANNEL_ID)
-
-    title_configs = [
-        ('grand_marshal', GRAND_MARSHAL_ROLE_ID, 'Grand Marshal',
-         "After careful review of the battlefield records, I must inform {old} that your commission has been reassigned. {new}, the Grand Marshal's standard is yours to carry. Try not to embarrass the household."),
-        ('weapons_master', WEAPONS_MASTER_ROLE_ID, 'Weapons Master',
-         "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
-        ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
-         "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('headhunter', HEADHUNTER_ROLE_ID, 'Headhunter',
-         "The tally has been reviewed. {old}, your count has been surpassed. {new}, the Headhunter title is yours. The butler suggests you stop being modest about it."),
-        ('butcher', BUTCHER_ROLE_ID, 'Butcher',
-         "The battlefield reports are in. {old}, someone has left more bodies behind. {new}, you are hereby declared the Butcher. The butler finds the whole affair rather distasteful, but acknowledges your commitment."),
+def _lb_rows_to_records(rows):
+    """Convert DB leaderboard rows [[name, thread_id, msg_ids, type], ...] to dict format."""
+    return [
+        {
+            'Leaderboard Name': r[0],
+            'Thread ID': r[1],
+            'Message ID': r[2],
+            'Type': r[3] if len(r) > 3 else '',
+        }
+        for r in rows
     ]
 
-    for stat_key, role_id, title_name, msg_template in title_configs:
-        new_holder_name = stats.get(stat_key, 'N/A')
-        if new_holder_name == 'N/A':
-            continue
 
-        role = guild.get_role(role_id)
-        if not role:
-            continue
+async def _get_lb_records():
+    """Fetch all leaderboard rows as dicts."""
+    return _lb_rows_to_records(await _db.get_all_leaderboards())
 
-        # Find current holder
-        current_holders = [m for m in guild.members if role in m.roles]
 
-        # Find new holder by display name
-        new_member = discord.utils.find(
-            lambda m: (m.nick or m.display_name).lower() == new_holder_name.lower(),
-            guild.members
+async def _find_index_thread(guild, forum_channel_id: int, index_label: str):
+    """Return the index thread object for a forum, or None if not found yet."""
+    try:
+        forum = guild.get_channel(forum_channel_id)
+        if not forum:
+            forum = await guild.fetch_channel(forum_channel_id)
+        target_name = f"📋 {index_label} Index"
+        for t in forum.threads:
+            if t.name == target_name:
+                return t
+        async for t in forum.archived_threads(limit=None):
+            if t.name == target_name:
+                return t
+    except Exception as e:
+        print(f"_find_index_thread error ({index_label}): {e}")
+    return None
+
+
+async def build_ledger_entrance(guild):
+    """
+    Post or refresh the 6-section ledger entrance in LEDGER_ENTRANCE_CHANNEL_ID.
+    Each section is one message; Butler edits it in-place on subsequent calls.
+    """
+    try:
+        channel = guild.get_channel(LEDGER_ENTRANCE_CHANNEL_ID)
+        if not channel:
+            channel = await guild.fetch_channel(LEDGER_ENTRANCE_CHANNEL_ID)
+
+        try:
+            all_lb_rows = await _get_lb_records()
+        except Exception as e:
+            print(f"Ledger entrance DB read error: {e}")
+            return
+
+        def board_links(names_and_ids, guild_id, max_chars=1600):
+            """Turn a list of (display_name, thread_id) into inline bullet links, capped to fit."""
+            links = []
+            for name, tid in names_and_ids:
+                links.append(f"[{name}](https://discord.com/channels/{guild_id}/{tid})")
+            result = ' • '.join(links)
+            if len(result) <= max_chars:
+                return result
+            kept = []
+            for link in links:
+                candidate = ' • '.join(kept + [link])
+                if len(candidate) > max_chars - 30:
+                    remaining = len(links) - len(kept)
+                    kept.append(f"*+{remaining} more*")
+                    break
+                kept.append(link)
+            return ' • '.join(kept)
+
+        guild_id = guild.id
+
+        weapon_1h_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'weapon'
+             and r['Leaderboard Name'] in _WEAPONS_1H],
+            key=lambda x: x[0]
         )
-        if not new_member:
-            continue
+        weapon_2h_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'weapon'
+             and r['Leaderboard Name'] in _WEAPONS_2H],
+            key=lambda x: x[0]
+        )
+        map_boards_raw = [
+            r for r in all_lb_rows
+            if r.get('Type', '').strip().lower() == 'map'
+        ]
+        seen_maps = {}
+        for r in sorted(map_boards_raw, key=lambda x: x['Leaderboard Name']):
+            base = r['Leaderboard Name'].split(' - ')[0].strip()
+            if base not in seen_maps:
+                seen_maps[base] = int(r['Thread ID'])
+        map_boards = sorted(seen_maps.items(), key=lambda x: x[0])
 
-        # Check if it changed hands
-        if current_holders and new_member in current_holders:
-            continue  # Same person, no change
+        feat_boards = sorted(
+            [(r['Leaderboard Name'], int(r['Thread ID']))
+             for r in all_lb_rows
+             if r.get('Type', '').strip().lower() == 'feat'],
+            key=lambda x: x[0]
+        )
 
-        # Remove from old holders
-        for old_member in current_holders:
+        _t = lambda tid: type('T', (), {'id': tid})()
+        idx_1h     = _t(INDEX_THREAD_1H)
+        idx_2h     = _t(INDEX_THREAD_2H)
+        idx_maps   = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID,  "Map Records")
+        idx_feats  = _t(INDEX_THREAD_FEATS)
+        idx_bounty = await _find_index_thread(guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards")
+        idx_reg    = _t(REGISTRY_INDEX_THREAD_ID)
+
+        def index_link(thread, label):
+            if thread:
+                return f"[→ Full {label} Index](https://discord.com/channels/{guild_id}/{thread.id})"
+            return f"*{label} index not yet built*"
+
+        embed = discord.Embed(
+            title="<:cigar:1444893851427803298>  The Ledger",
+            color=0x8b6914,
+        )
+
+        sections = [
+            ("ONE-HANDED WEAPONS",  index_link(idx_1h, '1H')),
+            ("TWO-HANDED WEAPONS",  index_link(idx_2h, '2H')),
+            ("<a:campaignmaster:1520497947115262083>  MAP RECORDS",  index_link(idx_maps, 'Maps')),
+            ("🏅  FEATS",                                            index_link(idx_feats, 'Feats')),
+            ("🐱  BOUNTY CARDS",                                     index_link(idx_bounty, 'Bounty Cards')),
+            ("<:cigar:1444893851427803298>  BUTLER'S ARCHIVE",       index_link(idx_reg, 'Registry')),
+        ]
+
+        for name, value in sections:
+            embed.add_field(name=name, value=value, inline=False)
+            embed.add_field(name="​", value="​", inline=False)
+
+        mid = _entrance_message_ids.get('entrance')
+        if not mid:
             try:
-                await old_member.remove_roles(role)
+                bot_id = guild.me.id
+                async for msg in channel.history(limit=20, oldest_first=True):
+                    if msg.author.id == bot_id and msg.embeds:
+                        if any('Ledger' in (e.title or '') for e in msg.embeds):
+                            _entrance_message_ids['entrance'] = msg.id
+                            mid = msg.id
+                            break
             except Exception:
                 pass
 
-        # Give to new holder
-        try:
-            await new_member.add_roles(role)
-        except Exception:
-            pass
-
-        # Announce in main
-        if main_channel and current_holders:
-            old_mention = current_holders[0].mention
-            new_mention = new_member.mention
-            msg = msg_template.format(old=old_mention, new=new_mention)
+        if mid:
             try:
-                await main_channel.send(msg)
-            except Exception as e:
-                print(f"Title announcement error: {e}")
+                msg = await channel.fetch_message(mid)
+                await msg.edit(content=None, embed=embed)
+            except discord.NotFound:
+                mid = None
+
+        if not mid:
+            new_msg = await channel.send(embed=embed)
+            _entrance_message_ids['entrance'] = new_msg.id
+
+        print("Ledger entrance updated.")
+
+    except Exception as e:
+        print(f"build_ledger_entrance error: {e}")
 
 
-class FavouritesCog(commands.Cog):
+async def update_leaderboard_index(guild, forum_channel_id: int, index_label: str, blurb: str = None):
+    """Rebuild the pinned index thread for a leaderboard forum using embeds."""
+    try:
+        import config as _cfg
+        forum = guild.get_channel(forum_channel_id)
+        if not forum:
+            print(f"Leaderboard index: forum {forum_channel_id} not found")
+            return
+
+        index_thread_name = f"📋 {index_label} Index"
+
+        seen_ids = set()
+        threads = []
+        try:
+            active = await guild._state.http.get_active_threads(guild.id)
+            for t_data in active.get('threads', []):
+                if int(t_data['parent_id']) == forum_channel_id and t_data['name'] != index_thread_name:
+                    t_obj = forum.get_thread(int(t_data['id']))
+                    if not t_obj:
+                        t_obj = await guild.fetch_channel(int(t_data['id']))
+                    threads.append(t_obj)
+                    seen_ids.add(int(t_data['id']))
+        except Exception as e:
+            print(f"Active threads fetch error: {e}")
+            for t in forum.threads:
+                if t.name != index_thread_name:
+                    threads.append(t)
+                    seen_ids.add(t.id)
+        async for thread in forum.archived_threads(limit=None):
+            if thread.name != index_thread_name and thread.id not in seen_ids:
+                threads.append(thread)
+
+        seen_base = set()
+        deduped = []
+        for t in sorted(threads, key=lambda t: t.name.lower()):
+            base = t.name.split(' - ')[0].strip() if ' - ' in t.name else t.name
+            if base not in seen_base:
+                seen_base.add(base)
+                deduped.append((base, t))
+        deduped.sort(key=lambda x: x[0].lower())
+
+        def make_links(items):
+            return ' • '.join(
+                f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                for name, t in items
+            )
+
+        def _split_field(field_name, items, max_chars=1000):
+            fields = []
+            current_name = field_name
+            current = []
+            for item in items:
+                candidate = make_links(current + [item])
+                if len(candidate) > max_chars and current:
+                    fields.append((current_name, make_links(current)))
+                    current_name = f"{field_name} (cont.)"
+                    current = [item]
+                else:
+                    current.append(item)
+            if current:
+                fields.append((current_name, make_links(current)))
+            return fields
+
+        embed_fields = []
+
+        is_weapon_index = index_label in ("1H Weapons", "2H Weapons")
+        is_map_index    = index_label in ("Map Records",)
+
+        if is_weapon_index:
+            CLASS_GROUPS = [
+                ("⚔️ Knight",   ["Officer", "Guardian", "Crusader"]),
+                ("🗡️ Vanguard", ["Devastator", "Raider", "Ambusher"]),
+                ("🛡️ Footman",  ["Poleman", "Man-at-Arms", "Field Engineer"]),
+                ("🏹 Archer",   ["Longbowman", "Crossbowman", "Skirmisher"]),
+            ]
+            archer_weapons = set()
+            for ws in _cfg.MARKSMAN_SUBCLASSES.values():
+                archer_weapons.update(ws)
+
+            placed = set()
+            for group_label, subclasses in CLASS_GROUPS:
+                group_weapons = archer_weapons if group_label.startswith("🏹") else set()
+                for sc in subclasses:
+                    group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
+                group_items = [(n, t) for n, t in deduped if n in group_weapons and n not in placed]
+                if not group_items:
+                    continue
+                group_items.sort(key=lambda x: x[0])
+                placed.update(n for n, _ in group_items)
+                embed_fields.extend(_split_field(group_label, group_items))
+            remainder = [(n, t) for n, t in deduped if n not in placed]
+            if remainder:
+                embed_fields.extend(_split_field("Other", remainder))
+
+        elif is_map_index:
+            embed_fields.extend(_split_field("Maps", deduped))
+
+        else:
+            groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+            for group_name, start, end in groups:
+                grp = [(n, t) for n, t in deduped if n and start <= n[0].upper() <= end]
+                if grp:
+                    embed_fields.extend(_split_field(group_name, grp))
+            other = [(n, t) for n, t in deduped if not n or not n[0].upper().isalpha()]
+            if other:
+                embed_fields.extend(_split_field('#', other))
+
+        def _build_embeds(fields):
+            embeds = []
+            for i in range(0, max(len(fields), 1), 25):
+                chunk = fields[i:i + 25]
+                e = discord.Embed(
+                    title=f"📋 {index_label} Index",
+                    description=blurb if (i == 0 and blurb) else ("Jump to a board below" if i == 0 else None),
+                    colour=discord.Colour.from_str("#2b2d31"),
+                )
+                for fname, fval in chunk:
+                    e.add_field(name=fname, value=fval, inline=False)
+                embeds.append(e)
+            return embeds
+
+        if not embed_fields:
+            embed_fields = [("No boards yet", "*Nothing here yet.*")]
+        embeds = _build_embeds(embed_fields)
+
+        _known_index_ids = {
+            "1H Weapons":  INDEX_THREAD_1H,
+            "2H Weapons":  INDEX_THREAD_2H,
+            "Feats of War": INDEX_THREAD_FEATS,
+        }
+        index_thread = None
+        if index_label in _known_index_ids:
+            try:
+                index_thread = guild.get_channel(_known_index_ids[index_label]) or \
+                               await guild.fetch_channel(_known_index_ids[index_label])
+            except Exception:
+                pass
+        if not index_thread:
+            for t in forum.threads:
+                if t.name == index_thread_name:
+                    index_thread = t
+                    break
+        if not index_thread:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == index_thread_name:
+                    index_thread = t
+                    break
+
+        if index_thread:
+            msgs = []
+            async for msg in index_thread.history(limit=50, oldest_first=True):
+                msgs.append(msg)
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            for embed in embeds:
+                await asyncio.sleep(0.5)
+                await index_thread.send(embed=embed)
+            print(f"Leaderboard index updated: {index_label}")
+        else:
+            result = await forum.create_thread(name=index_thread_name, content="**➜ INDEX**")
+            await asyncio.sleep(0.5)
+            for embed in embeds:
+                await asyncio.sleep(0.5)
+                await result.thread.send(embed=embed)
+            print(f"Leaderboard index created: {index_label}")
+
+    except Exception as e:
+        print(f"Leaderboard index error ({index_label}): {e}")
+
+
+async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
+                              takedowns, kills, deaths, vip, feats,
+                              player_name, message_link, bot_user=None, second_place_td=None):
+    guild = interaction.guild
+    discord_id = str(interaction.user.id)
+    any_updated = False
+    placements = []
+
+    updates = []
+
+    if not vip:
+        updates.append((selected_weapon, takedowns, True, True, False))
+
+    map_lb_name = f"{selected_map} - {faction}"
+    updates.append((map_lb_name, takedowns, True, True, False))
+
+    if "Flawless" in feats:
+        updates.append(("Flawless", takedowns, False, True, False))
+    if "100 Kills" in feats:
+        updates.append(("100 Kills", kills, False, False, True))
+    if "200 Takedowns" in feats:
+        updates.append(("200 Takedowns", takedowns, False, False, True))
+    if selected_weapon == "Mallet" and kills >= 100:
+        updates.append(("Mallet", takedowns, True, True, False))
+    if selected_weapon == "Knife" and kills >= 100:
+        updates.append(("Knife", takedowns, True, True, False))
+    if selected_weapon == "Healing Horn" and kills >= 100:
+        updates.append(("Healing Horn", kills, False, True, False))
+    if second_place_td is not None and kills is not None:
+        tuff_gap = kills - second_place_td
+        if tuff_gap > 0:
+            updates.append(("TUFF", tuff_gap, False, False, True))
+
+    # Fetch all data once at the start
+    all_values = await _db.get_all_leaderboard_data()
+    all_lb_rows = await _get_lb_records()
+
+    for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
+        # Find existing entry for this player on this board
+        existing_score = None
+        for row in all_values:
+            if row[0] == lb_name and row[2] == discord_id:
+                existing_score = int(row[3]) if row[3] else 0
+                break
+        existing_entry = existing_score is not None
+
+        if unlimited_top50:
+            # No cap — but skip exact duplicates (same player, score, weapon)
+            already_exists = any(
+                r[0] == lb_name and r[2] == discord_id
+                and (int(r[3]) if r[3] else 0) == score
+                and (r[5] if len(r) > 5 else '') == (selected_weapon or '')
+                for r in all_values
+            )
+            if already_exists:
+                continue
+            await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            any_updated = True
+            all_board = [int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]]
+            all_board.append(score)
+            all_board.sort(reverse=True)
+            pos = all_board.index(score) + 1
+            placements.append((lb_name, pos))
+        elif personal_best:
+            if existing_entry:
+                if score > existing_score:
+                    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+                    any_updated = True
+                    board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                    board_scores = [s for s in board_scores if s != existing_score]
+                    board_scores.append(score)
+                    board_scores.sort(reverse=True)
+                    pos = board_scores.index(score) + 1
+                    placements.append((lb_name, pos))
+                else:
+                    continue
+            else:
+                if top_10:
+                    board_entries = [row for row in all_values if row[0] == lb_name]
+                    board_entries_sorted = sorted(
+                        board_entries, key=lambda x: int(x[3]) if len(x) > 3 and x[3] else 0, reverse=True
+                    )
+                    if len(board_entries_sorted) >= 10:
+                        lowest_score = int(board_entries_sorted[9][3]) if board_entries_sorted[9][3] else 0
+                        if score <= lowest_score:
+                            continue
+                        tenth_discord_id = board_entries_sorted[9][2] if len(board_entries_sorted[9]) > 2 else ''
+                        await _db.delete_leaderboard_entry_by_board_and_player(lb_name, tenth_discord_id)
+                        all_values = await _db.get_all_leaderboard_data()
+                await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+                any_updated = True
+                board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                board_scores.append(score)
+                board_scores.sort(reverse=True)
+                pos = board_scores.index(score) + 1
+                placements.append((lb_name, pos))
+        else:
+            await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            any_updated = True
+            board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+            board_scores.append(score)
+            board_scores.sort(reverse=True)
+            pos = board_scores.index(score) + 1
+            placements.append((lb_name, pos))
+
+        # Reload and update Discord message
+        updated_values = await _db.get_all_leaderboard_data()
+        entries = []
+        for row in updated_values:
+            if row[0] == lb_name:
+                entries.append({
+                    'player': row[1] if len(row) > 1 else '',
+                    'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                    'link': row[4] if len(row) > 4 else '',
+                    'weapon': row[5] if len(row) > 5 else '',
+                })
+        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+
+        show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+        score_prefix = "+" if lb_name == "TUFF" else ""
+        lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+        if not lb_row:
+            print(f"No leaderboards DB entry found for: {lb_name}")
+            continue
+        is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+
+        thread_id = int(lb_row['Thread ID'])
+        message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+
+        try:
+            thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            msg_content = _map_header(lb_name) if is_map else ""
+            new_ids = []
+            for i, emb in enumerate(embeds):
+                if i < len(message_ids):
+                    try:
+                        msg = await thread.fetch_message(message_ids[i])
+                        await msg.edit(content=msg_content, embed=emb)
+                        new_ids.append(message_ids[i])
+                    except Exception:
+                        msg = await thread.send(content=msg_content, embed=emb)
+                        new_ids.append(msg.id)
+                else:
+                    msg = await thread.send(content=msg_content, embed=emb)
+                    new_ids.append(msg.id)
+            if new_ids != message_ids:
+                await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+        except Exception as e:
+            print(f"Discord update error for {lb_name}: {e}")
+
+    return any_updated, placements
+
+
+async def post_scorecard_to_threads(guild, lb_names, original_message):
+    """Re-upload scorecard image to each leaderboard thread."""
+    if not original_message.attachments:
+        return
+    attachment = original_message.attachments[0]
+    if not (attachment.content_type or "").startswith("image/"):
+        return
+    try:
+        import aiohttp, io as _io
+        async with aiohttp.ClientSession() as session:
+            async with session.get(attachment.url) as resp:
+                if resp.status != 200:
+                    return
+                image_bytes = await resp.read()
+    except Exception as e:
+        print(f"[SCORECARD_UPLOAD] Fetch failed: {e}")
+        return
+
+    all_lb_rows = await _get_lb_records()
+    posted = set()
+    for lb_name in lb_names:
+        lb_row = next((r for r in all_lb_rows if r["Leaderboard Name"] == lb_name), None)
+        if not lb_row:
+            continue
+        thread_id = int(lb_row["Thread ID"])
+        if thread_id in posted:
+            continue
+        try:
+            thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            import io as _io2
+            await thread.send(file=discord.File(_io2.BytesIO(image_bytes), filename=attachment.filename))
+            posted.add(thread_id)
+            print(f"[SCORECARD_UPLOAD] Posted to {lb_name} thread {thread_id}")
+        except Exception as e:
+            print(f"[SCORECARD_UPLOAD] Failed for {lb_name}: {e}")
+
+
+async def get_leaderboard_entries(name):
+    rows = await _db.get_all_leaderboard_data()
+    entries = []
+    for row in rows:
+        if row[0] == name:
+            entries.append({
+                'player': row[1] if len(row) > 1 else '',
+                'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                'link': row[4] if len(row) > 4 else '',
+                'weapon': row[5] if len(row) > 5 else ''
+            })
+    return sorted(entries, key=lambda x: x['score'], reverse=True)
+
+
+def pack_chunks_into_slots(chunks, num_slots):
+    if num_slots == 0:
+        return []
+
+    if len(chunks) <= num_slots:
+        packed = list(chunks)
+        while len(packed) < num_slots:
+            packed.append("​")
+        return packed
+
+    packed = list(chunks[:num_slots - 1])
+    last = chunks[num_slots - 1]
+    for extra in chunks[num_slots:]:
+        candidate = last + "\n" + extra
+        if len(candidate) <= 1900:
+            last = candidate
+        else:
+            last = last + "\n*...continued*"
+            break
+    packed.append(last)
+    return packed
+
+
+def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix=""):
+    if not entries:
+        return ["No entries yet."]
+
+    lines = []
+    for idx, e in enumerate(entries, 1):
+        weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        score_str = f"{score_prefix}{e['score']}"
+        if e['link']:
+            lines.append(f"{idx}. **{e['player']}** — [{score_str}]({e['link']}){weapon_str}")
+        else:
+            lines.append(f"{idx}. **{e['player']}** — {score_str}{weapon_str}")
+
+    if overflow > 0:
+        lines.append(f"*...and {overflow} more entries*")
+
+    chunks = []
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 > 1900:
+            chunks.append(current)
+            current = line
+        else:
+            current = current + "\n" + line if current else line
+    if current:
+        chunks.append(current)
+
+    return chunks
+
+
+EMBED_GOLD = 0xC8952C
+EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
+
+HH_TOTAL = sum(len(v) for v in config.CLASS_WEAPON_MAP.values())
+_HH_LEGACY_COMPLETERS = [
+    "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
+    "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
+    "C10H15N", "BallsMajoney"
+]
+
+
+def _map_header(lb_name: str) -> str:
+    """Return the text content label for a map board message, e.g. '🔵 Bridgetown — Agatha'."""
+    if ' - ' not in lb_name:
+        return lb_name
+    map_name, faction = lb_name.split(' - ', 1)
+    emoji = FACTION_EMOJIS.get(faction, '⚔️')
+    return f"{emoji} **{map_name} — {faction}**"
+
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
+    """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
+    if not entries:
+        title = lb_name if show_title else None
+        return [discord.Embed(title=title, description="*No entries yet.*", colour=EMBED_GOLD)]
+
+    lines = []
+    for idx, e in enumerate(entries, 1):
+        weapon_str = f" — *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        score_str = f"{score_prefix}{e['score']}"
+        if e['link']:
+            lines.append(f"{idx}. **{e['player']}** — [{score_str}]({e['link']}){weapon_str}")
+        else:
+            lines.append(f"{idx}. **{e['player']}** — {score_str}{weapon_str}")
+    if overflow > 0:
+        lines.append(f"*...and {overflow} more entries*")
+
+    embeds = []
+    current_lines = []
+    current_len = 0
+    for line in lines:
+        cost = len(line) + 1
+        if current_lines and current_len + cost > EMBED_DESC_LIMIT:
+            title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
+            embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+            current_lines = []
+            current_len = 0
+        current_lines.append(line)
+        current_len += cost
+    if current_lines:
+        title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
+        embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+    return embeds
+
+
+class LeaderboardsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="butlers_report", description="Summon the Butler's Favourites report")
-    async def butlers_report(self, interaction: discord.Interaction):
-        import time
-
-        # Check if user is in Players sheet
-        player_ids = set()
-        for row in players_ws.get_all_values()[1:]:
-            if row and row[0]:
-                player_ids.add(row[0].strip())
-
-        if str(interaction.user.id) not in player_ids:
-            await interaction.response.send_message(
-                "I'm afraid I don't recognise you, sir. Only registered players may summon the report.",
-                ephemeral=True
-            )
+    @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread")
+    @app_commands.describe(
+        name="Name of the leaderboard e.g. War Axe",
+        type="Type: weapon, feat, or map"
+    )
+    async def setup_leaderboard(self, interaction: discord.Interaction, name: str, type: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
-        # Rate limit — 5 minutes
-        now = time.time()
-        last = _butlers_report_cooldowns.get(interaction.user.id, 0)
-        if now - last < 300:
-            remaining = int(300 - (now - last))
-            await interaction.response.send_message(
-                f"Do you really think my manager would stand for this kind of excessive nagging? Try again in {remaining} seconds.",
-                ephemeral=True
-            )
+        await interaction.response.send_message("Setting up leaderboard...", ephemeral=True)
+        thread = interaction.channel
+
+        if type == "map":
+            map_info = MAP_ATTACK_DEFENSE.get(name)
+            if not map_info:
+                await interaction.edit_original_response(content=f"No attack/defense info found for map: {name}")
+                return
+
+            attack_faction = map_info["attack"]
+            defense_faction = map_info["defense"]
+            attack_emoji = FACTION_EMOJIS[attack_faction]
+            defense_emoji = FACTION_EMOJIS[defense_faction]
+
+            attack_name = f"{name} - {attack_faction}"
+            defense_name = f"{name} - {defense_faction}"
+
+            attack_entries = await get_leaderboard_entries(attack_name)
+            defense_entries = await get_leaderboard_entries(defense_name)
+
+            attack_chunks = format_leaderboard_text(attack_entries)
+            defense_chunks = format_leaderboard_text(defense_entries)
+
+            attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
+            defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
+
+            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries)
+            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries)
+
+            await thread.send(file=discord.File(DECORATION_TOP))
+            attack_ids = []
+            for emb in attack_embeds:
+                m = await thread.send(embed=emb)
+                attack_ids.append(str(m.id))
+            defense_ids = []
+            for emb in defense_embeds:
+                m = await thread.send(embed=emb)
+                defense_ids.append(str(m.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+            await _db.upsert_leaderboard(attack_name, str(thread.id), '|'.join(attack_ids), "map")
+            await _db.upsert_leaderboard(defense_name, str(thread.id), '|'.join(defense_ids), "map")
+
+            await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
+
+        else:
+            entries = await get_leaderboard_entries(name)
+            show_weapon = name in ("100 Kills", "200 Takedowns")
+            score_prefix = "+" if name == "TUFF" else ""
+            embeds = format_leaderboard_embeds(name, entries, 0, show_weapon, score_prefix)
+            await thread.send(file=discord.File(DECORATION_TOP))
+            msg_ids = []
+            for emb in embeds:
+                m = await thread.send(embed=emb)
+                msg_ids.append(str(m.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+            await _db.upsert_leaderboard(name, str(thread.id), '|'.join(msg_ids), type)
+
+            await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
+
+    @app_commands.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name")
+    @app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
+    async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
-        _butlers_report_cooldowns[interaction.user.id] = now
+        all_lb_rows = await _get_lb_records()
 
+        if name is None:
+            channel_id = str(interaction.channel.id)
+            matching = [r for r in all_lb_rows if str(r['Thread ID']) == channel_id]
+            if not matching:
+                await interaction.response.send_message("❌ No leaderboard found for this channel. Try specifying the name manually.", ephemeral=True)
+                return
+            names_to_refresh = [r['Leaderboard Name'] for r in matching]
+        else:
+            lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
+            if not lb_row:
+                await interaction.response.send_message(f"❌ No leaderboard found with name: `{name}`", ephemeral=True)
+                return
+            names_to_refresh = [name]
+
+        await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
+
+        for lb_name in names_to_refresh:
+            lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+            if not lb_row:
+                continue
+
+            entries = await get_leaderboard_entries(lb_name)
+            entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+
+            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+            score_prefix = "+" if lb_name == "TUFF" else ""
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+
+            thread_id = int(lb_row['Thread ID'])
+            message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+
+            try:
+                guild = interaction.guild
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(message_ids):
+                        try:
+                            msg = await thread.fetch_message(message_ids[i])
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            new_ids.append(message_ids[i])
+                        except Exception:
+                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                        new_ids.append(msg.id)
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+
+            except Exception as e:
+                await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
+                return
+
+        await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
+
+    @app_commands.command(name="refresh_all", description="Refresh every leaderboard at once (mod only)")
+    async def refresh_all_leaderboards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Refreshing all leaderboards...", ephemeral=True)
+
+        all_lb_rows = await _get_lb_records()
+        guild = interaction.guild
+        done, failed = [], []
+
+        for lb_row in all_lb_rows:
+            lb_name = lb_row.get('Leaderboard Name')
+            thread_id_raw = lb_row.get('Thread ID')
+            msg_id_raw = lb_row.get('Message ID')
+            if not lb_name or not thread_id_raw or not msg_id_raw:
+                continue
+
+            try:
+                entries = await get_leaderboard_entries(lb_name)
+                entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+                score_prefix = "+" if lb_name == "TUFF" else ""
+                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+
+                thread_id = int(thread_id_raw)
+                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(message_ids):
+                        try:
+                            msg = await thread.fetch_message(message_ids[i])
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            new_ids.append(message_ids[i])
+                        except Exception:
+                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                        new_ids.append(msg.id)
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
+            except Exception as e:
+                print(f"[refresh_all] Failed {lb_name}: {e}")
+                failed.append(lb_name)
+
+        summary = f"✅ Refreshed {len(done)} boards."
+        if failed:
+            summary += f"\n❌ Failed: {', '.join(failed)}"
+        await interaction.edit_original_response(content=summary)
+
+    @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
+    @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
+    async def rank_command(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer()
 
-        try:
-            _now = datetime.now(timezone.utc)
-            days_since_monday = _now.weekday()
-            week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
-            if week_start_dt > _now:
-                week_start_dt -= timedelta(weeks=1)
-            week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            stats = calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
-            stats['week_label'] = week_label
-            embed_text = build_favourites_embed(stats)
+        entries = await get_leaderboard_entries(name)
+        if not entries:
+            # Try case-insensitive match
+            all_rows = await _db.get_all_leaderboard_data()
+            all_boards = {row[0].strip() for row in all_rows if row}
+            match = next((b for b in all_boards if b.lower() == name.lower()), None)
+            if match:
+                entries = await get_leaderboard_entries(match)
+                name = match
+            else:
+                suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
+                msg = f"No leaderboard found for **{name}**."
+                if suggestions:
+                    msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
+                await interaction.followup.send(msg, ephemeral=True)
+                return
 
-            # Post publicly in the channel
-            await interaction.followup.send(embed_text)
+        top = entries[:10]
+        total = len(entries)
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = [f"**{name}** — Top {len(top)} of {total}", ""]
+        for i, e in enumerate(top, 1):
+            medal = medals.get(i, f"`{i}.`")
+            prefix = f"{medal} " if i <= 3 else f"{medal}  "
+            lines.append(f"{prefix}**{e['player']}** — {e['score']}")
 
-            # Update pinned favourites channel if set
-            if BUTLERS_FAVOURITES_CHANNEL_ID:
-                fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
-                if fav_channel:
-                    try:
-                        async for msg in fav_channel.history(limit=5):
-                            if msg.author == interaction.guild.me:
-                                await msg.edit(content=embed_text)
-                                break
-                        else:
-                            await fav_channel.send(embed_text)
-                    except Exception as e:
-                        print(f"Favourites channel update error: {e}")
+        await interaction.followup.send("\n".join(lines))
 
-            # Update title roles
+    @app_commands.command(name="migrate_boards", description="Convert all leaderboard boards from text to embeds (admin only).")
+    async def migrate_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        all_lb_rows = await _get_lb_records()
+        all_ld = await _db.get_all_leaderboard_data()
+        guild = interaction.guild
+        done, skipped, failed = [], [], []
+
+        for lb_row in all_lb_rows:
+            lb_name = lb_row['Leaderboard Name']
+            thread_id_str = lb_row['Thread ID']
+            if not thread_id_str:
+                skipped.append(lb_name)
+                continue
             try:
-                await update_title_roles(interaction.guild, stats)
+                thread_id = int(thread_id_str)
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
             except Exception as e:
-                pri
+                failed.append(f"{lb_name}: can't fetch thread ({e})")
+                continue
+
+            entries = []
+            for row in all_ld:
+                if row[0] == lb_name:
+                    entries.append({
+                        'player': row[1] if len(row) > 1 else '',
+                        'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                        'link': row[4] if len(row) > 4 else '',
+                        'weapon': row[5] if len(row) > 5 else '',
+                    })
+            entries.sort(key=lambda x: x['score'], reverse=True)
+
+            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+            score_prefix = "+" if lb_name == "TUFF" else ""
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+
+            old_ids_str = lb_row['Message ID']
+            old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
+
+            try:
+                new_ids = []
+                for i, emb in enumerate(embeds):
+                    if i < len(old_ids):
+                        try:
+                            msg = await thread.fetch_message(old_ids[i])
+                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            new_ids.append(old_ids[i])
+                        except Exception:
+                            # Old message gone or is text — send fresh embed
+                            msg = await thread.send(embed=emb)
+                            new_ids.append(msg.id)
+                    else:
+                        msg = await thread.send(embed=emb)
+                        new_ids.append(msg.id)
+                await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
+                await asyncio.sleep(0.4)
+            except Exception as e:
+                failed.append(f"{lb_name}: {e}")
+
+        report = f"✅ Migrated {len(done)} boards."
+        if skipped:
+            report += f"\n⚠️ Skipped (no thread): {len(skipped)}"
+        if failed:
+            report += f"\n❌ Failed:\n" + "\n".join(failed[:10])
+        await interaction.edit_original_response(content=report)
+
+    @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
+    async def create_missing_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        all_primaries = set()
+        for weapons in _SUBCLASS_PRIMARIES.values():
+            all_primaries.update(weapons)
+
+        existing = set()
+        try:
+            for row in await _db.get_all_leaderboards():
+                if row:
+                    existing.add(row[0].strip())
+        except Exception as e:
+            await interaction.followup.send(f"Failed to read leaderboards: {e}", ephemeral=True)
+            return
+
+        missing = sorted(all_primaries - existing)
+        if not missing:
+            await interaction.followup.send("All primary weapon boards already exist.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        created = []
+        failed = []
+
+        for weapon in missing:
+            try:
+                forum_id = _weapon_forum_id(weapon)
+                forum = guild.get_channel(forum_id) or await guild.fetch_channel(forum_id)
+
+                thread_with_msg = await forum.create_thread(
+                    name=weapon,
+                    content="<:cigar:1444893851427803298>"
+                )
+                thread = thread_with_msg.thread
+
+                entries = await get_leaderboard_entries(weapon)
+                chunks = format_leaderboard_text(entries)
+
+                await thread.send(file=discord.File(DECORATION_TOP))
+                msg_ids = []
+                for chunk in chunks:
+                    lb_msg = await thread.send(chunk)
+                    msg_ids.append(str(lb_msg.id))
+                await thread.send(file=discord.File(DECORATION_BOTTOM))
+
+                await _db.upsert_leaderboard(weapon, str(thread.id), "|".join(msg_ids), "weapon")
+                created.append(weapon)
+                await asyncio.sleep(1.5)
+
+            except Exception as e:
+                print(f"create_missing_boards error for {weapon}: {e}")
+                failed.append(weapon)
+                await asyncio.sleep(1)
+
+        msg = f"Created {len(created)} boards: {chr(10).join(created)}"
+        if failed:
+            msg += f"\nFailed: {chr(10).join(failed)}"
+        await interaction.followup.send(msg[:1900], ephemeral=True)
+
+    @app_commands.command(name="ledger_refresh", description="Rebuild the ledger entrance channel and all forum indexes (mod only).")
+    async def ledger_refresh(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Rebuilding the ledger entrance...", ephemeral=True)
+        guild = interaction.guild
+
+        _entrance_message_ids.clear()
+
+        try:
+            await build_ledger_entrance(guild)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Entrance build failed: {e}")
+            return
+
+        index_targets = [
+            (WEAPON_FORUM_1H,    "1H Weapons"),
+            (WEAPON_FORUM_2H,    "2H Weapons"),
+            (MAP_RECORDS_FORUM_ID, "Map Records"),
+            (FEATS_FORUM_ID,     "Feats of War"),
+        ]
+        for forum_id, label in index_targets:
+            try:
+                await update_leaderboard_index(guild, forum_id, label)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"ledger_refresh: index error for {label}: {e}")
+
+        await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
+
+    @app_commands.command(name="repair_marks", description="Backfill missing High Score marks from leaderboard entries (mod only)")
+    async def repair_marks(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        from cogs.registry import create_or_update_registry_card
+
+        FEAT_BOARDS = {"100 Kills", "200 Takedowns", "Flawless"}
+
+        try:
+            lb_rows  = await _db.get_all_leaderboard_data()
+            sub_rows = await _db.get_all_submissions()
+        except Exception as e:
+            await interaction.edit_original_response(content=f"DB read failed: {e}")
+            return
+
+        # Build index: message_link -> (feats_string) from submissions
+        link_to_sub = {}
+        for row in sub_rows:
+            if len(row) < 13:
+                continue
+            link = row[12].strip()
+            if link:
+                link_to_sub[link] = row[11].strip()  # feats at index 11
+
+        patched_rows = []
+        affected_players = set()
+
+        for lb_row in lb_rows:
+            if len(lb_row) < 5:
+                continue
+            lb_name    = lb_row[0].strip()
+            player     = lb_row[1].strip()
+            discord_id = lb_row[2].strip()
+            link       = lb_row[4].strip()
+
+            if lb_name in FEAT_BOARDS:
+                continue
+            if not link or link not in link_to_sub:
+                continue
+
+            feats_str = link_to_sub[link]
+            feats = [f.strip() for f in feats_str.split(',') if f.strip() and f.strip() != 'None']
+
+            if 'High Score' not in feats:
+                patched_rows.append((link, feats_str, player, discord_id, lb_name))
+
+        if not patched_rows:
+            await interaction.edit_original_response(content="✅ No missing High Score marks found — all entries look correct.")
+            return
+
+        errors = []
+        for link, old_feats, player, discord_id, lb_name in patched_rows:
+            try:
+                if old_feats in ('', 'None', 'none'):
+                    new_feats = 'High Score'
+                else:
+                    new_feats = old_feats.rstrip(', ') + ', High Score'
+                await _db.update_submission_feats_by_link(link, new_feats)
+                affected_players.add((player, int(discord_id) if discord_id.isdigit() else None))
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                errors.append(f"Link {link[:30]} ({player}): {e}")
+
+        rebuilt = []
+        for player_name, player_id in affected_players:
+            if not player_id:
+                continue
+            try:
+                await create_or_update_registry_card(interaction.guild, player_id, player_name)
+                rebuilt.append(player_name)
+                await asyncio.sleep(1.0)
+            except Exception as e:
+                errors.append(f"Registry rebuild for {player_name}: {e}")
+                await asyncio.sleep(1.0)
+
+        summary = (
+            f"✅ Backfilled High Score on **{len(patched_rows)}** submission(s) "
+            f"across **{len(affected_players)}** player(s).\n"
+            f"Registry cards rebuilt: {', '.join(rebuilt) or 'none'}"
+        )
+        if errors:
+            summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
+        await interaction.edit_original_response(content=summary)
+
+    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
+    async def backfill_feat_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        FEAT_MAP = {"100 Kills": "kills", "200 Takedowns": "takedowns"}
+        sub_rows = await _db.get_all_submissions()
+        lb_rows  = await _db.get_all_leaderboard_data()
+
+        existing = {(r[0], r[4]) for r in lb_rows if len(r) > 4}
+
+        added = 0
+        for row in sub_rows:
+            if len(row) < 13:
+                continue
+            feats_str  = row[11] or ""
+            link       = (row[12] or "").strip()
+            player     = row[1] or ""
+            discord_id = row[2] or ""
+            kills      = int(row[8]) if row[8] else 0
+            takedowns  = int(row[7]) if row[7] else 0
+            weapon     = row[3] or ""
+            if not link:
+                continue
+            for board, stat in FEAT_MAP.items():
+                if board not in feats_str:
+                    continue
+                if (board, link) in existing:
+                    continue
+                score = kills if stat == "kills" else takedowns
+                await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
+                existing.add((board, link))
+                added += 1
+
+        await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
+
+    @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
+    @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
+    async def dedupe_board(self, interaction: discord.Interaction, name: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        all_values = await _db.get_all_leaderboard_data()
+        rows = [r for r in all_values if r[0] == name]
+        seen = set()
+        removed = 0
+        for r in rows:
+            key = (r[2], int(r[3]) if r[3] else 0, r[5] if len(r) > 5 else '')
+            if key in seen:
+                # duplicate \u2014 delete by message link (unique enough)
+                await _db.delete_leaderboard_entry_by_link(name, r[4] if len(r) > 4 else '')
+                removed += 1
+            else:
+                seen.add(key)
+        await interaction.edit_original_response(content=f"\u2705 Removed **{removed}** duplicate entries from **{name}**. Run `/refresh` to update the board.")
+
+
+    @app_commands.command(name="backfill_hundred_handed", description="Seed Hundred Handed from submissions + legacy list (mod only).")
+    async def backfill_hundred_handed(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        added = 0
+
+        # 1. Seed legacy completers — mark all 87 combos for each
+        for name in _HH_LEGACY_COMPLETERS:
+            legacy_id = f"legacy_{name.lower().replace(' ', '_')}"
+            for subclass, weapons in config.CLASS_WEAPON_MAP.items():
+                for weapon in weapons:
+                    is_new = await _db.add_hundred_handed(legacy_id, name, subclass, weapon)
+                    if is_new:
+                        added += 1
+
+        # 2. Scan submissions for 100+ TD with known subclass+weapon
+        all_subs = await _db.get_all_submissions()
+        for row in all_subs:
+            try:
+                discord_id = str(row[1]) if len(row) > 1 and row[1] else None
+                player_name = str(row[2]) if len(row) > 2 and row[2] else None
+                weapon = str(row[5]) if len(row) > 5 and row[5] else None
+                subclass = str(row[6]) if len(row) > 6 and row[6] else None
+                takedowns = int(row[7]) if len(row) > 7 and row[7] else 0
+                if not discord_id or not weapon or not subclass or takedowns < 100:
+                    continue
+                if subclass.startswith("Marksman"):
+                    continue
+                if subclass not in config.CLASS_WEAPON_MAP:
+                    continue
+                if weapon not in config.CLASS_WEAPON_MAP[subclass]:
+                    continue
+                is_new = await _db.add_hundred_handed(discord_id, player_name or '', subclass, weapon)
+                if is_new:
+                    added += 1
+            except Exception:
+                continue
+
+        await refresh_hundred_handed_board(interaction.guild)
+        await interaction.edit_original_response(content=f"✅ Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.")
+
+
+async def refresh_hundred_handed_board(guild):
+    """Rebuild The Hundred Handed embed in its thread."""
+    all_lb_rows = await _get_lb_records()
+    lb_row = next((r for r in all_lb_rows if r.get('Leaderboard Name') == 'The Hundred Handed'), None)
+    if not lb_row:
+        print("[HUNDRED_HANDED] No leaderboard row found for 'The Hundred Handed'")
+        return
+
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+
+    rows = await _db.get_hundred_handed_leaderboard()
+    if not rows:
+        desc = "*No entries yet.*"
+    else:
+        lines = []
+        for idx, (discord_id, player_name, count) in enumerate(rows, 1):
+            done = "✓" if count >= HH_TOTAL else ""
+            lines.append(f"{idx}. **{player_name}** — {count}/{HH_TOTAL} {done}")
+        desc = "\n".join(lines)
+
+    embed = discord.Embed(title="The Hundred Handed", description=desc, colour=EMBED_GOLD)
+
+    try:
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        if message_ids:
+            try:
+                msg = await thread.fetch_message(message_ids[0])
+                await msg.edit(content="", embed=embed)
+            except Exception:
+                msg = await thread.send(embed=embed)
+                await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+        else:
+            msg = await thread.send(embed=embed)
+            await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+    except Exception as e:
+        print(f"[HUNDRED_HANDED] Board refresh error: {e}")
+
+
+async def setup(bot):
+    await bot.add_cog(LeaderboardsCog(bot))
