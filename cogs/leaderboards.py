@@ -614,7 +614,9 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 EMBED_GOLD = 0xC8952C
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
-HH_TOTAL = sum(len(v) for v in config.CLASS_WEAPON_MAP.values())
+_HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
+_HH_PRIMARIES = {sc: ws for sc, ws in config._SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER}
+HH_TOTAL = sum(len(v) for v in _HH_PRIMARIES.values())
 _HH_LEGACY_COMPLETERS = [
     "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
     "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
@@ -1220,31 +1222,30 @@ class LeaderboardsCog(commands.Cog):
 
         added = 0
 
-        # 1. Seed legacy completers — mark all 87 combos for each
+        # 1. Seed legacy completers — primary non-archer weapons only
         for name in _HH_LEGACY_COMPLETERS:
             legacy_id = f"legacy_{name.lower().replace(' ', '_')}"
-            for subclass, weapons in config.CLASS_WEAPON_MAP.items():
+            for subclass, weapons in _HH_PRIMARIES.items():
                 for weapon in weapons:
                     is_new = await _db.add_hundred_handed(legacy_id, name, subclass, weapon)
                     if is_new:
                         added += 1
 
-        # 2. Scan submissions for 100+ TD with known subclass+weapon
+        # 2. Scan submissions — primary non-archer weapons only
+        # Row indices: [0]=timestamp [1]=player_name [2]=discord_id [3]=weapon [4]=subclass [7]=takedowns
         all_subs = await _db.get_all_submissions()
         for row in all_subs:
             try:
-                discord_id = str(row[1]) if len(row) > 1 and row[1] else None
-                player_name = str(row[2]) if len(row) > 2 and row[2] else None
-                weapon = str(row[5]) if len(row) > 5 and row[5] else None
-                subclass = str(row[6]) if len(row) > 6 and row[6] else None
+                discord_id = str(row[2]) if len(row) > 2 and row[2] else None
+                player_name = str(row[1]) if len(row) > 1 and row[1] else None
+                weapon = str(row[3]).strip() if len(row) > 3 and row[3] else None
+                subclass = str(row[4]).strip() if len(row) > 4 and row[4] else None
                 takedowns = int(row[7]) if len(row) > 7 and row[7] else 0
                 if not discord_id or not weapon or not subclass or takedowns < 100:
                     continue
-                if subclass.startswith("Marksman"):
+                if subclass not in _HH_PRIMARIES:
                     continue
-                if subclass not in config.CLASS_WEAPON_MAP:
-                    continue
-                if weapon not in config.CLASS_WEAPON_MAP[subclass]:
+                if weapon not in _HH_PRIMARIES[subclass]:
                     continue
                 is_new = await _db.add_hundred_handed(discord_id, player_name or '', subclass, weapon)
                 if is_new:
@@ -1259,7 +1260,7 @@ class LeaderboardsCog(commands.Cog):
         try:
             hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
             if hh_role:
-                _all_primaries = {w for weapons in config._SUBCLASS_PRIMARIES.values() for w in weapons}
+                _all_primaries = {w for sc, ws in _HH_PRIMARIES.items() for w in ws}
                 all_subs_for_role = await _db.get_all_submissions()
                 player_weapons: dict[str, set] = {}
                 for r in all_subs_for_role:

@@ -360,11 +360,12 @@ async def get_feats_for_player(discord_id, cached_data=None):
     seen_links = set()  # deduplicate across all sources by link
     named_feats = set()
 
-    # Check for Hundred-Handed — at least one submission on every primary weapon across all subclasses
+    # Check for Hundred-Handed — one submission on every primary weapon, non-archer subclasses only
     from config import _SUBCLASS_PRIMARIES
-    _all_primaries = {w for weapons in _SUBCLASS_PRIMARIES.values() for w in weapons}
+    _HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
+    _hh_primaries = {w for sc, ws in _SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER for w in ws}
     _player_weapons = {row[3].strip() for row in subs if len(row) > 3 and row[2].strip() == discord_id_str and row[3].strip()}
-    if _all_primaries and _all_primaries.issubset(_player_weapons):
+    if _hh_primaries and _hh_primaries.issubset(_player_weapons):
         named_feats.add('hhanded')
 
     # Collect feat submissions from Submissions sheet

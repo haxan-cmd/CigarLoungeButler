@@ -1628,15 +1628,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if '200 Takedowns' in feats:
                 await _db.increment_manual_feat_count(discord_id_str, '200 takedowns')
 
-        # Assign Hundred-Handed role if player now has a submission on every primary weapon
+        # Assign Hundred-Handed role if player now has a submission on every primary non-archer weapon
         try:
             hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
             if hh_role and hh_role not in interaction.user.roles:
                 from config import _SUBCLASS_PRIMARIES
-                _all_primaries = {w for weapons in _SUBCLASS_PRIMARIES.values() for w in weapons}
+                _HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
+                _hh_primaries = {w for sc, ws in _SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER for w in ws}
                 all_subs = await _db.get_all_submissions()
                 _player_weapons = {r[3].strip() for r in all_subs if len(r) > 3 and r[2].strip() == discord_id_str and r[3].strip()}
-                if _all_primaries and _all_primaries.issubset(_player_weapons):
+                if _hh_primaries and _hh_primaries.issubset(_player_weapons):
                     await interaction.user.add_roles(hh_role, reason="Hundred-Handed — submitted on every primary weapon")
                     print(f"[HH] Assigned Hundred-Handed role to {interaction.user.display_name}")
         except Exception as hh_e:
