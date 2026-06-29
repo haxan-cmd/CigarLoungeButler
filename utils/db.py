@@ -222,30 +222,34 @@ async def upsert_player(discord_id, player_name, forum_thread_id=None,
         )
 
 
-async def get_player_ign(discord_id: str) -> str | None:
-    """Return stored in-game name for this player, or None."""
+async def get_player_igns(discord_id: str) -> list[str]:
+    """Return all known in-game names for this player."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
-            return await conn.fetchval(
-                "SELECT ign FROM players WHERE discord_id=$1", str(discord_id)
+            val = await conn.fetchval(
+                "SELECT igns FROM players WHERE discord_id=$1", str(discord_id)
             )
+            return list(val) if val else []
         except Exception:
-            return None
+            return []
 
 
 async def save_player_ign(discord_id: str, ign: str):
-    """Persist an in-game name alias for this player."""
+    """Append a new in-game name alias if not already stored."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
             await conn.execute(
-                "ALTER TABLE players ADD COLUMN IF NOT EXISTS ign TEXT"
+                "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'"
             )
+            # Append only if not already in the array
             await conn.execute(
-                "UPDATE players SET ign=$1 WHERE discord_id=$2",
+                """UPDATE players SET igns = array_append(igns, $1)
+                   WHERE discord_id=$2 AND NOT ($1 = ANY(COALESCE(igns, '{}')))""",
                 ign, str(discord_id)
             )
+            print(f"[IGN] Appended alias '{ign}' for discord_id={discord_id}")
         except Exception as e:
             print(f"[IGN] save failed: {e}")
 

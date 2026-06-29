@@ -147,13 +147,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
-            f"\n\nPLAYER NAME HINT: The submitting player's Discord name is '{player_name}'. "
-            f"Their IN-GAME name may be completely different from their Discord name. "
-            f"IMPORTANT: The name hint is a secondary clue only — do NOT try to find '{player_name}' in the scoreboard if no row matches it. "
-            f"NEVER read stats from Discord voice overlay cards (the small name cards on the left/right edges) even if they show a matching name — those are NOT scoreboard rows. "
-            f"PRIMARY method: find the row with the visually highlighted background (gold/bright/tinted row) inside the main RANK|NAME|SCORE|T|K|D|PING table. "
-            f"SECONDARY method: only use name matching if a row inside the scoreboard table closely matches '{player_name}'. "
-            f"If the name hint matches nothing in the scoreboard, rely entirely on the visual highlight."
+            f"\n\nPLAYER NAME HINT: The submitting player may appear under any of these names: {player_name}. "
+            f"Their in-game name may differ from their Discord name. "
+            f"NEVER read stats from Discord voice overlay cards on the edges — those are NOT scoreboard rows. "
+            f"PRIMARY method: find the row with the visually highlighted background (gold/bright/tinted) inside the RANK|NAME|SCORE|T|K|D|PING table. "
+            f"SECONDARY method: if a row inside the scoreboard closely matches any of the listed names, use that. "
+            f"If no name matches, rely entirely on the visual highlight. "
+            f"Also extract the exact NAME text from the highlighted row and return it in the 'name' field."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
 

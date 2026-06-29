@@ -202,10 +202,14 @@ class SubmitView(discord.ui.View):
         try:
             print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
             player_display_name = self.original_message.author.display_name
-            # Use stored IGN as hint if available (more reliable than Discord name)
+            # Use stored IGNs as hint if available (more reliable than Discord name)
             try:
-                stored_ign = await _db.get_player_ign(self.original_message.author.id)
-                vision_name_hint = stored_ign if stored_ign else player_display_name
+                stored_igns = await _db.get_player_igns(self.original_message.author.id)
+                if stored_igns:
+                    # Pass all known aliases; Discord name appended as last resort
+                    vision_name_hint = ', '.join(stored_igns + [player_display_name])
+                else:
+                    vision_name_hint = player_display_name
             except Exception:
                 vision_name_hint = player_display_name
             for att in self.original_message.attachments:
