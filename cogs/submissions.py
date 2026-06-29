@@ -1455,9 +1455,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         feats.append(selected_weapon)
 
     vip_str = "Yes" if vip else "No"
-    feats_str = ", ".join(feats) if feats else None
 
     caption = original_message.content.strip() if original_message.content else ""
+
+    # Tag resubmissions so they're excluded from weekly stats
+    if "resubmit" in caption.lower():
+        feats.append("Resubmit")
+
+    feats_str = ", ".join(feats) if feats else None
 
     # Compute lobby context from vision team data
     vd = vision_data or {}
@@ -2067,12 +2072,3 @@ class SubmissionsCog(commands.Cog):
         prompt = await message.reply(
             "\U0001f4cb Scorecard detected! Click below to submit your run.",
             mention_author=False,
-            view=view
-        )
-        view.prompt_msg = prompt
-
-
-
-
-async def setup(bot):
-    await bot.add_cog(SubmissionsCog(bot))

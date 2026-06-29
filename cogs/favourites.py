@@ -41,6 +41,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             try:
                 ts = datetime.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
                 if week_start <= ts < week_end:
+                    # Skip resubmissions — they're old runs, not new weekly activity
+                    feats_col = row[11].strip() if len(row) > 11 else ""
+                    if "Resubmit" in feats_col:
+                        continue
                     filtered.append(row)
             except Exception:
                 pass
@@ -505,12 +509,4 @@ class FavouritesCog(commands.Cog):
                                 break
                         else:
                             await fav_channel.send(embed=embed_text)
-                    except Exception as e:
-                        print(f"Favourites channel update error: {e}")
-
-        except Exception as e:
-            await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
-
-
-async def setup(bot):
-    await bot.add_cog(FavouritesCog(bot))
+      
