@@ -510,7 +510,6 @@ class AdminCog(commands.Cog):
             ephemeral=True
         )
 
-
     @app_commands.command(name="backfill_hundred_handed", description="Assign Hundred-Handed role to all players who've submitted on every primary weapon (mod only).")
     async def backfill_hundred_handed(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
