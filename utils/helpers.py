@@ -59,6 +59,12 @@ LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In 
 
 STEAM DECK / CONTROLLER UI: Some screenshots show "PRESS A TO INTERACT", "PRESS B", "PRESS X", or similar controller button prompts at the bottom of the screen. These are UI overlays — ignore them completely, they are not part of the scoreboard.
 
+SCREEN OVERLAYS TO IGNORE — these are NOT scoreboard rows:
+- Discord/streaming voice overlays on the left or right edges (small cards showing player names with icons like arrows, diamonds, or letters like "E")
+- A "SPECTATORS" panel that may appear on the right side listing players who are spectating
+- Any name that appears outside the main two-column scoreboard table
+Only read names and stats from inside the RANK | NAME | SCORE | T | K | D | PING table columns.
+
 FINDING THE PLAYER (use BOTH methods, prefer name match if highlight is ambiguous):
 Method 1 — Visual highlight: scan every row for the one with a distinctly brighter/gold background or a marker icon.
 Method 2 — Name match: if a player name hint is provided, find the row whose NAME column most closely matches it (exact or partial match, case-insensitive, ignoring clan tags or decorators).
@@ -372,47 +378,45 @@ def nerve_flush():
 
     if not subs and not interactions and not errors and not milestones:
         quiet_lines = [
-            "All quiet. The Butler approves.",
-            "Nothing to report. The lounge is running smoothly.",
-            "Silence. The Butler finds it acceptable.",
-            "No errors. No chaos. The Butler is mildly surprised.",
-            "Everything in order. The Manager need not be disturbed.",
+            "All quiet. The Butler appreciates the peace.",
+            "Nothing to report. Most unusual.",
+            "A quiet evening. The accounts are settled.",
         ]
-        return f"🧠 **Hourly Digest**\n*{random.choice(quiet_lines)}*"
+        return random.choice(quiet_lines)
 
-    lines = ["🧠 **Hourly Digest**"]
+    parts = []
     if subs:
-        lines.append(f"\n**Submissions ({len(subs)})**")
-        for ts, p, w in subs[-10:]:
-            lines.append(f"• `{ts}` {p} — {w}")
-    if milestones:
-        lines.append(f"\n**Milestones**")
-        for p, w, r in milestones:
-            lines.append(f"• {p} — {w} — {r}")
+        names = ', '.join(s['player'] for s in subs[:5])
+        extra = f" (+{len(subs)-5} more)" if len(subs) > 5 else ""
+        parts.append(f"📋 **{len(subs)} submission(s):** {names}{extra}")
     if interactions:
-        lines.append(f"\n**Butler ({len(interactions)} interactions)**")
-        for t, r in interactions[-5:]:
-            lines.append(f'• {t[:40]} -> {r[:40]}')
+        parts.append(f"💬 **{len(interactions)} butler interaction(s)**")
+    if milestones:
+        for m in milestones:
+            parts.append(f"🏆 {m}")
     if errors:
-        lines.append(f"\n**⚠️ Errors ({len(errors)})**")
-        for ts, e in errors[-5:]:
-            lines.append(f"• `{ts}` {e}")
+        parts.append(f"⚠️ **{len(errors)} error(s) logged**")
 
-    for k in _nerve_events:
-        _nerve_events[k].clear()
+    _nerve_events['submissions'].clear()
+    _nerve_events['interactions'].clear()
+    _nerve_events['errors'].clear()
+    _nerve_events['milestones'].clear()
 
-    return "\n".join(lines)
+    return "\n".join(parts)
 
 
-def build_manual_content():
-    lines = [
-        "📖 **BUTLER'S MANUAL**",
-        "*A reference for registered players.*",
-        "",
-        "**Commands**",
-    ]
-    for cmd, desc in config.PLAYER_COMMANDS:
-        lines.append(f"`{cmd}` — {desc}")
-    lines.append("")
-    lines.append("*Submit a run by posting a screenshot in the submissions channel.*")
-    return "\n".join(lines)
+async def nerve_alert(bot_instance, context, error):
+    # Fire-and-forget critical error to nerve center — don't let this crash anything else
+    try:
+        guild = bot_instance.get_guild(config.GUILD_ID)
+        if not guild:
+            return
+        ch = (guild.get_channel(config.NERVE_CENTER_CHANNEL_ID)
+              or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID))
+        if ch:
+            import discord as _discord
+            if isinstance(ch, _discord.Thread) and ch.archived:
+                await ch.edit(archived=False)
+            await ch.send(f"⚠️ **Critical Error** — {context}\n```{str(error)[:300]}```")
+    except Exception:
+        pass
