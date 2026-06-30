@@ -106,30 +106,38 @@ async def build_ledger_entrance(guild):
         idx_maps  = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID, "Map Records")
 
         # Active bounty from DB
+        bounty_label = "Active Bounty"
+        bounty_emoji = "🎯"
         bounty_channel_id = None
         try:
             all_bounties = await _db.get_all_bounties()
             for b in all_bounties:
                 if b[8] == 'TRUE':
+                    bounty_label = b[0] or "Active Bounty"
+                    bounty_emoji = b[3] or "🎯"
                     if b[1]:
                         bounty_channel_id = int(b[1])
                     break
         except Exception as be:
             nerve_log_error("Ledger bounty lookup", be)
 
-        def mention(channel_id):
-            return f"<#{channel_id}>" if channel_id else "*unavailable*"
+        def ch_url(channel_id):
+            return f"https://discord.com/channels/{guild.id}/{channel_id}"
 
-        content = "\n".join([
-            mention(1460713024082935930),
-            mention(1518822798116524092),
-            mention(bounty_channel_id),
-            mention(REGISTRY_INDEX_THREAD_ID),
-            mention(idx_maps.id if idx_maps else None),
-            mention(INDEX_THREAD_2H),
-            mention(INDEX_THREAD_1H),
-            mention(INDEX_THREAD_FEATS),
-        ])
+        view = discord.ui.View(timeout=None)
+        buttons = [
+            ("⚖️ Challenge Rules",   1460713024082935930),
+            ("📋 Butler's Favourites", 1518822798116524092),
+            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),
+            ("🗂️ Player Archive",    REGISTRY_INDEX_THREAD_ID),
+            ("🏆 Map Records",       idx_maps.id if idx_maps else None),
+            ("⚔️ 2H Weapons",        INDEX_THREAD_2H),
+            ("🗡️ 1H Weapons",        INDEX_THREAD_1H),
+            ("🏛️ Feats of War",      INDEX_THREAD_FEATS),
+        ]
+        for label, cid in buttons:
+            if cid:
+                view.add_item(discord.ui.Button(label=label, url=ch_url(cid), style=discord.ButtonStyle.link))
 
         mid = _entrance_message_ids.get('entrance')
         if not mid:
@@ -146,12 +154,12 @@ async def build_ledger_entrance(guild):
         if mid:
             try:
                 msg = await channel.fetch_message(mid)
-                await msg.edit(content=content, embed=None)
+                await msg.edit(content=None, embed=None, view=view)
             except discord.NotFound:
                 mid = None
 
         if not mid:
-            new_msg = await channel.send(content=content)
+            new_msg = await channel.send(view=view)
             _entrance_message_ids['entrance'] = new_msg.id
 
         print("Ledger entrance updated.")
