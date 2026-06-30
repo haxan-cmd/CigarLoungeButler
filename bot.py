@@ -76,8 +76,8 @@ async def on_ready():
         print(f"❌ Command sync failed: {e}")
 
 
-@bot.tree.after_invoke
-async def auto_delete_hotline(interaction: discord.Interaction):
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command):
     if interaction.channel_id == config.BUTLERS_HOTLINE_CHANNEL_ID:
         try:
             msg = await interaction.original_response()
