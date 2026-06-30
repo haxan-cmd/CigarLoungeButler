@@ -46,31 +46,21 @@ async def get_active_bounty():
 
 def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_done, completions):
     """
-    weapons: dict of { display_name: {"current": int, "total": int} }
+    Completions list only — used to be the full community card (weapon progress
+    bars + special challenge box + completions), but the weapon/special-challenge
+    breakdown was just maxed-out aggregate counts that weren't useful to an
+    individual player checking their own status, and got cut entirely per
+    feedback (2026-06-30). weapons/theme_emoji/special_challenge/special_done
+    are accepted but unused now — kept so the one call site in /bounty_status
+    doesn't need to change its signature if this gets reused later.
+
     completions: list of {"name": str, "date": str}
     """
-    # Top title box removed (2026-06-30) — redundant once /bounty_status also
-    # appends the personal progress card below, which has its own title box.
-    lines = []
-
-    for weapon, data in weapons.items():
-        cur = min(data['current'], data['total'])
-        tot = data['total']
-        label = f"~~{weapon}~~" if cur >= tot else weapon
-        progress = f"{cur}/{tot}"
-        lines.append(f"▸ {label:<22} {progress:>4}")
-
-    lines.append("╭──────────────────────────────╮")
-    lines.append(f"      {theme_emoji} SPECIAL CHALLENGE {theme_emoji}")
-    lines.append("╰──────────────────────────────╯")
-    sc_progress = "1/1" if special_done else "0/1"
-    lines.append(f"▸ {special_challenge:<22} {sc_progress:>4}")
-
-    card = "```\n" + "\n".join(lines) + "\n```"
-    if completions:
-        card += "\n\n🏆 **Completions**"
-        for idx, c in enumerate(completions, 1):
-            card += f"\n{idx}. {c['name']} — {c['date']}"
+    if not completions:
+        return ""
+    card = "🏆 **Completions**"
+    for idx, c in enumerate(completions, 1):
+        card += f"\n{idx}. {c['name']} — {c['date']}"
     return card
 
 
@@ -657,16 +647,16 @@ class BountyCog(commands.Cog):
         if not bounty:
             await interaction.response.send_message("No bounty is running.", ephemeral=True)
             return
-        card = build_bounty_card(
+        completions_block = build_bounty_card(
             bounty['title'], bounty['theme_emoji'], bounty['weapons'],
             bounty['special_challenge'], bounty['special_done'], bounty['completions']
         )
         player_row = await get_player_bounty_progress(bounty['title'], str(interaction.user.id))
         if player_row:
-            personal_card = build_player_bounty_card(bounty, player_row['progress'])
-            card += f"\n\n**Your progress:**\n{personal_card}"
+            personal_block = f"**Your progress:**\n{build_player_bounty_card(bounty, player_row['progress'])}"
         else:
-            card += "\n\n*No submissions recorded for this bounty yet.*"
+            personal_block = "*No submissions recorded for this bounty yet.*"
+        card = "\n\n".join(b for b in (completions_block, personal_block) if b)
         await interaction.response.send_message(card, ephemeral=True)
 
     @app_commands.command(name="bounty_hunt", description="Show the top hunters for the active bounty")
