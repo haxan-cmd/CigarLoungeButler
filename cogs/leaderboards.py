@@ -487,7 +487,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            msg_content = _map_header(lb_name) if is_map else ""
+            msg_content = ""
             new_ids = []
             for i, emb in enumerate(embeds):
                 if i < len(message_ids):
@@ -678,9 +678,9 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"│ `{e['player']}` — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"│ {idx}. `{e['player']}` — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"│ `{e['player']}` — {score_str}{weapon_str}")
+            lines.append(f"│ {idx}. `{e['player']}` — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
 
@@ -746,8 +746,8 @@ class LeaderboardsCog(commands.Cog):
             attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
             defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
 
-            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries)
-            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries)
+            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries, show_title=False)
+            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries, show_title=False)
 
             await thread.send(file=discord.File(DECORATION_TOP))
             attack_ids = []
@@ -830,13 +830,13 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(message_ids):
                         try:
                             msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            await msg.edit(content="", embed=emb)
                             new_ids.append(message_ids[i])
                         except Exception:
-                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            msg = await thread.send(content="", embed=emb)
                             new_ids.append(msg.id)
                     else:
-                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                        msg = await thread.send(content="", embed=emb)
                         new_ids.append(msg.id)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -883,13 +883,13 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(message_ids):
                         try:
                             msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            await msg.edit(content="", embed=emb)
                             new_ids.append(message_ids[i])
                         except Exception:
-                            msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            msg = await thread.send(content="", embed=emb)
                             new_ids.append(msg.id)
                     else:
-                        msg = await thread.send(content=_map_header(lb_name) if is_map else "", embed=emb)
+                        msg = await thread.send(content="", embed=emb)
                         new_ids.append(msg.id)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -986,7 +986,7 @@ class LeaderboardsCog(commands.Cog):
                     if i < len(old_ids):
                         try:
                             msg = await thread.fetch_message(old_ids[i])
-                            await msg.edit(content=_map_header(lb_name) if is_map else "", embed=emb)
+                            await msg.edit(content="", embed=emb)
                             new_ids.append(old_ids[i])
                         except Exception:
                             # Old message gone or is text — send fresh embed
