@@ -308,10 +308,12 @@ async def calculate_butler_stats(week_start=None, week_end=None):
 def build_favourites_embed(stats):
     import discord as _discord
 
-    def fmt_list(items, suffix, n=3):
+    def fmt_list(items, suffix="", n=3):
         lines = []
         for i, (name, val) in enumerate(items[:n]):
-            lines.append(f"│ `{name}` — {val} {suffix}")
+            # suffix only on first entry, blank after
+            sfx = f" {suffix}" if (suffix and i == 0) else ""
+            lines.append(f"│ `{name}` — {val}{sfx}")
         return "\n".join(lines) if lines else "│ *—*"
 
     def fmt_plain(items, n=3):
@@ -348,12 +350,12 @@ def build_favourites_embed(stats):
 
     embed.add_field(
         name="⚔️ Most Kills",
-        value=fmt_list(stats['top_kills_list'], "K"),
+        value=fmt_list(stats['top_kills_list']),
         inline=True,
     )
     embed.add_field(
         name="<a:toptkd:1360312666475728958> Highest Takedowns",
-        value=fmt_list(stats['top_td_list'], "TD"),
+        value=fmt_list(stats['top_td_list']),
         inline=True,
     )
     embed.add_field(name="​", value="​", inline=True)
