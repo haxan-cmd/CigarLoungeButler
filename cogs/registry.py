@@ -1125,19 +1125,29 @@ async def update_archive_index(guild):
         EMBED_OVERHEAD = len(EMBED_TITLE) + len(EMBED_DESC)
         EMBED_CHAR_LIMIT = 5800
 
+        _BLANK = ("​", "​", True)
+
+        def _pad_to_3(fields):
+            """Pad with blank inline fields so every row of 3 is complete — no gaps."""
+            remainder = len(fields) % 3
+            if remainder:
+                fields = fields + [_BLANK] * (3 - remainder)
+            return fields
+
         def _build_embeds(fields):
             embeds = []
             current_fields = []
             current_chars = EMBED_OVERHEAD
             for fname, fval, finline in fields:
                 cost = len(fname) + len(fval)
-                if current_fields and (current_chars + cost > EMBED_CHAR_LIMIT or len(current_fields) >= 25):
+                if current_fields and (current_chars + cost > EMBED_CHAR_LIMIT or len(current_fields) >= 24):
+                    padded = _pad_to_3(current_fields)
                     e = discord.Embed(
                         title=EMBED_TITLE,
                         description=EMBED_DESC,
                         colour=discord.Colour.from_str("#2b2d31"),
                     )
-                    for fn, fv, fi in current_fields:
+                    for fn, fv, fi in padded:
                         e.add_field(name=fn, value=fv, inline=fi)
                     embeds.append(e)
                     current_fields = []
@@ -1145,12 +1155,13 @@ async def update_archive_index(guild):
                 current_fields.append((fname, fval, finline))
                 current_chars += cost
             if current_fields:
+                padded = _pad_to_3(current_fields)
                 e = discord.Embed(
                     title=EMBED_TITLE,
                     description=EMBED_DESC,
                     colour=discord.Colour.from_str("#2b2d31"),
                 )
-                for fn, fv, fi in current_fields:
+                for fn, fv, fi in padded:
                     e.add_field(name=fn, value=fv, inline=fi)
                 embeds.append(e)
             return embeds
