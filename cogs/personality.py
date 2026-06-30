@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 import config
 import utils.db as _db
 from utils.helpers import (
-    build_manual_content, build_manual_embed, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
+    build_manual_content, build_manual_embed, build_favourites_explainer_embed, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
 from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
 
@@ -298,6 +298,22 @@ class PersonalityCog(commands.Cog):
                     print("butlers-manual updated")
         except Exception as e:
             print(f"butlers-manual update error: {e}")
+
+        # Update butlers-favourites explainer
+        try:
+            if real_guild:
+                fav_channel = real_guild.get_channel(config.BUTLERS_FAVOURITES_CHANNEL_ID) or                               await real_guild.fetch_channel(config.BUTLERS_FAVOURITES_CHANNEL_ID)
+                if fav_channel:
+                    fav_embed = build_favourites_explainer_embed()
+                    async for msg in fav_channel.history(limit=10):
+                        if msg.author == real_guild.me and msg.embeds:
+                            await msg.edit(embed=fav_embed)
+                            break
+                    else:
+                        await fav_channel.send(embed=fav_embed)
+                    print("butlers-favourites explainer updated")
+        except Exception as e:
+            print(f"butlers-favourites explainer update error: {e}")
 
 
 

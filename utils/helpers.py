@@ -236,6 +236,43 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         return empty
 
 
+def build_favourites_explainer_embed():
+    """Explainer embed posted in the Butler's Favourites channel."""
+    import discord as _discord
+
+    embed = _discord.Embed(
+        title="📋  The Butler's Favourites",
+        description="The Butler's Report tracks server-wide performance stats across all submissions. Updated automatically after every submission.",
+        colour=_discord.Colour.from_str("#8b6914"),
+    )
+    embed.add_field(
+        name="📅 Weekly stats  *(resets Monday 12:00 UTC)*",
+        value=(
+            "`Most Lethal` — highest kills ÷ takedowns % across the week\n"
+            "`Warlord` — highest takedown share of team % across the week\n"
+            "`Most Kills` — best single-game kill score this week\n"
+            "`Highest Takedowns` — best single-game takedown score this week\n"
+            "`Busiest` — most total submissions this week\n"
+            "`Top Weapons` — most submitted weapons this week\n"
+            "`Top Maps` — most played maps this week"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🏆 All-time titles  *(permanent leaderboard holders)*",
+        value=(
+            "`Grand Marshal` — #1 across the most leaderboards overall\n"
+            "`Weapons Master` — #1 across the most weapon boards\n"
+            "`Campaign Master` — #1 across the most map boards\n"
+            "`Headhunter` — highest weighted average kills on the 100 Kills board\n"
+            "`Butcher` — highest weighted average takedowns on the 200 Takedowns board"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Use /butlers_report in #🚨 | butlers-hotline to summon the latest report.")
+    return embed
+
+
 def build_manual_embed():
     """Build the butler's-manual embed listing all player-facing slash commands."""
     import discord as _discord
