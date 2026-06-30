@@ -123,8 +123,12 @@ async def build_progress_board(bounty, top_n=10):
             continue
         player_name = row[2]
         progress = json.loads(row[4]) if row[4] else {}
+        weapons = bounty.get('weapons', {})
         total_submissions = sum(
-            (v['current'] if isinstance(v, dict) else int(v))
+            min(
+                (v['current'] if isinstance(v, dict) else int(v)),
+                weapons.get(k, {}).get('total', 9999) if isinstance(weapons.get(k), dict) else 9999
+            )
             for k, v in progress.items() if k != '__special__'
         )
         if total_submissions > 0:

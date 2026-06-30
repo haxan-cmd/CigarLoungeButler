@@ -430,7 +430,7 @@ class PersonalityCog(commands.Cog):
             # Health check
             now_dt = datetime.now(timezone.utc)
             loaded_cogs = list(self.bot.cogs.keys())
-            expected_cogs = ['RegistryCog', 'LeaderboardCog', 'BountyCog', 'SubmissionsCog', 'FavouritesCog', 'PersonalityCog', 'AdminCog']
+            expected_cogs = ['RegistryCog', 'LeaderboardsCog', 'BountyCog', 'SubmissionsCog', 'FavouritesCog', 'PersonalityCog', 'AdminCog']
             missing_cogs = [c for c in expected_cogs if c not in loaded_cogs]
             health_lines = []
             health_lines.append(f"🟢 Bot online — {len(loaded_cogs)} cogs loaded")
