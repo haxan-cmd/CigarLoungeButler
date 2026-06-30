@@ -23,6 +23,7 @@ WEAPONS_MASTER_ROLE_ID     = config.WEAPONS_MASTER_ROLE_ID
 CAMPAIGN_MASTER_ROLE_ID    = config.CAMPAIGN_MASTER_ROLE_ID
 HEADHUNTER_ROLE_ID         = config.HEADHUNTER_ROLE_ID
 BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
+WARLORD_ROLE_ID            = config.WARLORD_ROLE_ID
 
 _butlers_report_cooldowns = {}
 
@@ -169,6 +170,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         shares = team_td_shares.get(p, [])
         avg = sum(shares) / len(shares) if shares else 0
         most_dominant.append(f"{p} -- {avg:.1f}%")
+    warlord_player = dom_ranked[0] if dom_ranked else None
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -296,6 +298,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'butcher': butcher or "N/A",
         'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
+        'warlord_player': warlord_player,
         'most_dominant': most_dominant if most_dominant else [],
         'top_weapons_by_kill_share': top_weapons_by_kill_share,
         'top_weapons_by_td_share': top_weapons_by_td_share,
@@ -406,8 +409,8 @@ async def update_title_roles(guild, stats):
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
         ('most_lethal_player', HEADHUNTER_ROLE_ID, 'Most Lethal',
          "The kill tallies have been reviewed. {old}, your edge has been lost. {new}, the Most Lethal title is yours. The butler is mildly impressed."),
-        ('butcher', BUTCHER_ROLE_ID, 'Butcher',
-         "The battlefield reports are in. {old}, someone has left more bodies behind. {new}, you are hereby declared the Butcher. The butler finds the whole affair rather distasteful, but acknowledges your commitment."),
+        ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
+         "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]
 
     for stat_key, role_id, title_name, msg_template in title_configs:
