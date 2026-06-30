@@ -1093,36 +1093,33 @@ async def update_archive_index(guild):
 
         entries.sort(key=lambda x: x[0].lower())
 
-        groups = [('A-D', 'A', 'D'), ('E-K', 'E', 'K'), ('L-R', 'L', 'R'), ('S-Z', 'S', 'Z')]
-
-        def _make_fields(group_name, group_entries):
-            """Return list of (name, value) embed field tuples, splitting if over 1024 chars."""
-            links = [f"[{n}](https://discord.com/channels/{guild.id}/{t})" for n, t in group_entries]
+        # Build per-letter inline fields (3-column grid layout)
+        def _make_letter_fields(letter, letter_entries):
+            """One inline field per letter, splitting at 1000 chars."""
+            links = [f"[{n}](https://discord.com/channels/{guild.id}/{t})" for n, t in letter_entries]
             fields = []
-            current_name = group_name
             current_links = []
             for link in links:
-                candidate = ' • '.join(current_links + [link])
-                if len(candidate) > 1000:
-                    fields.append((current_name, ' • '.join(current_links)))
-                    current_name = f"{group_name} (cont.)"
+                candidate = "\n".join(current_links + [link])
+                if len(candidate) > 950:
+                    fields.append((letter if not fields else f"{letter} (cont.)", "\n".join(current_links), True))
                     current_links = [link]
                 else:
                     current_links.append(link)
             if current_links:
-                fields.append((current_name, ' • '.join(current_links)))
+                fields.append((letter if not fields else f"{letter} (cont.)", "\n".join(current_links), True))
             return fields
 
         embed_fields = []
-        for group_name, start, end in groups:
-            group_entries = [(n, t) for n, t in entries if n and start <= n[0].upper() <= end]
-            if group_entries:
-                embed_fields.extend(_make_fields(group_name, group_entries))
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            letter_entries = [(n, t) for n, t in entries if n and n[0].upper() == letter]
+            if letter_entries:
+                embed_fields.extend(_make_letter_fields(letter, letter_entries))
         other = [(n, t) for n, t in entries if not n or not n[0].upper().isalpha()]
         if other:
-            embed_fields.extend(_make_fields('#', other))
+            embed_fields.extend(_make_letter_fields("#", other))
 
-        # Build embed(s) — Discord allows max 25 fields per embed
+        # Build embed(s) — max 25 fields per embed
         EMBED_TITLE = "📋 Player Registry Index"
         EMBED_DESC = "Jump to a player's card"
         EMBED_OVERHEAD = len(EMBED_TITLE) + len(EMBED_DESC)
@@ -1132,7 +1129,7 @@ async def update_archive_index(guild):
             embeds = []
             current_fields = []
             current_chars = EMBED_OVERHEAD
-            for fname, fval in fields:
+            for fname, fval, finline in fields:
                 cost = len(fname) + len(fval)
                 if current_fields and (current_chars + cost > EMBED_CHAR_LIMIT or len(current_fields) >= 25):
                     e = discord.Embed(
@@ -1140,12 +1137,12 @@ async def update_archive_index(guild):
                         description=EMBED_DESC,
                         colour=discord.Colour.from_str("#2b2d31"),
                     )
-                    for fn, fv in current_fields:
-                        e.add_field(name=fn, value=fv, inline=False)
+                    for fn, fv, fi in current_fields:
+                        e.add_field(name=fn, value=fv, inline=fi)
                     embeds.append(e)
                     current_fields = []
                     current_chars = EMBED_OVERHEAD
-                current_fields.append((fname, fval))
+                current_fields.append((fname, fval, finline))
                 current_chars += cost
             if current_fields:
                 e = discord.Embed(
@@ -1153,8 +1150,8 @@ async def update_archive_index(guild):
                     description=EMBED_DESC,
                     colour=discord.Colour.from_str("#2b2d31"),
                 )
-                for fn, fv in current_fields:
-                    e.add_field(name=fn, value=fv, inline=False)
+                for fn, fv, fi in current_fields:
+                    e.add_field(name=fn, value=fv, inline=fi)
                 embeds.append(e)
             return embeds
 
