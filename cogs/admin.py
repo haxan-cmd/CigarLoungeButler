@@ -24,128 +24,142 @@ CAMPAIGN_MASTER_ROLE_ID = config.CAMPAIGN_MASTER_ROLE_ID
 HEADHUNTER_ROLE_ID      = config.HEADHUNTER_ROLE_ID
 BUTCHER_ROLE_ID         = config.BUTCHER_ROLE_ID
 
-CHALLENGE_RULES_CONTENT = [
-    # 1. Intro + weapon ranks
-    """\
-<:cigar:1444893851427803298> **CIGAR LOUNGE**
-100-bombers come here to grind weapon marks, complete bounties, and settle scores against each other.
+def build_challenge_rules_embeds():
+    """Return a list of discord.Embed objects for the challenge rules channel."""
+    C = discord.Colour.from_str
 
-One outstanding game is a coincidence.
-The lounge is interested in what you do after that.
+    embeds = []
 
-<:level1_1:1361419350665461820> — **Bronze**
-• 1 weapon mark (1 total)
-<:level2_3:1361419398841106442> — **Silver**
-• +4 weapon marks (5 total)
-<:level3_6:1361419489635209396> — **Gold**
-• +7 weapon marks (12 total)
-<:level4_9:1368656036784771212> — **Emerald**
-• +13 weapon marks (25 total)
-<:level5_12:1368656100764942432> — **Diamond**
-• +15 weapon marks (40 total)
-<:level6_15:1430203489757302924> — **Crimson**
-• +20 weapon marks (60 total)
-<:level7_20:1430216503919120537> — **Prestige Bronze**
-• +20 weapon marks (80 total)
-<:level8_30:1430216636006137876> — **Prestige Silver**
-• +20 weapon marks (100 total)
-<:level9_40:1430216748329599046> — **Prestige Gold**
-• +15 weapon marks (115 total)
-<:level10_55:1430216819787956265> — **Prestige Emerald**
-• +10 weapon marks (125 total)
-<:level11_70:1430217739586240624> — **Prestige Diamond**
-• +8 weapon marks (133 total)
-<:level12_85:1430217099648962651> — **Prestige Crimson**
-• +8 weapon marks (141 total)
-<:level13_100:1459253823481712895> — **Iridescent**
-• +9 weapon marks (150 total)""",
+    # 1. Intro
+    e = discord.Embed(
+        title="<:cigar:1444893851427803298>  Cigar Lounge",
+        description=(
+            "100-bombers come here to grind weapon marks, complete bounties, and settle scores against each other.\n\n"
+            "One outstanding game is a coincidence.\nThe lounge is interested in what you do after that."
+        ),
+        colour=C("#C9A84C"),
+    )
+    embeds.append(e)
 
     # 2. Earning weapon marks
-    """\
-🎯 **EARNING WEAPON MARKS**
-A weapon mark is earned by completing a **100 takedown game** with the following conditions:
+    e = discord.Embed(
+        title="🎯  Earning Weapon Marks",
+        description="A weapon mark is earned by completing a **100 takedown game** with the following conditions:",
+        colour=C("#C9A84C"),
+    )
+    e.add_field(name="Requirements", value=(
+        "• Same loadout for the entire match\n"
+        "• No catapult usage\n"
+        "• Match must be submitted in <#1328832440927518920>"
+    ), inline=False)
+    e.add_field(name="Submission must include", value=(
+        "• Class or subclass\n• Weapon used\n• VIP used or not"
+    ), inline=False)
+    e.add_field(name="Bonus marks per submission", value=(
+        "<a:200tkd:1363648828414230538> +1 for 200 Takedowns\n"
+        "<a:100kill:1361412390339608686> +1 for 100 Kills\n"
+        "<a:triple:1365532698260668466> +1 for Triple\n"
+        "<a:highscore:1360312918545269057> +1 for Leaderboard High Score"
+    ), inline=False)
+    e.add_field(name="Note", value="Goedendag counts for Polearms **and** Engineer (Footman).", inline=False)
+    embeds.append(e)
 
-• Same loadout for the entire match
-• **No catapult usage**
-• Match must be submitted in <#1328832440927518920>
+    # 3. Weapon ranks
+    e = discord.Embed(
+        title="⚔️  Weapon Ranks",
+        description="Marks accumulate per weapon. Each threshold unlocks the next rank.",
+        colour=C("#5865F2"),
+    )
+    e.add_field(name="Ranks", value=(
+        "<:level1_1:1361419350665461820> **Bronze** — 1 mark\n"
+        "<:level2_3:1361419398841106442> **Silver** — 5 total\n"
+        "<:level3_6:1361419489635209396> **Gold** — 12 total\n"
+        "<:level4_9:1368656036784771212> **Emerald** — 25 total\n"
+        "<:level5_12:1368656100764942432> **Diamond** — 40 total\n"
+        "<:level6_15:1430203489757302924> **Crimson** — 60 total"
+    ), inline=True)
+    e.add_field(name="Prestige", value=(
+        "<:level7_20:1430216503919120537> **Prestige Bronze** — 80\n"
+        "<:level8_30:1430216636006137876> **Prestige Silver** — 100\n"
+        "<:level9_40:1430216748329599046> **Prestige Gold** — 115\n"
+        "<:level10_55:1430216819787956265> **Prestige Emerald** — 125\n"
+        "<:level11_70:1430217739586240624> **Prestige Diamond** — 133\n"
+        "<:level12_85:1430217099648962651> **Prestige Crimson** — 141\n"
+        "<:level13_100:1459253823481712895> **Iridescent** — 150"
+    ), inline=True)
+    embeds.append(e)
 
-**Submission must include:**
-• Class or Subclass
-• Weapon used
-• VIP used or not
+    # 4. Subclass & class progression
+    e = discord.Embed(
+        title="🧩  Subclass & Class Progression",
+        description=(
+            "Each time a weapon badge upgrades, you earn **1 subclass mark**.\n"
+            "Fill the subclass meter and earn **1 class mark**. "
+            "Subclass length varies by how many primary weapons it contains."
+        ),
+        colour=C("#534AB7"),
+    )
+    e.add_field(name="Subclass ranks", value=(
+        "<:subclass0:1361423009256308808> Initiate\n"
+        "<:veteran2:1430199755094360194> Veteran\n"
+        "<:master3:1430199983675670619> Master\n"
+        "<:grandmaster4:1430199858635210752> Grandmaster\n"
+        "<:champion5:1430199893363789934> Champion\n"
+        "<:paragon6:1430199955385094235> Paragon\n"
+        "<:apex7:1430199916126408754> Apex"
+    ), inline=True)
+    e.add_field(name="Class ranks", value=(
+        "<:class0_0:1446622044698443969> Sworn\n"
+        "<:class1_3:1446620360186269726> Trusted\n"
+        "<:class2_6:1446620614096846988> Proven\n"
+        "<:class3_9:1446620700189266182> Honored\n"
+        "<:class4_12:1446620991777407128> Esteemed\n"
+        "<:class5_15:1446621127605620826> Exalted\n"
+        "<:class6_18:1446621258430025791> Ascended"
+    ), inline=True)
+    embeds.append(e)
 
-**Bonus marks per submission:**
-• <a:200tkd:1363648828414230538> +1 for 200 Takedowns
-• <a:100kill:1361412390339608686> +1 for 100 Kills
-• <a:triple:1365532698260668466> +1 for Triple
-• <a:highscore:1360312918545269057> +1 for Leaderboard High Score
+    # 5. Feats of legend
+    e = discord.Embed(
+        title="💀  Feats of Legend",
+        description="Additional marks earned by completing a valid 100 TD game plus one of the following:",
+        colour=C("#C0392B"),
+    )
+    e.add_field(name="Feats", value=(
+        "<a:100kill:1361412390339608686> 100 kills\n"
+        "<a:triple:1365532698260668466> 150 takedowns, 100 kills, and 20,000 points **(Triple)**\n"
+        "<a:200tkd:1363648828414230538> 200 takedowns\n"
+        "<a:predator:1366794896081555567> 150 takedowns without dying **(Predator)**"
+    ), inline=False)
+    e.add_field(name="<:hhanded:1430199468246044772>  The Hundred-Handed", value=(
+        "Get a 100 with every primary weapon across all non-archer subclasses."
+    ), inline=False)
+    embeds.append(e)
 
-**Note:**
-Goedendag counts for Polearms and Engineer (Footman).
+    # 6. Player titles
+    e = discord.Embed(
+        title="🏆  Player Titles",
+        description="Complete bounties — that's how you rank up.",
+        colour=C("#1D9E75"),
+    )
+    e.add_field(name="Ranks", value=(
+        "0 — Unbound\n1 — Proven\n2 — Respected\n3 — Distinguished\n"
+        "4 — Renowned\n5 — Illustrious\n6 — Exemplar\n7 — Legend"
+    ), inline=False)
+    embeds.append(e)
 
-Weapon marks are recorded on your **Player Card**. The card is created on your first valid submission.""",
+    # 7. Bounties
+    e = discord.Embed(
+        title="🎯  Bounties",
+        description=(
+            "Monthly objectives tracked on separate bounty cards. "
+            "Complete them — that's how you rank up. They don't run forever."
+        ),
+        colour=C("#C9A84C"),
+    )
+    embeds.append(e)
 
-    # 3. Subclass & class progression
-    """\
-🧩 **SUBCLASS & CLASS PROGRESSION**
-Each time a weapon badge upgrades, you earn **1 subclass mark**.
-
-Subclasses differ in length — depends how many primary weapons are in them.
-Fill the meter and you earn **1 class mark**.""",
-
-    # 4. Subclass ranks
-    """\
-⚔️ **SUBCLASS RANKS**
-<:subclass0:1361423009256308808> — Initiate
-<:veteran2:1430199755094360194> — Veteran
-<:master3:1430199983675670619> — Master
-<:grandmaster4:1430199858635210752> — Grandmaster
-<:champion5:1430199893363789934> — Champion
-<:paragon6:1430199955385094235> — Paragon
-<:apex7:1430199916126408754> — Apex""",
-
-    # 5. Class ranks
-    """\
-🛡️ **CLASS RANKS**
-<:class0_0:1446622044698443969> — Sworn
-<:class1_3:1446620360186269726> — Trusted
-<:class2_6:1446620614096846988> — Proven
-<:class3_9:1446620700189266182> — Honored
-<:class4_12:1446620991777407128> — Esteemed
-<:class5_15:1446621127605620826> — Exalted
-<:class6_18:1446621258430025791> — Ascended""",
-
-    # 6. Overall player titles
-    """\
-🏆 **OVERALL PLAYER TITLES**
-Complete bounties. That's how you rank up.
-
-0 — Unbound
-1 — Proven
-2 — Respected
-3 — Distinguished
-4 — Renowned
-5 — Illustrious
-6 — Exemplar
-7 — Legend""",
-
-    # 7. Feats of legend
-    """\
-💀 **Feats of Legend**
-Additional marks may be earned by completing a valid **100 takedown game** plus one of the following:
-
-• <a:100kill:1361412390339608686> — 100 kills
-• <a:triple:1365532698260668466> — 150 takedowns, 100 kills, and 20,000 points (**Triple**)
-• <a:200tkd:1363648828414230538> — 200 takedowns
-• <a:predator:1366794896081555567> — 150 takedowns without dying
-
-Additionally, you can earn <:hhanded:1430199468246044772> **The Hundred-Handed** feat by getting a 100 with every primary weapon (archer excluded)""",
-
-    # 8. Bounties
-    """\
-🎯 **BOUNTIES**
-Monthly objectives tracked on separate bounty cards. Complete them — that's how you rank up. They don't run forever.""",
-]
+    return embeds
 
 
 async def get_challenge_rules_message_ids():
@@ -236,18 +250,15 @@ class AdminCog(commands.Cog):
                 await interaction.followup.send("Could not find challenge-rules channel.", ephemeral=True)
                 return
 
+            embeds = build_challenge_rules_embeds()
             msg_ids = []
-            for i, content in enumerate(CHALLENGE_RULES_CONTENT):
-                if i > 0:
-                    await channel.send(file=discord.File(DECORATION_BOTTOM))
-                    await asyncio.sleep(0.5)
-                msg = await channel.send(content)
+            for embed in embeds:
+                msg = await channel.send(embed=embed)
                 msg_ids.append(msg.id)
                 await asyncio.sleep(0.5)
 
-            await channel.send(file=discord.File(DECORATION_BOTTOM))
             await save_challenge_rules_message_ids(msg_ids)
-            await interaction.followup.send(f"Posted {len(msg_ids)} challenge rules messages.", ephemeral=True)
+            await interaction.followup.send(f"Posted {len(msg_ids)} challenge rules embeds.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
@@ -266,17 +277,18 @@ class AdminCog(commands.Cog):
                 await interaction.followup.send("No challenge rules messages found — run /post_challenge_rules first.", ephemeral=True)
                 return
 
+            embeds = build_challenge_rules_embeds()
             updated = 0
-            for msg_id, content in zip(msg_ids, CHALLENGE_RULES_CONTENT):
+            for msg_id, embed in zip(msg_ids, embeds):
                 try:
                     msg = await channel.fetch_message(msg_id)
-                    await msg.edit(content=content)
+                    await msg.edit(content=None, embed=embed)
                     updated += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:
                     print(f"Error updating message {msg_id}: {e}")
 
-            await interaction.followup.send(f"Updated {updated}/{len(msg_ids)} challenge rules messages.", ephemeral=True)
+            await interaction.followup.send(f"Updated {updated}/{len(msg_ids)} challenge rules embeds.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
@@ -457,8 +469,8 @@ class AdminCog(commands.Cog):
     @app_commands.command(name="rules", description="Show the Cigar Lounge challenge rules.")
     async def rules_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        for chunk in CHALLENGE_RULES_CONTENT:
-            await interaction.followup.send(chunk, ephemeral=True)
+        for embed in build_challenge_rules_embeds():
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="force_snapshot", description="Manually trigger the weekly snapshot (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
