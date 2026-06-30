@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 # Leaderboard read/write, Discord thread management, and the index builder.
 # update_leaderboards() is the main entry point — called after every submission.
 import asyncio
@@ -613,6 +614,18 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 
 
 EMBED_GOLD = 0xC8952C
+_FACTION_COLOUR = {
+    "Agatha":  0xC0392B,   # red
+    "Mason":   0x2471A3,   # blue
+    "Tenosia": 0xD4AC0D,   # gold/yellow
+}
+
+def _embed_colour(lb_name):
+    """Return faction colour for map boards, gold otherwise."""
+    if ' - ' in lb_name:
+        faction = lb_name.split(' - ', 1)[1]
+        return _FACTION_COLOUR.get(faction, EMBED_GOLD)
+    return EMBED_GOLD
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
 _HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
@@ -653,8 +666,12 @@ def _lb_title(lb_name, show_title, cont=False):
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
+    colour = _embed_colour(lb_name)
     if not entries:
-        return [discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=EMBED_GOLD)]
+        e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
+        e.set_footer(text="Last updated")
+        e.timestamp = datetime.now(timezone.utc)
+        return [e]
 
     lines = []
     for idx, e in enumerate(entries, 1):
@@ -673,13 +690,19 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     for line in lines:
         cost = len(line) + 1
         if current_lines and current_len + cost > EMBED_DESC_LIMIT:
-            embeds.append(discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=EMBED_GOLD))
+            _e = discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=colour)
+            _e.set_footer(text="Last updated")
+            _e.timestamp = datetime.now(timezone.utc)
+            embeds.append(_e)
             current_lines = []
             current_len = 0
         current_lines.append(line)
         current_len += cost
     if current_lines:
-        embeds.append(discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=EMBED_GOLD))
+        _e = discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=colour)
+        _e.set_footer(text="Last updated")
+        _e.timestamp = datetime.now(timezone.utc)
+        embeds.append(_e)
     return embeds
 
 
