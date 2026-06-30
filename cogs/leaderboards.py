@@ -124,51 +124,49 @@ async def build_ledger_entrance(guild):
         def ch_url(channel_id):
             return f"https://discord.com/channels/{guild.id}/{channel_id}"
 
-        view = discord.ui.View(timeout=None)
-        buttons = [
-            ("⚖️ Challenge Rules",         1460713024082935930),       # row 0
-            ("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID),  # row 1
-            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),      # row 2
-            ("📋 Butler's Favourites",     1518822798116524092),        # row 2
-            ("🏆 Map Records",             idx_maps.id if idx_maps else None), # row 3
-            ("⚔️ 2H Weapons",             INDEX_THREAD_2H),            # row 3
-            ("🗡️ 1H Weapons",             INDEX_THREAD_1H),            # row 3
-            ("🏛️ Feats of War",           INDEX_THREAD_FEATS),         # row 4
+        def make_view(*btns):
+            """Build a View from (label, channel_id) pairs."""
+            v = discord.ui.View(timeout=None)
+            for label, cid in btns:
+                if cid:
+                    v.add_item(discord.ui.Button(
+                        label=label, url=ch_url(cid),
+                        style=discord.ButtonStyle.link,
+                    ))
+            return v
+
+        # Each tuple is one message: list of (label, channel_id) buttons
+        message_groups = [
+            [("⚖️ Challenge Rules",         1460713024082935930)],
+            [("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID)],
+            [(f"{bounty_emoji} {bounty_label}", bounty_channel_id),
+             ("📋 Butler's Favourites",     1518822798116524092)],
+            [("🏆 Map Records",             idx_maps.id if idx_maps else None),
+             ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
+             ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
+            [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
         ]
-        # Max 5 rows in Discord; assign rows explicitly for vertical layout
-        _row_map = [0, 1, 2, 2, 3, 3, 3, 4]
-        _btn_idx = 0
-        for label, cid in buttons:
-            if cid:
-                view.add_item(discord.ui.Button(
-                    label=label, url=ch_url(cid),
-                    style=discord.ButtonStyle.link,
-                    row=_row_map[_btn_idx] if _btn_idx < len(_row_map) else 4,
-                ))
-            _btn_idx += 1
 
-        mid = _entrance_message_ids.get('entrance')
-        if not mid:
-            try:
-                bot_id = guild.me.id
-                async for msg in channel.history(limit=20, oldest_first=True):
-                    if msg.author.id == bot_id:
-                        _entrance_message_ids['entrance'] = msg.id
-                        mid = msg.id
-                        break
-            except Exception:
-                pass
+        # Delete all previous entrance messages then resend fresh
+        bot_id = guild.me.id
+        try:
+            old_msgs = []
+            async for msg in channel.history(limit=30, oldest_first=True):
+                if msg.author.id == bot_id:
+                    old_msgs.append(msg)
+            for om in old_msgs:
+                try:
+                    await om.delete()
+                except Exception:
+                    pass
+        except Exception as de:
+            print(f"Entrance cleanup error: {de}")
 
-        if mid:
-            try:
-                msg = await channel.fetch_message(mid)
-                await msg.edit(content="​", embed=None, view=view)
-            except discord.NotFound:
-                mid = None
-
-        if not mid:
-            new_msg = await channel.send(content="​", view=view)
-            _entrance_message_ids['entrance'] = new_msg.id
+        _entrance_message_ids.clear()
+        for i, group in enumerate(message_groups):
+            view = make_view(*group)
+            sent = await channel.send(content="​", view=view)
+            _entrance_message_ids[f'entrance_{i}'] = sent.id
 
         print("Ledger entrance updated.")
 
