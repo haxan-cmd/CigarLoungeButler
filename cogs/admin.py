@@ -511,5 +511,49 @@ class AdminCog(commands.Cog):
         )
 
 
+    @app_commands.command(name="award_marks", description="Manually award marks on a weapon to a player (mod only).")
+    @app_commands.describe(
+        player="@ mention the player",
+        weapon="Weapon name (must match exactly)",
+        marks="Number of marks to add"
+    )
+    async def award_marks(self, interaction: discord.Interaction, player: discord.Member, weapon: str, marks: int):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That\'s not for you.", ephemeral=True)
+            return
+        if marks < 1:
+            await interaction.response.send_message("Marks must be at least 1.", ephemeral=True)
+            return
+
+        # Validate weapon name
+        all_weapons = set()
+        for ws in config.CLASS_WEAPON_MAP.values():
+            all_weapons.update(ws)
+        if weapon not in all_weapons:
+            await interaction.response.send_message(
+                f"\u274c Unknown weapon `{weapon}`. Check spelling — must match exactly.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await _db.add_legacy_mark(player.display_name, weapon, '', marks)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c DB error: {e}", ephemeral=True)
+            return
+
+        card_status = "and refreshed their card"
+        try:
+            from cogs.registry import create_or_update_registry_card
+            await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
+        except Exception as e:
+            card_status = f"but card refresh failed: {e}"
+
+        plural = 's' if marks != 1 else ''
+        await interaction.followup.send(
+            f"\u2705 Awarded **{marks} mark{plural}** on **{weapon}** to **{player.display_name}** {card_status}.",
+            ephemeral=True
+        )
+
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))

@@ -1763,9 +1763,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
-    if any(lb == "TUFF" for lb, _ in placements):
-        await safe_react("<a:TUFF2:1520779243879927898>")
-        # Write High Score feat back to the Submissions sheet so mark totals count it
+        # Write High Score feat back to the Submissions sheet so mark totals count it (any PB on any board)
         _high_score_written = False
         if submission_row:
             try:
@@ -1803,6 +1801,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     break
         except Exception as e:
             print(f"Highscore mark edit error: {e}")
+    if any(lb == "TUFF" for lb, _ in placements):
+        await safe_react("<a:TUFF2:1520779243879927898>")
 
     # Bounty check (skip for ranged submissions)
     if not is_ranged:
