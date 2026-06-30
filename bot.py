@@ -64,6 +64,10 @@ async def on_ready():
     print(f"✅ Session started at {bot.session_start.isoformat()}")
     try:
         guild = discord.Object(id=config.GUILD_ID)
+        # Clear any globally-registered commands (causes duplicates)
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()  # push empty global list
+        # Sync all commands to the guild only
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f"✅ Synced {len(synced)} slash commands to guild")
