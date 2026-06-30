@@ -2152,9 +2152,9 @@ class RegistryCog(commands.Cog):
             except (ValueError, IndexError):
                 continue
             if lb_name == "100 Kills":
-                kills_best[p_name] = max(kills_best.get(p_name, 0), score)
+                kills_best[p_name] = kills_best.get(p_name, 0) + score
             elif lb_name == "200 Takedowns":
-                td_best[p_name] = max(td_best.get(p_name, 0), score)
+                td_best[p_name] = td_best.get(p_name, 0) + score
 
         hh_holder = max(kills_best, key=kills_best.get) if kills_best else None
         hh_score = kills_best.get(hh_holder, 0) if hh_holder else 0
@@ -2416,7 +2416,7 @@ class RegistryCog(commands.Cog):
         if mastered_weapons:
             _iridescent = WEAPON_RANK_EMOJIS.get("Iridescent", "")
             lines.append("")
-            lines.append(f"{cigar} **Mastered Weapons**")
+            lines.append(f"{WEAPON_RANK_EMOJIS.get('Iridescent', cigar)} **Mastered Weapons**")
             for w in sorted(mastered_weapons):
                 lines.append(f"│ {_iridescent} {w}")
 
