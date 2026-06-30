@@ -2417,7 +2417,7 @@ class RegistryCog(commands.Cog):
         if mastered_weapons:
             _iridescent = WEAPON_RANK_EMOJIS.get("Iridescent", "")
             lines.append("")
-            lines.append(f"{WEAPON_RANK_EMOJIS.get('Iridescent', cigar)} **Mastered Weapons**")
+            lines.append("**Mastered Weapons**")
             for w in sorted(mastered_weapons):
                 lines.append(f"│ {_iridescent} {w}")
 
