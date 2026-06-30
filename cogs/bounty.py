@@ -49,10 +49,9 @@ def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_do
     weapons: dict of { display_name: {"current": int, "total": int} }
     completions: list of {"name": str, "date": str}
     """
+    # Top title box removed (2026-06-30) — redundant once /bounty_status also
+    # appends the personal progress card below, which has its own title box.
     lines = []
-    lines.append("╭──────────────────────────────╮")
-    lines.append(f"     😼 {title} ◈")
-    lines.append("╰──────────────────────────────╯")
 
     for weapon, data in weapons.items():
         cur = min(data['current'], data['total'])

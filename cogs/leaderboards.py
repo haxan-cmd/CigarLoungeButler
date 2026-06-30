@@ -577,14 +577,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+        header_content = _map_header(lb_name) if is_map else ""
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            new_ids = await _sync_board_messages(thread, embeds, message_ids)
+            new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
             if new_ids != message_ids:
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
         except Exception as e:
@@ -723,12 +724,21 @@ _HH_LEGACY_COMPLETERS = [
 
 
 def _map_header(lb_name: str) -> str:
-    """Return the text content label for a map board message, e.g. '🔵 Bridgetown — Agatha'."""
+    """Return the text CONTENT header for a map board message, e.g.
+    '[icon] Falmire Agatha [icon]' — sent as the message's content alongside
+    the embed, not as the embed's own title (the title renders inside the
+    bordered/colored box; this is meant to sit visibly outside it, matching
+    how these boards originally looked). MAP_ATTACK_DEFENSE[map] is
+    (attack_faction, defense_faction) — used here to pick the closing icon.
+    """
     if ' - ' not in lb_name:
         return lb_name
     map_name, faction = lb_name.split(' - ', 1)
     emoji = FACTION_EMOJIS.get(faction, '⚔️')
-    return f"{emoji} **{map_name} — {faction}**"
+    map_info = config.MAP_ATTACK_DEFENSE.get(map_name)
+    is_attack = bool(map_info) and map_info[0] == faction
+    suffix = "<:weapon_hs:1350656128635375698>" if is_attack else "🛡️"
+    return f"{emoji} **{map_name} {faction}** {suffix}"
 
 _LB_EMOJI = {
     "TUFF":             "<a:TUFF2:1520779243879927898>",
@@ -742,20 +752,14 @@ _LB_EMOJI = {
 }
 
 def _lb_title(lb_name, show_title, cont=False):
-    """Embed title for a board. Map boards (e.g. "Aberfell - Agatha") use
-    _map_header() for a faction-labeled header (e.g. "[icon] Aberfell — Agatha");
-    everything else uses the weapon/feat emoji lookup. _map_header() used to be
-    built and then never actually passed into the embed/message anywhere — every
-    call site disabled titles for map boards entirely (show_title=False), so map
-    board posts had no header at all once refreshed. Fixed 2026-06-30.
-    """
+    """Embed title for a board (weapon/feat emoji lookup). Map boards never use
+    this for their header — that's _map_header(), sent as separate message
+    content above the bordered embed, not as the embed's own title field (user
+    preference, 2026-06-30: header should sit outside the embed border)."""
     if not show_title:
         return None
-    if ' - ' in lb_name:
-        base = _map_header(lb_name)
-    else:
-        emoji = _LB_EMOJI.get(lb_name)
-        base = emoji if emoji else lb_name
+    emoji = _LB_EMOJI.get(lb_name)
+    base = emoji if emoji else lb_name
     return f"{base} (cont.)" if cont else base
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
@@ -823,34 +827,38 @@ class LeaderboardsCog(commands.Cog):
                 await interaction.edit_original_response(content=f"No attack/defense info found for map: {name}")
                 return
 
-            attack_faction = map_info["attack"]
-            defense_faction = map_info["defense"]
-            attack_emoji = FACTION_EMOJIS[attack_faction]
-            defense_emoji = FACTION_EMOJIS[defense_faction]
-
+            # map_info is (attack_faction, defense_faction) — this used to do
+            # map_info["attack"]/["defense"] dict-style access, which would raise
+            # TypeError against the actual tuple shape in config.py. Never caught
+            # because every map board already existed by the time this drifted out
+            # of sync; only would have surfaced on a genuinely new /setup_leaderboard
+            # map call. Fixed 2026-06-30 alongside the header-placement fix below.
+            attack_faction, defense_faction = map_info[0], map_info[1]
             attack_name = f"{name} - {attack_faction}"
             defense_name = f"{name} - {defense_faction}"
 
             attack_entries = await get_leaderboard_entries(attack_name)
             defense_entries = await get_leaderboard_entries(defense_name)
 
-            attack_chunks = format_leaderboard_text(attack_entries)
-            defense_chunks = format_leaderboard_text(defense_entries)
+            # Headers are message CONTENT, sent alongside the embed — not the
+            # embed's own title field, which renders inside the bordered/colored
+            # box. _map_header() builds the same "[icon] Map Faction [icon]" text
+            # used by every other board-sync path now (update_leaderboards,
+            # /refresh, /refresh_all, /migrate_boards).
+            attack_header = _map_header(attack_name)
+            defense_header = _map_header(defense_name)
 
-            attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
-            defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
-
-            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries)
-            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries)
+            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries, show_title=False)
+            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries, show_title=False)
 
             await thread.send(file=discord.File(DECORATION_TOP))
             attack_ids = []
             for emb in attack_embeds:
-                m = await thread.send(embed=emb)
+                m = await thread.send(content=attack_header, embed=emb)
                 attack_ids.append(str(m.id))
             defense_ids = []
             for emb in defense_embeds:
-                m = await thread.send(embed=emb)
+                m = await thread.send(content=defense_header, embed=emb)
                 defense_ids.append(str(m.id))
             await thread.send(file=discord.File(DECORATION_BOTTOM))
 
@@ -911,7 +919,8 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            header_content = _map_header(lb_name) if is_map else ""
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -919,7 +928,7 @@ class LeaderboardsCog(commands.Cog):
             try:
                 guild = interaction.guild
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                new_ids = await _sync_board_messages(thread, embeds, message_ids)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
 
@@ -954,13 +963,14 @@ class LeaderboardsCog(commands.Cog):
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+                header_content = _map_header(lb_name) if is_map else ""
 
                 thread_id = int(thread_id_raw)
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-                new_ids = await _sync_board_messages(thread, embeds, message_ids)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
                 done.append(lb_name)
@@ -1045,13 +1055,14 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            header_content = _map_header(lb_name) if is_map else ""
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
 
             try:
-                new_ids = await _sync_board_messages(thread, embeds, old_ids)
+                new_ids = await _sync_board_messages(thread, embeds, old_ids, msg_content=header_content)
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
                 done.append(lb_name)
                 await asyncio.sleep(0.4)
