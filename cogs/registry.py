@@ -871,6 +871,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
         }
         _triple_db = board_counts.get('Triple') or None  # >0 wins; 0/None = use feat_counts
+        _rendered_labels = set()
         for normalized, count in feat_counts.items():
             # Strip hhanded emoji before label lookup
             hhanded_emoji = "<:hhanded:1430199468246044772>"
@@ -897,6 +898,22 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             suffix = f" ×{display_count}" if display_count > 1 else ""
             display_emojis = feat_display.get(normalized, normalized)
             lines.append(f"• {display_emojis}{suffix} {label_str}")
+            _rendered_labels.add(label)
+        # Fallback: render board counts for feats not covered by feat_counts loop
+        _fallback_feats = [
+            ('200 Takedowns', FEAT_EMOJIS['200 Takedowns']),
+            ('100 Kills',     FEAT_EMOJIS['100 Kills']),
+            ('Triple',        FEAT_EMOJIS['Triple']),
+        ]
+        for _fb_label, _fb_emoji in _fallback_feats:
+            if _fb_label in _rendered_labels:
+                continue
+            _fb_count = board_counts.get(_fb_label, 0)
+            if _fb_count == 0:
+                continue
+            _fb_suffix = f" ×{_fb_count}" if _fb_count > 1 else ""
+            _fb_label_str = f"**{_fb_label}**" if _fb_count >= 5 else f"*{_fb_label}*"
+            lines.append(f"• {_fb_emoji}{_fb_suffix} {_fb_label_str}")
         lines.append("")
 
     if best_placements:
