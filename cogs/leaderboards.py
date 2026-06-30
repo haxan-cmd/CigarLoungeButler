@@ -102,52 +102,37 @@ async def build_ledger_entrance(guild):
 
         guild_id = guild.id
 
-        def ch_url(channel_id):
-            return f"https://discord.com/channels/{guild_id}/{channel_id}"
+        def row(emoji, channel_id):
+            if channel_id:
+                return f"{emoji} <#{channel_id}>"
+            return f"{emoji} *unavailable*"
 
-        def row(emoji, label, url):
-            if url:
-                return f"**[{emoji}┃{label}]({url})**"
-            return f"**{emoji}┃{label}**"
-
-        # Fixed channels
-        rules_url     = ch_url(1460713024082935930)
-        favourites_url = ch_url(1518822798116524092)
-
-        # Index threads (same as before)
-        _t = lambda tid: type('T', (), {'id': tid})()
-        idx_1h    = _t(INDEX_THREAD_1H)
-        idx_2h    = _t(INDEX_THREAD_2H)
+        # Index threads
         idx_maps  = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID, "Map Records")
-        idx_feats = _t(INDEX_THREAD_FEATS)
-        idx_reg   = _t(REGISTRY_INDEX_THREAD_ID)
 
         # Active bounty from DB
         bounty_emoji = "🎯"
-        bounty_label = "Active Bounty"
-        bounty_url   = None
+        bounty_channel_id = None
         try:
             all_bounties = await _db.get_all_bounties()
-            # row format: [title, channel_id, message_id, theme_emoji, ..., active(idx8), ...]
             for b in all_bounties:
                 if b[8] == 'TRUE':
                     bounty_emoji = b[3] or "🎯"
-                    bounty_label = b[0] or "Active Bounty"
                     if b[1]:
-                        bounty_url = ch_url(int(b[1]))
+                        bounty_channel_id = int(b[1])
                     break
         except Exception as be:
             nerve_log_error("Ledger bounty lookup", be)
 
         lines = [
-            row("⚖️", "challenge-rules",    rules_url),
-            row("📋", "butlers-favorites",  favourites_url),
-            row(bounty_emoji, bounty_label,   bounty_url),
-            row("🗂️", "butlers-archive",    ch_url(idx_reg.id)   if idx_reg   else None),
-            row("🏆", "map-records",        ch_url(idx_maps.id)  if idx_maps  else None),
-            row("⚔️", "2h-weapons",         ch_url(idx_2h.id)    if idx_2h    else None),
-            row("🗡️", "1h-weapons",         ch_url(idx_1h.id)    if idx_1h    else None),
-            row("🏛️", "feats-of-war",       ch_url(idx_feats.id) if idx_feats else None),
+            row("⚖️", 1460713024082935930),
+            row("📋", 1518822798116524092),
+            row(bounty_emoji, bounty_channel_id),
+            row("🗂️", REGISTRY_INDEX_THREAD_ID),
+            row("🏆", idx_maps.id if idx_maps else None),
+            row("⚔️", INDEX_THREAD_2H),
+            row("🗡️", INDEX_THREAD_1H),
+            row("🏛️", INDEX_THREAD_FEATS),
         ]
 
         embed = discord.Embed(description="\n\n".join(lines), color=0x8b6914)

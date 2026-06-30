@@ -305,7 +305,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     }
 
 
-def build_favourites_embed(stats):
+def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
     def fmt_list(items, suffix="", n=3):
@@ -331,6 +331,8 @@ def build_favourites_embed(stats):
     desc = f"*{stats['total_runs']} runs · {stats['total_players']} players*"
 
     embed = _discord.Embed(title=title, description=desc, color=0x8b6914)
+    if bot_avatar_url:
+        embed.set_thumbnail(url=bot_avatar_url)
 
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "│ *Not enough data yet*"
     embed.add_field(
@@ -492,7 +494,7 @@ class FavouritesCog(commands.Cog):
             week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
             stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
             stats['week_label'] = week_label
-            embed_text = build_favourites_embed(stats)
+            embed_text = build_favourites_embed(stats, bot_avatar_url=_guild.me.display_avatar.url if _guild else None)
 
             await interaction.followup.send(embed=embed_text)
 

@@ -954,22 +954,35 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             meter = '▰' * progress_in_current_level + '▱' * (num_weapons - progress_in_current_level)
             lines.append(f"**{sub_emoji} {subclass}: {sdata['rank']}** `[{meter}]`")
 
-            for w, wdata in sdata['weapons'].items():
+            primary_set = set(_SUBCLASS_PRIMARIES.get(subclass, []))
+            def _weapon_line(w, wdata):
                 w_emoji = WEAPON_RANK_EMOJIS.get(wdata['rank'], WEAPON_RANK_EMOJIS['Unranked'])
                 marks = wdata['marks']
                 _, _, next_threshold = get_weapon_rank(marks)
                 mark_str = format_weapon_marks(marks)
-                if next_threshold:
-                    progress_str = f"{mark_str}/{next_threshold}"
-                else:
-                    progress_str = mark_str
+                progress_str = f"{mark_str}/{next_threshold}" if next_threshold else mark_str
                 share_parts = []
                 if wdata.get('avg_kill_share') is not None:
                     share_parts.append(f"{wdata['avg_kill_share']}% K")
                 if wdata.get('avg_td_share') is not None:
                     share_parts.append(f"{wdata['avg_td_share']}% TD")
                 share_str = f" `{' · '.join(share_parts)}`" if share_parts else ""
-                lines.append(f"• {w_emoji} {w} — {progress_str}{share_str}")
+                return f"• {w_emoji} {w} — {progress_str}{share_str}"
+
+            primaries = sorted(
+                [(w, d) for w, d in sdata['weapons'].items() if w in primary_set],
+                key=lambda x: -x[1]['marks']
+            )
+            secondaries = sorted(
+                [(w, d) for w, d in sdata['weapons'].items() if w not in primary_set],
+                key=lambda x: -x[1]['marks']
+            )
+            for w, wdata in primaries:
+                lines.append(_weapon_line(w, wdata))
+            if secondaries:
+                lines.append("*Secondary*")
+                for w, wdata in secondaries:
+                    lines.append(_weapon_line(w, wdata))
             lines.append("")
 
         messages.append("\n".join(lines))
