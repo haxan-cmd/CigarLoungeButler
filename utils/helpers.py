@@ -77,7 +77,8 @@ Step 3: That same player must NOT appear in team_scores or team_kills - those ar
 Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown - may appear as an icon tooltip or text; null if not visible)
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
-- map (full map name shown on screen e.g. "The Battle of Darkforest", "Galencourt")
+- map (full map name shown at the TOP of the screen above the scoreboard, e.g. "The Siege of Rudhelm", "The Battle of Darkforest" — NOT from the leaderboard rows)
+NOTE: The two large numbers displayed prominently on the LEFT and RIGHT sides of the screen are the total team takedown scores — one per team. These are NOT individual player stats.
 - faction (Agatha, Mason, or Tenosia - whichever team side the highlighted row is on)
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
