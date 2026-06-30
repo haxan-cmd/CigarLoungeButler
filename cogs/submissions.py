@@ -1542,18 +1542,18 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     summary = (
         f"**Run Submitted**\n"
-        f"{interaction.user.display_name}\n"
-        f"{selected_weapon} • {selected_class}\n"
-        f"{selected_map} / {faction}\n"
-        f"{takedowns} TD / {kills} K / {deaths} D\n"
-        f"VIP: {vip_str}"
+        f"│ `{interaction.user.display_name}`\n"
+        f"│ {selected_weapon} • {selected_class}\n"
+        f"│ {selected_map} / {faction}\n"
+        f"│ {takedowns} TD / {kills} K / {deaths} D\n"
+        f"│ VIP: {vip_str}"
     )
     if feats_str:
-        summary += f"\n{feats_str}"
+        summary += f"\n│ {feats_str}"
     if lobby_line:
-        summary += f"\n*{lobby_line}*"
+        summary += f"\n│ *{lobby_line}*"
     if caption:
-        summary += f"\n*{caption}*"
+        summary += f"\n│ *{caption}*"
 
     # Build marks breakdown
     marks_earned = 1
