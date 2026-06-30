@@ -405,7 +405,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                               player_name, message_link, bot_user=None, second_place_td=None):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
-    any_updated = False  # True only when player beats their own existing score
+    any_updated = False  # True only when player beats their own score on a weapon/feat board (not map boards)
     placements = []
 
     updates = []
@@ -490,7 +490,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         await _db.delete_leaderboard_entry_by_board_and_player(lb_name, tenth_discord_id)
                         all_values = await _db.get_all_leaderboard_data()
                 await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                any_updated = True  # New entry on a board still counts as a PB
+                any_updated = True  # New entry on a board counts as a PB
                 board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
                 board_scores.append(score)
                 board_scores.sort(reverse=True)
