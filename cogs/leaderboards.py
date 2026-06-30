@@ -1279,6 +1279,13 @@ class LeaderboardsCog(commands.Cog):
         itself now cleans up after a failed edit going forward, but this command
         finds any duplicates that were already left behind before that fix. Nothing
         is deleted automatically — verify each flagged message before removing it.
+
+        Multiple boards can share one thread (e.g. a map's Attack + Defense entries
+        live in the same thread as two separately-tracked messages) — so tracked IDs
+        are pooled globally before scanning, and threads are only scanned once each.
+        Scanning thread-by-thread per board originally caused board A's tracked
+        message to look "untracked" while scanning board B's thread, false-flagging
+        legitimate Attack/Defense pairs as duplicates. Fixed 2026-06-30.
         """
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("Not for you.", ephemeral=True)
@@ -1289,10 +1296,10 @@ class LeaderboardsCog(commands.Cog):
         bot_id = guild.me.id
         lb_rows = await _get_lb_records()
 
-        findings = []
-        errors = []
-        checked = 0
-
+        # Pool ALL tracked message IDs globally, and group board names by thread —
+        # several boards can legitimately live in the same thread.
+        all_tracked_ids = set()
+        threads_by_id = {}  # thread_id -> list of board names in that thread
         for lb_row in lb_rows:
             lb_name = (lb_row.get('Leaderboard Name') or '').strip()
             thread_id_raw = lb_row.get('Thread ID') or ''
@@ -1306,11 +1313,18 @@ class LeaderboardsCog(commands.Cog):
             tracked_ids = set(int(m) for m in _re.findall(r'\d{17,20}', str(message_id_raw)))
             if not tracked_ids:
                 continue
+            all_tracked_ids.update(tracked_ids)
+            threads_by_id.setdefault(thread_id, []).append(lb_name)
 
+        findings = []
+        errors = []
+        checked = 0
+
+        for thread_id, board_names in threads_by_id.items():
             try:
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
             except Exception as e:
-                errors.append(f"{lb_name}: thread fetch failed ({e})")
+                errors.append(f"{', '.join(board_names)}: thread fetch failed ({e})")
                 continue
 
             try:
@@ -1319,20 +1333,21 @@ class LeaderboardsCog(commands.Cog):
                 async for msg in thread.history(limit=50, oldest_first=True):
                     if msg.author.id != bot_id or not msg.embeds:
                         continue
-                    if msg.id in tracked_ids:
+                    if msg.id in all_tracked_ids:
                         continue
                     extra.append(msg)
                 if extra:
                     links = ", ".join(f"[msg]({m.jump_url})" for m in extra)
-                    findings.append(f"\u2022 **{lb_name}** \u2014 {len(extra)} untracked embed message(s): {links}")
+                    label = " / ".join(board_names)
+                    findings.append(f"\u2022 **{label}** \u2014 {len(extra)} untracked embed message(s): {links}")
             except Exception as e:
-                errors.append(f"{lb_name}: history scan failed ({e})")
+                errors.append(f"{', '.join(board_names)}: history scan failed ({e})")
             await asyncio.sleep(0.2)
 
         if not findings:
-            summary = f"\u2705 Scanned **{checked}** board(s) \u2014 no stray/duplicate leaderboard messages found."
+            summary = f"\u2705 Scanned **{checked}** thread(s) \u2014 no stray/duplicate leaderboard messages found."
         else:
-            summary = f"\u26a0\ufe0f Found possible duplicates on **{len(findings)}** of {checked} board(s):\n" + "\n".join(findings[:15])
+            summary = f"\u26a0\ufe0f Found possible duplicates in **{len(findings)}** of {checked} thread(s):\n" + "\n".join(findings[:15])
             if len(findings) > 15:
                 summary += f"\n*...and {len(findings) - 15} more*"
             summary += "\n\nThis is read-only \u2014 nothing was deleted. Verify each link manually before removing it."
