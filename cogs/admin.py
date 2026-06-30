@@ -564,7 +564,12 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         try:
             from cogs.favourites import calculate_butler_stats, update_title_roles
-            stats = await calculate_butler_stats()
+            from datetime import datetime, timezone, timedelta
+            _now = datetime.now(timezone.utc)
+            _week_start = (_now - timedelta(days=_now.weekday())).replace(hour=12, minute=0, second=0, microsecond=0)
+            if _week_start > _now:
+                _week_start -= timedelta(weeks=1)
+            stats = await calculate_butler_stats(week_start=_week_start.timestamp(), week_end=_now.timestamp())
             await update_title_roles(interaction.guild, stats)
             await interaction.followup.send("✅ Title roles recalculated and reassigned.", ephemeral=True)
         except Exception as e:
