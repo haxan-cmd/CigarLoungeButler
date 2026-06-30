@@ -363,13 +363,16 @@ async def get_feats_for_player(discord_id, cached_data=None):
     seen_links = set()  # deduplicate across all sources by link
     named_feats = set()
 
-    # Check for Hundred-Handed — one submission on every primary weapon, non-archer subclasses only
-    from config import _SUBCLASS_PRIMARIES
-    _HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
-    _hh_primaries = {w for sc, ws in _SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER for w in ws}
-    _player_weapons = {row[3].strip() for row in subs if len(row) > 3 and row[2].strip() == discord_id_str and row[3].strip()}
-    if _hh_primaries and _hh_primaries.issubset(_player_weapons):
-        named_feats.add('hhanded')
+    # Check for Hundred-Handed — one submission per (subclass, weapon) pair for all non-archer subclasses
+    try:
+        from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+        hh_progress = await _db.get_hundred_handed_progress(discord_id_str)
+        _hh_done = {(r[0], r[1]) for r in hh_progress}
+        _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+        if _hh_required and _hh_required.issubset(_hh_done):
+            named_feats.add('hhanded')
+    except Exception:
+        pass
 
     # Collect feat submissions from Submissions sheet
     for row in subs:
@@ -2330,6 +2333,17 @@ class RegistryCog(commands.Cog):
         special_ops = await get_special_ops_for_player(int(discord_id_str))
         # ── Bounties completed ───────────────────────────────────────────
         bounty_completions = await get_bounty_completions_for_player(int(discord_id_str))
+        # ── Hundred Handed progress ──────────────────────────────────────
+        try:
+            from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+            _hh_rows = await _db.get_hundred_handed_progress(discord_id_str)
+            _hh_done = {(r[0], r[1]) for r in _hh_rows}
+            _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+            hh_count = len(_hh_done & _hh_required)
+            hh_complete = hh_count >= HH_TOTAL
+        except Exception:
+            hh_count = 0
+            hh_complete = False
         # ── Lethality ────────────────────────────────────────────────────
         best_lethality = 0.0
         for r in player_subs:
@@ -2396,6 +2410,13 @@ class RegistryCog(commands.Cog):
                 else:
                     ops_parts.append(f"{emoji} {feat}")
             lines.append("│ " + "  ".join(ops_parts))
+
+        if hh_count > 0:
+            _hh_emoji = "<:hhanded:1430199468246044772>"
+            hh_suffix = " ✓" if hh_complete else ""
+            lines.append("")
+            lines.append(f"**Hundred Handed**")
+            lines.append(f"│ {_hh_emoji} {hh_count}/{HH_TOTAL}{hh_suffix}")
 
         if bounty_completions:
             def _place(n):

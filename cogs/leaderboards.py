@@ -1343,16 +1343,26 @@ async def refresh_hundred_handed_board(guild):
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
     rows = await _db.get_hundred_handed_leaderboard()
+    _hh_emoji = "<:hhanded:1430199468246044772>"
     if not rows:
         desc = "*No entries yet.*"
     else:
         lines = []
-        for idx, (discord_id, player_name, count) in enumerate(rows, 1):
-            done = "\u2713" if count >= HH_TOTAL else ""
-            lines.append(f"{idx}. **{player_name}** \u2014 {count}/{HH_TOTAL} {done}")
+        completers = [(did, name, cnt) for did, name, cnt in rows if cnt >= HH_TOTAL]
+        in_progress = [(did, name, cnt) for did, name, cnt in rows if cnt < HH_TOTAL]
+        for idx, (discord_id, player_name, count) in enumerate(completers, 1):
+            lines.append(f"│ {idx}. `{player_name}` — {_hh_emoji} {count}/{HH_TOTAL} ✓")
+        if in_progress:
+            if completers:
+                lines.append("")
+                lines.append("*In Progress*")
+            for discord_id, player_name, count in in_progress:
+                lines.append(f"│ `{player_name}` — {count}/{HH_TOTAL}")
         desc = "\n".join(lines)
 
-    embed = discord.Embed(title="The Hundred Handed", description=desc, colour=EMBED_GOLD)
+    embed = discord.Embed(title=_hh_emoji, description=desc, colour=EMBED_GOLD)
+    embed.set_footer(text="Last updated")
+    embed.timestamp = datetime.now(timezone.utc)
 
     try:
         thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)

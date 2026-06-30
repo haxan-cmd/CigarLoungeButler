@@ -1748,8 +1748,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Leaderboard update error: {e}")
 
-    # Hundred Handed: track 100+TD subclass+weapon combos
-    if takedowns and takedowns >= 100 and selected_weapon and selected_class and not selected_class.startswith("Marksman"):
+    # Hundred Handed: track subclass+weapon combos (any submission counts)
+    if selected_weapon and selected_class and not selected_class.startswith("Marksman"):
         try:
             is_new = await _db.add_hundred_handed(
                 str(interaction.user.id), interaction.user.display_name,
