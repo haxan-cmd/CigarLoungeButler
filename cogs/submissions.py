@@ -1493,13 +1493,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if td_share_str:
             blurb_parts.append(td_share_str)
 
-    # --- Kill share (team only) ---
-    total_team_kills = kills + sum(_team_k) if (kills and _team_k) else None
-    if total_team_kills and total_team_kills > 0 and kills:
-        kill_share = round(kills / total_team_kills * 100, 1)
-        # Lethality emoji if kill share >= 5%
-        lethal_prefix = "<a:mostlethal:1520490418817601658> " if kill_share >= 5.0 else ""
-        blurb_parts.append(f"{lethal_prefix}{kill_share}% kill share")
+    # --- Lethality (kills / takedowns ratio) ---
+    if kills is not None and takedowns and takedowns > 0:
+        lethality = round(kills / takedowns * 100, 1)
+        lethal_prefix = "<a:mostlethal:1520490418817601658> " if lethality >= 5.0 else ""
+        blurb_parts.append(f"{lethal_prefix}{lethality}% lethality")
 
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
