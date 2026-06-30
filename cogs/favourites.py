@@ -446,11 +446,11 @@ async def update_title_roles(guild, stats):
             pass
 
         if main_channel and current_holders:
-            old_mention = current_holders[0].mention
-            new_mention = new_member.mention
-            msg = msg_template.format(old=old_mention, new=new_mention)
+            old_name = current_holders[0].display_name
+            new_name = new_member.display_name
+            msg = msg_template.format(old=f"**{old_name}**", new=f"**{new_name}**")
             try:
-                await main_channel.send(msg)
+                await main_channel.send(msg, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
                 print(f"Title announcement error: {e}")
 
