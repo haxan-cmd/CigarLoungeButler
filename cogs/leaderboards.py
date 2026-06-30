@@ -102,47 +102,41 @@ async def build_ledger_entrance(guild):
 
         guild_id = guild.id
 
-        def row(emoji, channel_id):
-            if channel_id:
-                return f"{emoji} <#{channel_id}>"
-            return f"{emoji} *unavailable*"
-
         # Index threads
         idx_maps  = await _find_index_thread(guild, MAP_RECORDS_FORUM_ID, "Map Records")
 
         # Active bounty from DB
-        bounty_emoji = "🎯"
         bounty_channel_id = None
         try:
             all_bounties = await _db.get_all_bounties()
             for b in all_bounties:
                 if b[8] == 'TRUE':
-                    bounty_emoji = b[3] or "🎯"
                     if b[1]:
                         bounty_channel_id = int(b[1])
                     break
         except Exception as be:
             nerve_log_error("Ledger bounty lookup", be)
 
-        lines = [
-            row("⚖️", 1460713024082935930),
-            row("📋", 1518822798116524092),
-            row(bounty_emoji, bounty_channel_id),
-            row("🗂️", REGISTRY_INDEX_THREAD_ID),
-            row("🏆", idx_maps.id if idx_maps else None),
-            row("⚔️", INDEX_THREAD_2H),
-            row("🗡️", INDEX_THREAD_1H),
-            row("🏛️", INDEX_THREAD_FEATS),
-        ]
+        def mention(channel_id):
+            return f"<#{channel_id}>" if channel_id else "*unavailable*"
 
-        embed = discord.Embed(description="\n\n".join(lines), color=0x8b6914)
+        content = "\n".join([
+            mention(1460713024082935930),
+            mention(1518822798116524092),
+            mention(bounty_channel_id),
+            mention(REGISTRY_INDEX_THREAD_ID),
+            mention(idx_maps.id if idx_maps else None),
+            mention(INDEX_THREAD_2H),
+            mention(INDEX_THREAD_1H),
+            mention(INDEX_THREAD_FEATS),
+        ])
 
         mid = _entrance_message_ids.get('entrance')
         if not mid:
             try:
                 bot_id = guild.me.id
                 async for msg in channel.history(limit=20, oldest_first=True):
-                    if msg.author.id == bot_id and msg.embeds:
+                    if msg.author.id == bot_id:
                         _entrance_message_ids['entrance'] = msg.id
                         mid = msg.id
                         break
@@ -152,12 +146,12 @@ async def build_ledger_entrance(guild):
         if mid:
             try:
                 msg = await channel.fetch_message(mid)
-                await msg.edit(content=None, embed=embed)
+                await msg.edit(content=content, embed=None)
             except discord.NotFound:
                 mid = None
 
         if not mid:
-            new_msg = await channel.send(embed=embed)
+            new_msg = await channel.send(content=content)
             _entrance_message_ids['entrance'] = new_msg.id
 
         print("Ledger entrance updated.")
