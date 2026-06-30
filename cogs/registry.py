@@ -213,19 +213,22 @@ async def calculate_registry_stats(discord_id, cached_data=None):
         class_marks_total = 0
 
         for subclass in subclasses:
-            weapons = REGISTRY_WEAPON_MAP.get(subclass, [])
-            num_weapons = len(weapons)
+            all_weapons = REGISTRY_WEAPON_MAP.get(subclass, [])
+            primary_weapons = set(_SUBCLASS_PRIMARIES.get(subclass, all_weapons))
+            num_weapons = len(primary_weapons)
 
-            # Count subclass marks = sum of weapon rank-ups across all weapons in subclass
+            # Count subclass marks = sum of weapon rank-ups across PRIMARY weapons only
             subclass_marks = 0
             weapon_details = {}
-            for w in weapons:
+            for w in all_weapons:
                 # Check subclass-specific key first, fall back to plain weapon name
                 marks = weapon_marks.get((w, subclass), weapon_marks.get(w, 0))
                 rank_name, _, _ = get_weapon_rank(marks) if marks > 0 else ("Unranked", 0, 1)
                 # Count how many rank tiers this weapon has achieved
                 tiers_achieved = sum(1 for threshold, _ in WEAPON_RANK_THRESHOLDS if marks >= threshold)
-                subclass_marks += tiers_achieved
+                # Only primary weapons count toward the subclass meter
+                if w in primary_weapons:
+                    subclass_marks += tiers_achieved
                 weapon_details[w] = {
                     'marks': marks,
                     'rank': rank_name,
