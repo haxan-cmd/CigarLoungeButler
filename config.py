@@ -216,7 +216,7 @@ REGISTRY_CLASS_MAP = {
 
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
-    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe"},
+    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},
     "Guardian":       {"Warhammer", "Falchion", "Heavy Cavalry Sword", "Axe", "One-Handed Spear"},
     "Crusader":       {"Messer", "Battle Axe", "Two-Handed Hammer", "Executioner's Axe", "Quarterstaff"},
     "Devastator":     {"Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe", "Highland Sword"},
