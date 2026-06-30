@@ -1968,7 +1968,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 print(f"Ledger entrance refresh error: {e}")
             try:
                 from cogs.favourites import calculate_butler_stats, update_title_roles
-                from datetime import timezone, timedelta
                 _now_t = datetime.now(timezone.utc)
                 _days_since_mon = _now_t.weekday()
                 _week_start = (_now_t - timedelta(days=_days_since_mon)).replace(hour=12, minute=0, second=0, microsecond=0)
