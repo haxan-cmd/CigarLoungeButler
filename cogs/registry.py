@@ -2374,7 +2374,7 @@ class RegistryCog(commands.Cog):
 
         if has_pb or has_lethality:
             lines.append("")
-            lines.append("🏆 **Personal Bests**")
+            lines.append("**Personal Bests**")
             if pb_td_str:
                 lines.append(f"│ <a:toptkd:1360312666475728958> {pb_td_str}")
             if pb_kills_str:
