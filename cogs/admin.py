@@ -515,9 +515,10 @@ class AdminCog(commands.Cog):
     @app_commands.describe(
         player="@ mention the player",
         weapon="Weapon name (must match exactly)",
+        subclass="Subclass (e.g. Knight, Vanguard) — required for shared weapons",
         marks="Number of marks to add"
     )
-    async def award_marks(self, interaction: discord.Interaction, player: discord.Member, weapon: str, marks: int):
+    async def award_marks(self, interaction: discord.Interaction, player: discord.Member, weapon: str, subclass: str, marks: int):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That\'s not for you.", ephemeral=True)
             return
@@ -537,7 +538,7 @@ class AdminCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
         try:
-            await _db.add_legacy_mark(player.display_name, weapon, '', marks)
+            await _db.add_legacy_mark(player.display_name, weapon, subclass, marks)
         except Exception as e:
             await interaction.followup.send(f"\u274c DB error: {e}", ephemeral=True)
             return
