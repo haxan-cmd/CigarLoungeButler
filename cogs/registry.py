@@ -880,9 +880,13 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 label = "Hundred-Handed"
             else:
                 label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
-            # Prefer DB manual count when set
+            # Prefer board counts for standalone feat labels
             if label == "Triple" and _triple_db is not None:
                 display_count = _triple_db
+            elif label == "200 Takedowns" and board_counts.get('200 Takedowns'):
+                display_count = board_counts['200 Takedowns']
+            elif label == "100 Kills" and board_counts.get('100 Kills'):
+                display_count = board_counts['100 Kills']
             else:
                 _db_override = _board_count_map.get(normalized)
                 display_count = _db_override if _db_override is not None else count
