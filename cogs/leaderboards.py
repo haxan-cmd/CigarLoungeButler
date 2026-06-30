@@ -446,6 +446,19 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
         except Exception as deco_err:
             print(f"Decoration repost failed in #{thread.id}: {deco_err}")
 
+    # If the tracked message_ids list was longer than the number of embeds we
+    # actually have (leftover from an older posting scheme that tracked more
+    # messages per board than it should have), the leftover IDs were never
+    # touched by the loop above and would sit in the thread forever as an
+    # orphan no one ever edits or deletes again — found 2026-06-30 on map
+    # boards as a duplicate plain-text header sitting above the real embed.
+    for extra_id in message_ids[len(embeds):]:
+        try:
+            extra_msg = await thread.fetch_message(extra_id)
+            await extra_msg.delete()
+        except Exception:
+            pass
+
     return new_ids
 
 
@@ -1425,6 +1438,103 @@ class LeaderboardsCog(commands.Cog):
             return
 
         await interaction.edit_original_response(content=f"✅ **{name}** re-framed with fresh decoration.")
+
+    @app_commands.command(name="fix_map_duplicates", description="Delete stray duplicate header messages on map boards (mod only).")
+    async def fix_map_duplicates(self, interaction: discord.Interaction):
+        """One-off cleanup for orphaned header-only messages left behind by an
+        older posting scheme that tracked more message IDs per map board than
+        format_leaderboard_embeds actually produces. _sync_board_messages only
+        ever looped over len(embeds), so any extra tracked ID was never edited,
+        never deleted, and — once a /refresh overwrote the DB row with the
+        shorter new_ids list — no longer tracked anywhere at all, leaving a
+        plain-text "[icon] Map Faction [icon]" message sitting above the real
+        embed forever (found 2026-06-30, every map board affected). Going
+        forward _sync_board_messages cleans these up itself; this command
+        sweeps up the ones that already exist and are no longer in the DB to
+        be found by that fix or by /scan_leaderboard_duplicates (which only
+        flags untracked messages that have an embed — these don't).
+
+        Scoped tight to avoid touching anything unrelated: only deletes bot
+        messages in map-board threads that have NO embed, NO attachment, and
+        whose content contains the bold "**Map Faction**" core for some board
+        in that same thread (i.e. a duplicate of a real header, not just any
+        message with text in it).
+        """
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        bot_id = guild.me.id
+        all_lb_rows = await _get_lb_records()
+
+        # Group map boards by thread, tracking which message IDs are
+        # legitimately current and the "core" header text (map + faction,
+        # without the leading/trailing icon) that belongs there. The icon
+        # suffix logic has changed across deploys, so a stray message left
+        # behind by an older version of this code may not be byte-identical
+        # to what _map_header() returns today -- only the bold "**Map
+        # Faction**" core is stable across versions, so that's what gets
+        # matched, not the full header string.
+        threads = {}  # thread_id -> {'tracked': set(ids), 'cores': set(core text)}
+        for lb_row in all_lb_rows:
+            lb_name = (lb_row.get('Leaderboard Name') or '').strip()
+            thread_id_raw = lb_row.get('Thread ID') or ''
+            if not lb_name or not thread_id_raw:
+                continue
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            if not is_map or ' - ' not in lb_name:
+                continue
+            try:
+                thread_id = int(thread_id_raw)
+            except ValueError:
+                continue
+            map_name, faction = lb_name.split(' - ', 1)
+            core = f"**{map_name} {faction}**"
+            tracked_ids = set(int(m) for m in _re.findall(r'\d{17,20}', str(lb_row.get('Message ID') or '')))
+            entry = threads.setdefault(thread_id, {'tracked': set(), 'cores': set()})
+            entry['tracked'].update(tracked_ids)
+            entry['cores'].add(core)
+
+        deleted = []
+        errors = []
+        checked = 0
+
+        for thread_id, info in threads.items():
+            try:
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            except Exception as e:
+                errors.append(f"Thread {thread_id}: fetch failed ({e})")
+                continue
+            try:
+                checked += 1
+                async for msg in thread.history(limit=50, oldest_first=True):
+                    if msg.author.id != bot_id:
+                        continue
+                    if msg.id in info['tracked']:
+                        continue
+                    if msg.embeds or msg.attachments:
+                        continue
+                    content = msg.content.strip()
+                    if content and any(core in content for core in info['cores']):
+                        try:
+                            await msg.delete()
+                            deleted.append(f"{msg.content.strip()} ({msg.jump_url})")
+                            await asyncio.sleep(0.3)
+                        except Exception as de:
+                            errors.append(f"Delete failed for {msg.id}: {de}")
+            except Exception as e:
+                errors.append(f"Thread {thread_id}: scan failed ({e})")
+
+        summary = f"✅ Scanned {checked} map thread(s), deleted {len(deleted)} stray duplicate header(s)."
+        if deleted:
+            summary += "\n" + "\n".join(deleted[:15])
+            if len(deleted) > 15:
+                summary += f"\n*...and {len(deleted) - 15} more*"
+        if errors:
+            summary += "\n⚠️ Errors:\n" + "\n".join(errors[:5])
+        await interaction.edit_original_response(content=summary[:1900])
 
     @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
