@@ -126,17 +126,17 @@ async def build_ledger_entrance(guild):
 
         view = discord.ui.View(timeout=None)
         buttons = [
-            ("⚖️ Challenge Rules",    1460713024082935930),       # row 0
-            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),# row 1
-            ("🗂️ Player Archive",    REGISTRY_INDEX_THREAD_ID),  # row 1
-            ("📋 Butler's Favourites", 1518822798116524092),      # row 1
-            ("🏆 Map Records",       idx_maps.id if idx_maps else None), # row 2
-            ("⚔️ 2H Weapons",        INDEX_THREAD_2H),           # row 2
-            ("🗡️ 1H Weapons",        INDEX_THREAD_1H),           # row 2
-            ("🏛️ Feats of War",      INDEX_THREAD_FEATS),        # row 3
+            ("⚖️ Challenge Rules",         1460713024082935930),       # row 0
+            ("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID),  # row 1
+            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),      # row 2
+            ("📋 Butler's Favourites",     1518822798116524092),        # row 2
+            ("🏆 Map Records",             idx_maps.id if idx_maps else None), # row 3
+            ("⚔️ 2H Weapons",             INDEX_THREAD_2H),            # row 3
+            ("🗡️ 1H Weapons",             INDEX_THREAD_1H),            # row 3
+            ("🏛️ Feats of War",           INDEX_THREAD_FEATS),         # row 4
         ]
         # Max 5 rows in Discord; assign rows explicitly for vertical layout
-        _row_map = [0, 1, 1, 1, 2, 2, 2, 3]
+        _row_map = [0, 1, 2, 2, 3, 3, 3, 4]
         _btn_idx = 0
         for label, cid in buttons:
             if cid:
@@ -162,12 +162,12 @@ async def build_ledger_entrance(guild):
         if mid:
             try:
                 msg = await channel.fetch_message(mid)
-                await msg.edit(content=None, embed=None, view=view)
+                await msg.edit(content="​", embed=None, view=view)
             except discord.NotFound:
                 mid = None
 
         if not mid:
-            new_msg = await channel.send(view=view)
+            new_msg = await channel.send(content="​", view=view)
             _entrance_message_ids['entrance'] = new_msg.id
 
         print("Ledger entrance updated.")
