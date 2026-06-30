@@ -421,7 +421,6 @@ PLAYER_COMMANDS = [
     ("/stats",          "Show your title standings and weapon rank progress. Use /stats [name] for any player."),
     ("/refresh_card",   "Refresh your registry card in butlers-archive."),
         ("/butlers_report", "Summon the Butler's Favourites report."),
-    ("/bounty_status",  "Show the current active bounty card."),
+    ("/bounty_status",  "Show the current active bounty card and your personal progress."),
     ("/bounty_hunt",    "Show the top 5 hunters for the active bounty."),
-    ("/my_bounty",      "Show your personal progress on the active bounty."),
 ]

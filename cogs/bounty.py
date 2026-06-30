@@ -649,8 +649,11 @@ class BountyCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
 
-    @app_commands.command(name="bounty_status", description="Show the current active bounty card")
+    @app_commands.command(name="bounty_status", description="Show the current active bounty card and your personal progress")
     async def bounty_status(self, interaction: discord.Interaction):
+        # Merged with the old standalone /my_bounty command (removed 2026-06-30) —
+        # this now shows the server-wide aggregate card plus the command runner's
+        # own progress in one response, instead of requiring a second command.
         bounty = await get_active_bounty()
         if not bounty:
             await interaction.response.send_message("No bounty is running.", ephemeral=True)
@@ -659,6 +662,12 @@ class BountyCog(commands.Cog):
             bounty['title'], bounty['theme_emoji'], bounty['weapons'],
             bounty['special_challenge'], bounty['special_done'], bounty['completions']
         )
+        player_row = await get_player_bounty_progress(bounty['title'], str(interaction.user.id))
+        if player_row:
+            personal_card = build_player_bounty_card(bounty, player_row['progress'])
+            card += f"\n\n**Your progress:**\n{personal_card}"
+        else:
+            card += "\n\n*No submissions recorded for this bounty yet.*"
         await interaction.response.send_message(card, ephemeral=True)
 
     @app_commands.command(name="bounty_hunt", description="Show the top hunters for the active bounty")
@@ -669,19 +678,6 @@ class BountyCog(commands.Cog):
             return
         board = await build_progress_board(bounty, top_n=10)
         await interaction.response.send_message(board)
-
-    @app_commands.command(name="my_bounty", description="Show your personal progress on the active bounty")
-    async def my_bounty(self, interaction: discord.Interaction):
-        bounty = await get_active_bounty()
-        if not bounty:
-            await interaction.response.send_message("No bounty is running.", ephemeral=True)
-            return
-        player_row = await get_player_bounty_progress(bounty['title'], str(interaction.user.id))
-        if not player_row:
-            await interaction.response.send_message("No submissions recorded for this bounty.", ephemeral=True)
-            return
-        card = build_player_bounty_card(bounty, player_row['progress'])
-        await interaction.response.send_message(card)
 
     @app_commands.command(name="bounty_add_card", description="Manually create a bounty forum card for a player (mod only)")
     @app_commands.checks.has_permissions(administrator=True)
