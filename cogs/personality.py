@@ -621,6 +621,28 @@ class PersonalityCog(commands.Cog):
         content_lower = message.content.lower()
         mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
 
+        # ── Command help redirect — fire in main if someone asks about commands ───
+        _cmd_triggers = [
+            'how do i', 'how to', 'what command', 'what commands', 'slash command',
+            'how do you', 'what is /', 'what does /', '/stats', '/rank', '/bounty',
+            'what can you do', 'what can the bot', 'how does the bot', 'commands',
+        ]
+        if is_main and not message.author.bot:
+            _cl = content_lower
+            if any(t in _cl for t in _cmd_triggers):
+                import random as _rand
+                _hotline_id = config.BUTLERS_HOTLINE_CHANNEL_ID
+                _manual_id  = config.BUTLERS_MANUAL_CHANNEL_ID
+                _responses = [
+                    f"You need to call my hotline. <#{_hotline_id}>",
+                    f"I don't take requests in the main hall. The hotline exists for a reason. <#{_hotline_id}>",
+                    f"Kindly direct your enquiries to <#{_hotline_id}>. That's what it's there for.",
+                    f"The manual covers everything you need. <#{_manual_id}> — and the hotline for commands. <#{_hotline_id}>",
+                    f"I have a hotline. It's not decorative. <#{_hotline_id}>",
+                ]
+                await message.channel.send(_rand.choice(_responses))
+                return
+
         # ── Main only — only respond if pinged or butler/clanker mentioned ────────
         if not is_main:
             return
