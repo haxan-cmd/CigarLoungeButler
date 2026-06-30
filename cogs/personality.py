@@ -248,7 +248,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
 
         response = _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
-            max_tokens=120,
+            max_tokens=60,
             system=BUTLER_SYSTEM_PROMPT,
             messages=[{'role': 'user', 'content': user_prompt}]
         )
@@ -377,7 +377,7 @@ class PersonalityCog(commands.Cog):
                 return
             response = _anthropic_client.messages.create(
                 model='claude-haiku-4-5-20251001',
-                max_tokens=80,
+                max_tokens=50,
                 system=BUTLER_SYSTEM_PROMPT,
                 messages=[{
                     'role': 'user',
@@ -642,6 +642,7 @@ class PersonalityCog(commands.Cog):
             'how do i', 'how to', 'what command', 'what commands', 'slash command',
             'how do you', 'what is /', 'what does /', '/stats', '/rank', '/bounty',
             'what can you do', 'what can the bot', 'how does the bot', 'commands',
+            'need help', 'help with', 'help me',
         ]
         if is_main and not message.author.bot:
             _cl = content_lower
