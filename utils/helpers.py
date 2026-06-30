@@ -236,20 +236,53 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         return empty
 
 
+def build_manual_embed():
+    """Build the butler's-manual embed listing all player-facing slash commands."""
+    import discord as _discord
+
+    embed = _discord.Embed(
+        title="🎩  Butler's Manual",
+        description="*Slash commands available to all players.*",
+        colour=_discord.Colour.from_str("#2b2d31"),
+    )
+
+    embed.add_field(
+        name="📊 Stats & Rankings",
+        value=(
+            "`/stats` — Your title standings and weapon rank progress. Use `/stats [name]` for any player.\n"
+            "`/rank` — Top 10 for any weapon board. e.g. `/rank Messer`\n"
+            "`/butlers_report` — Summon the Butler's Favourites weekly report."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🏹 Bounty",
+        value=(
+            "`/bounty_status` — Show the current active bounty card.\n"
+            "`/bounty_hunt` — Top 5 hunters for the active bounty.\n"
+            "`/my_bounty` — Your personal progress on the active bounty."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📋 Registry",
+        value=(
+            "`/refresh_card` — Refresh your registry card in Butler's Archive."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="⚖️ Rules",
+        value="`/rules` — Show the Cigar Lounge challenge rules.",
+        inline=False,
+    )
+    embed.set_footer(text="Use commands in #🤙 | hotline")
+    return embed
+
+
 def build_manual_content():
-    """Build the butler's-manual channel post listing all player-facing slash commands."""
-    import config as _config
-    lines = [
-        "```",
-        "╭──────────────────────────────────────╮",
-        "   🎩  BUTLER'S MANUAL - PLAYER COMMANDS",
-        "╰──────────────────────────────────────╯",
-        "",
-    ]
-    for cmd, desc in _config.PLAYER_COMMANDS:
-        lines.append(f"  {cmd:<20} {desc}")
-    lines.append("```")
-    return "\n".join(lines)
+    """Legacy plain-text fallback — use build_manual_embed() instead."""
+    return "See pinned embed above."
 
 
 def parse_submission_text(text):
