@@ -371,6 +371,8 @@ async def get_feats_for_player(discord_id, cached_data=None):
         _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
         if _hh_required and _hh_required.issubset(_hh_done):
             named_feats.add('hhanded')
+        elif _hh_done:
+            named_feats.add(f'hhanded_progress:{len(_hh_done)}:{HH_TOTAL}')
     except Exception:
         pass
 
@@ -812,6 +814,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         lines.append("**Feats of Legend:**")
         if 'hhanded' in named_feats:
             lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
+        else:
+            _hh_prog = next((f for f in named_feats if f.startswith('hhanded_progress:')), None)
+            if _hh_prog:
+                _, _hh_cur, _hh_tot = _hh_prog.split(':')
+                lines.append(f"• <:hhanded:1430199468246044772> Hundred-Handed — {_hh_cur}/{_hh_tot}")
         # Flawless shows with link as PB; everything else groups with ×N count
         flawless_emoji = FEAT_EMOJIS['Flawless']
         flawless_entry = None
