@@ -418,9 +418,11 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
     if "Flawless" in feats:
         updates.append(("Flawless", takedowns, False, True, False))
-    if "100 Kills" in feats:
+    # Board placement uses raw stats — independent of feat mark counting
+    # Triples also qualify for 100 Kills / 200 Takedowns boards if stats meet threshold
+    if kills >= 100:
         updates.append(("100 Kills", kills, False, False, True))
-    if "200 Takedowns" in feats:
+    if takedowns >= 200:
         updates.append(("200 Takedowns", takedowns, False, False, True))
     if selected_weapon == "Mallet" and kills >= 100:
         updates.append(("Mallet", takedowns, True, True, False))
