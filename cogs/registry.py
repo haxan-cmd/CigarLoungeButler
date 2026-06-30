@@ -1266,6 +1266,24 @@ async def update_archive_index(guild):
         print(f"Archive index error: {e}")
 
 
+def _chunk_message(msg_text, limit=1900):
+    """Split a message into Discord-safe chunks (<= limit chars), breaking on blank lines."""
+    if len(msg_text) <= limit:
+        return [msg_text]
+    chunks = []
+    current = ""
+    for block in msg_text.split("\n\n"):
+        if len(current) + len(block) + 2 > limit:
+            if current:
+                chunks.append(current.strip())
+            current = block
+        else:
+            current += ("\n\n" if current else "") + block
+    if current:
+        chunks.append(current.strip())
+    return chunks
+
+
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None, skip_index=False):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
@@ -1281,6 +1299,25 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             return
 
         messages = await build_registry_messages(player_name, discord_id, cached_data)
+        # Chunk every top-level message up front (including the header, messages[0])
+        # so the create path and the edit path always agree on exactly how many
+        # text messages the card needs. Previously the edit path never chunked at
+        # all: a card whose text crossed Discord's ~2000-char edit limit would
+        # either throw on .edit() (silently falling through to spawn a *second*
+        # duplicate thread while the old one stayed stale) or, if it had been
+        # chunked once before at creation time, permanently desync text_msgs[i]
+        # from messages[i] on every future refresh. That looked exactly like
+        # "the mark is in the DB but the card never updates" even though the
+        # underlying weapon-mark calculation was correct.
+        # (OctoLemon Sword/Man-at-Arms card bug, investigated 2026-06-30.)
+        chunks_per_message = [_chunk_message(m) for m in messages]
+        chunked_messages = [c for chunks in chunks_per_message for c in chunks]
+        boundary_indices = set()
+        _idx = 0
+        for _chunks in chunks_per_message:
+            boundary_indices.add(_idx)
+            _idx += len(_chunks)
+
         thread_id = await get_registry_thread_id(discord_id)
 
         top_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Top.png')
@@ -1293,14 +1330,15 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
 
-                # Collect existing text messages (skip image-only messages)
+                # Collect existing text messages (skip image-only messages).
+                # Raised from 30 -> 50 since chunking can push a long card past 30 messages.
                 existing = []
-                async for msg in thread.history(limit=30, oldest_first=True):
+                async for msg in thread.history(limit=50, oldest_first=True):
                     existing.append(msg)
                 text_msgs = [m for m in existing if m.content and m.content != '🗂️']
 
-                # Edit existing text messages
-                for i, new_text in enumerate(messages):
+                # Edit existing text messages against the flattened, chunk-aware list
+                for i, new_text in enumerate(chunked_messages):
                     if i < len(text_msgs):
                         if text_msgs[i].content != new_text:
                             await text_msgs[i].edit(content=new_text)
@@ -1310,7 +1348,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                         await thread.send(new_text)
 
                 # Clear any extra messages beyond what we need
-                for extra_msg in text_msgs[len(messages):]:
+                for extra_msg in text_msgs[len(chunked_messages):]:
                     try:
                         await extra_msg.edit(content='\u200b')
                     except Exception:
@@ -1344,30 +1382,14 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             await thread.send(file=discord.File(top_path))
 
         await asyncio.sleep(0.5)
-        await thread.send(messages[0])
+        await thread.send(chunked_messages[0])
 
-        for msg_text in messages[1:]:
-            if has_bot:
+        for i in range(1, len(chunked_messages)):
+            if has_bot and i in boundary_indices:
                 await asyncio.sleep(0.5)
                 await thread.send(file=discord.File(bot_path))
             await asyncio.sleep(0.5)
-            if len(msg_text) <= 1900:
-                await thread.send(msg_text)
-            else:
-                chunks = []
-                current = ""
-                for block in msg_text.split("\n\n"):
-                    if len(current) + len(block) + 2 > 1900:
-                        if current:
-                            chunks.append(current.strip())
-                        current = block
-                    else:
-                        current += ("\n\n" if current else "") + block
-                if current:
-                    chunks.append(current.strip())
-                for chunk in chunks:
-                    await asyncio.sleep(0.5)
-                    await thread.send(chunk)
+            await thread.send(chunked_messages[i])
 
         await save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
