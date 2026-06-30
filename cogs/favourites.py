@@ -308,88 +308,90 @@ async def calculate_butler_stats(week_start=None, week_end=None):
 def build_favourites_embed(stats):
     import discord as _discord
 
-    def fmt_list(items, suffix, n=3):
-        return "\n".join(f"{i+1}. **{name}** — {val} {suffix}" for i, (name, val) in enumerate(items[:n]))
+    MEDALS = ["🥇", "🥈", "🥉"]
 
-    def fmt_plain(items, n=3):
-        # entries are like "kc -- 13.2%" — bold the name before the separator
+    def fmt_indented(items, suffix="", n=3):
+        lines = []
+        for i, (name, val) in enumerate(items[:n]):
+            medal = MEDALS[i] if i < 3 else f"{i+1}."
+            lines.append(f"{medal} **{name}** — {val}{(' ' + suffix) if suffix else ''}")
+        return "\n".join(lines) if lines else "*—*"
+
+    def fmt_indented_plain(items, n=3):
         lines = []
         for i, p in enumerate(items[:n]):
+            medal = MEDALS[i] if i < 3 else f"{i+1}."
             if ' -- ' in p:
                 name, rest = p.split(' -- ', 1)
-                lines.append(f"{i+1}. **{name}** — {rest}")
+                lines.append(f"{medal} **{name}** — {rest}")
             else:
-                lines.append(f"{i+1}. **{p}**")
-        return "\n".join(lines)
+                lines.append(f"{medal} **{p}**")
+        return "\n".join(lines) if lines else "*—*"
 
     week_label = stats.get('week_label', '')
-    desc = (
-        f"Weekly report · {stats['total_runs']} runs · {stats['total_players']} players"
-        if week_label else
-        f"{stats['total_runs']} runs · {stats['total_players']} players"
-    )
-    title = f"📋 The Butler's Favourites" + (f"  |  {week_label}" if week_label else "")
+    run_summary = f"*{stats['total_runs']} runs · {stats['total_players']} players this week*"
+    title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
 
-    embed = _discord.Embed(
-        title=title,
-        description=f"*{desc}*",
-        color=0x8b6914,
-    )
+    embed = _discord.Embed(title=title, description=run_summary, color=0x8b6914)
 
-    embed.add_field(name="─── This Week ───", value="​", inline=False)
+    # ── This Week ──
+    embed.add_field(name="\u200b", value="**── THIS WEEK ─────────────────────**", inline=False)
 
-    lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
+    lethal_text = fmt_indented_plain(stats['high_lethality']) if stats.get('high_lethality') else "*Not enough data yet*"
     embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ takedowns %)*",
+        name="<a:mostlethal:1520490418817601658>  Most Lethal  *(kills ÷ takedowns %)*",
         value=lethal_text,
         inline=False,
     )
 
-    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough team data yet*"
+    warlord_text = fmt_indented_plain(stats['most_dominant']) if stats.get('most_dominant') else "*Not enough team data yet*"
     embed.add_field(
-        name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
+        name="<:warlord:1520490364039860347>  Warlord  *(TD share of team %)*",
         value=warlord_text,
         inline=False,
     )
 
-    embed.add_field(name="​", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+    # ── Grid ──
+    embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
     embed.add_field(
-        name="⚔️ Most Kills",
-        value=fmt_list(stats['top_kills_list'], "K") or "*—*",
+        name="⚔️  Most Kills",
+        value=fmt_indented(stats['top_kills_list'], "K"),
         inline=True,
     )
     embed.add_field(
-        name="<a:toptkd:1360312666475728958> Highest Takedowns",
-        value=fmt_list(stats['top_td_list'], "TD") or "*—*",
+        name="<a:toptkd:1360312666475728958>  Highest TD",
+        value=fmt_indented(stats['top_td_list'], "TD"),
         inline=True,
     )
-    embed.add_field(name="​", value="​", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
 
     embed.add_field(
-        name="🏃 Busiest",
-        value=fmt_list(stats['top_busiest'], "runs") or "*—*",
+        name="🏃  Busiest",
+        value=fmt_indented(stats['top_busiest'], "runs"),
+        inline=True,
+    )
+    embed.add_field(
+        name="🗡️  Top Weapons",
+        value=fmt_indented(stats['top_weapons'], "runs"),
+        inline=True,
+    )
+    embed.add_field(
+        name="🗺️  Top Maps",
+        value=fmt_indented(stats['top_maps'], "runs"),
         inline=True,
     )
 
+    # ── All-Time ──
+    embed.add_field(name="\u200b", value="**── ALL-TIME ───────────────────────**", inline=False)
     embed.add_field(
-        name="⚔️ Top Weapons",
-        value=fmt_list(stats['top_weapons'], "runs") or "*—*",
-        inline=True,
-    )
-    embed.add_field(
-        name="🗺️ Top Maps",
-        value=fmt_list(stats['top_maps'], "runs") or "*—*",
-        inline=True,
-    )
-    embed.add_field(
-        name="─── All-Time Titles ───",
+        name="\u200b",
         value=(
-            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — **{stats['grand_marshal']}**\n"
-            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — **{stats['weapons_master']}**\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — **{stats['campaign_master']}**\n"
-            f"<a:topkill:1360314538364240024> **Headhunter** — **{stats['headhunter']}**\n"
-            f"<a:200tkd:1363648828414230538> **Butcher** — **{stats['butcher']}**"
+            f"<a:grandmarshal:1519928617407348877>  **Grand Marshal** — {stats['grand_marshal']}\n"
+            f"<a:weaponsmaster:1519928521445605488>  **Weapons Master** — {stats['weapons_master']}\n"
+            f"<a:campaignmaster:1520497947115262083>  **Campaign Master** — {stats['campaign_master']}\n"
+            f"<a:topkill:1360314538364240024>  **Headhunter** — {stats['headhunter']}\n"
+            f"<a:200tkd:1363648828414230538>  **Butcher** — {stats['butcher']}"
         ),
         inline=False,
     )
