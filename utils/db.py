@@ -158,12 +158,17 @@ async def update_submission_fields(submission_id: int, weapon: str, cls: str,
 
 async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int,
                                      deaths: int, map_name: str, faction: str,
-                                     cutoff_minutes: int = 5) -> bool:
-    """Return True if an identical submission exists within the last N minutes."""
+                                     cutoff_minutes: int = 5):
+    """Return the weapon of a matching duplicate submission within the last N
+    minutes, or None if no duplicate exists. (Used to return a plain bool — now
+    returns the original weapon too, since callers need it to tell a genuine
+    re-submission-with-corrected-weapon apart from an exact accidental repeat;
+    see log_submission()/finalise_submission's dedup branch.)
+    """
     pool = _pool_check()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT id FROM submissions
+            SELECT weapon FROM submissions
             WHERE discord_id=$1
               AND takedowns=$2 AND kills=$3 AND deaths=$4
               AND LOWER(map)=$5 AND LOWER(faction)=$6
@@ -172,7 +177,7 @@ async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int
         """, str(discord_id), takedowns, kills, deaths,
              (map_name or '').lower(), (faction or '').lower(),
              str(cutoff_minutes))
-    return row is not None
+    return row['weapon'] if row else None
 
 
 async def delete_submission_by_link(message_link: str):

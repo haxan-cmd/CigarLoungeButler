@@ -104,12 +104,12 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
 
     # Deduplicate: skip if identical run logged in the last 5 minutes
     try:
-        is_dup = await _db.check_duplicate_submission(
+        dup_weapon = await _db.check_duplicate_submission(
             str(discord_id), takedowns, kills, deaths, map_name, faction
         )
-        if is_dup:
+        if dup_weapon is not None:
             print(f"[DEDUP] Skipping duplicate submission for {discord_name} ({takedowns} TD, {kills}K, {deaths}D)")
-            return None
+            return None, dup_weapon
     except Exception as dedup_err:
         print(f"[DEDUP] Check failed (non-fatal): {dedup_err}")
 
@@ -130,7 +130,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
         team_td_share=round(team_td_share, 1) if team_td_share is not None else None,
         second_place_td=second_place_td,
     )
-    return row_id
+    return row_id, None
 
 class SubmitView(discord.ui.View):
     def __init__(self, original_message, prompt_msg=None):
@@ -1629,8 +1629,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_kill_share=_team_kill_share,
             team_td_share=_team_td_share,
         )
-        # log_submission returns the exact row index it wrote to (or None if dedup skipped)
-        submission_row = log_result
+        # log_submission returns (row_id, dup_weapon): row_id is the exact row index
+        # it wrote to, or None if this was a dedup-skipped repeat — in which case
+        # dup_weapon is the weapon already recorded on the matching original.
+        submission_row, dup_weapon = log_result
         is_new_player = False  # determined later from submission_count == 1
 
         # Auto-increment manual feat counts if already set for this player
@@ -1661,16 +1663,22 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         is_new_player = False
         print(f"Sheet logging error: {e}")
 
-    # Dedup: if this was a duplicate run, still check bounty (weapon may differ from first attempt) then bail
+    # Dedup: if this was a duplicate run, only re-check bounty if the weapon was
+    # actually corrected from the original attempt (e.g. they picked the wrong
+    # weapon the first time and resubmitted). An exact repeat — same stats, same
+    # weapon, just double-posted by accident — must NOT increment bounty progress
+    # again; it was unconditionally re-counting every accidental resubmission
+    # before this, inflating the bounty's aggregate weapon totals. (2026-06-30.)
     if submission_row is None:
-        if not is_ranged:
+        weapon_changed = bool(dup_weapon) and dup_weapon.strip().lower() != (selected_weapon or '').strip().lower()
+        if not is_ranged and weapon_changed:
             try:
                 from cogs.bounty import update_bounty
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
                     interaction.user.display_name, interaction.user.id, takedowns
                 )
-                print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon}")
+                print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon} (corrected from {dup_weapon})")
                 if bounty_hit:
                     await original_message.add_reaction("🐱")
             except Exception as e:
