@@ -352,7 +352,7 @@ def build_favourites_embed(stats):
         inline=False,
     )
 
-    embed.add_field(name="​", value="​", inline=False)
+    embed.add_field(name="​", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
     embed.add_field(
         name="⚔️ Most Kills",
