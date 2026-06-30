@@ -55,7 +55,7 @@ def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_do
     lines.append("╰──────────────────────────────╯")
 
     for weapon, data in weapons.items():
-        cur = data['current']
+        cur = min(data['current'], data['total'])
         tot = data['total']
         label = f"~~{weapon}~~" if cur >= tot else weapon
         progress = f"{cur}/{tot}"
@@ -67,13 +67,12 @@ def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_do
     sc_progress = "1/1" if special_done else "0/1"
     lines.append(f"▸ {special_challenge:<22} {sc_progress:>4}")
 
+    card = "```\n" + "\n".join(lines) + "\n```"
     if completions:
-        lines.append("")
-        lines.append("🏆 **Completions**")
+        card += "\n\n🏆 **Completions**"
         for idx, c in enumerate(completions, 1):
-            lines.append(f"{idx}. {c['name']} — {c['date']}")
-
-    return "```\n" + "\n".join(lines) + "\n```"
+            card += f"\n{idx}. {c['name']} — {c['date']}"
+    return card
 
 
 async def save_bounty_state(bounty_id, weapons, special_done, completions, message_id=None):
