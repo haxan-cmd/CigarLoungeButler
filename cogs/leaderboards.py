@@ -135,9 +135,17 @@ async def build_ledger_entrance(guild):
             ("🗡️ 1H Weapons",        INDEX_THREAD_1H),
             ("🏛️ Feats of War",      INDEX_THREAD_FEATS),
         ]
+        # Max 5 rows in Discord; assign rows explicitly for vertical layout
+        _row_map = [0, 1, 1, 1, 2, 2, 2, 3]
+        _btn_idx = 0
         for label, cid in buttons:
             if cid:
-                view.add_item(discord.ui.Button(label=label, url=ch_url(cid), style=discord.ButtonStyle.link))
+                view.add_item(discord.ui.Button(
+                    label=label, url=ch_url(cid),
+                    style=discord.ButtonStyle.link,
+                    row=_row_map[_btn_idx] if _btn_idx < len(_row_map) else 4,
+                ))
+            _btn_idx += 1
 
         mid = _entrance_message_ids.get('entrance')
         if not mid:

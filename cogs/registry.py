@@ -464,7 +464,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
 
 # Subclass primary weapons — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
-    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe"},
+    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},
     "Guardian":       {"Warhammer", "Falchion", "Heavy Cavalry Sword", "Axe", "One-Handed Spear"},
     "Crusader":       {"Messer", "Battle Axe", "Two-Handed Hammer", "Executioner's Axe", "Quarterstaff"},
     "Devastator":     {"Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe", "Highland Sword"},
@@ -1700,6 +1700,7 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             print(f"Bounty blurb fetch error: {e}")
 
+        from cogs.leaderboards import update_leaderboard_index
         LEADERBOARD_FORUMS = {
             "map_records":  (MAP_RECORDS_FORUM_ID,  "Map Records",  map_blurb),
             "weapons_2h":   (WEAPONS_2H_FORUM_ID,   "2H Weapons",   weapons_blurb),
