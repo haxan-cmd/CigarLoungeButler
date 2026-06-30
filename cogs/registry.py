@@ -2143,8 +2143,8 @@ class RegistryCog(commands.Cog):
         cm_holder, cm_count = breadth_leader(holder_map, 6)
 
         # Headhunter / Butcher — best score from 100 Kills / 200 TD boards
-        kills_best = {}
-        td_best = {}
+        kills_best = {}  # player -> list of scores
+        td_best = {}   # player -> list of scores
         for row in ld:
             if len(row) < 4:
                 continue
@@ -2155,17 +2155,22 @@ class RegistryCog(commands.Cog):
             except (ValueError, IndexError):
                 continue
             if lb_name == "100 Kills":
-                kills_best[p_name] = kills_best.get(p_name, 0) + score
+                kills_best.setdefault(p_name, []).append(score)
             elif lb_name == "200 Takedowns":
-                td_best[p_name] = td_best.get(p_name, 0) + score
+                td_best.setdefault(p_name, []).append(score)
 
-        hh_holder = max(kills_best, key=kills_best.get) if kills_best else None
-        hh_score = kills_best.get(hh_holder, 0) if hh_holder else 0
-        bt_holder = max(td_best, key=td_best.get) if td_best else None
-        bt_score = td_best.get(bt_holder, 0) if bt_holder else 0
+        import math as _math
+        def _weighted(scores):
+            if not scores: return 0
+            return (sum(scores) / len(scores)) * _math.log(len(scores) + 1)
 
-        player_kills_best = kills_best.get(resolved_name, 0)
-        player_td_best = td_best.get(resolved_name, 0)
+        hh_holder = max(kills_best, key=lambda p: _weighted(kills_best[p])) if kills_best else None
+        hh_score = round(_weighted(kills_best[hh_holder])) if hh_holder else 0
+        bt_holder = max(td_best, key=lambda p: _weighted(td_best[p])) if td_best else None
+        bt_score = round(_weighted(td_best[bt_holder])) if bt_holder else 0
+
+        player_kills_best = round(_weighted(kills_best.get(resolved_name, [])))
+        player_td_best = round(_weighted(td_best.get(resolved_name, [])))
 
         # Total board counts
         total_combined_boards = len(set(holder_combined.keys()) and holder_combined) and len(holder_combined) or 0
