@@ -276,7 +276,7 @@ def build_manual_embed():
         value="`/rules` — Show the Cigar Lounge challenge rules.",
         inline=False,
     )
-    embed.set_footer(text="Use commands in #🤙 | hotline")
+    embed.set_footer(text="Use commands in #🚨 | butlers-hotline")
     return embed
 
 
