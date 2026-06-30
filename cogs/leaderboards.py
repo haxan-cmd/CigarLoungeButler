@@ -1283,4 +1283,54 @@ class LeaderboardsCog(commands.Cog):
                         member = interaction.guild.get_member(int(discord_id_str)) or await interaction.guild.fetch_member(int(discord_id_str))
                         if hh_role not in member.roles:
                             await member.add_roles(hh_role, reason="Backfill: Hundred-Handed role")
-                      
+                            hh_role_assigned.append(member.display_name)
+                    except Exception:
+                        continue
+        except Exception as role_e:
+            print(f"[HH] Role backfill error: {role_e}")
+
+        role_msg = f"\n\U0001f396\ufe0f Role assigned to: {', '.join(hh_role_assigned)}" if hh_role_assigned else ""
+        await interaction.edit_original_response(content=f"\u2705 Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
+
+
+async def refresh_hundred_handed_board(guild):
+    """Rebuild The Hundred Handed embed in its thread."""
+    all_lb_rows = await _get_lb_records()
+    lb_row = next((r for r in all_lb_rows if r.get('Leaderboard Name') == 'The Hundred Handed'), None)
+    if not lb_row:
+        print("[HUNDRED_HANDED] No leaderboard row found for 'The Hundred Handed'")
+        return
+
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+
+    rows = await _db.get_hundred_handed_leaderboard()
+    if not rows:
+        desc = "*No entries yet.*"
+    else:
+        lines = []
+        for idx, (discord_id, player_name, count) in enumerate(rows, 1):
+            done = "\u2713" if count >= HH_TOTAL else ""
+            lines.append(f"{idx}. **{player_name}** \u2014 {count}/{HH_TOTAL} {done}")
+        desc = "\n".join(lines)
+
+    embed = discord.Embed(title="The Hundred Handed", description=desc, colour=EMBED_GOLD)
+
+    try:
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        if message_ids:
+            try:
+                msg = await thread.fetch_message(message_ids[0])
+                await msg.edit(content="", embed=embed)
+            except Exception:
+                msg = await thread.send(embed=embed)
+                await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+        else:
+            msg = await thread.send(embed=embed)
+            await _db.update_leaderboard_messages('The Hundred Handed', str(msg.id))
+    except Exception as e:
+        print(f"[HUNDRED_HANDED] Board refresh error: {e}")
+
+
+async def setup(bot):
+    await bot.add_cog(LeaderboardsCog(bot))
