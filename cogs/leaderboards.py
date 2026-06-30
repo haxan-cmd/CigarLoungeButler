@@ -615,8 +615,8 @@ def format_leaderboard_text(entries, overflow=0, show_weapon=False, score_prefix
 
 EMBED_GOLD = 0xC8952C
 _FACTION_COLOUR = {
-    "Agatha":  0xC0392B,   # red
-    "Mason":   0x2471A3,   # blue
+    "Mason":   0xC0392B,   # red
+    "Agatha":  0x2471A3,   # blue
     "Tenosia": 0xD4AC0D,   # gold/yellow
 }
 
