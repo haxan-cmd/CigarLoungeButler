@@ -548,6 +548,21 @@ class AdminCog(commands.Cog):
             )
             return
 
+        # Normalize subclass through the same alias table used for submission parsing
+        # (e.g. "man at arms" / "maa" -> "Man-at-Arms"). Free-text subclass input
+        # previously got stored verbatim into legacy_marks, so a mod typing "Man at
+        # Arms" (no hyphen) would silently create a row that never matched the
+        # canonical "Man-at-Arms" key used everywhere else — the mark looked added
+        # but never showed up on the card. (OctoLemon Sword/Man-at-Arms, 2026-06-30.)
+        normalized_subclass = config.SUBCLASS_ALIASES.get(subclass.strip().lower(), subclass.strip())
+        if normalized_subclass not in config.REGISTRY_WEAPON_MAP:
+            await interaction.response.send_message(
+                f"\u274c Unknown subclass `{subclass}`. Must be a valid subclass (e.g. `Man-at-Arms`, `Officer`, `Guardian`).",
+                ephemeral=True
+            )
+            return
+        subclass = normalized_subclass
+
         await interaction.response.defer(ephemeral=True)
         try:
             await _db.add_legacy_mark(player.display_name, weapon, subclass, marks)

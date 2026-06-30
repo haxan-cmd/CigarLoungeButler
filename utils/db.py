@@ -639,16 +639,31 @@ async def get_legacy_marks_for_player(player_name: str) -> list[list]:
 
 
 async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: int):
+    """Add (or accumulate onto) a legacy mark for player+weapon+subclass.
+
+    Previously this only checked player_name+weapon for an existing row, ignoring
+    subclass — so a second award on the same weapon under a *different* subclass
+    silently did nothing (no insert, no error). It also never accumulated: a repeat
+    award on the exact same (player, weapon, subclass) was just dropped instead of
+    adding to the existing total. Both fixed here by keying on the full triple and
+    incrementing on conflict. (OctoLemon Sword/Man-at-Arms, 2026-06-30.)
+    """
     pool = _pool_check()
+    subclass = subclass or ''
     async with pool.acquire() as conn:
-        exists = await conn.fetchrow(
-            "SELECT id FROM legacy_marks WHERE LOWER(player_name)=LOWER($1) AND weapon=$2 LIMIT 1",
-            player_name, weapon
+        existing = await conn.fetchrow(
+            "SELECT id FROM legacy_marks WHERE LOWER(player_name)=LOWER($1) AND weapon=$2 AND subclass=$3 LIMIT 1",
+            player_name, weapon, subclass
         )
-        if not exists:
+        if existing:
+            await conn.execute(
+                "UPDATE legacy_marks SET marks = marks + $1 WHERE id = $2",
+                marks, existing['id']
+            )
+        else:
             await conn.execute(
                 "INSERT INTO legacy_marks (player_name, weapon, subclass, marks) VALUES ($1,$2,$3,$4)",
-                player_name, weapon, subclass or '', marks
+                player_name, weapon, subclass, marks
             )
 
 
