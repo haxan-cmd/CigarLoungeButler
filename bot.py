@@ -26,11 +26,14 @@ def submission_end():
     _active_submissions = max(0, _active_submissions - 1)
 
 
+_web_app = web.Application()
+
+
 async def run_healthcheck():
     """Minimal HTTP server so Railway's healthcheck passes."""
     async def handle(request):
         return web.Response(text="ok")
-    app = web.Application()
+    app = _web_app
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -54,6 +57,7 @@ COGS = [
     "cogs.favourites",
     "cogs.personality",
     "cogs.admin",
+    "cogs.kofi",
 ]
 
 
@@ -70,6 +74,16 @@ async def on_ready():
         print(f"✅ Synced {len(synced)} slash commands to guild")
     except Exception as e:
         print(f"❌ Command sync failed: {e}")
+
+
+@bot.tree.after_invoke
+async def auto_delete_hotline(interaction: discord.Interaction):
+    if interaction.channel_id == config.BUTLERS_HOTLINE_CHANNEL_ID:
+        try:
+            msg = await interaction.original_response()
+            await msg.delete(delay=300)
+        except Exception:
+            pass
 
 
 @bot.tree.error

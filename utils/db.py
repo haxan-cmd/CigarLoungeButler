@@ -818,3 +818,68 @@ async def get_snapshots(limit: int = 52) -> list[dict]:
             "SELECT * FROM snapshots ORDER BY snapshot_date DESC LIMIT $1", limit
         )
     return [dict(r) for r in rows]
+
+
+# -- Ko-fi --------------------------------------------------------------------
+
+async def kofi_init():
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS kofi_donations (
+                id SERIAL PRIMARY KEY,
+                kofi_transaction_id TEXT UNIQUE,
+                donor_name TEXT,
+                amount NUMERIC(10,2),
+                currency TEXT,
+                received_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS kofi_dashboard (
+                id INT PRIMARY KEY DEFAULT 1,
+                channel_id BIGINT,
+                message_id BIGINT
+            )
+        """)
+
+
+async def add_kofi_donation(transaction_id: str, donor_name: str, amount: float, currency: str) -> bool:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchval(
+            "SELECT id FROM kofi_donations WHERE kofi_transaction_id=$1", transaction_id
+        )
+        if existing:
+            return False
+        await conn.execute(
+            "INSERT INTO kofi_donations (kofi_transaction_id, donor_name, amount, currency) VALUES ($1,$2,$3,$4)",
+            transaction_id, donor_name, amount, currency
+        )
+        return True
+
+
+async def get_kofi_total() -> float:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        val = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM kofi_donations")
+        return float(val)
+
+
+async def get_kofi_dashboard_message():
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT channel_id, message_id FROM kofi_dashboard WHERE id=1")
+        if row:
+            return row['channel_id'], row['message_id']
+        return None
+
+
+async def set_kofi_dashboard_message(channel_id: int, message_id: int):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO kofi_dashboard (id, channel_id, message_id) VALUES (1,$1,$2)
+            ON CONFLICT (id) DO UPDATE SET channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id""",
+            channel_id, message_id
+        )
