@@ -1279,11 +1279,13 @@ class LeaderboardsCog(commands.Cog):
             if not link:
                 continue
             for board, stat in FEAT_MAP.items():
-                if board not in feats_str:
+                # Qualify by raw stats — catches Triples that didn't get the feat tag
+                score = kills if stat == "kills" else takedowns
+                threshold = 100 if stat == "kills" else 200
+                if score < threshold:
                     continue
                 if (board, link) in existing:
                     continue
-                score = kills if stat == "kills" else takedowns
                 await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
                 existing.add((board, link))
                 added += 1
