@@ -2404,9 +2404,10 @@ class RegistryCog(commands.Cog):
                 suf = {1: "st", 2: "nd", 3: "rd"}.get(n if n <= 3 else 0, "th")
                 return f" ({n}{suf})"
             _dart = "🎯"
+            _sorted_bounties = sorted(bounty_completions, key=lambda x: x[1] if x[1] is not None else 999)
             bounty_row = "  ".join(
                 (emoji or _dart) + _place(pl)
-                for _, pl, emoji in bounty_completions
+                for _, pl, emoji in _sorted_bounties
             )
             lines.append("")
             lines.append(f"**Bounties**")
