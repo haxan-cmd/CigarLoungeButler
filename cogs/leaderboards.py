@@ -400,6 +400,55 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         print(f"Leaderboard index error ({index_label}): {e}")
 
 
+async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
+    """Edit each board message in place; on edit failure, delete the orphaned
+    original (best-effort) and post a fresh message instead of leaving a stale
+    duplicate behind. If anything had to be recreated, also repost a fresh
+    DECORATION_BOTTOM so the new message doesn't end up sitting outside the
+    board's decorative frame (the top/bottom spacer images are only posted once,
+    by /setup_leaderboard — none of the refresh paths ever touched them, so a
+    recreated message looked like a bare, undecorated leaderboard post). Returns
+    the new list of message IDs, same length/order as embeds.
+
+    Consolidated from update_leaderboards / refresh_leaderboard /
+    refresh_all_leaderboards, which each had this loop duplicated with the same
+    orphan-on-failure bug (Glaive board duplicate, found 2026-06-30).
+    """
+    new_ids = []
+    recreated = False
+    for i, emb in enumerate(embeds):
+        if i < len(message_ids):
+            edited = False
+            try:
+                msg = await thread.fetch_message(message_ids[i])
+                await msg.edit(content=msg_content, embed=emb)
+                new_ids.append(message_ids[i])
+                edited = True
+            except Exception as edit_err:
+                print(f"Leaderboard edit failed for msg {message_ids[i]} in #{thread.id}, posting fresh: {edit_err}")
+            if not edited:
+                try:
+                    old_msg = await thread.fetch_message(message_ids[i])
+                    await old_msg.delete()
+                except Exception:
+                    pass
+                msg = await thread.send(content=msg_content, embed=emb)
+                new_ids.append(msg.id)
+                recreated = True
+        else:
+            msg = await thread.send(content=msg_content, embed=emb)
+            new_ids.append(msg.id)
+            recreated = True
+
+    if recreated:
+        try:
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+        except Exception as deco_err:
+            print(f"Decoration repost failed in #{thread.id}: {deco_err}")
+
+    return new_ids
+
+
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
                               player_name, message_link, bot_user=None, second_place_td=None):
@@ -535,36 +584,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            msg_content = ""
-            new_ids = []
-            for i, emb in enumerate(embeds):
-                if i < len(message_ids):
-                    edited = False
-                    try:
-                        msg = await thread.fetch_message(message_ids[i])
-                        await msg.edit(content=msg_content, embed=emb)
-                        new_ids.append(message_ids[i])
-                        edited = True
-                    except Exception as edit_err:
-                        print(f"Leaderboard edit failed for {lb_name} msg {message_ids[i]}, posting fresh: {edit_err}")
-                    if not edited:
-                        # Edit failed (rate limit, transient API error, etc.) — before
-                        # falling back to a brand new message, try to clean up the
-                        # original so it doesn't linger as a stale duplicate in the
-                        # thread forever. If it's genuinely gone already this just
-                        # no-ops. (Glaive board duplicate, found 2026-06-30 — the old
-                        # message stayed untouched while a new one got created and
-                        # the DB pointer silently moved to it.)
-                        try:
-                            old_msg = await thread.fetch_message(message_ids[i])
-                            await old_msg.delete()
-                        except Exception:
-                            pass
-                        msg = await thread.send(content=msg_content, embed=emb)
-                        new_ids.append(msg.id)
-                else:
-                    msg = await thread.send(content=msg_content, embed=emb)
-                    new_ids.append(msg.id)
+            new_ids = await _sync_board_messages(thread, embeds, message_ids)
             if new_ids != message_ids:
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
         except Exception as e:
@@ -889,19 +909,7 @@ class LeaderboardsCog(commands.Cog):
             try:
                 guild = interaction.guild
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                new_ids = []
-                for i, emb in enumerate(embeds):
-                    if i < len(message_ids):
-                        try:
-                            msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content="", embed=emb)
-                            new_ids.append(message_ids[i])
-                        except Exception:
-                            msg = await thread.send(content="", embed=emb)
-                            new_ids.append(msg.id)
-                    else:
-                        msg = await thread.send(content="", embed=emb)
-                        new_ids.append(msg.id)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
 
@@ -942,19 +950,7 @@ class LeaderboardsCog(commands.Cog):
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
                 thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
 
-                new_ids = []
-                for i, emb in enumerate(embeds):
-                    if i < len(message_ids):
-                        try:
-                            msg = await thread.fetch_message(message_ids[i])
-                            await msg.edit(content="", embed=emb)
-                            new_ids.append(message_ids[i])
-                        except Exception:
-                            msg = await thread.send(content="", embed=emb)
-                            new_ids.append(msg.id)
-                    else:
-                        msg = await thread.send(content="", embed=emb)
-                        new_ids.append(msg.id)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids)
                 if new_ids != message_ids:
                     await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
                 done.append(lb_name)
@@ -1045,20 +1041,7 @@ class LeaderboardsCog(commands.Cog):
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
 
             try:
-                new_ids = []
-                for i, emb in enumerate(embeds):
-                    if i < len(old_ids):
-                        try:
-                            msg = await thread.fetch_message(old_ids[i])
-                            await msg.edit(content="", embed=emb)
-                            new_ids.append(old_ids[i])
-                        except Exception:
-                            # Old message gone or is text — send fresh embed
-                            msg = await thread.send(embed=emb)
-                            new_ids.append(msg.id)
-                    else:
-                        msg = await thread.send(embed=emb)
-                        new_ids.append(msg.id)
+                new_ids = await _sync_board_messages(thread, embeds, old_ids)
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
                 done.append(lb_name)
                 await asyncio.sleep(0.4)
