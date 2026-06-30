@@ -178,6 +178,7 @@ class SubmitView(discord.ui.View):
         if not has_image:
             # No image — skip vision entirely, go straight to class select instantly
             _active_vision.discard(msg_id)
+            _bot_module.submission_end()
             caption = self.original_message.content.strip()
             detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
             if detected_weapon or detected_subclass:
@@ -288,6 +289,7 @@ class SubmitView(discord.ui.View):
                     await interaction.followup.send(content="Which class were you playing?", view=view, ephemeral=True)
         finally:
             _active_vision.discard(msg_id)
+            _bot_module.submission_end()
 
     @discord.ui.button(label='Dismiss', style=discord.ButtonStyle.grey, emoji='✖️')
     async def dismiss_button(self, interaction: discord.Interaction, button: discord.ui.Button):

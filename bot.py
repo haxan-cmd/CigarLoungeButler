@@ -1,11 +1,29 @@
 import asyncio
 import traceback
 import os
+import signal
 from aiohttp import web
 import discord
 from discord.ext import commands
 
 import config
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown — shared state imported by cogs via `import bot`
+# ---------------------------------------------------------------------------
+_shutting_down = False
+_active_submissions = 0
+
+def is_shutting_down():
+    return _shutting_down
+
+def submission_start():
+    global _active_submissions
+    _active_submissions += 1
+
+def submission_end():
+    global _active_submissions
+    _active_submissions = max(0, _active_submissions - 1)
 
 
 async def run_healthcheck():
@@ -75,7 +93,24 @@ async def on_app_command_error(
         raise error
 
 
+async def _graceful_shutdown():
+    global _shutting_down
+    _shutting_down = True
+    print("[SHUTDOWN] SIGTERM received — draining active submissions...")
+    for _ in range(60):
+        if _active_submissions == 0:
+            break
+        await asyncio.sleep(0.5)
+    print(f"[SHUTDOWN] Drained ({_active_submissions} remaining). Closing bot.")
+    await bot.close()
+
+
 async def main():
+    loop = asyncio.get_event_loop()
+    loop.add_signal_handler(
+        signal.SIGTERM,
+        lambda: asyncio.ensure_future(_graceful_shutdown())
+    )
     await run_healthcheck()
     # Initialise Postgres pool if DATABASE_URL is configured
     if os.environ.get('DATABASE_URL'):
