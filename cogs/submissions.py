@@ -1278,9 +1278,16 @@ async def _apply_edit(interaction, ev):
         print(f"Edit DB update error: {e}")
 
     # Rebuild summary
+    _edit_player_row = await _db.get_player(str(ev.author.id))
+    _edit_thread_id = _edit_player_row[2] if _edit_player_row and _edit_player_row[2] else None
+    _edit_guild_id = ev.original_message.guild.id
+    _edit_name = (
+        f"[{ev.author.display_name}](https://discord.com/channels/{_edit_guild_id}/{_edit_thread_id})"
+        if _edit_thread_id else ev.author.display_name
+    )
     new_summary = (
         f"**Run Submitted** *(edited)*\n"
-        f"{ev.author.display_name}\n"
+        f"{_edit_name}\n"
         f"{ev.weapon} • {ev.cls}\n"
         f"{ev.map_name} / {ev.faction}\n"
         f"{ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
@@ -1542,9 +1549,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if blurb_parts:
         lobby_line = " · ".join(blurb_parts)
 
+    _player_row = await _db.get_player(str(interaction.user.id))
+    _thread_id = _player_row[2] if _player_row and _player_row[2] else None
+    _guild_id = interaction.guild.id
+    _name_display = (
+        f"[{interaction.user.display_name}](https://discord.com/channels/{_guild_id}/{_thread_id})"
+        if _thread_id else f"`{interaction.user.display_name}`"
+    )
+
     summary = (
         f"**Run Submitted**\n"
-        f"│ `{interaction.user.display_name}`\n"
+        f"│ {_name_display}\n"
         f"│ {selected_weapon} • {selected_class}\n"
         f"│ {selected_map} / {faction}\n"
         f"│ {takedowns} TD / {kills} K / {deaths} D\n"
