@@ -451,11 +451,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         existing_entry = existing_score is not None
 
         if unlimited_top50:
-            # No cap — but skip exact duplicates (same player, score, weapon)
+            # No cap — but skip if this exact submission link already on the board
             already_exists = any(
                 r[0] == lb_name and r[2] == discord_id
-                and (int(r[3]) if r[3] else 0) == score
-                and (r[5] if len(r) > 5 else '') == (selected_weapon or '')
+                and (r[4] if len(r) > 4 else '') == (message_link or '')
                 for r in all_values
             )
             if already_exists:
@@ -1311,9 +1310,9 @@ class LeaderboardsCog(commands.Cog):
         seen = set()
         removed = 0
         for r in rows:
-            key = (r[2], int(r[3]) if r[3] else 0, r[5] if len(r) > 5 else '')
+            # Use (discord_id, message_link) as unique key — same link = same game
+            key = (r[2], r[4] if len(r) > 4 else '')
             if key in seen:
-                # duplicate \u2014 delete by message link (unique enough)
                 await _db.delete_leaderboard_entry_by_link(name, r[4] if len(r) > 4 else '')
                 removed += 1
             else:
