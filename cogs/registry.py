@@ -2204,12 +2204,15 @@ class RegistryCog(commands.Cog):
         total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn"}])
         total_map_boards = len([b for b in all_board_names if " - " in b])
 
+        _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Headhunter", "Butcher"])
+
         def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True, total=None):
             total_str = f"/{total}" if total is not None else ""
+            padded = f"{label:<{_TITLE_PAD}}"
             if resolved == holder_name:
-                return f"{emoji} {label} \u2713 ({player_val}{total_str})"
+                return f"{emoji} `{padded}` \u2713 ({player_val}{total_str})"
             diff = holder_val - player_val
-            return f"{emoji} {label} \u2014 {player_val}{total_str} / {holder_val}{total_str} {holder_name} **(-{diff})**"
+            return f"{emoji} `{padded}` \u2014 `{player_val}{total_str}` / `{holder_val}{total_str}` {holder_name} **(-{diff})**"
 
         title_lines = [
             fmt_title(config.TITLE_EMOJIS["Grand Marshal"],   "Grand Marshal",   player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),

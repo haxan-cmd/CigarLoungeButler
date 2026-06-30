@@ -309,22 +309,35 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
     def fmt_list(items, suffix="", n=3):
+        subset = items[:n]
+        if not subset:
+            return "│ *—*"
+        pad = max(len(name) for name, _ in subset)
         lines = []
-        for i, (name, val) in enumerate(items[:n]):
-            # suffix only on first entry, blank after
+        for i, (name, val) in enumerate(subset):
             sfx = f" {suffix}" if (suffix and i == 0) else ""
-            lines.append(f"│ `{name}` — {val}{sfx}")
-        return "\n".join(lines) if lines else "│ *—*"
+            lines.append(f"│ `{name:<{pad}}` — {val}{sfx}")
+        return "\n".join(lines)
 
     def fmt_plain(items, n=3):
-        lines = []
-        for i, p in enumerate(items[:n]):
+        subset = items[:n]
+        if not subset:
+            return "│ *—*"
+        parsed = []
+        for p in subset:
             if ' -- ' in p:
                 name, rest = p.split(' -- ', 1)
-                lines.append(f"│ `{name}` — {rest}")
+                parsed.append((name, rest))
             else:
-                lines.append(f"│ `{p}`")
-        return "\n".join(lines) if lines else "│ *—*"
+                parsed.append((p, None))
+        pad = max(len(name) for name, _ in parsed)
+        lines = []
+        for name, rest in parsed:
+            if rest is not None:
+                lines.append(f"│ `{name:<{pad}}` — {rest}")
+            else:
+                lines.append(f"│ `{name:<{pad}}`")
+        return "\n".join(lines)
 
     week_label = stats.get('week_label', '')
     title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
