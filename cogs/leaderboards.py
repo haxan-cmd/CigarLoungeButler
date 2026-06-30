@@ -577,7 +577,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -742,10 +742,20 @@ _LB_EMOJI = {
 }
 
 def _lb_title(lb_name, show_title, cont=False):
+    """Embed title for a board. Map boards (e.g. "Aberfell - Agatha") use
+    _map_header() for a faction-labeled header (e.g. "[icon] Aberfell — Agatha");
+    everything else uses the weapon/feat emoji lookup. _map_header() used to be
+    built and then never actually passed into the embed/message anywhere — every
+    call site disabled titles for map boards entirely (show_title=False), so map
+    board posts had no header at all once refreshed. Fixed 2026-06-30.
+    """
     if not show_title:
         return None
-    emoji = _LB_EMOJI.get(lb_name)
-    base = emoji if emoji else lb_name
+    if ' - ' in lb_name:
+        base = _map_header(lb_name)
+    else:
+        emoji = _LB_EMOJI.get(lb_name)
+        base = emoji if emoji else lb_name
     return f"{base} (cont.)" if cont else base
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
@@ -830,8 +840,8 @@ class LeaderboardsCog(commands.Cog):
             attack_header = f"{attack_emoji} **{name} {attack_faction}** <:weapon_hs:1350656128635375698>"
             defense_header = f"{defense_emoji} **{name} {defense_faction}** 🛡️"
 
-            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries, show_title=False)
-            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries, show_title=False)
+            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries)
+            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries)
 
             await thread.send(file=discord.File(DECORATION_TOP))
             attack_ids = []
@@ -901,7 +911,7 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -944,7 +954,7 @@ class LeaderboardsCog(commands.Cog):
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
                 thread_id = int(thread_id_raw)
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
@@ -1035,7 +1045,7 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix)
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
@@ -1339,6 +1349,71 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n\n\u26a0\ufe0f Errors ({len(errors)}):\n" + "\n".join(errors[:5])
 
         await interaction.edit_original_response(content=summary[:1900])
+
+    @app_commands.command(name="fix_board_decoration", description="Re-frame a single (non-map) board with fresh top/bottom decoration (mod only).")
+    @app_commands.describe(name="Exact leaderboard name, e.g. 'Messer' or 'Glaive'")
+    async def fix_board_decoration(self, interaction: discord.Interaction, name: str):
+        """Decoration spacer images are only ever posted once, by /setup_leaderboard,
+        and Discord has no way to insert a message "before" an existing one — so a
+        board whose message was ever silently recreated by the old edit-fallback bug
+        ended up sitting outside its original top/bottom frame permanently (Glaive,
+        Messer, found 2026-06-30). _sync_board_messages now reposts a bottom
+        decoration when IT recreates a message, but that doesn't retroactively fix
+        boards already in this state from before that fix existed. This command
+        deletes the board's current tracked message(s) and reposts everything fresh
+        — DECORATION_TOP, the embed(s), DECORATION_BOTTOM — restoring the frame.
+        Single-board (non-map) threads only; map boards share a thread with their
+        Attack/Defense counterpart and aren't supported here.
+        """
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        all_lb_rows = await _get_lb_records()
+        lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == name), None)
+        if not lb_row:
+            await interaction.edit_original_response(content=f"❌ No leaderboard found with name: `{name}`")
+            return
+
+        is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in name and name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+        if is_map:
+            await interaction.edit_original_response(content=f"❌ `{name}` is a map board (shares a thread with its Attack/Defense counterpart) — not supported by this command yet.")
+            return
+
+        try:
+            thread_id = int(lb_row['Thread ID'])
+            thread = interaction.guild.get_channel(thread_id) or await interaction.guild.fetch_channel(thread_id)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Couldn't fetch thread: {e}")
+            return
+
+        old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+        for old_id in old_ids:
+            try:
+                old_msg = await thread.fetch_message(old_id)
+                await old_msg.delete()
+            except Exception:
+                pass
+
+        entries = await get_leaderboard_entries(name)
+        show_weapon = name in ("100 Kills", "200 Takedowns")
+        score_prefix = "+" if name == "TUFF" else ""
+        embeds = format_leaderboard_embeds(name, entries, 0, show_weapon, score_prefix)
+
+        try:
+            await thread.send(file=discord.File(DECORATION_TOP))
+            new_ids = []
+            for emb in embeds:
+                m = await thread.send(embed=emb)
+                new_ids.append(str(m.id))
+            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await _db.update_leaderboard_messages(name, '|'.join(new_ids))
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Re-post failed: {e}")
+            return
+
+        await interaction.edit_original_response(content=f"✅ **{name}** re-framed with fresh decoration.")
 
     @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
