@@ -633,11 +633,28 @@ def _map_header(lb_name: str) -> str:
     emoji = FACTION_EMOJIS.get(faction, '⚔️')
     return f"{emoji} **{map_name} — {faction}**"
 
+_LB_EMOJI = {
+    "TUFF":             "<a:TUFF2:1520779243879927898>",
+    "200 Takedowns":    "<a:200tkd:1363648828414230538>",
+    "100 Kills":        "<a:100kill:1361412390339608686>",
+    "Triple":           "<a:triple:1365532698260668466>",
+    "Flawless":         "<a:flawless:1360358300834599062>",
+    "The Hundred Handed": "<:hhanded:1430199468246044772>",
+    "Knife":            "\U0001f5e1\ufe0f",
+    "Mallet":           "\U0001f528",
+}
+
+def _lb_title(lb_name, show_title, cont=False):
+    if not show_title:
+        return None
+    emoji = _LB_EMOJI.get(lb_name)
+    base = emoji if emoji else lb_name
+    return f"{base} (cont.)" if cont else base
+
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     if not entries:
-        title = lb_name if show_title else None
-        return [discord.Embed(title=title, description="*No entries yet.*", colour=EMBED_GOLD)]
+        return [discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=EMBED_GOLD)]
 
     lines = []
     for idx, e in enumerate(entries, 1):
@@ -656,15 +673,13 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     for line in lines:
         cost = len(line) + 1
         if current_lines and current_len + cost > EMBED_DESC_LIMIT:
-            title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
-            embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+            embeds.append(discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=EMBED_GOLD))
             current_lines = []
             current_len = 0
         current_lines.append(line)
         current_len += cost
     if current_lines:
-        title = (lb_name if not embeds else f"{lb_name} (cont.)") if show_title else None
-        embeds.append(discord.Embed(title=title, description="\n".join(current_lines), colour=EMBED_GOLD))
+        embeds.append(discord.Embed(title=_lb_title(lb_name, show_title, cont=bool(embeds)), description="\n".join(current_lines), colour=EMBED_GOLD))
     return embeds
 
 
