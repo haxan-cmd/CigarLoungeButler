@@ -1145,7 +1145,7 @@ async def update_archive_index(guild):
             letter_entries = [(n, t) for n, t in entries if n and n[0].upper() == letter]
             if letter_entries:
                 embed_fields.extend(_make_letter_fields(letter, letter_entries))
-        other = [(n, t) for n, t in entries if not n or not n[0].upper().isalpha()]
+        other = [(n, t) for n, t in entries if not n or n[0].upper() not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
         if other:
             embed_fields.extend(_make_letter_fields("#", other))
 
