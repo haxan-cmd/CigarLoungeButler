@@ -539,11 +539,27 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             new_ids = []
             for i, emb in enumerate(embeds):
                 if i < len(message_ids):
+                    edited = False
                     try:
                         msg = await thread.fetch_message(message_ids[i])
                         await msg.edit(content=msg_content, embed=emb)
                         new_ids.append(message_ids[i])
-                    except Exception:
+                        edited = True
+                    except Exception as edit_err:
+                        print(f"Leaderboard edit failed for {lb_name} msg {message_ids[i]}, posting fresh: {edit_err}")
+                    if not edited:
+                        # Edit failed (rate limit, transient API error, etc.) — before
+                        # falling back to a brand new message, try to clean up the
+                        # original so it doesn't linger as a stale duplicate in the
+                        # thread forever. If it's genuinely gone already this just
+                        # no-ops. (Glaive board duplicate, found 2026-06-30 — the old
+                        # message stayed untouched while a new one got created and
+                        # the DB pointer silently moved to it.)
+                        try:
+                            old_msg = await thread.fetch_message(message_ids[i])
+                            await old_msg.delete()
+                        except Exception:
+                            pass
                         msg = await thread.send(content=msg_content, embed=emb)
                         new_ids.append(msg.id)
                 else:
@@ -1252,6 +1268,79 @@ class LeaderboardsCog(commands.Cog):
         if errors:
             summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary)
+
+    @app_commands.command(name="scan_leaderboard_duplicates", description="Scan all leaderboard threads for stale duplicate messages (mod only, read-only).")
+    async def scan_leaderboard_duplicates(self, interaction: discord.Interaction):
+        """Read-only audit: each leaderboard board tracks its current Discord message
+        ID(s) in the DB. If a message edit ever fails (rate limit, transient API
+        error, etc.), the old code path silently posted a brand-new message and
+        moved the DB pointer to it, leaving the original stuck in the thread forever
+        as a stale duplicate (found on the Glaive board, 2026-06-30). The edit path
+        itself now cleans up after a failed edit going forward, but this command
+        finds any duplicates that were already left behind before that fix. Nothing
+        is deleted automatically — verify each flagged message before removing it.
+        """
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        bot_id = guild.me.id
+        lb_rows = await _get_lb_records()
+
+        findings = []
+        errors = []
+        checked = 0
+
+        for lb_row in lb_rows:
+            lb_name = (lb_row.get('Leaderboard Name') or '').strip()
+            thread_id_raw = lb_row.get('Thread ID') or ''
+            message_id_raw = lb_row.get('Message ID') or ''
+            if not lb_name or not thread_id_raw:
+                continue
+            try:
+                thread_id = int(thread_id_raw)
+            except ValueError:
+                continue
+            tracked_ids = set(int(m) for m in _re.findall(r'\d{17,20}', str(message_id_raw)))
+            if not tracked_ids:
+                continue
+
+            try:
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+            except Exception as e:
+                errors.append(f"{lb_name}: thread fetch failed ({e})")
+                continue
+
+            try:
+                checked += 1
+                extra = []
+                async for msg in thread.history(limit=50, oldest_first=True):
+                    if msg.author.id != bot_id or not msg.embeds:
+                        continue
+                    if msg.id in tracked_ids:
+                        continue
+                    extra.append(msg)
+                if extra:
+                    links = ", ".join(f"[msg]({m.jump_url})" for m in extra)
+                    findings.append(f"\u2022 **{lb_name}** \u2014 {len(extra)} untracked embed message(s): {links}")
+            except Exception as e:
+                errors.append(f"{lb_name}: history scan failed ({e})")
+            await asyncio.sleep(0.2)
+
+        if not findings:
+            summary = f"\u2705 Scanned **{checked}** board(s) \u2014 no stray/duplicate leaderboard messages found."
+        else:
+            summary = f"\u26a0\ufe0f Found possible duplicates on **{len(findings)}** of {checked} board(s):\n" + "\n".join(findings[:15])
+            if len(findings) > 15:
+                summary += f"\n*...and {len(findings) - 15} more*"
+            summary += "\n\nThis is read-only \u2014 nothing was deleted. Verify each link manually before removing it."
+
+        if errors:
+            summary += f"\n\n\u26a0\ufe0f Errors ({len(errors)}):\n" + "\n".join(errors[:5])
+
+        await interaction.edit_original_response(content=summary[:1900])
 
     @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
