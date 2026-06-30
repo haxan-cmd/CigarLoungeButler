@@ -464,21 +464,13 @@ async def get_feats_for_player(discord_id, cached_data=None):
 
     return named_feats, feats, board_counts
 
-# Subclass primary weapons — only these count toward Mastered Weapon (100 submissions)
-_SUBCLASS_PRIMARIES = {
-    "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},
-    "Guardian":       {"Warhammer", "Falchion", "Heavy Cavalry Sword", "Axe", "One-Handed Spear"},
-    "Crusader":       {"Messer", "Battle Axe", "Two-Handed Hammer", "Executioner's Axe", "Quarterstaff"},
-    "Devastator":     {"Greatsword", "Maul", "War Club", "Battle Axe", "Executioner's Axe", "Highland Sword"},
-    "Raider":         {"Dane Axe", "Glaive", "Two-Handed Hammer", "Messer"},
-    "Ambusher":       {"Hatchet", "Dagger", "Cudgel", "Katars", "Short Sword"},
-    "Poleman":        {"Halberd", "Polehammer", "Spear", "Glaive", "Quarterstaff", "Goedendag"},
-    "Man-at-Arms":    {"Sword", "Morning Star", "One-Handed Spear", "Rapier", "Heavy Cavalry Sword"},
-    "Field Engineer": {"Goedendag", "Pick Axe", "Sledge Hammer", "Shovel"},
-    "Longbowman":     {"War Bow", "Bow"},
-    "Crossbowman":    {"Crossbow", "Siege Crossbow"},
-    "Skirmisher":     {"Javelin", "Throwing Axe"},
-}
+# NOTE: _SUBCLASS_PRIMARIES is defined once, at module top (line ~27), as an alias
+# of config._SUBCLASS_PRIMARIES. A second hardcoded copy used to live here and was
+# stale relative to config.py (e.g. missing Falchion for Man-at-Arms after config.py
+# was updated) — because it was assigned AFTER the top-of-file alias, it silently
+# shadowed config's version for every primary/secondary split and Mastered Weapon
+# check in this file, with no error. Removed; this file now always reflects
+# whatever config._SUBCLASS_PRIMARIES says. (Falchion/Man-at-Arms bug, 2026-06-30.)
 
 def is_primary_weapon(weapon, subclass):
     """Return True if weapon is a primary for the given subclass."""
