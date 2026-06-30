@@ -768,12 +768,13 @@ async def get_hundred_handed_progress(discord_id: str) -> list:
 
 
 async def get_hundred_handed_leaderboard() -> list:
-    """Return [(discord_id, player_name, count)] sorted by count desc."""
+    """Return [(discord_id, player_name, count)] — completers sorted by completion time, then in-progress by count desc."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT discord_id, player_name, COUNT(*) as cnt "
-            "FROM hundred_handed GROUP BY discord_id, player_name ORDER BY cnt DESC"
+            "SELECT discord_id, player_name, COUNT(*) as cnt, MAX(achieved_at) as last_entry "
+            "FROM hundred_handed GROUP BY discord_id, player_name "
+            "ORDER BY cnt DESC, last_entry ASC"
         )
     return [(r['discord_id'], r['player_name'], int(r['cnt'])) for r in rows]
 
