@@ -263,13 +263,44 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                     continue
                 group_items.sort(key=lambda x: x[0])
                 placed.update(n for n, _ in group_items)
-                embed_fields.extend(_split_field(group_label, group_items))
+                # Newline-separated links, one weapon per line
+                val = "\n".join(
+                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    for name, t in group_items
+                )
+                embed_fields.append((group_label, val))
             remainder = [(n, t) for n, t in deduped if n not in placed]
             if remainder:
-                embed_fields.extend(_split_field("Other", remainder))
+                val = "\n".join(
+                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    for name, t in sorted(remainder, key=lambda x: x[0])
+                )
+                embed_fields.append(("Other", val))
 
         elif is_map_index:
-            embed_fields.extend(_split_field("Maps", deduped))
+            # Alphabetical groups, one map per line
+            alpha_groups = [
+                ("A – F", "A", "F"),
+                ("G – M", "G", "M"),
+                ("N – Z", "N", "Z"),
+            ]
+            placed_maps = set()
+            for gname, start, end in alpha_groups:
+                grp = [(n, t) for n, t in deduped if n and start[0] <= n[0].upper() <= end[0]]
+                if grp:
+                    val = "\n".join(
+                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        for name, t in grp
+                    )
+                    embed_fields.append((gname, val))
+                    placed_maps.update(n for n, _ in grp)
+            other_maps = [(n, t) for n, t in deduped if n not in placed_maps]
+            if other_maps:
+                val = "\n".join(
+                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    for name, t in other_maps
+                )
+                embed_fields.append(("Other", val))
 
         else:
             groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
@@ -285,10 +316,22 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             embeds = []
             for i in range(0, max(len(fields), 1), 25):
                 chunk = fields[i:i + 25]
+                if is_map_index:
+                    colour = discord.Colour.from_str("#2b2d31")
+                elif is_weapon_index:
+                    colour = discord.Colour.from_str("#2b2d31")
+                else:
+                    colour = discord.Colour.from_str("#2b2d31")
+                if is_map_index:
+                    _title_icon = "🗺️"
+                elif is_weapon_index:
+                    _title_icon = "⚔️"
+                else:
+                    _title_icon = "📋"
                 e = discord.Embed(
-                    title=f"📋 {index_label} Index",
+                    title=f"{_title_icon} {index_label} Index",
                     description=blurb if (i == 0 and blurb) else ("Jump to a board below" if i == 0 else None),
-                    colour=discord.Colour.from_str("#2b2d31"),
+                    colour=colour,
                 )
                 for fname, fval in chunk:
                     e.add_field(name=fname, value=fval, inline=False)
