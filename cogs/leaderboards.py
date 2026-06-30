@@ -303,14 +303,23 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 embed_fields.append(("Other", val))
 
         else:
-            groups = [('A–D', 'A', 'D'), ('E–K', 'E', 'K'), ('L–R', 'L', 'R'), ('S–Z', 'S', 'Z')]
+            # Feats of War — alphabetical groups, one feat per line
+            groups = [('A – D', 'A', 'D'), ('E – K', 'E', 'K'), ('L – R', 'L', 'R'), ('S – Z', 'S', 'Z')]
             for group_name, start, end in groups:
-                grp = [(n, t) for n, t in deduped if n and start <= n[0].upper() <= end]
+                grp = [(n, t) for n, t in deduped if n and start[0] <= n[0].upper() <= end[0]]
                 if grp:
-                    embed_fields.extend(_split_field(group_name, grp))
+                    val = "\n".join(
+                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        for name, t in grp
+                    )
+                    embed_fields.append((group_name, val))
             other = [(n, t) for n, t in deduped if not n or not n[0].upper().isalpha()]
             if other:
-                embed_fields.extend(_split_field('#', other))
+                val = "\n".join(
+                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    for name, t in other
+                )
+                embed_fields.append(('#', val))
 
         def _build_embeds(fields):
             embeds = []
