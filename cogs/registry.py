@@ -2354,8 +2354,39 @@ class RegistryCog(commands.Cog):
 
         if weapon_lines_filtered:
             lines.append("")
-            lines.append("**Weapon Ranks** *(Gold+)*")
-            lines.extend(weapon_lines_filtered)
-        elif not flat_marks:
+            lines.append("*No weapon marks recorded yet.*")
+
+        pb_td_str = _pb_str(best_td_row)
+        pb_kills_row = best_kills_row
+        if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or biggest_lead_str:
             lines.append("")
-      
+            lines.append("<a:toptkd:1360312666475728958> **Personal Bests**")
+            if pb_td_str:
+                lines.append(f"<a:toptkd:1360312666475728958> {pb_td_str}")
+            if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
+                lines.append(f"<a:topkill:1360314538364240024> {_pb_str(pb_kills_row)}")
+            if biggest_lead_str:
+                lines.append(f"\U0001f3c6 {biggest_lead_str}")
+
+        if special_ops:
+            lines.append("")
+            lines.append("**Special Ops**")
+            ops_parts = []
+            for feat, link in special_ops.items():
+                emoji = SPECIAL_OPS_EMOJIS.get(feat, "")
+                if link:
+                    ops_parts.append(f"[{emoji} {feat}]({link})")
+                else:
+                    ops_parts.append(f"{emoji} {feat}")
+            lines.append("  ".join(ops_parts))
+
+        if bounties_done:
+            lines.append("")
+            lines.append(f"**Bounties** \u2014 \U0001f3c6 {bounties_done} completed")
+
+        output = "\n".join(lines)
+        await interaction.followup.send(output[:1900])
+
+
+async def setup(bot):
+    await bot.add_cog(RegistryCog(bot))
