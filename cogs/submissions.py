@@ -2002,22 +2002,25 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             last_submission = player_subs[-1][0] if player_subs else ''
             is_new_player = submission_count == 1
 
-            # Read OLD weapon marks from Players DB BEFORE updating — used for milestone diff
+            # Compute OLD weapon marks as "everything except this brand-new submission",
+            # rather than trusting the cached players.weapon_marks column. That cache is
+            # only ever written by this same block, so a player whose legacy_marks /
+            # leaderboard_data were backfilled (e.g. via /award_marks or an old-registry
+            # import) without ever making a live submission before would show old_flat={}
+            # here — and since is_first_submission also waives the Bronze/threshold-1
+            # suppression below, EVERY backfilled weapon looked like a brand new "first
+            # blood" milestone, firing a wall of announcements off a single submission.
+            # (Backfilled-player mass "first blood" spam, investigated 2026-06-30.)
             old_flat = {}
             try:
-                p_rows = await _db.get_all_players()
-                for p_row in p_rows:
-                    if p_row and p_row[0].strip() == discord_id_str:
-                        old_marks_str = p_row[6].strip() if len(p_row) > 6 else ''
-                        for part in old_marks_str.split(','):
-                            part = part.strip()
-                            if ':' in part:
-                                w, c = part.rsplit(':', 1)
-                                try:
-                                    old_flat[w.strip()] = int(c.strip())
-                                except ValueError:
-                                    pass
-                        break
+                newest_row = player_subs[-1] if player_subs else None
+                subs_excl_new = [r for r in subs if r is not newest_row]
+                old_marks_data = await calculate_weapon_marks_for_player(
+                    _user_id, cached_data={'submissions': subs_excl_new}
+                )
+                for k, v in old_marks_data.items():
+                    w = k[0] if isinstance(k, tuple) else k
+                    old_flat[w] = old_flat.get(w, 0) + v
             except Exception as e:
                 print(f"Milestone: old marks read error: {e}")
 
