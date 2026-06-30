@@ -126,14 +126,14 @@ async def build_ledger_entrance(guild):
 
         view = discord.ui.View(timeout=None)
         buttons = [
-            ("⚖️ Challenge Rules",   1460713024082935930),
-            ("📋 Butler's Favourites", 1518822798116524092),
-            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),
-            ("🗂️ Player Archive",    REGISTRY_INDEX_THREAD_ID),
-            ("🏆 Map Records",       idx_maps.id if idx_maps else None),
-            ("⚔️ 2H Weapons",        INDEX_THREAD_2H),
-            ("🗡️ 1H Weapons",        INDEX_THREAD_1H),
-            ("🏛️ Feats of War",      INDEX_THREAD_FEATS),
+            ("⚖️ Challenge Rules",    1460713024082935930),       # row 0
+            (f"{bounty_emoji} {bounty_label}", bounty_channel_id),# row 1
+            ("🗂️ Player Archive",    REGISTRY_INDEX_THREAD_ID),  # row 1
+            ("📋 Butler's Favourites", 1518822798116524092),      # row 1
+            ("🏆 Map Records",       idx_maps.id if idx_maps else None), # row 2
+            ("⚔️ 2H Weapons",        INDEX_THREAD_2H),           # row 2
+            ("🗡️ 1H Weapons",        INDEX_THREAD_1H),           # row 2
+            ("🏛️ Feats of War",      INDEX_THREAD_FEATS),        # row 3
         ]
         # Max 5 rows in Discord; assign rows explicitly for vertical layout
         _row_map = [0, 1, 1, 1, 2, 2, 2, 3]
