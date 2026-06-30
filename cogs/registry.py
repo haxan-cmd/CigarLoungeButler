@@ -391,6 +391,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
     FEAT_BOARD_EMOJIS = {
         '200 Takedowns': FEAT_EMOJIS['200 Takedowns'],
         '100 Kills':     FEAT_EMOJIS['100 Kills'],
+        'Triple':        FEAT_EMOJIS['Triple'],
         'Flawless':      FEAT_EMOJIS['Flawless'],
     }
     board_counts = {}  # lb_name -> count of entries on that board for this player
@@ -421,8 +422,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
                     board_counts['100 Kills'] = int(p[8])
                 if len(p) > 9 and p[9] is not None:
                     board_counts['200 Takedowns'] = int(p[9])
-                if len(p) > 10 and p[10] is not None:
-                    board_counts['Triple'] = int(p[10])
+                # triple_count manual override removed — Triple now auto-counted from leaderboard_data
                 break
     except Exception as e:
         nerve_log_error("Feats manual override", e)

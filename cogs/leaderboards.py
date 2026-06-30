@@ -424,6 +424,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         updates.append(("100 Kills", kills, False, False, True))
     if takedowns >= 200:
         updates.append(("200 Takedowns", takedowns, False, False, True))
+    if "Triple" in feats:
+        updates.append(("Triple", takedowns, False, False, True))
     if selected_weapon == "Mallet" and kills >= 100:
         updates.append(("Mallet", takedowns, True, True, False))
     if selected_weapon == "Knife" and kills >= 100:
@@ -1259,7 +1261,7 @@ class LeaderboardsCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
 
-        FEAT_MAP = {"100 Kills": "kills", "200 Takedowns": "takedowns"}
+        FEAT_MAP = {"100 Kills": "kills", "200 Takedowns": "takedowns", "Triple": "takedowns"}
         sub_rows = await _db.get_all_submissions()
         lb_rows  = await _db.get_all_leaderboard_data()
 
@@ -1278,12 +1280,17 @@ class LeaderboardsCog(commands.Cog):
             weapon     = row[3] or ""
             if not link:
                 continue
+            is_triple_row = 'Triple' in (feats_str or '')
             for board, stat in FEAT_MAP.items():
                 # Qualify by raw stats — catches Triples that didn't get the feat tag
                 score = kills if stat == "kills" else takedowns
-                threshold = 100 if stat == "kills" else 200
-                if score < threshold:
-                    continue
+                if board == "Triple":
+                    if not is_triple_row:
+                        continue
+                else:
+                    threshold = 100 if stat == "kills" else 200
+                    if score < threshold:
+                        continue
                 if (board, link) in existing:
                     continue
                 await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
