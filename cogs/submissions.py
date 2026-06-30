@@ -1641,7 +1641,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     await interaction.user.add_roles(hh_role, reason="Hundred-Handed — submitted on every primary weapon")
                     print(f"[HH] Assigned Hundred-Handed role to {interaction.user.display_name}")
         except Exception as hh_e:
-            print(f"[HH] Role assign error: {hh_e}")
+            nerve_log_error("HH role assign", hh_e)
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")
@@ -1659,7 +1659,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if bounty_hit:
                     await original_message.add_reaction("🐱")
             except Exception as e:
-                print(f"[BOUNTY/DEDUP] Bounty check error: {e}")
+                nerve_log_error("Bounty check", e)
         print(f"[DEDUP] Duplicate submission fully skipped for {interaction.user.display_name}")
         return
 
@@ -1761,7 +1761,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 print(f"[HUNDRED_HANDED] New combo: {interaction.user.display_name} — {selected_class} / {selected_weapon}")
                 await _refresh_hundred_handed_board(interaction.guild)
         except Exception as e:
-            print(f"[HUNDRED_HANDED] Error: {e}")
+            nerve_log_error("Hundred-Handed check", e)
 
     if any_updated:
         await safe_react("<a:highscore:1360312918545269057>")
@@ -1858,7 +1858,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         await member.add_roles(unbound_role, reason="First blood — first submission")
                         print(f"[UNBOUND] Assigned Unbound role to {player}")
                 except Exception as ub_e:
-                    print(f"[UNBOUND] Role assign error: {ub_e}")
+                    nerve_log_error("Unbound role assign", ub_e)
 
             # New #1 on any leaderboard
             new_firsts = [lb for lb, pos in placements if pos == 1]
@@ -2061,64 +2061,4 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
                     if week_start_dt > _now:
                         week_start_dt -= timedelta(weeks=1)
-                    week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-                    stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
-                    stats['week_label'] = week_label
-                    embed_text = build_favourites_embed(stats)
-                    async for msg in fav_channel.history(limit=5):
-                        if msg.author == _guild.me:
-                            await msg.edit(content=embed_text)
-                            break
-                    else:
-                        await fav_channel.send(embed_text)
-                    await update_title_roles(_guild, stats)
-        except Exception as e:
-            print(f"Butler favourites update error: {e}")
-
-    asyncio.create_task(_bg_tasks())
-
-
-_active_vision: set[int] = set()  # prevents double-processing same message
-_queued_msgs: set[int] = set()  # prevents same message being finalised twice
-
-class SubmissionsCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._prompted_messages: set[int] = set()
-
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        """Trigger submission flow when a player posts an image in the submissions channel."""
-        if message.author.bot:
-            return
-        if message.channel.id != SUBMISSIONS_CHANNEL_ID:
-            return
-        if message.id in self._prompted_messages:
-            return
-        # Only trigger on image attachments
-        has_image = any(
-            (att.content_type and att.content_type.startswith('image/'))
-            or (not att.content_type and att.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')))
-            for att in message.attachments
-        )
-        if not has_image:
-            return
-
-        self._prompted_messages.add(message.id)
-        # Prevent unbounded growth — keep only the last 200 message IDs
-        if len(self._prompted_messages) > 200:
-            self._prompted_messages = set(list(self._prompted_messages)[-200:])
-
-        view = SubmitView(message)
-        prompt = await message.reply(
-            "\U0001f4cb Scorecard detected! Click below to submit your run.",
-            mention_author=False,
-            view=view
-        )
-        view.prompt_msg = prompt
-
-
-
-
-async def setup(bot):
-    await bot.add_cog(SubmissionsCog(bot))
+                    week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).
