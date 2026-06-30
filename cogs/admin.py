@@ -556,5 +556,20 @@ class AdminCog(commands.Cog):
             ephemeral=True
         )
 
+    @app_commands.command(name="refresh_titles", description="Recalculate Butler's Favourites title holders and reassign roles (mod only).")
+    async def refresh_titles(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That’s not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            from cogs.favourites import calculate_butler_stats, update_title_roles
+            stats = await calculate_butler_stats()
+            await update_title_roles(interaction.guild, stats)
+            await interaction.followup.send("✅ Title roles recalculated and reassigned.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))

@@ -2325,11 +2325,23 @@ class RegistryCog(commands.Cog):
         except Exception:
             biggest_lead_str = ''
 
-        # \u2500\u2500 Special Ops \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+        # ── Special Ops ──────────────────────────────────────────────────
         special_ops = await get_special_ops_for_player(int(discord_id_str))
-        # \u2500\u2500 Bounties completed \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        bounties_done = len(await get_bounty_completions_for_player(int(discord_id_str)))
-        # \u2500\u2500 Butler titles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        # ── Bounties completed ───────────────────────────────────────────
+        bounty_completions = await get_bounty_completions_for_player(int(discord_id_str))
+        # ── Lethality ────────────────────────────────────────────────────
+        best_lethality = 0.0
+        for r in player_subs:
+            try:
+                rk = int(r[8]); rtd = int(r[7])
+                if rtd > 0:
+                    leth = round(rk / rtd * 100, 1)
+                    if leth > best_lethality:
+                        best_lethality = leth
+            except (ValueError, IndexError):
+                continue
+        # ── Butler titles ────────────────────────────────────────────────
         try:
             from cogs.favourites import calculate_butler_stats
             fav_stats = await calculate_butler_stats()
@@ -2352,21 +2364,24 @@ class RegistryCog(commands.Cog):
         lines.append("**Title Standings**")
         lines.extend(title_lines)
 
-        if weapon_lines_filtered:
-            lines.append("")
-            lines.append("*No weapon marks recorded yet.*")
-
+        # Feats (replaces Personal Bests; no weapon marks line)
         pb_td_str = _pb_str(best_td_row)
-        pb_kills_row = best_kills_row
-        if pb_td_str or (pb_kills_row and _pb_str(pb_kills_row) != pb_td_str) or biggest_lead_str:
+        pb_kills_str = _pb_str(best_kills_row) if best_kills_row and _pb_str(best_kills_row) != pb_td_str else None
+        has_pb = pb_td_str or pb_kills_str or biggest_lead_str
+        has_lethality = best_lethality > 0
+
+        if has_pb or has_lethality:
             lines.append("")
-            lines.append("<a:toptkd:1360312666475728958> **Personal Bests**")
+            lines.append("<a:highscore:1360312918545269057> **Feats**")
             if pb_td_str:
                 lines.append(f"<a:toptkd:1360312666475728958> {pb_td_str}")
-            if pb_kills_row and _pb_str(pb_kills_row) != pb_td_str:
-                lines.append(f"<a:topkill:1360314538364240024> {_pb_str(pb_kills_row)}")
+            if pb_kills_str:
+                lines.append(f"<a:topkill:1360314538364240024> {pb_kills_str}")
             if biggest_lead_str:
                 lines.append(f"\U0001f3c6 {biggest_lead_str}")
+            if has_lethality:
+                lethal_emoji = "<a:mostlethal:1520490418817601658>" if best_lethality >= 5.0 else "\U0001f9ea"
+                lines.append(f"{lethal_emoji} {best_lethality}% peak lethality")
 
         if special_ops:
             lines.append("")
@@ -2380,9 +2395,19 @@ class RegistryCog(commands.Cog):
                     ops_parts.append(f"{emoji} {feat}")
             lines.append("  ".join(ops_parts))
 
-        if bounties_done:
+        if bounty_completions:
+            def _place(n):
+                if n is None:
+                    return ""
+                suf = {1: "st", 2: "nd", 3: "rd"}.get(n if n <= 3 else 0, "th")
+                return f"³{n}{suf}"
+            _dart = "🎯"
+            bounty_row = "  ".join(
+                (emoji or _dart) + _place(pl)
+                for _, pl, emoji in bounty_completions
+            )
             lines.append("")
-            lines.append(f"**Bounties** \u2014 \U0001f3c6 {bounties_done} completed")
+            lines.append(f"**Bounties** — {bounty_row}")
 
         output = "\n".join(lines)
         await interaction.followup.send(output[:1900])
