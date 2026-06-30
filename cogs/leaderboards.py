@@ -1052,6 +1052,19 @@ class LeaderboardsCog(commands.Cog):
             msg += f"\nFailed: {chr(10).join(failed)}"
         await interaction.followup.send(msg[:1900], ephemeral=True)
 
+    @app_commands.command(name="refresh_entrance", description="Refresh just the ledger entrance channel links (mod only).")
+    async def refresh_entrance(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        _entrance_message_ids.clear()
+        try:
+            await build_ledger_entrance(interaction.guild)
+            await interaction.followup.send("✅ Ledger entrance refreshed.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+
     @app_commands.command(name="ledger_refresh", description="Rebuild the ledger entrance channel and all forum indexes (mod only).")
     async def ledger_refresh(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
