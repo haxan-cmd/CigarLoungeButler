@@ -353,29 +353,27 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(
         name="⚔️ Most Kills",
         value=fmt_list(stats['top_kills_list']),
-        inline=True,
+        inline=False,
     )
     embed.add_field(
         name="<a:toptkd:1360312666475728958> Highest Takedowns",
         value=fmt_list(stats['top_td_list']),
-        inline=True,
+        inline=False,
     )
-    embed.add_field(name="​", value="​", inline=True)
-
     embed.add_field(
         name="🏃 Busiest",
         value=fmt_list(stats['top_busiest'], "runs"),
-        inline=True,
+        inline=False,
     )
     embed.add_field(
         name="🗡️ Top Weapons",
         value=fmt_list(stats['top_weapons'], "runs"),
-        inline=True,
+        inline=False,
     )
     embed.add_field(
         name="🗺️ Top Maps",
         value=fmt_list(stats['top_maps'], "runs"),
-        inline=True,
+        inline=False,
     )
 
     embed.add_field(
