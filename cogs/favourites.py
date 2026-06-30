@@ -311,7 +311,7 @@ def build_favourites_embed(stats):
     def fmt_list(items, suffix, n=3):
         lines = []
         for i, (name, val) in enumerate(items[:n]):
-            lines.append(f"│ **{name}** — {val} {suffix}")
+            lines.append(f"│ `{name}` — {val} {suffix}")
         return "\n".join(lines) if lines else "│ *—*"
 
     def fmt_plain(items, n=3):
@@ -319,9 +319,9 @@ def build_favourites_embed(stats):
         for i, p in enumerate(items[:n]):
             if ' -- ' in p:
                 name, rest = p.split(' -- ', 1)
-                lines.append(f"│ **{name}** — {rest}")
+                lines.append(f"│ `{name}` — {rest}")
             else:
-                lines.append(f"│ **{p}**")
+                lines.append(f"│ `{p}`")
         return "\n".join(lines) if lines else "│ *—*"
 
     week_label = stats.get('week_label', '')
@@ -377,11 +377,11 @@ def build_favourites_embed(stats):
     embed.add_field(
         name="─── All-Time Titles ───",
         value=(
-            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — **{stats['grand_marshal']}**\n"
-            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — **{stats['weapons_master']}**\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — **{stats['campaign_master']}**\n"
-            f"<a:topkill:1360314538364240024> **Headhunter** — **{stats['headhunter']}**\n"
-            f"<a:200tkd:1363648828414230538> **Butcher** — **{stats['butcher']}**"
+            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — `{stats['grand_marshal']}`\n"
+            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — `{stats['weapons_master']}`\n"
+            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`\n"
+            f"<a:topkill:1360314538364240024> **Headhunter** — `{stats['headhunter']}`\n"
+            f"<a:200tkd:1363648828414230538> **Butcher** — `{stats['butcher']}`"
         ),
         inline=False,
     )
