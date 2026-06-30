@@ -1085,7 +1085,7 @@ class LeaderboardsCog(commands.Cog):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
-        await interaction.response.send_message("Rebuilding the ledger entrance...", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
 
         _entrance_message_ids.clear()
@@ -1093,7 +1093,7 @@ class LeaderboardsCog(commands.Cog):
         try:
             await build_ledger_entrance(guild)
         except Exception as e:
-            await interaction.edit_original_response(content=f"❌ Entrance build failed: {e}")
+            await interaction.followup.send(f"❌ Entrance build failed: {e}", ephemeral=True)
             return
 
         index_targets = [
@@ -1109,7 +1109,7 @@ class LeaderboardsCog(commands.Cog):
             except Exception as e:
                 print(f"ledger_refresh: index error for {label}: {e}")
 
-        await interaction.edit_original_response(content="✅ Ledger entrance and all indexes rebuilt.")
+        await interaction.followup.send("✅ Ledger entrance and all indexes rebuilt.", ephemeral=True)
 
     @app_commands.command(name="repair_marks", description="Backfill missing High Score marks from leaderboard entries (mod only)")
     async def repair_marks(self, interaction: discord.Interaction):
