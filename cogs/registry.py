@@ -878,6 +878,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             has_hhanded = hhanded_emoji in normalized
             lookup_key = normalized.replace(hhanded_emoji, '')
             if has_hhanded:
+                if 'hhanded' in named_feats:
+                    continue  # already rendered as "The Hundred-Handed" above
                 label = "Hundred-Handed"
             else:
                 label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
