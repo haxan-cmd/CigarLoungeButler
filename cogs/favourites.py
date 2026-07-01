@@ -359,7 +359,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     }
 
 
-def build_favourites_embed(stats, bot_avatar_url=None):
+async def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
     def fmt_list(items, suffix="", n=3):
@@ -398,6 +398,23 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     embed = _discord.Embed(title=title, description=desc, color=0x8b6914)
     if bot_avatar_url:
         embed.set_thumbnail(url=bot_avatar_url)
+
+    # Live championship + Special Features (shown when a season is running)
+    _season = await _db.get_current_season()
+    if _season:
+        _standings, _core, _featured = await season_total(_season)
+        if _standings:
+            embed.add_field(
+                name="🏁 Championship",
+                value="\n".join(f"`{i:>2}.` **{nm}** — {pts} pts" for i, (nm, pts) in enumerate(_standings[:10], 1)),
+                inline=False)
+        if _featured:
+            _fl = []
+            for _flabel, _focus, _top in _featured:
+                _w = f"`{_top[0][0]}` ({_top[0][1]})" if _top else "—"
+                _fl.append(f"│ **{_flabel}: {_focus}** — {_w}")
+            embed.add_field(name="⭐ Special Features", value="\n".join(_fl), inline=False)
+        embed.add_field(name="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", value="​", inline=False)
 
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "│ *Not enough data yet*"
     warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "│ *Not enough team data yet*"
@@ -880,7 +897,7 @@ class FavouritesCog(commands.Cog):
                     week_start_dt -= timedelta(weeks=1)
                 stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
                 stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            embed_text = build_favourites_embed(stats, bot_avatar_url=interaction.guild.me.display_avatar.url if interaction.guild else None)
+            embed_text = await build_favourites_embed(stats, bot_avatar_url=interaction.guild.me.display_avatar.url if interaction.guild else None)
 
             await interaction.followup.send(embed=embed_text)
 

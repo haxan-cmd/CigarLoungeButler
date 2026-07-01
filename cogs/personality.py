@@ -768,12 +768,15 @@ class PersonalityCog(commands.Cog):
             guild = self.bot.get_guild(GUILD_ID)
             if guild:
                 week_end_ts = now.timestamp()
-                week_start_ts = week_end_ts - 7 * 86400
-                week_start_dt = now - timedelta(days=7)
-                week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
-                weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
-                weekly_stats['week_label'] = week_label
-                embed_text = build_favourites_embed(weekly_stats)
+                _season = await _db.get_current_season()
+                if _season:
+                    weekly_stats = await calculate_butler_stats(week_start=_season['started_at'].timestamp(), week_end=week_end_ts)
+                    weekly_stats['week_label'] = (_season.get('label') or f"Season {_season['id']}") + " — season so far"
+                else:
+                    week_start_dt = now - timedelta(days=7)
+                    weekly_stats = await calculate_butler_stats(week_start=week_end_ts - 7 * 86400, week_end=week_end_ts)
+                    weekly_stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
+                embed_text = await build_favourites_embed(weekly_stats)
                 fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
                     async for msg in fav_channel.history(limit=5):

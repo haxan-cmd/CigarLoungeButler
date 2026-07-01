@@ -2149,14 +2149,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 fav_channel = _guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
                     _now = datetime.now(timezone.utc)
-                    days_since_monday = _now.weekday()
-                    week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
-                    if week_start_dt > _now:
-                        week_start_dt -= timedelta(weeks=1)
-                    week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-                    stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
-                    stats['week_label'] = week_label
-                    embed_text = build_favourites_embed(stats, bot_avatar_url=_guild.me.display_avatar.url if _guild else None)
+                    _season = await _db.get_current_season()
+                    if _season:
+                        stats = await calculate_butler_stats(week_start=_season['started_at'].timestamp(), week_end=_now.timestamp())
+                        stats['week_label'] = (_season.get('label') or f"Season {_season['id']}") + " — season so far"
+                    else:
+                        week_start_dt = (_now - timedelta(days=_now.weekday())).replace(hour=12, minute=0, second=0, microsecond=0)
+                        if week_start_dt > _now:
+                            week_start_dt -= timedelta(weeks=1)
+                        stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                        stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
+                    embed_text = await build_favourites_embed(stats, bot_avatar_url=_guild.me.display_avatar.url if _guild else None)
                     async for msg in fav_channel.history(limit=5):
                         if msg.author == _guild.me:
                             await msg.edit(content=embed_text)
