@@ -547,7 +547,9 @@ class BountyCog(commands.Cog):
             f"🎭 Role: {bounty_role.mention}"
         )
         try:
-            await _db.start_season(title)
+            _sid = await _db.start_season(title)
+            from cogs.favourites import roll_featured
+            await roll_featured(_sid)
         except Exception as _se:
             print(f"[SEASON] start error: {_se}")
         await interaction.edit_original_response(content=msg)

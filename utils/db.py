@@ -1127,6 +1127,14 @@ async def season_init():
                 UNIQUE(season_id, player_name, reason)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS season_features (
+                season_id INT NOT NULL,
+                slot TEXT NOT NULL,
+                value TEXT,
+                PRIMARY KEY (season_id, slot)
+            )
+        """)
 
 
 async def start_season(label: str) -> int:
@@ -1209,3 +1217,18 @@ async def get_season_bonuses(season_id: int) -> dict:
             "SELECT player_name, SUM(points) AS pts FROM season_bonus WHERE season_id = $1 GROUP BY player_name",
             season_id)
     return {r['player_name']: int(r['pts']) for r in rows}
+
+
+async def set_season_feature(season_id: int, slot: str, value: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO season_features (season_id, slot, value) VALUES ($1,$2,$3) "
+            "ON CONFLICT (season_id, slot) DO UPDATE SET value = EXCLUDED.value", season_id, slot, value)
+
+
+async def get_season_features(season_id: int) -> dict:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT slot, value FROM season_features WHERE season_id = $1", season_id)
+    return {r['slot']: r['value'] for r in rows}

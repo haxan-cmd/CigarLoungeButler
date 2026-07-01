@@ -561,18 +561,125 @@ async def compute_season_standings(started_at, ended_at, bonuses):
     return sorted(points.items(), key=lambda x: (-x[1], x[0])), stats
 
 
+async def roll_featured(season_id):
+    """Randomly pick the season's 4 featured focuses: a 1H weapon, a 2H weapon,
+    and two maps. Inverse-frequency weighted (overplayed picks are rare) and
+    never repeats the previous season's pick in the same slot."""
+    import random
+    subs = await _db.get_all_submissions()
+    wcount, mcount = {}, {}
+    for r in subs:
+        if len(r) < 6:
+            continue
+        w = r[3].strip() if r[3] else ""
+        m = r[5].strip() if r[5] else ""
+        if w:
+            wcount[w] = wcount.get(w, 0) + 1
+        if m:
+            mcount[m] = mcount.get(m, 0) + 1
+    prev = {}
+    fins = await _db.get_finished_seasons()
+    if fins:
+        prev = await _db.get_season_features(fins[0]["id"])
+
+    def _pick(candidates, counts, exclude):
+        pool = [c for c in candidates if c and c != exclude] or [c for c in candidates if c]
+        if not pool:
+            return None
+        weights = [1.0 / (counts.get(c, 0) + 1) for c in pool]
+        return random.choices(pool, weights=weights, k=1)[0]
+
+    f1h = _pick(list(config.WEAPONS_1H), wcount, prev.get("weapon_1h"))
+    f2h = _pick(list(config.WEAPONS_2H), wcount, prev.get("weapon_2h"))
+    m1 = _pick(list(config.MAPS), mcount, prev.get("map_1"))
+    m2 = _pick([x for x in config.MAPS if x != m1], mcount, prev.get("map_2"))
+    for slot, val in (("weapon_1h", f1h), ("weapon_2h", f2h), ("map_1", m1), ("map_2", m2)):
+        if val:
+            await _db.set_season_feature(season_id, slot, val)
+    return {"weapon_1h": f1h, "weapon_2h": f2h, "map_1": m1, "map_2": m2}
+
+
+_FEATURED_POINTS = [2, 1]
+_FEATURED_SLOTS = [
+    ("weapon_1h", "weapon", "1H Weapon"),
+    ("weapon_2h", "weapon", "2H Weapon"),
+    ("map_1", "map", "Map"),
+    ("map_2", "map", "Map"),
+]
+
+
+async def compute_featured(season):
+    """(boards, points): best single-game takedowns on each featured weapon/map
+    this season; top 2 earn 2/1 championship GP."""
+    from datetime import datetime, timezone
+    feats = await _db.get_season_features(season["id"])
+    if not feats:
+        return [], {}
+    _sa = season["started_at"]
+    start_ts = _sa.timestamp() if hasattr(_sa, "timestamp") else float(_sa)
+    end_ts = (season["ended_at"].timestamp() if season.get("ended_at") else datetime.now(timezone.utc).timestamp())
+    subs = await _db.get_all_submissions()
+    inwin = []
+    for r in subs:
+        if len(r) < 9 or not r[0].strip():
+            continue
+        try:
+            ts = datetime.strptime(r[0].strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            continue
+        if start_ts <= ts < end_ts:
+            inwin.append(r)
+    boards, points = [], {}
+    for slot, kind, label in _FEATURED_SLOTS:
+        val = feats.get(slot)
+        if not val:
+            continue
+        best = {}
+        for r in inwin:
+            p = r[1].strip()
+            try:
+                td = int(r[7])
+            except (ValueError, IndexError):
+                continue
+            hit = (kind == "weapon" and r[3].strip() == val) or (kind == "map" and r[5].strip() == val)
+            if hit and (p not in best or td > best[p]):
+                best[p] = td
+        top = sorted(best.items(), key=lambda x: -x[1])[:3]
+        for i, (nm, td) in enumerate(top[:2]):
+            points[nm] = points.get(nm, 0) + _FEATURED_POINTS[i]
+        boards.append((label, val, top))
+    return boards, points
+
+
+async def season_total(season):
+    """Combined standings: core category GP + bounty bonuses + featured boards."""
+    bonuses = await _db.get_season_bonuses(season["id"])
+    core, core_stats = await compute_season_standings(season["started_at"], season.get("ended_at"), bonuses)
+    points = dict(core)
+    featured, feat_points = await compute_featured(season)
+    for nm, pt in feat_points.items():
+        points[nm] = points.get(nm, 0) + pt
+    standings = sorted(points.items(), key=lambda x: (-x[1], x[0]))
+    return standings, core_stats, featured
+
+
 async def build_season_embed(season):
     import discord as _d
-    bonuses = await _db.get_season_bonuses(season["id"])
-    standings, s_stats = await compute_season_standings(season["started_at"], season.get("ended_at"), bonuses)
+    standings, s_stats, featured = await season_total(season)
     a_stats = await calculate_butler_stats()  # all-time
     label = season.get("label") or f"Season {season['id']}"
     lines = []
     if standings:
         champ = standings[0]
-        lines += [f"\U0001f3c6 **Champion — {champ[0]}**  ({champ[1]} pts)", "", "**Standings**"]
+        lines += [f"🏆 **Champion — {champ[0]}**  ({champ[1]} pts)", "", "**Standings**"]
         for i, (nm, pts) in enumerate(standings[:8], 1):
             lines.append(f"`{i:>2}.` {nm} — {pts} pts")
+        lines.append("")
+    if featured:
+        lines.append("**Special Features**  *(random each season)*")
+        for flabel, focus, top in featured:
+            winner = f"`{top[0][0]}` ({top[0][1]})" if top else "—"
+            lines.append(f"│ **{flabel} — {focus}**: {winner}")
         lines.append("")
     lines.append("**Category Winners**  *(this season · all-time)*")
     for cat, key, plain in _SEASON_CATEGORIES:
@@ -581,7 +688,7 @@ async def build_season_embed(season):
         s_txt = (f"`{s_nm}`" + (f" {s_val}" if s_val else "")) if s_nm else "—"
         a_txt = (f"{a_nm}" + (f" {a_val}" if a_val else "")) if a_nm else "—"
         lines.append(f"│ **{cat}**: {s_txt}  ·  all-time: {a_txt}")
-    return _d.Embed(title=f"\U0001f3c1 {label} — Hall of Fame",
+    return _d.Embed(title=f"🏁 {label} — Hall of Fame",
                     description="\n".join(lines), color=0x8b6914)
 
 
@@ -595,8 +702,7 @@ async def _hof_index_refresh(guild):
         if not tid:
             continue
         label = s.get("label") or f"Season {s['id']}"
-        bonuses = await _db.get_season_bonuses(s["id"])
-        standings, _ = await compute_season_standings(s["started_at"], s.get("ended_at"), bonuses)
+        standings, _, _ = await season_total(s)
         champ = standings[0][0] if standings else "—"
         status = "" if s.get("ended_at") else "  *(in progress)*"
         link = f"  https://discord.com/channels/{guild.id}/{tid}"
@@ -657,8 +763,23 @@ class FavouritesCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         sid = await _db.start_season(label)
+        await roll_featured(sid)
         await interaction.followup.send(
             f"Season **{label}** opened (id {sid}). Stats accrue from now until the bounty ends.", ephemeral=True)
+
+    @app_commands.command(name="roll_features", description="Roll this season's Special Features now (mod only).")
+    async def roll_features(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        season = await _db.get_current_season()
+        if not season:
+            await interaction.followup.send("No season is running.", ephemeral=True)
+            return
+        feats = await roll_featured(season["id"])
+        txt = "\n".join(f"• {k.replace('_', ' ')}: **{v}**" for k, v in feats.items() if v)
+        await interaction.followup.send(f"Special Features rolled for this season:\n{txt}", ephemeral=True)
 
     @app_commands.command(name="season_set_start", description="Backdate the current season's start date (mod only).")
     @app_commands.describe(date="Start date YYYY-MM-DD — e.g. the day the bounty began")
@@ -689,8 +810,7 @@ class FavouritesCog(commands.Cog):
         if not season:
             await interaction.followup.send("No season is running — a season opens when a bounty starts.")
             return
-        bonuses = await _db.get_season_bonuses(season["id"])
-        standings, _s = await compute_season_standings(season["started_at"], None, bonuses)
+        standings, _s, _feat = await season_total(season)
         if not standings:
             await interaction.followup.send("No stats recorded yet this season.")
             return
