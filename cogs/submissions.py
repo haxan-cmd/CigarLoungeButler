@@ -2048,7 +2048,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if _week_start > _now_t:
                     _week_start -= timedelta(weeks=1)
                 _title_stats = await calculate_butler_stats(week_start=_week_start.timestamp(), week_end=_now_t.timestamp())
-                await update_title_roles(_guild, _title_stats)
+                await update_title_roles(_guild, _title_stats, include_weekly=False)
             except Exception as e:
                 print(f"Title roles refresh error: {e}")
 
@@ -2166,7 +2166,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             break
                     else:
                         await fav_channel.send(embed=embed_text)
-                    await update_title_roles(_guild, stats)
+                    await update_title_roles(_guild, stats, include_weekly=False)
         except Exception as e:
             print(f"Butler favourites update error: {e}")
 

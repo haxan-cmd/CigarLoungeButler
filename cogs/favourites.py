@@ -442,7 +442,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     return embed
 
 
-async def update_title_roles(guild, stats):
+async def update_title_roles(guild, stats, include_weekly=True):
     main_channel = guild.get_channel(MAIN_CHANNEL_ID)
 
     title_configs = [
@@ -459,6 +459,12 @@ async def update_title_roles(guild, stats):
     ]
 
     for stat_key, role_id, title_name, msg_template in title_configs:
+        # Most Lethal / Warlord are volatile season stats. Keep reassigning the
+        # role live on every submission (behaviour unchanged), but only ANNOUNCE
+        # the change on the weekly pass — otherwise the flip-flop spams chat.
+        announce = True
+        if not include_weekly and stat_key in ('most_lethal_player', 'warlord_player'):
+            announce = False
         new_holder_name = stats.get(stat_key, 'N/A')
         if new_holder_name == 'N/A':
             continue
@@ -490,7 +496,7 @@ async def update_title_roles(guild, stats):
         except Exception:
             pass
 
-        if main_channel and current_holders:
+        if main_channel and current_holders and announce:
             old_name = current_holders[0].display_name
             new_name = new_member.display_name
             msg = msg_template.format(old=f"**{old_name}**", new=f"**{new_name}**")

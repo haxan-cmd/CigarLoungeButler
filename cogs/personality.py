@@ -770,11 +770,15 @@ class PersonalityCog(commands.Cog):
                 if fav_channel:
                     async for msg in fav_channel.history(limit=5):
                         if msg.author == guild.me:
-                            await msg.edit(content=embed_text)
+                            await msg.edit(content=None, embed=embed_text)
                             break
                     else:
-                        await fav_channel.send(embed_text)
+                        await fav_channel.send(embed=embed_text)
                 print(f"Butler's Favourites updated for week of {week_label}")
+                try:
+                    await update_title_roles(guild, weekly_stats)
+                except Exception as _te:
+                    print(f"Weekly title update error: {_te}")
         except Exception as e:
             print(f"Favourites weekly update error: {e}")
 
