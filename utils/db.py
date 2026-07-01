@@ -664,6 +664,27 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
         """, board_name, str(discord_id))
 
 
+async def delete_lowest_leaderboard_entry(board_name: str):
+    """Delete the single lowest-scoring row on a board (tie-break: oldest id).
+
+    Origin-agnostic top-10 trimming. Replaces the old delete-by-discord_id
+    eviction, which deleted the *oldest blank-id* row when the 10th entry was a
+    legacy (no discord_id) one — silently nuking high legacy scores instead of
+    the actual lowest entry."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            DELETE FROM leaderboard_data
+            WHERE id = (
+                SELECT id FROM leaderboard_data
+                WHERE board_name=$1
+                ORDER BY score ASC NULLS FIRST, id ASC
+                LIMIT 1
+            )
+        """, board_name)
+
+
 async def delete_leaderboard_entry_by_link(board_name: str, message_link: str):
     """Delete one entry on a specific board by message link (for deduplication)."""
     _cache_invalidate('leaderboard_data')

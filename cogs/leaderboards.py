@@ -570,8 +570,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         lowest_score = int(board_entries_sorted[9][3]) if board_entries_sorted[9][3] else 0
                         if score <= lowest_score:
                             continue
-                        tenth_discord_id = board_entries_sorted[9][2] if len(board_entries_sorted[9]) > 2 else ''
-                        await _db.delete_leaderboard_entry_by_board_and_player(lb_name, tenth_discord_id)
+                        # Evict the actual lowest-scoring row by identity — NOT by
+                        # discord_id. Legacy entries have blank discord_ids, and
+                        # deleting by ''+oldest nuked arbitrary high legacy rows.
+                        await _db.delete_lowest_leaderboard_entry(lb_name)
                         all_values = await _db.get_all_leaderboard_data()
                 await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
                 any_updated = True  # New entry on a board counts as a PB
@@ -738,16 +740,12 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 await _db.upsert_leaderboard_entry(nm, pname, did, score, link, wpn)
                 summary['updated'] += 1
 
-        # 3. Cap to top-10 (weapon + map boards are top-10 boards).
+        # 3. Cap to top-10 (weapon + map boards are top-10 boards). Trim by
+        # deleting the true lowest row each time — origin-agnostic, so a low
+        # submission-backed entry goes before an equal/higher legacy one.
         rows = await _db.get_leaderboard_by_board(nm)
-        rows_sorted = sorted(rows, key=lambda r: int(r[3]) if len(r) > 3 and r[3] else 0, reverse=True)
-        for r in rows_sorted[10:]:
-            did = r[2] if len(r) > 2 else ''
-            link = r[4] if len(r) > 4 else ''
-            if did:
-                await _db.delete_leaderboard_entry_by_board_and_player(nm, did)
-            elif link:
-                await _db.delete_leaderboard_entry_by_link(nm, link)
+        for _ in range(max(0, len(rows) - 10)):
+            await _db.delete_lowest_leaderboard_entry(nm)
             summary['evicted'] += 1
 
         summary['boards'] += 1
