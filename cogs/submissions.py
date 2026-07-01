@@ -2125,6 +2125,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
         # Update Butler's Favourites
         try:
+            # Import here so these names are bound regardless of the any_updated
+            # branch above (that branch's local import otherwise makes them
+            # function-local and unassigned on the no-new-highscore path).
+            from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
             if BUTLERS_FAVOURITES_CHANNEL_ID:
                 fav_channel = _guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
