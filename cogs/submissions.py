@@ -208,7 +208,7 @@ class SubmitView(discord.ui.View):
 
         # Has image — defer so vision API has time to run
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send("📋 Reading your scorecard...", ephemeral=True)
+        _reading_msg = await interaction.followup.send("📋 Reading your scorecard...", ephemeral=True, wait=True)
 
         parsed = None
         try:
@@ -313,6 +313,12 @@ class SubmitView(discord.ui.View):
                     view = ClassSelectView(self.original_message, self.prompt_msg, "all", all_classes)
                     await interaction.followup.send(content="Which class were you playing?", view=view, ephemeral=True)
         finally:
+            # Remove the "Reading your scorecard..." ephemeral now that the result
+            # card / picker has been sent — it otherwise lingers on screen.
+            try:
+                await _reading_msg.delete()
+            except Exception:
+                pass
             _active_vision.discard(msg_id)
             _bot_module.submission_end()
 
