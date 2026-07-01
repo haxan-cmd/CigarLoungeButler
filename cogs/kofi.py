@@ -53,13 +53,22 @@ class KofiCog(commands.Cog, name="KofiCog"):
         channel_id, message_id = result
         channel = self.bot.get_channel(channel_id)
         if not channel:
-            return
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except Exception:
+                return
+        total = await get_kofi_total()
         try:
             msg = await channel.fetch_message(message_id)
-            total = await get_kofi_total()
             await msg.edit(embed=_build_embed(total))
-        except Exception as e:
-            log.warning(f"[KOFI] Failed to update dashboard: {e}")
+        except Exception:
+            # Message is gone (deleted / stale id) — repost and save the new id so it self-heals.
+            try:
+                msg = await channel.send(embed=_build_embed(total))
+                await set_kofi_dashboard_message(channel_id, msg.id)
+                log.info("[KOFI] Dashboard message was missing — reposted.")
+            except Exception as e:
+                log.warning(f"[KOFI] Failed to update/repost dashboard: {e}")
 
     async def handle_webhook(self, request: web.Request) -> web.Response:
         try:
@@ -103,6 +112,31 @@ class KofiCog(commands.Cog, name="KofiCog"):
         msg = await interaction.channel.send(embed=_build_embed(total))
         await set_kofi_dashboard_message(interaction.channel_id, msg.id)
         await interaction.followup.send("Dashboard posted.", ephemeral=True)
+
+    @app_commands.command(name="refresh_kofi", description="Recompute the Ko-fi total and update the dashboard (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refresh_kofi(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.update_dashboard()
+        total = await get_kofi_total()
+        await interaction.followup.send(
+            f"Dashboard refreshed. Current recorded total: **${total:.2f}**.\n"
+            "If that's lower than the real Ko-fi total, a donation webhook was missed \u2014 "
+            "use /add_kofi to record it.", ephemeral=True)
+
+    @app_commands.command(name="add_kofi", description="Manually record a Ko-fi donation the webhook missed (admin only).")
+    @app_commands.describe(amount="Donation amount (USD)", donor="Donor name")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def add_kofi(self, interaction: discord.Interaction, amount: float, donor: str = "Manual"):
+        await interaction.response.defer(ephemeral=True)
+        import time as _t
+        inserted = await add_kofi_donation(f"manual-{int(_t.time())}", donor, amount, "USD")
+        if not inserted:
+            await interaction.followup.send("That entry already exists.", ephemeral=True)
+            return
+        await self.update_dashboard()
+        total = await get_kofi_total()
+        await interaction.followup.send(f"Recorded **${amount:.2f}** from {donor}. New total: **${total:.2f}**.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
