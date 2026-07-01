@@ -503,9 +503,57 @@ async def update_title_roles(guild, stats):
                 print(f"Title announcement error: {e}")
 
 
+def _season_key(dt):
+    return dt.strftime('%Y-%m')
+
+
+async def record_weekly_leg(stats, run_dt):
+    """Record one weekly 'leg': top-3 in each competitive category earn 3/2/1
+    Grand Prix points toward the monthly season. Idempotent per week (keyed on
+    the run date), so re-running a Monday won't double-count."""
+    def _names(items, plain=False):
+        out = []
+        for it in (items or [])[:3]:
+            if plain:
+                nm = it.split(' -- ', 1)[0].strip() if isinstance(it, str) else ''
+            else:
+                nm = (it[0].strip() if isinstance(it, (list, tuple)) and it and it[0] else '')
+            out.append(nm)
+        return out
+    placements = {
+        "Most Lethal": _names(stats.get('high_lethality'), plain=True),
+        "Warlord": _names(stats.get('most_dominant'), plain=True),
+        "Total Tally": _names(stats.get('top_total_tally')),
+        "Fastest Learner": _names(stats.get('top_fastest_learner')),
+        "Most Kills": _names(stats.get('top_kills_list')),
+        "Highest Takedowns": _names(stats.get('top_td_list')),
+        "Busiest": _names(stats.get('top_busiest')),
+    }
+    return await _db.record_season_leg(_season_key(run_dt), run_dt.date(), placements)
+
+
 class FavouritesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def cog_load(self):
+        await _db.season_init()
+
+    @app_commands.command(name="season_standings", description="This month's season standings \u2014 GP points across the weekly legs.")
+    async def season_standings(self, interaction: discord.Interaction):
+        from datetime import datetime, timezone
+        await interaction.response.defer()
+        now = datetime.now(timezone.utc)
+        season = now.strftime('%Y-%m')
+        standings = await _db.get_season_standings(season)
+        legs = await _db.get_season_leg_count(season)
+        if not standings:
+            await interaction.followup.send(f"No legs recorded yet for {now.strftime('%B %Y')} \u2014 standings open once the first weekly report lands.")
+            return
+        lines = [f"**\U0001f3c1 Season Standings \u2014 {now.strftime('%B %Y')}**  *(after {legs} leg{'s' if legs != 1 else ''})*", ""]
+        for i, (name, pts, wins) in enumerate(standings[:15], 1):
+            lines.append(f"`{i:>2}.` **{name}** \u2014 {pts} pts \u00b7 {wins} leg win{'s' if wins != 1 else ''}")
+        await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="butlers_report", description="Summon the Butler's Favourites report")
     async def butlers_report(self, interaction: discord.Interaction):
