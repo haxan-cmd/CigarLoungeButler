@@ -4,6 +4,7 @@ cogs/personality.py — Butler AI, on_message handler, task loops, on_ready.
 import asyncio
 import time
 import re
+import json
 from datetime import time as dt_time
 import random
 import anthropic
@@ -53,8 +54,7 @@ Your server knowledge:
 - /rules shows the challenge rules
 - /progress shows title standings and weapon rank progress
 - /refresh_card updates a registry card
-- /bounty_status shows the active bounty card
-- /my_bounty shows personal bounty progress
+- /bounty_status shows the active bounty card and your personal progress
 - The Manager handles all administrative matters and will follow up on feedback
 
 Special instructions:
@@ -265,6 +265,83 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         return None
 
 
+_POLL_STATS_CATEGORIES = ("map", "weapon", "faction", "subclass")
+
+
+def _build_stats_poll():
+    """Build a (question, options) pair grounded in real config data — the
+    Butler can't invent fake maps/weapons this way. Discord polls cap out at
+    10 answers, so anything with more options than that gets randomly sampled
+    down rather than truncated (avoids always showing the same alphabetical
+    first 10)."""
+    category = random.choice(_POLL_STATS_CATEGORIES)
+    if category == "map":
+        question = "What's your favourite map?"
+        pool = list(config.MAPS)
+    elif category == "weapon":
+        question = "What's your favourite weapon?"
+        pool = sorted({w for ws in config.CLASS_WEAPON_MAP.values() for w in ws})
+    elif category == "faction":
+        question = "Which faction do you run with?"
+        pool = list(config.FACTION_EMOJIS.keys())
+    else:
+        question = "What's your favourite subclass?"
+        pool = sorted(config.CLASS_WEAPON_MAP.keys())
+    options = pool if len(pool) <= 10 else sorted(random.sample(pool, 10))
+    return question, options
+
+
+_ABSURD_POLL_FALLBACKS = [
+    {"question": "Best late-night lounge snack?",
+     "options": ["Cold pizza", "Cigars only", "Regret", "Whatever's in the vending machine"]},
+    {"question": "If the Butler had a pet, what would it be?",
+     "options": ["A moth", "A very old cat", "Nothing, he doesn't need love", "A rock he's named"]},
+    {"question": "Most trustworthy weapon in a dark alley?",
+     "options": ["Mace", "Dagger", "Harsh words", "Running away"]},
+    {"question": "What's actually inside the cigar?",
+     "options": ["Tobacco", "Secrets", "Nothing, it's for show", "The Manager's patience"]},
+    {"question": "Best way to end a losing streak?",
+     "options": ["Switch weapons", "Blame the lag", "Touch grass", "Submit anyway"]},
+]
+
+
+async def _generate_absurd_poll():
+    """Ask the AI for a random, silly poll question with a few short options —
+    nothing to do with the server or stats, just something abstract or comical
+    (food, hypotheticals, dry hot takes). Falls back to a static list if the
+    AI is unavailable or its output doesn't parse as valid JSON."""
+    if _anthropic_client:
+        try:
+            response = _anthropic_client.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=150,
+                system=BUTLER_SYSTEM_PROMPT,
+                messages=[{
+                    'role': 'user',
+                    'content': (
+                        'Write a completely random, silly or abstract poll question for the server — '
+                        'nothing to do with the game, stats, or leaderboards. Food, hypotheticals, absurd '
+                        'hot takes, anything. Reply with ONLY strict JSON and nothing else, no markdown '
+                        'fences: {"question": "...", "options": ["...", "...", "...", "..."]}. '
+                        'Question under 100 characters. 3 to 5 options, each under 50 characters, '
+                        'written in your dry voice.'
+                    )
+                }]
+            )
+            raw = response.content[0].text.strip().strip('`')
+            if raw.lower().startswith('json'):
+                raw = raw[4:].strip()
+            data = json.loads(raw)
+            question = str(data['question']).strip()[:300]
+            options = [str(o).strip()[:55] for o in data.get('options', []) if str(o).strip()][:10]
+            if question and len(options) >= 2:
+                return question, options
+        except Exception as e:
+            print(f"Absurd poll generation error: {e}")
+    fallback = random.choice(_ABSURD_POLL_FALLBACKS)
+    return fallback['question'], fallback['options']
+
+
 class PersonalityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -278,6 +355,8 @@ class PersonalityCog(commands.Cog):
             self.dry_weather_check.start()
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.start()
+        if not self.butler_poll_post.is_running():
+            self.butler_poll_post.start()
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.start()
         # Fire nerve center immediately on startup so it always posts on deploy
@@ -395,6 +474,47 @@ class PersonalityCog(commands.Cog):
         print(f"Organic post task crashed, restarting: {error}")
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
+
+    @tasks.loop(hours=12)
+    async def butler_poll_post(self):
+        """Occasionally post a poll in main — half the time grounded in real
+        server stats (favourite map/weapon/faction/subclass, options pulled
+        straight from config so the Butler can't invent fake choices), half
+        the time a random silly/abstract one from the AI (static fallback if
+        generation fails). ~30% chance each 12-hour window — roughly once
+        every day and a half."""
+        if random.random() > 0.3:
+            return
+        try:
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                return
+            main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
+            if not main_ch:
+                return
+
+            if random.random() < 0.5:
+                question, options = _build_stats_poll()
+            else:
+                question, options = await _generate_absurd_poll()
+
+            if not question or len(options) < 2:
+                return
+
+            poll = discord.Poll(question=question, duration=timedelta(hours=24), multiple=False)
+            for opt in options[:10]:
+                poll.add_answer(text=opt)
+
+            await main_ch.send(poll=poll)
+            print(f"[POLL] Posted: {question}")
+        except Exception as e:
+            print(f"Butler poll post error: {e}")
+
+    @butler_poll_post.error
+    async def butler_poll_post_error(self, error):
+        print(f"Poll post task crashed, restarting: {error}")
+        if not self.butler_poll_post.is_running():
+            self.butler_poll_post.restart()
 
     async def _run_nerve_logic(self):
         """Core nerve center post logic. Called by the hourly loop."""
