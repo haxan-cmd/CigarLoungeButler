@@ -360,113 +360,85 @@ async def calculate_butler_stats(week_start=None, week_end=None):
 async def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
-    def _short(nm, m=16):
+    def _short(nm, m=18):
+        nm = str(nm)
         return nm if len(nm) <= m else nm[:m - 1] + "…"
 
-    def fmt_list(items, suffix="", n=3):
-        subset = items[:n]
-        if not subset:
-            return "│ *—*"
-        lines = []
-        for i, (name, val) in enumerate(subset):
-            sfx = f" {suffix}" if (suffix and i == 0) else ""
-            lines.append(f"│ `{_short(name)}` — {val}{sfx}")
-        return "\n".join(lines)
+    def _table(rows):
+        # Monospace table: left column left-justified, right column right-justified,
+        # so the numbers line up vertically. rows = [(left, right)].
+        rows = [(str(l), str(r)) for l, r in rows]
+        if not rows:
+            return "```\n—\n```"
+        lw = max(len(l) for l, _ in rows)
+        rw = max(len(r) for _, r in rows)
+        body = "\n".join(f"{l:<{lw}}  {r:>{rw}}" for l, r in rows)
+        return "```\n" + body + "\n```"
 
-    def fmt_plain(items, n=3):
-        subset = items[:n]
-        if not subset:
-            return "│ *—*"
-        parsed = []
-        for p in subset:
-            if ' -- ' in p:
-                name, rest = p.split(' -- ', 1)
-                parsed.append((name, rest))
-            else:
-                parsed.append((p, None))
-        lines = []
-        for name, rest in parsed:
-            if rest is not None:
-                lines.append(f"│ `{_short(name)}` — {rest}")
-            else:
-                lines.append(f"│ `{_short(name)}`")
-        return "\n".join(lines)
+    def _rows(items, plain=False, n=5):
+        out = []
+        for it in (items or [])[:n]:
+            if plain and isinstance(it, str):
+                nm, _, v = it.partition(" -- ")
+                out.append((_short(nm.strip()), v.strip()))
+            elif isinstance(it, (list, tuple)) and it:
+                out.append((_short(str(it[0]).strip()), str(it[1]) if len(it) > 1 else ""))
+        return out
 
-    week_label = stats.get('week_label', '')
+    _RULE = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    week_label = stats.get("week_label", "")
     title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
     desc = f"*{stats['total_runs']} runs · {stats['total_players']} players*"
-
     embed = _discord.Embed(title=title, description=desc, color=0x8b6914)
     if bot_avatar_url:
         embed.set_thumbnail(url=bot_avatar_url)
 
-    # Live championship + Special Features (shown when a season is running)
     _season = await _db.get_current_season()
     if _season:
         _standings, _core, _featured = await season_total(_season)
         if _standings:
-            embed.add_field(
-                name="🏁 Championship",
-                value="\n".join(f"`{i:>2}.` **{nm}** — {pts} pts" for i, (nm, pts) in enumerate(_standings[:10], 1)),
-                inline=False)
+            crows = [(f"{i:>2} {_short(nm, 16)}", f"{pts} pts") for i, (nm, pts) in enumerate(_standings[:10], 1)]
+            embed.add_field(name="🏁 Championship", value=_table(crows), inline=False)
+        embed.add_field(name=_RULE, value="​", inline=False)
         if _featured:
-            _fl = []
-            for _flabel, _focus, _top in _featured:
-                _w = f"`{_top[0][0]}` ({_top[0][1]})" if _top else "—"
-                _fl.append(f"│ **{_flabel}: {_focus}** — {_w}")
-            embed.add_field(name="⭐ Special Features", value="\n".join(_fl), inline=False)
-        embed.add_field(name="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", value="​", inline=False)
+            frows = [((f"{lbl}: {focus}"), (f"{top[0][0]} ({top[0][1]})" if top else "—"))
+                     for lbl, focus, top in _featured]
+            embed.add_field(name="⭐ Special Features  *(random this season)*", value=_table(frows), inline=False)
+        embed.add_field(name=_RULE, value="​", inline=False)
 
-    lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "│ *Not enough data yet*"
-    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "│ *Not enough team data yet*"
+    embed.add_field(name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ td %)*",
+                    value=_table(_rows(stats.get("high_lethality"), plain=True)) if stats.get("high_lethality") else "```\n— not enough data —\n```",
+                    inline=False)
+    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(TD share %)*",
+                    value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
+                    inline=False)
 
-    def _pair(a, b):
-        # two half-width columns (2 inline fields ≈ 50% each); non-inline fields break rows
-        embed.add_field(name=a[0], value=a[1], inline=True)
-        embed.add_field(name=b[0], value=b[1], inline=True)
+    _tt = stats.get("top_total_tally") or []
+    embed.add_field(name="<a:200tkd:1363648828414230538> Total Tally  *(takedowns)*",
+                    value=_table([(_short(n), f"{v:,}") for n, v in _tt[:5]]) if _tt else "```\n—\n```",
+                    inline=False)
+    _flg = stats.get("top_fastest_learner") or []
+    embed.add_field(name="📈 Fastest Learner  *(PBs)*",
+                    value=_table([(_short(n), str(c)) for n, c in _flg[:5]]) if _flg else "```\n—\n```",
+                    inline=False)
 
-    def _spacer():
-        embed.add_field(name="​", value="​", inline=False)
+    embed.add_field(name="<a:topkill:1360314538364240024> Most Kills",
+                    value=_table(_rows(stats.get("top_kills_list"))), inline=False)
+    embed.add_field(name="<a:toptkd:1360312666475728958> Highest Takedowns",
+                    value=_table(_rows(stats.get("top_td_list"))), inline=False)
+    embed.add_field(name="🏃 Busiest",
+                    value=_table([(_short(n), str(v)) for n, v in (stats.get("top_busiest") or [])[:5]]),
+                    inline=False)
 
-    _spacer()
-    _pair(
-        ("<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ td %)*", lethal_text),
-        ("<:warlord:1520490364039860347> Warlord  *(TD share %)*", warlord_text),
-    )
-
-    _spacer()
-
-    _tt = stats.get('top_total_tally') or []
-    _fl = stats.get('top_fastest_learner') or []
-    _pair(
-        ("<a:200tkd:1363648828414230538> Total Tally  *(takedowns)*", fmt_list([(n, f"{v:,}") for n, v in _tt], "TDs") if _tt else "│ *—*"),
-        ("📈 Fastest Learner  *(PBs)*", fmt_list([(n, c) for n, c in _fl], "PBs") if _fl else "│ *—*"),
-    )
-    _spacer()
-    _pair(
-        ("<a:topkill:1360314538364240024> Most Kills", fmt_list(stats['top_kills_list'], "kills")),
-        ("<a:toptkd:1360312666475728958> Highest Takedowns", fmt_list(stats['top_td_list'], "TDs")),
-    )
-    _spacer()
-    embed.add_field(name="🏃 Busiest", value=fmt_list(stats['top_busiest'], "runs"), inline=False)
-
-    _spacer()
     embed.add_field(name="─── Meta ───", value="​", inline=False)
-    _pair(
-        ("🗡️ Top Weapons", fmt_list(stats['top_weapons'], "runs")),
-        ("🗺️ Top Maps", fmt_list(stats['top_maps'], "runs")),
-    )
+    embed.add_field(name="🗡️ Top Weapons", value=_table(_rows(stats.get("top_weapons"))), inline=False)
+    embed.add_field(name="🗺️ Top Maps", value=_table(_rows(stats.get("top_maps"))), inline=False)
 
-    _spacer()
-    embed.add_field(
-        name="─── All-Time Titles ───",
-        value=(
-            f"│ <a:grandmarshal:1519928617407348877> **Grand Marshal** — `{stats['grand_marshal']}`\n"
-            f"│ <a:weaponsmaster:1519928521445605488> **Weapons Master** — `{stats['weapons_master']}`\n"
-            f"│ <a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`"
-        ),
-        inline=False,
-    )
+    embed.add_field(name="─── All-Time Titles ───", value=_table([
+        ("Grand Marshal", stats.get("grand_marshal") or "—"),
+        ("Weapons Master", stats.get("weapons_master") or "—"),
+        ("Campaign Master", stats.get("campaign_master") or "—"),
+    ]), inline=False)
     return embed
 
 
