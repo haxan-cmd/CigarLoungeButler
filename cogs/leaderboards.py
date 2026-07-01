@@ -570,17 +570,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             pos = board_scores.index(score) + 1
             placements.append((lb_name, pos))
 
-        # Reload and update Discord message
-        updated_values = await _db.get_all_leaderboard_data()
+        # Reload just this board (indexed) instead of scanning the whole table
+        board_rows = await _db.get_leaderboard_by_board(lb_name)
         entries = []
-        for row in updated_values:
-            if row[0] == lb_name:
-                entries.append({
-                    'player': row[1] if len(row) > 1 else '',
-                    'score': int(row[3]) if len(row) > 3 and row[3] else 0,
-                    'link': row[4] if len(row) > 4 else '',
-                    'weapon': row[5] if len(row) > 5 else '',
-                })
+        for row in board_rows:
+            entries.append({
+                'player': row[1] if len(row) > 1 else '',
+                'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+                'link': row[4] if len(row) > 4 else '',
+                'weapon': row[5] if len(row) > 5 else '',
+            })
         entries = sorted(entries, key=lambda x: x['score'], reverse=True)
 
         show_weapon = lb_name in ("100 Kills", "200 Takedowns")

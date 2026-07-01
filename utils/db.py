@@ -463,6 +463,17 @@ async def count_board_scores_at_least(board_name: str, min_score: int) -> int:
     return n or 0
 
 
+async def get_leaderboard_position(board_name: str, score: int) -> int:
+    """1-based rank a given score holds on a board = (entries strictly higher) + 1.
+    One indexed COUNT instead of fetching the board and sorting in Python."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        higher = await conn.fetchval(
+            "SELECT COUNT(*) FROM leaderboard_data WHERE board_name=$1 AND score > $2",
+            board_name, score)
+    return (higher or 0) + 1
+
+
 async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
     _cache_invalidate('leaderboard_data')
     pool = _pool_check()
