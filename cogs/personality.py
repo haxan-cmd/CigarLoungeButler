@@ -868,10 +868,10 @@ class PersonalityCog(commands.Cog):
                             best_td_game = None    # full row of their highest-TD submission
                             best_kills_game = None # full row of their highest-kills submission
                             try:
-                                subs_for_pb = await _db.get_all_submissions()
+                                # Targeted per-player fetch instead of scanning every submission
                                 player_subs_pb = [
-                                    r for r in subs_for_pb
-                                    if len(r) > 8 and r[2].strip() == discord_id_str
+                                    r for r in await _db.get_submissions_by_player(discord_id_str)
+                                    if len(r) > 8
                                 ]
                                 for pb_row in player_subs_pb:
                                     try:
