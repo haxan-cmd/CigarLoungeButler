@@ -98,19 +98,7 @@ except Exception as _e:
 async def count_qualifying_runs(weapon_name, min_td=100):
     """Count runs with TD >= min_td for a weapon using LeaderboardData (includes legacy)."""
     try:
-        ld = await _db.get_all_leaderboard_data()
-        count = 0
-        for row in ld:
-            if len(row) < 4:
-                continue
-            lb_name = row[0].strip()
-            try:
-                score = int(row[3])
-            except ValueError:
-                continue
-            if lb_name.lower() == weapon_name.lower() and score >= min_td:
-                count += 1
-        return count
+        return await _db.count_board_scores_at_least(weapon_name, min_td)
     except Exception:
         return None
 
@@ -145,13 +133,13 @@ def extract_stats_from_message(text):
 async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
     """Find a recent submission matching the given stats. Returns context string or empty."""
     try:
-        subs = await _db.get_all_submissions()
         discord_id_str = str(discord_id)
-        player_subs = [r for r in subs if len(r) > 8 and r[2].strip() == discord_id_str]
+        # Targeted per-player fetch (newest first) instead of scanning every submission
+        player_subs = [r for r in await _db.get_submissions_by_player(discord_id_str) if len(r) > 8]
         if not player_subs:
             return ''
-        # Search most recent 20 submissions
-        for row in reversed(player_subs[-20:]):
+        # Search most recent 20 submissions (player_subs is newest-first)
+        for row in player_subs[:20]:
             try:
                 row_kills = int(row[8])
                 row_tds = int(row[7])
@@ -177,10 +165,9 @@ async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=No
                 # Check leaderboard position for this weapon
                 lb_ctx = ''
                 try:
-                    ld = await _db.get_all_leaderboard_data()
-                    weapon_entries = [(r[1].strip(), int(r[3])) for r in ld
-                                      if len(r) > 3 and r[0].strip() == sub_weapon
-                                      and r[3].strip().isdigit()]
+                    board_rows = await _db.get_leaderboard_by_board(sub_weapon)
+                    weapon_entries = [(r[1].strip(), int(r[3])) for r in board_rows
+                                      if len(r) > 3 and r[3].strip().isdigit()]
                     weapon_entries.sort(key=lambda x: -x[1])
                     player_entry = next((i+1, s) for i, (p, s) in enumerate(weapon_entries) if p == player_name_ref)
                     if player_entry:
@@ -268,78 +255,79 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
 _POLL_STATS_CATEGORIES = ("map", "weapon", "faction", "subclass")
 
 
-def _build_stats_poll():
-    """Build a (question, options) pair grounded in real config data — the
-    Butler can't invent fake maps/weapons this way. Discord polls cap out at
-    10 answers, so anything with more options than that gets randomly sampled
-    down rather than truncated (avoids always showing the same alphabetical
-    first 10)."""
+def _build_stats_question():
+    """Return one dry, plain-text question about the server's tastes (map /
+    weapon / faction / subclass). No poll, no options — just a question posed
+    to the room for people to answer in chat, in the Butler's flat register."""
     category = random.choice(_POLL_STATS_CATEGORIES)
     if category == "map":
-        question = "What's your favourite map?"
-        pool = list(config.MAPS)
+        pool = [
+            "Which map is your favourite? I'll feign interest.",
+            "Favourite map. Go on. Not that the rotation will bend to suit you.",
+            "What's the best map? Wrong answers are, statistically, most of them.",
+        ]
     elif category == "weapon":
-        question = "What's your favourite weapon?"
-        pool = sorted({w for ws in config.CLASS_WEAPON_MAP.values() for w in ws})
+        pool = [
+            "Which weapon do you actually enjoy? Be honest, the leaderboard already knows.",
+            "Favourite weapon. Choose carefully; I am keeping a list.",
+            "What's your weapon of choice? Mine is silence, but you go ahead.",
+        ]
     elif category == "faction":
-        question = "Which faction do you run with?"
-        pool = list(config.FACTION_EMOJIS.keys())
+        pool = [
+            "Agatha or Mason? Pick a side to be disappointed by.",
+            "Which faction do you run with, and why is it the wrong one?",
+            "Agatha or Mason? There are no good answers, only loud ones.",
+        ]
     else:
-        question = "What's your favourite subclass?"
-        pool = sorted(config.CLASS_WEAPON_MAP.keys())
-    options = pool if len(pool) <= 10 else sorted(random.sample(pool, 10))
-    return question, options
+        pool = [
+            "What's your subclass of choice? The lounge is morbidly curious.",
+            "Favourite subclass. I'll pretend the answer surprises me.",
+            "Which subclass do you main? Confession is good for the soul, apparently.",
+        ]
+    return random.choice(pool)
 
 
-_ABSURD_POLL_FALLBACKS = [
-    {"question": "Best late-night lounge snack?",
-     "options": ["Cold pizza", "Cigars only", "Regret", "Whatever's in the vending machine"]},
-    {"question": "If the Butler had a pet, what would it be?",
-     "options": ["A moth", "A very old cat", "Nothing, he doesn't need love", "A rock he's named"]},
-    {"question": "Most trustworthy weapon in a dark alley?",
-     "options": ["Mace", "Dagger", "Harsh words", "Running away"]},
-    {"question": "What's actually inside the cigar?",
-     "options": ["Tobacco", "Secrets", "Nothing, it's for show", "The Manager's patience"]},
-    {"question": "Best way to end a losing streak?",
-     "options": ["Switch weapons", "Blame the lag", "Touch grass", "Submit anyway"]},
+_ABSURD_QUESTION_FALLBACKS = [
+    "If the lounge caught fire, what would you save first? Not me, I assume.",
+    "How many cigars is too many? Trick question; there is no such number.",
+    "What do you suppose the Manager is doing back there? No one asks. No one dares.",
+    "If you could ban one thing from the lounge, what would it be? Besides me.",
+    "What's the most convincing lie you've told the scoreboard lately?",
+    "Which is worse: losing quietly, or winning and telling everyone about it?",
+    "If your playstyle had a smell, what would it be? Be honest, for once.",
+    "Cigars or the crushing quiet between rounds? Choose your comfort.",
 ]
 
 
-async def _generate_absurd_poll():
-    """Ask the AI for a random, silly poll question with a few short options —
-    nothing to do with the server or stats, just something abstract or comical
-    (food, hypotheticals, dry hot takes). Falls back to a static list if the
-    AI is unavailable or its output doesn't parse as valid JSON."""
+async def _generate_absurd_question():
+    """Ask the AI for one dry, absurd, open-ended question to pose to the room —
+    nothing to do with the game or stats, just something comical or hypothetical
+    in the Butler's flat voice. Plain text, no options. Falls back to a static
+    list if the AI is unavailable or returns nothing usable."""
     if _anthropic_client:
         try:
             response = await _anthropic_client.messages.create(
                 model='claude-haiku-4-5-20251001',
-                max_tokens=150,
+                max_tokens=80,
                 system=BUTLER_SYSTEM_PROMPT,
                 messages=[{
                     'role': 'user',
                     'content': (
-                        'Write a completely random, silly or abstract poll question for the server — '
-                        'nothing to do with the game, stats, or leaderboards. Food, hypotheticals, absurd '
-                        'hot takes, anything. Reply with ONLY strict JSON and nothing else, no markdown '
-                        'fences: {"question": "...", "options": ["...", "...", "...", "..."]}. '
-                        'Question under 100 characters. 3 to 5 options, each under 50 characters, '
-                        'written in your dry voice.'
+                        'Pose a single dry, absurd, open-ended question to the room — nothing to do '
+                        'with the game, stats, or leaderboards. Food, hypotheticals, bleak little hot '
+                        'takes, anything. It should invite people to answer in chat. One sentence, '
+                        'under 140 characters, in your usual flat, faintly weary voice. Reply with '
+                        'ONLY the question text — no quotes, no options, no preamble.'
                     )
                 }]
             )
-            raw = response.content[0].text.strip().strip('`')
-            if raw.lower().startswith('json'):
-                raw = raw[4:].strip()
-            data = json.loads(raw)
-            question = str(data['question']).strip()[:300]
-            options = [str(o).strip()[:55] for o in data.get('options', []) if str(o).strip()][:10]
-            if question and len(options) >= 2:
-                return question, options
+            question = response.content[0].text.strip().strip('"').strip()
+            question = question.replace('\n', ' ')[:300]
+            if len(question) >= 8:
+                return question
         except Exception as e:
-            print(f"Absurd poll generation error: {e}")
-    fallback = random.choice(_ABSURD_POLL_FALLBACKS)
-    return fallback['question'], fallback['options']
+            print(f"Absurd question generation error: {e}")
+    return random.choice(_ABSURD_QUESTION_FALLBACKS)
 
 
 class PersonalityCog(commands.Cog):
@@ -493,20 +481,16 @@ class PersonalityCog(commands.Cog):
             return
 
         if random.random() < 0.5:
-            question, options = _build_stats_poll()
+            question = _build_stats_question()
         else:
-            question, options = await _generate_absurd_poll()
+            question = await _generate_absurd_question()
 
-        if not question or len(options) < 2:
-            print("[POLL] question/options invalid, skipping")
+        if not question:
+            print("[POLL] no question generated, skipping")
             return
 
-        poll = discord.Poll(question=question, duration=timedelta(hours=24), multiple=False)
-        for opt in options[:10]:
-            poll.add_answer(text=opt)
-
-        await main_ch.send(poll=poll)
-        print(f"[POLL] Posted: {question}")
+        await main_ch.send(f"*{question}*")
+        print(f"[POLL] Posted question: {question}")
 
     @tasks.loop(hours=12)
     async def butler_poll_post(self):

@@ -486,7 +486,7 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="force_poll", description="Manually post a Butler poll in main right now (admin only).")
+    @app_commands.command(name="force_poll", description="Manually post a dry Butler question in main right now (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
     async def force_poll(self, interaction: discord.Interaction):
         """Bypasses the 30%-per-12-hours dice roll in butler_poll_post so a

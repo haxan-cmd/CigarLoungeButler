@@ -125,6 +125,20 @@ async def get_all_submissions() -> list[list]:
     return data
 
 
+async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:
+    """Targeted fetch: one player's submissions, newest first — uses the
+    submissions(discord_id) index instead of scanning the whole table.
+    Pass a limit to cap the rows returned."""
+    pool = _pool_check()
+    q = "SELECT * FROM submissions WHERE discord_id=$1 ORDER BY id DESC"
+    async with pool.acquire() as conn:
+        if limit is not None:
+            rows = await conn.fetch(q + " LIMIT $2", str(discord_id), limit)
+        else:
+            rows = await conn.fetch(q, str(discord_id))
+    return [_row_to_submission(r) for r in rows]
+
+
 async def add_submission(
     timestamp, discord_name, discord_id, weapon, cls, map_name, faction,
     takedowns, kills, deaths, vip, feats, message_link,
@@ -418,6 +432,35 @@ async def get_all_leaderboard_data() -> list[list]:
     ]
     _cache_set('leaderboard_data', data)
     return data
+
+
+async def get_leaderboard_by_board(board_name: str) -> list[list]:
+    """Targeted fetch: a single board's entries, highest score first — uses the
+    leaderboard_data(board_name) index instead of scanning every board.
+    Same row shape as get_all_leaderboard_data()."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM leaderboard_data WHERE board_name=$1 ORDER BY score DESC NULLS LAST",
+            board_name)
+    return [
+        [r['board_name'], r['player_name'], r['discord_id'] or '',
+         str(r['score']) if r['score'] is not None else '', r['message_link'] or '', r['weapon'] or '']
+        for r in rows
+    ]
+
+
+async def count_board_scores_at_least(board_name: str, min_score: int) -> int:
+    """Count entries on a board with score >= min_score (case-insensitive,
+    whitespace-tolerant board match). One COUNT instead of fetching + filtering
+    the entire leaderboard_data table in Python."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        n = await conn.fetchval(
+            "SELECT COUNT(*) FROM leaderboard_data "
+            "WHERE LOWER(TRIM(board_name)) = LOWER(TRIM($1)) AND score >= $2",
+            board_name, min_score)
+    return n or 0
 
 
 async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
