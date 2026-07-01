@@ -277,7 +277,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
 
         response = await _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
-            max_tokens=60,
+            max_tokens=150,
             system=BUTLER_SYSTEM_PROMPT,
             messages=[{'role': 'user', 'content': user_prompt}]
         )
