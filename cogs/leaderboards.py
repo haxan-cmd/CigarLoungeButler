@@ -1631,10 +1631,15 @@ class LeaderboardsCog(commands.Cog):
                 name_to_id[p[1].strip().lower()] = (p[0].strip(), p[1].strip())
         for name in _HH_LEGACY_COMPLETERS:
             match = name_to_id.get(name.lower())
-            if not match:
-                print(f"[HH] Legacy completer '{name}' not found in players table — skipping")
-                continue
-            real_id, real_name = match
+            if match:
+                real_id, real_name = match
+            else:
+                # Never registered / name not in the players table — seed under a
+                # stable name-based id so they still show as completers. If they
+                # later register, the board (collapse-by-name) and
+                # /consolidate_hundred_handed will merge them onto their real id.
+                real_id, real_name = f"legacy:{name.strip().lower()}", name
+                print(f"[HH] Legacy completer '{name}' not in players table — seeding under {real_id}")
             for subclass, weapons in _HH_PRIMARIES.items():
                 for weapon in weapons:
                     is_new = await _db.add_hundred_handed(real_id, real_name, subclass, weapon)
