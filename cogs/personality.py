@@ -432,8 +432,8 @@ class PersonalityCog(commands.Cog):
         import random
         if not _anthropic_client:
             return
-        # ~25% chance each 3-hour window — roughly 2x per day
-        if random.random() > 0.25:
+        # ~15% chance each 3-hour window — roughly once a day, still random
+        if random.random() > 0.15:
             return
         try:
             guild = self.bot.get_guild(GUILD_ID)
@@ -448,7 +448,7 @@ class PersonalityCog(commands.Cog):
                 system=BUTLER_SYSTEM_PROMPT,
                 messages=[{
                     'role': 'user',
-                    'content': 'Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long.'
+                    'content': ('Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long. Pick a genuinely fresh subject each time — the hour, the furniture, the quiet, a passing thought, the state of the lounge. Do NOT mention shiny heads, skulls, polished surfaces, gleaming helms, or the bald woman; you lean on those far too often.')
                 }]
             )
             line = response.content[0].text.strip()
