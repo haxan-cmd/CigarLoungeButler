@@ -1897,9 +1897,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
 
-        # Bounty check (skip for ranged submissions)
+        # Bounty check (skip for ranged submissions, and for resubmits — an old
+        # re-uploaded run shouldn't advance the current monthly bounty or trigger
+        # its completion bonus; resubmits still count for all-time boards + card).
         bounty_line = ""  # convenience hyperlink to the player's bounty post, if hit
-        if not is_ranged:
+        if not is_ranged and "Resubmit" not in feats:
             try:
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
