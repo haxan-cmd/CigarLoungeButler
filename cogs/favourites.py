@@ -283,6 +283,51 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     headhunter = best_score_title(kills_scores)
     butcher = best_score_title(td_scores)
 
+    # Fastest Learner — most personal-best runs set THIS WEEK (a run beating the
+    # player's prior best kills or takedowns). Debut runs don't count. Rewards
+    # improvement, so newer players can compete for it, not just the veterans.
+    _pb_history = {}
+    for _row in all_subs:
+        if not _row or len(_row) < 9 or not _row[0].strip():
+            continue
+        try:
+            _ts = datetime.strptime(_row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+            _k = int(_row[8]); _t = int(_row[7])
+        except (ValueError, IndexError):
+            continue
+        _pb_history.setdefault(_row[1].strip(), []).append((_ts, _k, _t))
+
+    pb_counts = {}
+    for _pname, _runs in _pb_history.items():
+        _runs.sort(key=lambda x: x[0])
+        _best_k = _best_t = None
+        _cnt = 0
+        for _ts, _k, _t in _runs:
+            if _best_k is None:
+                _best_k, _best_t = _k, _t
+                continue
+            _is_pb = _k > _best_k or _t > _best_t
+            if _k > _best_k: _best_k = _k
+            if _t > _best_t: _best_t = _t
+            if _is_pb and week_start is not None and week_start <= _ts < week_end:
+                _cnt += 1
+        if _cnt > 0:
+            pb_counts[_pname] = _cnt
+    top_fastest_learner = sorted(pb_counts.items(), key=lambda x: (-x[1], x[0]))[:3]
+
+    # Total Tally — most total takedowns accumulated this week (the grind race).
+    _tally = {}
+    for _row in subs:
+        if len(_row) < 8:
+            continue
+        try:
+            _t = int(_row[7])
+        except (ValueError, IndexError):
+            continue
+        _pn = _row[1].strip()
+        _tally[_pn] = _tally.get(_pn, 0) + _t
+    top_total_tally = sorted(_tally.items(), key=lambda x: (-x[1], x[0]))[:3]
+
     return {
         'top_busiest': top_busiest,
         'top_td_list': top_td_list,
@@ -296,6 +341,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'campaign_master': campaign_master or "N/A",
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
+        'top_fastest_learner': top_fastest_learner,
+        'top_total_tally': top_total_tally,
         'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
         'warlord_player': warlord_player,
@@ -367,6 +414,19 @@ def build_favourites_embed(stats, bot_avatar_url=None):
             f"<a:topkill:1360314538364240024> **Apex** — `{stats['headhunter']}`  *(avg kills, 100+ runs)*\n"
             f"<a:200tkd:1363648828414230538> **Frenzied** — `{stats['butcher']}`  *(avg takedowns, 200+ runs)*"
         ),
+        inline=False,
+    )
+
+    _tt = stats.get('top_total_tally') or []
+    embed.add_field(
+        name="🩸 Total Tally  *(most takedowns this week)*",
+        value=fmt_list([(n, f"{v:,}") for n, v in _tt], "TDs") if _tt else "│ *—*",
+        inline=False,
+    )
+    _fl = stats.get('top_fastest_learner') or []
+    embed.add_field(
+        name="📈 Fastest Learner  *(personal bests set this week)*",
+        value=fmt_list([(n, c) for n, c in _fl], "PBs") if _fl else "│ *No new personal bests yet*",
         inline=False,
     )
 
