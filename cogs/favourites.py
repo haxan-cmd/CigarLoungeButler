@@ -784,8 +784,9 @@ class FavouritesCog(commands.Cog):
         await interaction.followup.send(
             f"Season **{label}** opened (id {sid}). Stats accrue from now until the bounty ends.", ephemeral=True)
 
-    @app_commands.command(name="roll_features", description="Roll this season's Special Features now (mod only).")
-    async def roll_features(self, interaction: discord.Interaction):
+    @app_commands.command(name="roll_features", description="Roll this season's Special Features (mod only).")
+    @app_commands.describe(force="Re-roll even if features are already set — changes the live challenges.")
+    async def roll_features(self, interaction: discord.Interaction, force: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -793,6 +794,14 @@ class FavouritesCog(commands.Cog):
         season = await _db.get_current_season()
         if not season:
             await interaction.followup.send("No season is running.", ephemeral=True)
+            return
+        existing = await _db.get_season_features(season["id"])
+        if existing and not force:
+            cur = "\n".join(f"• {k.replace('_', ' ')}: **{v}**" for k, v in existing.items() if v)
+            await interaction.followup.send(
+                f"Special Features are already set for this season:\n{cur}\n\n"
+                "Re-rolling mid-season changes the live challenges — run again with `force: True` if you really mean to.",
+                ephemeral=True)
             return
         feats = await roll_featured(season["id"])
         txt = "\n".join(f"• {k.replace('_', ' ')}: **{v}**" for k, v in feats.items() if v)
