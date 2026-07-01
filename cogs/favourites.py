@@ -358,18 +358,18 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     def fmt_list(items, suffix="", n=3):
         subset = items[:n]
         if not subset:
-            return "│ *—*"
+            return "│ *—*\n\u200b"
         pad = max(len(name) for name, _ in subset)
         lines = []
         for i, (name, val) in enumerate(subset):
             sfx = f" {suffix}" if (suffix and i == 0) else ""
             lines.append(f"│ `{name:<{pad}}` — {val}{sfx}")
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n\u200b"
 
     def fmt_plain(items, n=3):
         subset = items[:n]
         if not subset:
-            return "│ *—*"
+            return "│ *—*\n\u200b"
         parsed = []
         for p in subset:
             if ' -- ' in p:
@@ -384,7 +384,7 @@ def build_favourites_embed(stats, bot_avatar_url=None):
                 lines.append(f"│ `{name:<{pad}}` — {rest}")
             else:
                 lines.append(f"│ `{name:<{pad}}`")
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n\u200b"
 
     week_label = stats.get('week_label', '')
     title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
@@ -405,15 +405,6 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(
         name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
         value=warlord_text,
-        inline=False,
-    )
-
-    embed.add_field(
-        name="─── This Week's Titles ───",
-        value=(
-            f"<a:topkill:1360314538364240024> **Apex** — `{stats['headhunter']}`  *(avg kills, 100+ runs)*\n"
-            f"<a:200tkd:1363648828414230538> **Frenzied** — `{stats['butcher']}`  *(avg takedowns, 200+ runs)*"
-        ),
         inline=False,
     )
 
