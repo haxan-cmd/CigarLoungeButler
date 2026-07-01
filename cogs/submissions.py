@@ -32,6 +32,17 @@ from utils.helpers import (
 def _ordinal(n):
     return {1:'st',2:'nd',3:'rd'}.get(n if n < 20 else n % 10, 'th')
 
+def _link_weapon(weapon, guild_id, lb_thread_map):
+    """Hyperlink a weapon name to its leaderboard thread, if one exists."""
+    tid = lb_thread_map.get(weapon)
+    return f"[{weapon}](https://discord.com/channels/{guild_id}/{tid})" if tid and weapon else (weapon or "")
+
+def _link_map_faction(map_name, faction, guild_id, lb_thread_map):
+    """Hyperlink the 'Map / Faction' text to its shared map-board thread, if one exists."""
+    tid = lb_thread_map.get(f"{map_name} - {faction}")
+    plain = f"{map_name} / {faction}"
+    return f"[{plain}](https://discord.com/channels/{guild_id}/{tid})" if tid else plain
+
 MOD_ROLE_ID            = config.MOD_ROLE_ID
 _ASSETS_DIR            = os.path.join(os.path.dirname(__file__), '..', 'assets')
 DECORATION_TOP         = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
@@ -1921,7 +1932,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     except Exception as e:
         print(f"Butler personality error: {e}")
 
-    # Edit the summary reply to include placements
+    # Edit the summary reply to include placements, and — only for boards this
+    # submission actually placed on — swap the plain weapon/map text for a
+    # hyperlink to that board. A submission that doesn't place shouldn't link
+    # to a board it didn't make.
     if placements:
         def _placement_line(lb, pos):
             if ' - ' in lb:
@@ -1932,10 +1946,31 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
         placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
         try:
+            placed_boards = {lb for lb, _ in placements}
+            map_lb_name = f"{selected_map} - {faction}"
+            if selected_weapon in placed_boards or map_lb_name in placed_boards:
+                from cogs.leaderboards import _get_lb_records as _lb_get_records
+                _lb_rows_for_links = await _lb_get_records()
+                _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
             # Find the reply we sent and edit it
             async for msg in original_message.channel.history(limit=10, after=original_message):
                 if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                    await msg.edit(content=msg.content + f"\n{placement_lines}")
+                    new_content = msg.content
+                    if selected_weapon in placed_boards:
+                        weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
+                        new_content = new_content.replace(
+                            f"│ {selected_weapon} • {selected_class}",
+                            f"│ {weapon_link} • {selected_class}",
+                            1,
+                        )
+                    if map_lb_name in placed_boards:
+                        map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
+                        new_content = new_content.replace(
+                            f"│ {selected_map} / {faction}",
+                            f"│ {map_link}",
+                            1,
+                        )
+                    await msg.edit(content=new_content + f"\n{placement_lines}")
                     break
         except Exception as e:
             print(f"Placement edit error: {e}")
