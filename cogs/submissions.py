@@ -2162,10 +2162,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     embed_text = await build_favourites_embed(stats, bot_avatar_url=_guild.me.display_avatar.url if _guild else None)
                     async for msg in fav_channel.history(limit=5):
                         if msg.author == _guild.me:
-                            await msg.edit(content=embed_text)
+                            await msg.edit(content=None, embed=embed_text)
                             break
                     else:
-                        await fav_channel.send(embed_text)
+                        await fav_channel.send(embed=embed_text)
                     await update_title_roles(_guild, stats)
         except Exception as e:
             print(f"Butler favourites update error: {e}")
