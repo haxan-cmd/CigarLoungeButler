@@ -151,19 +151,24 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             import io as _io
             img = _PImage.open(_io.BytesIO(image_bytes)).convert('RGB')
             w, h = img.size
-            # Upscale if smaller than 1920px wide — large lobbies have tiny text
-            if w < 1920:
-                scale = max(2.0, 1920 / w)
-                img = img.resize((int(w * scale), int(h * scale)), _PImage.LANCZOS)
-            # Sharpen and boost contrast slightly
+            # Normalize the long edge to ~1920px (≈1080p). Gemini tiles images
+            # internally and reads a full scoreboard fine at this size, so 4K
+            # screenshots only add upload + processing time (the old code left
+            # big images at full size — a 4K PNG is multi-MB and slow). Small
+            # images are still upscaled to 1920 so dense-lobby text stays legible.
+            TARGET_W = 1920
+            if w > 0 and w != TARGET_W:
+                scale = TARGET_W / w
+                img = img.resize((TARGET_W, max(1, int(h * scale))), _PImage.LANCZOS)
+            # Sharpen and boost contrast slightly (after resize, to recover edges)
             img = img.filter(_PIFilter.SHARPEN)
             img = _PIEnhance.Contrast(img).enhance(1.3)
             img = _PIEnhance.Sharpness(img).enhance(2.0)
             buf = _io.BytesIO()
-            img.save(buf, format='PNG')
+            img.save(buf, format='PNG', optimize=True)
             image_bytes = buf.getvalue()
             content_type = 'image/png'
-            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} PNG")
+            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} PNG ({len(image_bytes)} bytes)")
         except Exception as pp_err:
             print(f"[VISION] Pre-process skipped: {pp_err}")
 

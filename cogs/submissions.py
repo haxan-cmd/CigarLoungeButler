@@ -1526,18 +1526,21 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Reaction failed ({emoji}): {e}")
 
-    _immediate = ["<:cigar:1444893851427803298>"]
+    # Cigar always lands first; the rest fire concurrently right after.
+    await safe_react("<:cigar:1444893851427803298>")
+    _rest_reacts = []
     if deaths == 0:
-        _immediate.append("<a:flawless:1360358300834599062>")
+        _rest_reacts.append("<a:flawless:1360358300834599062>")
     if is_triple:
-        _immediate.append("<a:triple:1365532698260668466>")
+        _rest_reacts.append("<a:triple:1365532698260668466>")
     if kills >= 100:
-        _immediate.append("<a:100kill:1361412390339608686>")
+        _rest_reacts.append("<a:100kill:1361412390339608686>")
     if takedowns >= 200:
-        _immediate.append("<a:200tkd:1363648828414230538>")
+        _rest_reacts.append("<a:200tkd:1363648828414230538>")
     if takedowns >= 150 and deaths == 0:
-        _immediate.append("<a:predator:1366794896081555567>")
-    await asyncio.gather(*(safe_react(e) for e in _immediate), return_exceptions=True)
+        _rest_reacts.append("<a:predator:1366794896081555567>")
+    if _rest_reacts:
+        await asyncio.gather(*(safe_react(e) for e in _rest_reacts), return_exceptions=True)
 
     # Clear the "Scorecard detected" prompt in the background (never blocks).
     async def _cleanup_prompt():
