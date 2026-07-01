@@ -23,6 +23,9 @@ from cogs.favourites import calculate_butler_stats, build_favourites_embed, upda
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
 COUNTING_CHANNEL_ID         = config.COUNTING_CHANNEL_ID
+CLOWN_TARGET_USER_ID        = config.CLOWN_TARGET_USER_ID
+REACT_BLOCKED_USER_ID       = config.REACT_BLOCKED_USER_ID
+CLOWN_REACT_CHANCE          = 0.4  # ~40% of that user's messages get a clown react
 NERVE_CENTER_CHANNEL_ID     = config.NERVE_CENTER_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
 BUTLERS_MANUAL_CHANNEL_ID   = config.BUTLERS_MANUAL_CHANNEL_ID
@@ -572,6 +575,21 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"Counting insult error: {e}")
 
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        """Designated user isn't allowed to add reactions in main — strip them
+        as they land. They can still post messages normally. (Bot needs the
+        Manage Messages permission in main for this to work.)"""
+        if (not REACT_BLOCKED_USER_ID or payload.user_id != REACT_BLOCKED_USER_ID
+                or payload.channel_id != MAIN_CHANNEL_ID):
+            return
+        try:
+            channel = self.bot.get_channel(payload.channel_id) or await self.bot.fetch_channel(payload.channel_id)
+            message = await channel.fetch_message(payload.message_id)
+            await message.remove_reaction(payload.emoji, discord.Object(id=payload.user_id))
+        except Exception as e:
+            print(f"Reaction-block error: {e}")
+
     async def _run_nerve_logic(self):
         """Core nerve center post logic. Called by the hourly loop."""
         print(f"[NERVE] firing at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
@@ -801,6 +819,14 @@ class PersonalityCog(commands.Cog):
         if message.author.bot:
             return
 
+        # Clown a designated person — often, not every message
+        if (CLOWN_TARGET_USER_ID and message.author.id == CLOWN_TARGET_USER_ID
+                and random.random() < CLOWN_REACT_CHANCE):
+            try:
+                await message.add_reaction('\U0001f921')
+            except Exception:
+                pass
+
         # Middle finger at the bot = middle finger back
         if self.bot.user in message.mentions and '\U0001f595' in message.content:
             await message.channel.send('\U0001f595')
@@ -827,14 +853,13 @@ class PersonalityCog(commands.Cog):
             _cl = content_lower
             if any(t in _cl for t in _cmd_triggers):
                 import random as _rand
-                _hotline_id = config.BUTLERS_HOTLINE_CHANNEL_ID
                 _manual_id  = config.BUTLERS_MANUAL_CHANNEL_ID
                 _responses = [
-                    f"You need to call my hotline. <#{_hotline_id}>",
-                    f"I don't take requests in the main hall. The hotline exists for a reason. <#{_hotline_id}>",
-                    f"Kindly direct your enquiries to <#{_hotline_id}>. That's what it's there for.",
-                    f"The manual covers everything you need. <#{_manual_id}> — and the hotline for commands. <#{_hotline_id}>",
-                    f"I have a hotline. It's not decorative. <#{_hotline_id}>",
+                    f"The manual covers everything you need. <#{_manual_id}>",
+                    f"I don't take requests in the main hall. Consult the manual. <#{_manual_id}>",
+                    f"Kindly direct your enquiries to the manual. <#{_manual_id}> — that's what it's there for.",
+                    f"It's all written down. <#{_manual_id}>",
+                    f"The manual is not decorative. <#{_manual_id}>",
                 ]
                 await message.channel.send(_rand.choice(_responses))
                 return

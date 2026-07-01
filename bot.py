@@ -76,16 +76,6 @@ async def on_ready():
         print(f"❌ Command sync failed: {e}")
 
 
-@bot.event
-async def on_app_command_completion(interaction: discord.Interaction, command):
-    if interaction.channel_id == config.BUTLERS_HOTLINE_CHANNEL_ID:
-        try:
-            msg = await interaction.original_response()
-            await msg.delete(delay=300)
-        except Exception:
-            pass
-
-
 @bot.tree.error
 async def on_app_command_error(
     interaction: discord.Interaction,

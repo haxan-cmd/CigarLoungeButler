@@ -269,7 +269,7 @@ def build_favourites_explainer_embed():
         ),
         inline=False,
     )
-    embed.set_footer(text="Use /butlers_report in #🚨 | butlers-hotline to summon the latest report.")
+    embed.set_footer(text="Use /butlers_report to summon the latest report.")
     return embed
 
 
@@ -313,7 +313,7 @@ def build_manual_embed():
         value="`/rules` — Show the Cigar Lounge challenge rules.",
         inline=False,
     )
-    embed.set_footer(text="Use commands in #🚨 | butlers-hotline")
+    embed.set_footer(text="Use the bot's slash commands anywhere.")
     return embed
 
 
