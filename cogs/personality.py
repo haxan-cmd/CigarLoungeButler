@@ -18,7 +18,7 @@ import utils.db as _db
 from utils.helpers import (
     build_manual_content, build_manual_embed, build_favourites_explainer_embed, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
-from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles, record_weekly_leg
+from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles, record_weekly_leg, finalize_season
 
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
@@ -774,7 +774,9 @@ class PersonalityCog(commands.Cog):
                 weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
                 weekly_stats['week_label'] = week_label
                 try:
-                    await record_weekly_leg(weekly_stats, now)
+                    _season, _leg_no, _complete = await record_weekly_leg(weekly_stats, now)
+                    if _complete:
+                        await finalize_season(guild, _season)
                 except Exception as _le:
                     print(f"Season leg record error: {_le}")
                 embed_text = build_favourites_embed(weekly_stats)
@@ -881,7 +883,10 @@ class PersonalityCog(commands.Cog):
         if should_respond and _anthropic_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'
-            if str(message.author.id) == bald_female_id and not is_pinged and not mentions_butler:
+            # The Manager (Bald Female) only gets a reply on an explicit @mention —
+            # never on keywords, since she naturally says "butler"/"stats"/"manager"
+            # when discussing the bot. Avoids the Butler talking over the Manager.
+            if str(message.author.id) == bald_female_id and not is_pinged:
                 return
 
             discord_id_str = str(message.author.id)
