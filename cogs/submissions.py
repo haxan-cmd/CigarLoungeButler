@@ -1288,6 +1288,34 @@ async def _apply_edit(interaction, ev):
     except Exception as e:
         print(f"Edit DB update error: {e}")
 
+    # Propagate the edit to the leaderboards. Previously an edit only rewrote the
+    # summary + card, so the boards kept the pre-edit score (e.g. a mis-parsed map
+    # left the wrong map board updated and the corrected one untouched).
+    # Fix: wipe this run's board entries by link (clears stale weapon/map/feat
+    # placements), re-run update_leaderboards with the corrected values, then
+    # rebuild the affected weapon/map boards for this player so another of their
+    # runs reclaims the slot if this run moved off a board.
+    try:
+        from cogs.leaderboards import update_leaderboards, rebuild_score_boards
+        _edit_guild = ev.original_message.guild
+        _old_boards = await _db.delete_leaderboard_entries_by_link(ev.message_link)
+        try:
+            await update_leaderboards(
+                interaction, ev.weapon, ev.map_name, ev.faction,
+                ev.takedowns, ev.kills, ev.deaths, ev.vip, (ev.feats or []),
+                ev.author.display_name, ev.message_link,
+            )
+        except Exception as _e_upd:
+            print(f"[EDIT] update_leaderboards error: {_e_upd}")
+        _new_boards = {b for b in (None if ev.vip else ev.weapon,
+                                   f"{ev.map_name} - {ev.faction}") if b}
+        _affected = set(_old_boards) | _new_boards
+        if _affected:
+            await rebuild_score_boards(
+                _edit_guild, board_names=list(_affected), only_player=str(ev.author.id))
+    except Exception as e:
+        print(f"[EDIT] board propagation error: {e}")
+
     # Recompute marks + refresh the registry card so the edit actually propagates.
     # Previously the edit only rewrote the summary message, leaving the card and
     # cached mark totals stale (e.g. a class edit didn't move the mark).

@@ -543,13 +543,21 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             if existing_entry:
                 if score > existing_score:
                     await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                    any_updated = True
-                    board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
-                    board_scores = [s for s in board_scores if s != existing_score]
+                    _all = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                    board_scores = [s for s in _all if s != existing_score]
                     board_scores.append(score)
                     board_scores.sort(reverse=True)
                     pos = board_scores.index(score) + 1
-                    placements.append((lb_name, pos))
+                    old_pos = (_all.index(existing_score) + 1) if existing_score in _all else pos + 1
+                    if pos < old_pos:
+                        # Actually climbed the board — this counts as a High Score.
+                        # Announce the placement only for maps or a #1 takeover
+                        # (weapon boards you're already on don't re-announce a spot).
+                        any_updated = True
+                        if ' - ' in lb_name or pos == 1:
+                            placements.append((lb_name, pos))
+                    # else: beat their own score but didn't move up — the board keeps
+                    # the higher score, but no placement and no High Score bonus.
                 else:
                     continue
             else:
@@ -615,6 +623,138 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             print(f"Discord update error for {lb_name}: {e}")
 
     return any_updated, placements
+
+
+# Boards that have their own qualifying rules / are unlimited — handled by
+# /backfill_feat_boards, NOT by the weapon/map rebuild below.
+_FEAT_BOARD_NAMES = {
+    "100 Kills", "200 Takedowns", "Triple", "TUFF",
+    "Flawless", "Mallet", "Knife", "Healing Horn",
+}
+
+
+def _classify_board(name, board_type):
+    """Return 'map', 'feat', or 'weapon' for a board."""
+    t = (board_type or '').strip().lower()
+    if t == 'map' or (' - ' in name and name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE):
+        return 'map'
+    if name in _FEAT_BOARD_NAMES:
+        return 'feat'
+    return 'weapon'
+
+
+async def _render_board(guild, lb_row, lb_name):
+    """Re-render a single board's Discord messages from its current DB rows."""
+    board_rows = await _db.get_leaderboard_by_board(lb_name)
+    entries = []
+    for row in board_rows:
+        entries.append({
+            'player': row[1] if len(row) > 1 else '',
+            'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+            'link': row[4] if len(row) > 4 else '',
+            'weapon': row[5] if len(row) > 5 else '',
+        })
+    entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+    show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+    score_prefix = "+" if lb_name == "TUFF" else ""
+    is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+    embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+    header_content = _map_header(lb_name) if is_map else ""
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+    try:
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+        if new_ids != message_ids:
+            await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+    except Exception as e:
+        print(f"Discord update error for {lb_name}: {e}")
+
+
+async def rebuild_score_boards(guild, board_names=None, only_player=None, render=True):
+    """Rebuild weapon + map boards from the full submission history.
+
+    Additive by design: recovers each player's best qualifying score per board
+    (weapon boards exclude VIP runs, map boards include them), merges it with
+    whatever is already on the board (keeping the higher score so true legacy
+    entries with no matching submission are preserved), then re-caps to top-10.
+
+    board_names — restrict to these boards (None = every weapon + map board).
+    only_player — restrict the submission scan to one discord_id (used by edits).
+    """
+    all_lb_records = await _get_lb_records()
+    all_subs = await _db.get_all_submissions()
+    summary = {'boards': 0, 'added': 0, 'updated': 0, 'evicted': 0}
+
+    for rec in all_lb_records:
+        nm = rec['Leaderboard Name']
+        kind = _classify_board(nm, rec.get('Type', ''))
+        if kind not in ('weapon', 'map'):
+            continue
+        if board_names is not None and nm not in board_names:
+            continue
+
+        # 1. Best qualifying submission per player for this board.
+        best = {}  # discord_id -> (score, player_name, link, weapon)
+        for s in all_subs:
+            if len(s) < 13:
+                continue
+            did = s[2] or ''
+            if only_player is not None and did != str(only_player):
+                continue
+            try:
+                td = int(s[7]) if s[7] else 0
+            except (ValueError, TypeError):
+                td = 0
+            if kind == 'weapon':
+                if s[3] != nm:
+                    continue
+                if (s[10] or '').strip().lower() == 'yes':  # VIP excluded from weapon boards
+                    continue
+                score = td
+            else:  # map board: "{map} - {faction}"
+                if f"{s[5]} - {s[6]}" != nm:
+                    continue
+                score = td
+            if score <= 0 or not did:
+                continue
+            cur = best.get(did)
+            if cur is None or score > cur[0]:
+                best[did] = (score, s[1] or '', s[12] or '', s[3] or '')
+
+        # 2. Merge additively with existing entries (keep the higher score).
+        existing_rows = await _db.get_leaderboard_by_board(nm)
+        existing_by_id = {}
+        for r in existing_rows:
+            eid = r[2] if len(r) > 2 else ''
+            esc = int(r[3]) if len(r) > 3 and r[3] else 0
+            existing_by_id[eid] = esc
+        for did, (score, pname, link, wpn) in best.items():
+            ex = existing_by_id.get(did)
+            if ex is None:
+                await _db.upsert_leaderboard_entry(nm, pname, did, score, link, wpn)
+                summary['added'] += 1
+            elif score > ex:
+                await _db.upsert_leaderboard_entry(nm, pname, did, score, link, wpn)
+                summary['updated'] += 1
+
+        # 3. Cap to top-10 (weapon + map boards are top-10 boards).
+        rows = await _db.get_leaderboard_by_board(nm)
+        rows_sorted = sorted(rows, key=lambda r: int(r[3]) if len(r) > 3 and r[3] else 0, reverse=True)
+        for r in rows_sorted[10:]:
+            did = r[2] if len(r) > 2 else ''
+            link = r[4] if len(r) > 4 else ''
+            if did:
+                await _db.delete_leaderboard_entry_by_board_and_player(nm, did)
+            elif link:
+                await _db.delete_leaderboard_entry_by_link(nm, link)
+            summary['evicted'] += 1
+
+        summary['boards'] += 1
+        if render:
+            await _render_board(guild, rec, nm)
+
+    return summary
 
 
 async def post_scorecard_to_threads(guild, lb_names, original_message):
@@ -1546,6 +1686,25 @@ class LeaderboardsCog(commands.Cog):
         if errors:
             summary += "\n⚠️ Errors:\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary[:1900])
+
+    @app_commands.command(name="rebuild_boards", description="Rebuild weapon + map boards from full submission history (mod only).")
+    @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
+    async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        board_names = [name] if name else None
+        try:
+            summary = await rebuild_score_boards(interaction.guild, board_names=board_names)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Rebuild failed: {e}")
+            return
+        await interaction.edit_original_response(content=(
+            f"✅ Rebuilt **{summary['boards']}** board(s) from submissions. "
+            f"Added {summary['added']}, updated {summary['updated']}, "
+            f"evicted {summary['evicted']} beyond top-10."
+        ))
 
     @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
