@@ -8,6 +8,7 @@ Connection pool is initialised once on bot startup via db_init().
 import os
 import json
 import asyncpg
+import time as _time
 from datetime import datetime
 
 _pool: asyncpg.Pool | None = None
@@ -34,6 +35,31 @@ def _pool_check():
     if not _pool:
         raise RuntimeError("DB pool not initialised — call db_init() first.")
     return _pool
+
+
+# ── In-memory read cache ────────────────────────────────────────────────────
+# The full-table getters below (submissions / players / leaderboard_data) get
+# hit repeatedly within a single event handler — a Butler chat reply alone can
+# fetch the same table several times. Cache each briefly so those bursts collapse
+# into one query. Writers invalidate the affected table immediately; the short
+# TTL is a backstop so any missed invalidation self-heals within seconds.
+# NOTE: returned lists are shared references — callers must treat them read-only,
+# same contract as the old SheetCache this replaces.
+_CACHE_TTL = 5.0  # seconds
+_cache: dict = {}
+
+def _cache_get(key: str):
+    entry = _cache.get(key)
+    if entry and (_time.monotonic() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+def _cache_set(key: str, data: list):
+    _cache[key] = (_time.monotonic(), data)
+
+def _cache_invalidate(*keys: str):
+    for k in keys:
+        _cache.pop(k, None)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -88,10 +114,15 @@ def _row_to_player(r) -> list:
 # ── Submissions ───────────────────────────────────────────────────────────────
 
 async def get_all_submissions() -> list[list]:
+    cached = _cache_get('submissions')
+    if cached is not None:
+        return cached
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM submissions ORDER BY id")
-    return [_row_to_submission(r) for r in rows]
+    data = [_row_to_submission(r) for r in rows]
+    _cache_set('submissions', data)
+    return data
 
 
 async def add_submission(
@@ -102,6 +133,7 @@ async def add_submission(
     team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None
 ) -> int:
     """Insert a submission and return its id (replaces sheet row index)."""
+    _cache_invalidate('submissions')
     pool = _pool_check()
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
     if isinstance(timestamp, str):
@@ -134,6 +166,7 @@ async def get_submission_feats(submission_id: int) -> str:
 
 
 async def update_submission_feats(submission_id: int, feats: str):
+    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -145,6 +178,7 @@ async def update_submission_fields(submission_id: int, weapon: str, cls: str,
                                    map_name: str, faction: str, takedowns: int,
                                    kills: int, deaths: int, vip: bool, feats: str):
     """Update all editable fields on a submission row (used by edit flow)."""
+    _cache_invalidate('submissions')
     pool = _pool_check()
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
     async with pool.acquire() as conn:
@@ -181,6 +215,7 @@ async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int
 
 
 async def delete_submission_by_link(message_link: str):
+    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -191,10 +226,15 @@ async def delete_submission_by_link(message_link: str):
 # ── Players ───────────────────────────────────────────────────────────────────
 
 async def get_all_players() -> list[list]:
+    cached = _cache_get('players')
+    if cached is not None:
+        return cached
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM players ORDER BY player_name")
-    return [_row_to_player(r) for r in rows]
+    data = [_row_to_player(r) for r in rows]
+    _cache_set('players', data)
+    return data
 
 
 async def get_player(discord_id: str) -> list | None:
@@ -207,6 +247,7 @@ async def get_player(discord_id: str) -> list | None:
 async def upsert_player(discord_id, player_name, forum_thread_id=None,
                          total_marks=0, submission_count=0, last_submission=None,
                          weapon_marks=None, class_marks=None):
+    _cache_invalidate('players')
     pool = _pool_check()
     if isinstance(last_submission, str):
         try: last_submission = datetime.strptime(last_submission, '%Y-%m-%d %H:%M:%S')
@@ -249,6 +290,7 @@ async def get_player_igns(discord_id: str) -> list[str]:
 
 async def save_player_ign(discord_id: str, ign: str):
     """Append a new in-game name alias if not already stored."""
+    _cache_invalidate('players')
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
@@ -269,6 +311,7 @@ async def save_player_ign(discord_id: str, ign: str):
 async def increment_manual_feat_count(discord_id: str, feat: str):
     """Increment a manual feat count by 1 — only if the column is already set (not NULL).
     If NULL, does nothing so auto-detection continues to work for untracked players."""
+    _cache_invalidate('players')
     col_map = {
         '100 kills':      'kills_100_count',
         '200 takedowns':  'takedowns_200_count',
@@ -287,6 +330,7 @@ async def increment_manual_feat_count(discord_id: str, feat: str):
 
 async def set_manual_feat_count(discord_id: str, feat: str, count: int):
     """Set a manual override count for 100 Kills, 200 Takedowns, or Triple on a player row."""
+    _cache_invalidate('players')
     col_map = {
         '100 kills':      'kills_100_count',
         '200 takedowns':  'takedowns_200_count',
@@ -313,6 +357,7 @@ async def set_manual_feat_count(discord_id: str, feat: str, count: int):
 
 
 async def update_player_thread(discord_id: str, thread_id: str):
+    _cache_invalidate('players')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -360,17 +405,23 @@ async def update_leaderboard_messages(board_name: str, message_ids: str):
 # ── LeaderboardData ───────────────────────────────────────────────────────────
 
 async def get_all_leaderboard_data() -> list[list]:
+    cached = _cache_get('leaderboard_data')
+    if cached is not None:
+        return cached
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM leaderboard_data ORDER BY id")
-    return [
+    data = [
         [r['board_name'], r['player_name'], r['discord_id'] or '',
          str(r['score']) if r['score'] is not None else '', r['message_link'] or '', r['weapon'] or '']
         for r in rows
     ]
+    _cache_set('leaderboard_data', data)
+    return data
 
 
 async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
@@ -391,6 +442,7 @@ async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, m
 
 
 async def delete_leaderboard_entry(entry_id: int):
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM leaderboard_data WHERE id=$1", entry_id)
@@ -534,6 +586,7 @@ async def upsert_index_post(forum_name, channel_id, message_id):
 
 async def add_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
     """Always insert a new row (used for unlimited boards like 100 Kills / 200 Takedowns)."""
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -544,6 +597,7 @@ async def add_leaderboard_entry(board_name, player_name, discord_id, score, mess
 
 async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_id: str):
     """Delete the oldest entry for a player on a board (top-10 pruning)."""
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -558,6 +612,7 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
 
 async def delete_leaderboard_entry_by_link(board_name: str, message_link: str):
     """Delete one entry on a specific board by message link (for deduplication)."""
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -569,6 +624,7 @@ async def delete_leaderboard_entry_by_link(board_name: str, message_link: str):
 
 async def delete_leaderboard_entries_by_link(message_link: str) -> list[str]:
     """Delete all leaderboard_data rows matching a message_link; return affected board names."""
+    _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -581,6 +637,7 @@ async def delete_leaderboard_entries_by_link(message_link: str) -> list[str]:
 
 async def update_submission_feats_by_link(message_link: str, feats: str):
     """Update feats string for a submission identified by message_link."""
+    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -593,6 +650,7 @@ async def update_submission_feats_by_link(message_link: str, feats: str):
 async def update_player_stats(discord_id, total_marks, submission_count, last_submission_str,
                                weapon_marks_str, class_marks_str, forum_thread_id=None):
     """Update stats columns on the players table."""
+    _cache_invalidate('players')
     pool = _pool_check()
     last_sub = None
     if last_submission_str:
