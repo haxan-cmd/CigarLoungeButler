@@ -403,6 +403,7 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     def _spacer():
         embed.add_field(name="​", value="​", inline=False)
 
+    _spacer()
     _pair(
         ("<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ td %)*", lethal_text),
         ("<:warlord:1520490364039860347> Warlord  *(TD share %)*", warlord_text),
