@@ -1981,13 +1981,26 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # hyperlink to that board. A submission that doesn't place shouldn't link
     # to a board it didn't make.
     if placements:
+        # Each feat board shows its own logo; weapon_hs is reserved for the actual
+        # weapon board. Map boards use the trophy.
+        _FEAT_EMOJI = {
+            "100 Kills":     "<a:100kill:1361412390339608686>",
+            "200 Takedowns": "<a:200tkd:1363648828414230538>",
+            "Triple":        "<a:triple:1365532698260668466>",
+            "TUFF":          "<a:TUFF2:1520779243879927898>",
+            "Flawless":      "<a:flawless:1360358300834599062>",
+            "Mallet":        "🔨",
+            "Knife":         "🗡️",
+        }
         def _placement_line(lb, pos):
-            if ' - ' in lb:
+            if ' - ' in lb:                       # map board
                 return f"🏆 {lb} — #{pos}"
-            elif lb == "TUFF":
-                return f"<a:TUFF2:1520779243879927898> — #{pos}"
-            else:
-                return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
+            if lb == "TUFF":                      # TUFF shows emoji only, no name
+                return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
+            if lb in _FEAT_EMOJI:                 # feat boards: own logo + rank
+                return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
+            # actual weapon board — the only place weapon_hs belongs
+            return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
         placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
         try:
             placed_boards = {lb for lb, _ in placements}
