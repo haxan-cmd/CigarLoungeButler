@@ -306,28 +306,28 @@ class AdminCog(commands.Cog):
             color=discord.Color.from_str("#c8a45a")
         )
         embed.add_field(
-            name="🏆 Grand Marshal",
+            name="🏆 Grand Marshal  *(all-time)*",
             value="Appears on 15+ leaderboards across all categories, ranked by average placement.",
             inline=False
         )
         embed.add_field(
-            name="⚔️ Weapons Master",
+            name="⚔️ Weapons Master  *(all-time)*",
             value="Appears on 9+ weapon leaderboards, ranked by average placement.",
             inline=False
         )
         embed.add_field(
-            name="🗺️ Campaign Master",
+            name="🗺️ Campaign Master  *(all-time)*",
             value="Appears on 6+ map leaderboards, ranked by average placement.",
             inline=False
         )
         embed.add_field(
-            name="💀 Apex",
-            value="Hit 100+ kills in a single match and submit your scoreboard to enter the 100 Kills board. The title goes to the highest average kills across your qualifying runs (minimum 3 runs).",
+            name="💀 Apex  *(weekly showcase)*",
+            value="Each week, awarded to the highest average kills across your 100+ kill runs (minimum 3 that week). A showcase title — no role attached, just bragging rights.",
             inline=False
         )
         embed.add_field(
-            name="🩸 Frenzied",
-            value="Hit 200+ takedowns in a single match and submit your scoreboard to enter the 200 Takedowns board. The title goes to the highest average takedowns across your qualifying runs (minimum 3 runs).",
+            name="🩸 Frenzied  *(weekly showcase)*",
+            value="Each week, awarded to the highest average takedowns across your 200+ takedown runs (minimum 3 that week). A showcase title — no role attached, just bragging rights.",
             inline=False
         )
         embed.set_footer(text="Only one player holds each title at a time.")

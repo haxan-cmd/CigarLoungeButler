@@ -250,6 +250,8 @@ def build_favourites_explainer_embed():
         value=(
             "`Most Lethal` — highest kills ÷ takedowns % across the week\n"
             "`Warlord` — highest takedown share of team % across the week\n"
+            "`Apex` — highest average kills on 100+ kill runs this week\n"
+            "`Frenzied` — highest average takedowns on 200+ takedown runs this week\n"
             "`Most Kills` — best single-game kill score this week\n"
             "`Highest Takedowns` — best single-game takedown score this week\n"
             "`Busiest` — most total submissions this week\n"
@@ -263,9 +265,7 @@ def build_favourites_explainer_embed():
         value=(
             "`Grand Marshal` — #1 across the most leaderboards overall\n"
             "`Weapons Master` — #1 across the most weapon boards\n"
-            "`Campaign Master` — #1 across the most map boards\n"
-            "`Apex` — highest average kills on 100+ kill runs\n"
-            "`Frenzied` — highest average takedowns on 200+ takedown runs"
+            "`Campaign Master` — #1 across the most map boards"
         ),
         inline=False,
     )
