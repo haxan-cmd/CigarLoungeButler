@@ -358,18 +358,18 @@ def build_favourites_embed(stats, bot_avatar_url=None):
     def fmt_list(items, suffix="", n=3):
         subset = items[:n]
         if not subset:
-            return "│ *—*\n\u200b"
+            return "│ *—*"
         pad = max(len(name) for name, _ in subset)
         lines = []
         for i, (name, val) in enumerate(subset):
             sfx = f" {suffix}" if (suffix and i == 0) else ""
             lines.append(f"│ `{name:<{pad}}` — {val}{sfx}")
-        return "\n".join(lines) + "\n\u200b"
+        return "\n".join(lines)
 
     def fmt_plain(items, n=3):
         subset = items[:n]
         if not subset:
-            return "│ *—*\n\u200b"
+            return "│ *—*"
         parsed = []
         for p in subset:
             if ' -- ' in p:
@@ -384,7 +384,7 @@ def build_favourites_embed(stats, bot_avatar_url=None):
                 lines.append(f"│ `{name:<{pad}}` — {rest}")
             else:
                 lines.append(f"│ `{name:<{pad}}`")
-        return "\n".join(lines) + "\n\u200b"
+        return "\n".join(lines)
 
     week_label = stats.get('week_label', '')
     title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
@@ -395,70 +395,51 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         embed.set_thumbnail(url=bot_avatar_url)
 
     lethal_text = fmt_plain(stats['high_lethality']) if stats.get('high_lethality') else "│ *Not enough data yet*"
-    embed.add_field(
-        name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ takedowns %)*",
-        value=lethal_text,
-        inline=False,
+    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "│ *Not enough team data yet*"
+
+    def _pair(a, b):
+        # two half-width columns (2 inline fields ≈ 50% each); non-inline fields break rows
+        embed.add_field(name=a[0], value=a[1], inline=True)
+        embed.add_field(name=b[0], value=b[1], inline=True)
+
+    def _spacer():
+        embed.add_field(name="​", value="​", inline=False)
+
+    _pair(
+        ("<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ td %)*", lethal_text),
+        ("<:warlord:1520490364039860347> Warlord  *(TD share %)*", warlord_text),
     )
 
-    warlord_text = fmt_plain(stats['most_dominant']) if stats.get('most_dominant') else "│ *Not enough team data yet*"
-    embed.add_field(
-        name="<:warlord:1520490364039860347> Warlord  *(TD share of team %)*",
-        value=warlord_text,
-        inline=False,
-    )
+    embed.add_field(name="─── This Week ───", value="​", inline=False)
 
     _tt = stats.get('top_total_tally') or []
-    embed.add_field(
-        name="🩸 Total Tally  *(most takedowns this week)*",
-        value=fmt_list([(n, f"{v:,}") for n, v in _tt], "TDs") if _tt else "│ *—*",
-        inline=False,
-    )
     _fl = stats.get('top_fastest_learner') or []
-    embed.add_field(
-        name="📈 Fastest Learner  *(personal bests set this week)*",
-        value=fmt_list([(n, c) for n, c in _fl], "PBs") if _fl else "│ *No new personal bests yet*",
-        inline=False,
+    _pair(
+        ("<a:200tkd:1363648828414230538> Total Tally  *(takedowns)*", fmt_list([(n, f"{v:,}") for n, v in _tt], "TDs") if _tt else "│ *—*"),
+        ("📈 Fastest Learner  *(PBs)*", fmt_list([(n, c) for n, c in _fl], "PBs") if _fl else "│ *—*"),
     )
+    _spacer()
+    _pair(
+        ("<a:topkill:1360314538364240024> Most Kills", fmt_list(stats['top_kills_list'], "kills")),
+        ("<a:toptkd:1360312666475728958> Highest Takedowns", fmt_list(stats['top_td_list'], "TDs")),
+    )
+    embed.add_field(name="🏃 Busiest", value=fmt_list(stats['top_busiest'], "runs"), inline=False)
 
-    embed.add_field(name="​", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
-
-    embed.add_field(
-        name="⚔️ Most Kills",
-        value=fmt_list(stats['top_kills_list']),
-        inline=False,
-    )
-    embed.add_field(
-        name="<a:toptkd:1360312666475728958> Highest Takedowns",
-        value=fmt_list(stats['top_td_list']),
-        inline=False,
-    )
-    embed.add_field(
-        name="🏃 Busiest",
-        value=fmt_list(stats['top_busiest'], "runs"),
-        inline=False,
-    )
-    embed.add_field(
-        name="🗡️ Top Weapons",
-        value=fmt_list(stats['top_weapons'], "runs"),
-        inline=False,
-    )
-    embed.add_field(
-        name="🗺️ Top Maps",
-        value=fmt_list(stats['top_maps'], "runs"),
-        inline=False,
+    embed.add_field(name="─── Meta ───", value="​", inline=False)
+    _pair(
+        ("🗡️ Top Weapons", fmt_list(stats['top_weapons'], "runs")),
+        ("🗺️ Top Maps", fmt_list(stats['top_maps'], "runs")),
     )
 
     embed.add_field(
         name="─── All-Time Titles ───",
         value=(
-            f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — `{stats['grand_marshal']}`\n"
-            f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — `{stats['weapons_master']}`\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`"
+            f"│ <a:grandmarshal:1519928617407348877> **Grand Marshal** — `{stats['grand_marshal']}`\n"
+            f"│ <a:weaponsmaster:1519928521445605488> **Weapons Master** — `{stats['weapons_master']}`\n"
+            f"│ <a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`"
         ),
         inline=False,
     )
-
     return embed
 
 
