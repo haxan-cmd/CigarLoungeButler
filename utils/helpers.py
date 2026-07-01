@@ -195,6 +195,10 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
                     config=_gtypes.GenerateContentConfig(
                         temperature=0,
                         response_mime_type='application/json',
+                        # Cap output so a runaway response (a real 65k-char blob was
+                        # seen) gets cut off fast instead of hanging ~100s; a normal
+                        # scorecard JSON is ~200 tokens, so this is huge headroom.
+                        max_output_tokens=2048,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
