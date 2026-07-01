@@ -18,7 +18,7 @@ import utils.db as _db
 from utils.helpers import (
     build_manual_content, build_manual_embed, build_favourites_explainer_embed, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
-from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles, record_weekly_leg, finalize_season
+from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
 
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
@@ -773,12 +773,6 @@ class PersonalityCog(commands.Cog):
                 week_label = f"{week_start_dt.strftime('%b %d')} – {now.strftime('%b %d')}"
                 weekly_stats = await calculate_butler_stats(week_start=week_start_ts, week_end=week_end_ts)
                 weekly_stats['week_label'] = week_label
-                try:
-                    _season, _leg_no, _complete = await record_weekly_leg(weekly_stats, now)
-                    if _complete:
-                        await finalize_season(guild, _season)
-                except Exception as _le:
-                    print(f"Season leg record error: {_le}")
                 embed_text = build_favourites_embed(weekly_stats)
                 fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:

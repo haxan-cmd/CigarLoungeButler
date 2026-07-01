@@ -150,8 +150,15 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # ── LETHALITY -- avg kills ÷ takedowns %, min 3 runs ──
-    lethal_candidates = {p for p, v in lethal_ratios.items() if len(v) >= 3}
+    # -- Median-anchored qualification floor for the average categories: you need
+    # about half as many games as a typical player (min 3), so one lucky game
+    # can't top a percentage board. Robust to grinders (median ignores whales).
+    import statistics as _stats
+    _active = [c for c in player_counts.values() if c > 0]
+    _min_games = max(3, int(_stats.median(_active) // 2)) if _active else 3
+
+    # ── LETHALITY -- avg kills ÷ takedowns %, median-floor qualified ──
+    lethal_candidates = {p for p, v in lethal_ratios.items() if len(v) >= _min_games}
     lethal_ranked = sorted(lethal_candidates, key=lambda p: -(sum(lethal_ratios[p]) / len(lethal_ratios[p])))
 
     def lethality_label(p):
@@ -162,7 +169,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     most_lethal_top5 = [lethality_label(p) for p in lethal_ranked[:5]]
 
     # ── WARLORD -- avg team TD share %, min 3 runs with team data ──
-    warlord_candidates = {p for p, v in team_td_shares.items() if len(v) >= 3}
+    warlord_candidates = {p for p, v in team_td_shares.items() if len(v) >= _min_games}
     dom_ranked = sorted(warlord_candidates, key=lambda p: -(sum(team_td_shares[p]) / len(team_td_shares[p])))
 
     most_dominant = []
@@ -503,87 +510,96 @@ async def update_title_roles(guild, stats):
                 print(f"Title announcement error: {e}")
 
 
-_SEASON_CATEGORIES = ["Most Lethal", "Warlord", "Total Tally", "Fastest Learner",
-                      "Most Kills", "Highest Takedowns", "Busiest"]
+_SEASON_CATEGORIES = [
+    ("Most Lethal", "high_lethality", True),
+    ("Warlord", "most_dominant", True),
+    ("Total Tally", "top_total_tally", False),
+    ("Fastest Learner", "top_fastest_learner", False),
+    ("Most Kills", "top_kills_list", False),
+    ("Highest Takedowns", "top_td_list", False),
+    ("Busiest", "top_busiest", False),
+]
+_GP_POINTS = [3, 2, 1]
 
 
-async def record_weekly_leg(stats, run_dt):
-    """Record one weekly leg toward the current fixed 3-week season: top-3 per
-    category earn 3/2/1 GP points. Returns (season, leg_in_season, complete).
-    Idempotent per week (keyed on the run date)."""
-    def _placings(items, plain=False):
-        out = []
-        for it in (items or [])[:3]:
-            if plain and isinstance(it, str):
-                if ' -- ' in it:
-                    nm, val = it.split(' -- ', 1)
-                    out.append((nm.strip(), val.strip()))
-                else:
-                    out.append((it.strip(), None))
-            elif isinstance(it, (list, tuple)) and it and it[0]:
-                out.append((str(it[0]).strip(), str(it[1]) if len(it) > 1 else None))
-        return out
-    placements = {
-        "Most Lethal": _placings(stats.get('high_lethality'), plain=True),
-        "Warlord": _placings(stats.get('most_dominant'), plain=True),
-        "Total Tally": _placings(stats.get('top_total_tally')),
-        "Fastest Learner": _placings(stats.get('top_fastest_learner')),
-        "Most Kills": _placings(stats.get('top_kills_list')),
-        "Highest Takedowns": _placings(stats.get('top_td_list')),
-        "Busiest": _placings(stats.get('top_busiest')),
-    }
-    week_start = run_dt.date()
-    ordinal = await _db.get_leg_ordinal(week_start)
-    season = str((ordinal - 1) // _db.SEASON_LENGTH + 1)
-    leg_in_season = (ordinal - 1) % _db.SEASON_LENGTH + 1
-    await _db.record_season_leg(season, week_start, placements)
-    return season, leg_in_season, leg_in_season >= _db.SEASON_LENGTH
+def _cat_names(items, plain=False):
+    out = []
+    for it in (items or [])[:3]:
+        if plain and isinstance(it, str):
+            out.append(it.split(" -- ", 1)[0].strip())
+        elif isinstance(it, (list, tuple)) and it and it[0]:
+            out.append(str(it[0]).strip())
+    return out
+
+
+def _cat_top(items, plain=False):
+    for it in (items or [])[:1]:
+        if plain and isinstance(it, str):
+            nm, _, val = it.partition(" -- ")
+            return nm.strip(), val.strip()
+        if isinstance(it, (list, tuple)) and it and it[0]:
+            return str(it[0]).strip(), (str(it[1]) if len(it) > 1 else "")
+    return None, ""
+
+
+async def compute_season_standings(started_at, ended_at, bonuses):
+    """Grand Prix points over the season window: top-3 per category = 3/2/1,
+    summed per player, plus bounty-completion bonuses. Returns (standings, stats)."""
+    from datetime import datetime, timezone
+    start_ts = started_at.timestamp() if hasattr(started_at, "timestamp") else float(started_at)
+    if ended_at:
+        end_ts = ended_at.timestamp() if hasattr(ended_at, "timestamp") else float(ended_at)
+    else:
+        end_ts = datetime.now(timezone.utc).timestamp()
+    stats = await calculate_butler_stats(week_start=start_ts, week_end=end_ts)
+    points = {}
+    for _cat, key, plain in _SEASON_CATEGORIES:
+        for i, nm in enumerate(_cat_names(stats.get(key), plain)):
+            points[nm] = points.get(nm, 0) + _GP_POINTS[i]
+    for nm, bp in (bonuses or {}).items():
+        points[nm] = points.get(nm, 0) + bp
+    return sorted(points.items(), key=lambda x: (-x[1], x[0])), stats
 
 
 async def build_season_embed(season):
     import discord as _d
-    legs = await _db.get_season_legs(season)
-    standings = await _db.get_season_standings(season)
-    by_week, order = {}, []
-    for wk, cat, name, rank, val in legs:
-        if wk not in by_week:
-            by_week[wk] = {}
-            order.append(wk)
-        by_week[wk].setdefault(cat, []).append((rank, name, val))
-    desc = []
-    for i, wk in enumerate(sorted(order), 1):
-        label = wk.strftime('%b %d') if hasattr(wk, 'strftime') else str(wk)
-        desc.append(f"__**Leg {i}** — {label}__")
-        for cat in _SEASON_CATEGORIES:
-            top = sorted(by_week[wk].get(cat, []))
-            if top:
-                _, nm, val = top[0]
-                desc.append(f"│ {cat}: `{nm}`" + (f" — {val}" if val else ""))
-        desc.append("")
-    embed = _d.Embed(title=f"\U0001f3c1 Season {season} — Hall of Fame",
-                     description="\n".join(desc) or "*No data.*", color=0x8b6914)
+    bonuses = await _db.get_season_bonuses(season["id"])
+    standings, s_stats = await compute_season_standings(season["started_at"], season.get("ended_at"), bonuses)
+    a_stats = await calculate_butler_stats()  # all-time
+    label = season.get("label") or f"Season {season['id']}"
+    lines = []
     if standings:
         champ = standings[0]
-        embed.add_field(name="\U0001f3c6 Season Champion",
-                        value=f"**{champ[0]}** — {champ[1]} pts · {champ[2]} leg wins", inline=False)
-        table = "\n".join(f"`{i:>2}.` {n} — {p} pts" for i, (n, p, w) in enumerate(standings[:8], 1))
-        embed.add_field(name="Final Standings", value=table, inline=False)
-    return embed
+        lines += [f"\U0001f3c6 **Champion — {champ[0]}**  ({champ[1]} pts)", "", "**Standings**"]
+        for i, (nm, pts) in enumerate(standings[:8], 1):
+            lines.append(f"`{i:>2}.` {nm} — {pts} pts")
+        lines.append("")
+    lines.append("**Category Winners**  *(this season · all-time)*")
+    for cat, key, plain in _SEASON_CATEGORIES:
+        s_nm, s_val = _cat_top(s_stats.get(key), plain)
+        a_nm, a_val = _cat_top(a_stats.get(key), plain)
+        s_txt = (f"`{s_nm}`" + (f" {s_val}" if s_val else "")) if s_nm else "—"
+        a_txt = (f"{a_nm}" + (f" {a_val}" if a_val else "")) if a_nm else "—"
+        lines.append(f"│ **{cat}**: {s_txt}  ·  all-time: {a_txt}")
+    return _d.Embed(title=f"\U0001f3c1 {label} — Hall of Fame",
+                    description="\n".join(lines), color=0x8b6914)
 
 
 async def _hof_index_refresh(guild):
     forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
     if not forum:
         return
-    lines = ["**\U0001f3c1 Hall of Fame — Season Index**", "", "*Champions of each 3-week season.*", ""]
-    for s in await _db.get_completed_seasons():
-        tid = await _db.get_season_thread(s)
-        standings = await _db.get_season_standings(s)
+    lines = ["**\U0001f3c1 Hall of Fame — Index**", "", "*Champions of each season.*", ""]
+    for s in await _db.get_finished_seasons():
+        label = s.get("label") or f"Season {s['id']}"
+        bonuses = await _db.get_season_bonuses(s["id"])
+        standings, _ = await compute_season_standings(s["started_at"], s.get("ended_at"), bonuses)
         champ = standings[0][0] if standings else "—"
+        tid = s.get("thread_id")
         link = f"  https://discord.com/channels/{guild.id}/{tid}" if tid else ""
-        lines.append(f"**Season {s}** — \U0001f3c6 {champ}{link}")
+        lines.append(f"**{label}** — \U0001f3c6 {champ}{link}")
     body = "\n".join(lines)
-    idx = next((p for p in await _db.get_all_index_posts() if p[0] == 'hall_of_fame'), None)
+    idx = next((p for p in await _db.get_all_index_posts() if p[0] == "hall_of_fame"), None)
     if idx and idx[1]:
         try:
             thread = guild.get_channel(int(idx[1])) or await guild.fetch_channel(int(idx[1]))
@@ -592,21 +608,21 @@ async def _hof_index_refresh(guild):
             return
         except Exception:
             pass
-    created = await forum.create_thread(name="\U0001f4cb Season Index", content=body)
-    await _db.upsert_index_post('hall_of_fame', str(created.thread.id), str(created.message.id))
+    created = await forum.create_thread(name="\U0001f4cb Hall of Fame Index", content=body)
+    await _db.upsert_index_post("hall_of_fame", str(created.thread.id), str(created.message.id))
 
 
 async def finalize_season(guild, season):
-    """Create or refresh the forum thread for a season and update the index."""
+    """Create or refresh a season's Hall of Fame forum thread, then update the index."""
     forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
     if not forum:
         print("[HOF] Hall of Fame forum not found")
         return
     embed = await build_season_embed(season)
-    existing = await _db.get_season_thread(season)
-    if existing:
+    label = season.get("label") or f"Season {season['id']}"
+    if season.get("thread_id"):
         try:
-            thread = guild.get_channel(int(existing)) or await guild.fetch_channel(int(existing))
+            thread = guild.get_channel(int(season["thread_id"])) or await guild.fetch_channel(int(season["thread_id"]))
             async for msg in thread.history(oldest_first=True, limit=1):
                 await msg.edit(embed=embed)
                 break
@@ -615,11 +631,10 @@ async def finalize_season(guild, season):
         except Exception as e:
             print(f"[HOF] Could not refresh season thread: {e}")
     try:
-        created = await forum.create_thread(name=f"Season {season}",
-                                            content=f"**Season {season} — Hall of Fame**", embed=embed)
-        await _db.set_season_thread(season, str(created.thread.id))
+        created = await forum.create_thread(name=label, content=f"**{label} — Hall of Fame**", embed=embed)
+        await _db.set_season_thread(season["id"], str(created.thread.id))
         await _hof_index_refresh(guild)
-        print(f"[HOF] Posted Season {season}")
+        print(f"[HOF] Posted {label}")
     except Exception as e:
         print(f"[HOF] Failed to post season: {e}")
 
@@ -631,33 +646,51 @@ class FavouritesCog(commands.Cog):
     async def cog_load(self):
         await _db.season_init()
 
-    @app_commands.command(name="season_standings", description="Current season standings — GP points across the 3 weekly legs.")
-    async def season_standings(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        total = await _db.get_total_legs()
-        season = str(max(total - 1, 0) // _db.SEASON_LENGTH + 1)
-        standings = await _db.get_season_standings(season)
-        legs = await _db.get_season_leg_count(season)
-        if not standings:
-            await interaction.followup.send("No legs recorded yet — standings open once the first weekly report lands.")
-            return
-        lines = [f"**\U0001f3c1 Season {season} Standings**  *(after {legs} of {_db.SEASON_LENGTH} legs)*", ""]
-        for i, (name, pts, wins) in enumerate(standings[:15], 1):
-            lines.append(f"`{i:>2}.` **{name}** — {pts} pts · {wins} leg win{'s' if wins != 1 else ''}")
-        await interaction.followup.send("\n".join(lines))
-
-    @app_commands.command(name="force_finalize_season", description="Post/refresh a season's Hall of Fame entry (mod only).")
-    @app_commands.describe(season="Season number (blank = current)")
-    async def force_finalize_season(self, interaction: discord.Interaction, season: str = None):
+    @app_commands.command(name="season_start", description="Open a season now for the current bounty (mod only).")
+    @app_commands.describe(label="Season name — e.g. the bounty title")
+    async def season_start(self, interaction: discord.Interaction, label: str):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
+        sid = await _db.start_season(label)
+        await interaction.followup.send(
+            f"Season **{label}** opened (id {sid}). Stats accrue from now until the bounty ends.", ephemeral=True)
+
+    @app_commands.command(name="season_standings", description="Live standings for the current season (this bounty cycle).")
+    async def season_standings(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        season = await _db.get_current_season()
         if not season:
-            total = await _db.get_total_legs()
-            season = str(max(total - 1, 0) // _db.SEASON_LENGTH + 1)
+            await interaction.followup.send("No season is running — a season opens when a bounty starts.")
+            return
+        bonuses = await _db.get_season_bonuses(season["id"])
+        standings, _s = await compute_season_standings(season["started_at"], None, bonuses)
+        if not standings:
+            await interaction.followup.send("No stats recorded yet this season.")
+            return
+        label = season.get("label") or f"Season {season['id']}"
+        lines = [f"**\U0001f3c1 {label} — Live Standings**", ""]
+        for i, (nm, pts) in enumerate(standings[:15], 1):
+            lines.append(f"`{i:>2}.` **{nm}** — {pts} pts")
+        await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
+    async def force_finalize_season(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        season = await _db.get_current_season()
+        if not season:
+            fin = await _db.get_finished_seasons()
+            season = fin[0] if fin else None
+        if not season:
+            await interaction.followup.send("No season to finalize.", ephemeral=True)
+            return
         await finalize_season(interaction.guild, season)
-        await interaction.followup.send(f"Posted/refreshed Season {season} in the Hall of Fame.", ephemeral=True)
+        label = season.get("label") or f"Season {season['id']}"
+        await interaction.followup.send(f"Posted/refreshed the Hall of Fame entry for {label}.", ephemeral=True)
 
     @app_commands.command(name="butlers_report", description="Summon the Butler's Favourites report")
     async def butlers_report(self, interaction: discord.Interaction):

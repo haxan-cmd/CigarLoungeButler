@@ -546,6 +546,10 @@ class BountyCog(commands.Cog):
             f"📖 Ledger: {forum_mention}\n"
             f"🎭 Role: {bounty_role.mention}"
         )
+        try:
+            await _db.start_season(title)
+        except Exception as _se:
+            print(f"[SEASON] start error: {_se}")
         await interaction.edit_original_response(content=msg)
 
     @app_commands.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
@@ -568,6 +572,16 @@ class BountyCog(commands.Cog):
         await _db.update_bounty_field(bounty['id'], 'active', 'FALSE')
 
         guild = interaction.guild
+
+        # Close the season tied to this bounty: post the Hall of Fame entry, then end it.
+        try:
+            from cogs.favourites import finalize_season
+            _season = await _db.get_current_season()
+            if _season:
+                await finalize_season(guild, _season)
+                await _db.end_current_season()
+        except Exception as _se:
+            print(f"[SEASON] finalize error: {_se}")
         closed_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         completed_ids = {str(c['id']) for c in bounty['completions']}
 

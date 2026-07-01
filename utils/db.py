@@ -1103,119 +1103,95 @@ async def set_kofi_dashboard_message(channel_id: int, message_id: int):
         )
 
 
-# -- Season / Hall of Fame: Grand Prix points across fixed 3-week "legs" --------
-_LEG_POINTS = {1: 3, 2: 2, 3: 1}
-SEASON_LENGTH = 3  # weekly legs per season
-
-
+# -- Season / Hall of Fame: one season per bounty cycle --------------------------
 async def season_init():
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS season_legs (
+            CREATE TABLE IF NOT EXISTS seasons (
                 id SERIAL PRIMARY KEY,
-                season TEXT NOT NULL,
-                week_start DATE NOT NULL,
-                category TEXT NOT NULL,
-                player_name TEXT NOT NULL,
-                rank INT NOT NULL,
-                points INT NOT NULL,
-                value TEXT,
-                UNIQUE(season, week_start, category, rank)
-            )
-        """)
-        await conn.execute("ALTER TABLE season_legs ADD COLUMN IF NOT EXISTS value TEXT")
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS season_threads (
-                season TEXT PRIMARY KEY,
+                label TEXT,
+                started_at TIMESTAMPTZ DEFAULT NOW(),
+                ended_at TIMESTAMPTZ,
                 thread_id TEXT
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS season_bonus (
+                id SERIAL PRIMARY KEY,
+                season_id INT NOT NULL,
+                player_name TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                points INT NOT NULL,
+                awarded_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(season_id, player_name, reason)
+            )
+        """)
 
 
-async def get_leg_ordinal(week_start) -> int:
-    """1-based chronological index of this week's leg (distinct earlier weeks + 1)."""
+async def start_season(label: str) -> int:
+    """Open a new season (defensively closing any still-open one). Returns its id."""
     pool = _pool_check()
     async with pool.acquire() as conn:
-        before = await conn.fetchval(
-            "SELECT COUNT(DISTINCT week_start) FROM season_legs WHERE week_start < $1", str(week_start))
-    return (before or 0) + 1
+        await conn.execute("UPDATE seasons SET ended_at = NOW() WHERE ended_at IS NULL")
+        return await conn.fetchval("INSERT INTO seasons (label) VALUES ($1) RETURNING id", label)
 
 
-async def get_total_legs() -> int:
+async def get_current_season():
     pool = _pool_check()
     async with pool.acquire() as conn:
-        n = await conn.fetchval("SELECT COUNT(DISTINCT week_start) FROM season_legs")
-    return n or 0
+        r = await conn.fetchrow(
+            "SELECT id, label, started_at, ended_at, thread_id FROM seasons "
+            "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1")
+    return dict(r) if r else None
 
 
-async def record_season_leg(season: str, week_start, placements: dict) -> int:
-    """placements = {category: [(name, value), ...]} top-3. GP points 3/2/1 by rank.
-    Idempotent per (season, week_start, category, rank)."""
-    pool = _pool_check()
-    added = 0
-    async with pool.acquire() as conn:
-        for category, entries in placements.items():
-            for i, entry in enumerate(entries[:3], start=1):
-                name = entry[0] if isinstance(entry, (list, tuple)) else entry
-                val = entry[1] if isinstance(entry, (list, tuple)) and len(entry) > 1 else None
-                if not name:
-                    continue
-                res = await conn.execute(
-                    "INSERT INTO season_legs (season, week_start, category, player_name, rank, points, value) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (season, week_start, category, rank) DO NOTHING",
-                    season, str(week_start), category, name, i, _LEG_POINTS.get(i, 0), val)
-                if res.split()[-1] == '1':
-                    added += 1
-    return added
-
-
-async def get_season_standings(season: str) -> list:
+async def get_season(season_id: int):
     pool = _pool_check()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT player_name, SUM(points) AS pts, COUNT(*) FILTER (WHERE rank = 1) AS wins "
-            "FROM season_legs WHERE season = $1 GROUP BY player_name ORDER BY pts DESC, wins DESC, player_name",
-            season)
-    return [(r['player_name'], int(r['pts']), int(r['wins'])) for r in rows]
+        r = await conn.fetchrow(
+            "SELECT id, label, started_at, ended_at, thread_id FROM seasons WHERE id = $1", season_id)
+    return dict(r) if r else None
 
 
-async def get_season_leg_count(season: str) -> int:
+async def end_current_season():
     pool = _pool_check()
     async with pool.acquire() as conn:
-        n = await conn.fetchval("SELECT COUNT(DISTINCT week_start) FROM season_legs WHERE season = $1", season)
-    return n or 0
+        r = await conn.fetchrow(
+            "UPDATE seasons SET ended_at = NOW() WHERE ended_at IS NULL "
+            "RETURNING id, label, started_at, ended_at, thread_id")
+    return dict(r) if r else None
 
 
-async def get_season_legs(season: str) -> list:
-    """[(week_start, category, player_name, rank, value)] for a season, ordered."""
+async def get_finished_seasons():
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT week_start, category, player_name, rank, value FROM season_legs "
-            "WHERE season = $1 ORDER BY week_start, category, rank", season)
-    return [(r['week_start'], r['category'], r['player_name'], int(r['rank']), r['value']) for r in rows]
+            "SELECT id, label, started_at, ended_at, thread_id FROM seasons "
+            "WHERE ended_at IS NOT NULL ORDER BY id DESC")
+    return [dict(r) for r in rows]
 
 
-async def get_completed_seasons() -> list:
-    """Season numbers (str) with all legs done, newest first."""
+async def set_season_thread(season_id: int, thread_id: str):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE seasons SET thread_id = $1 WHERE id = $2", str(thread_id), season_id)
+
+
+async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str) -> bool:
+    """Idempotent per (season, player, reason) so a resubmission can't farm it."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "INSERT INTO season_bonus (season_id, player_name, reason, points) VALUES ($1,$2,$3,$4) "
+            "ON CONFLICT (season_id, player_name, reason) DO NOTHING", season_id, player_name, points, reason)
+    return res.split()[-1] == '1'
+
+
+async def get_season_bonuses(season_id: int) -> dict:
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT season FROM season_legs GROUP BY season "
-            "HAVING COUNT(DISTINCT week_start) >= $1 ORDER BY season::int DESC", SEASON_LENGTH)
-    return [r['season'] for r in rows]
-
-
-async def get_season_thread(season: str):
-    pool = _pool_check()
-    async with pool.acquire() as conn:
-        return await conn.fetchval("SELECT thread_id FROM season_threads WHERE season = $1", season)
-
-
-async def set_season_thread(season: str, thread_id: str):
-    pool = _pool_check()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO season_threads (season, thread_id) VALUES ($1,$2) "
-            "ON CONFLICT (season) DO UPDATE SET thread_id = EXCLUDED.thread_id", season, str(thread_id))
+            "SELECT player_name, SUM(points) AS pts FROM season_bonus WHERE season_id = $1 GROUP BY player_name",
+            season_id)
+    return {r['player_name']: int(r['pts']) for r in rows}
