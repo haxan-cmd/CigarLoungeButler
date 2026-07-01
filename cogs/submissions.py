@@ -261,6 +261,20 @@ class SubmitView(discord.ui.View):
                 if d is not None and (d < 0 or d > 100):
                     parsed['deaths'] = None
     
+            # Caption keyword prefill: vision usually can't read weapon/subclass, so
+            # if the player typed them in the caption (e.g. "Poleman Halberd") use
+            # those to fill the gaps. Vision-read values always win; the caption
+            # only fills fields vision left blank.
+            _caption_text = self.original_message.content.strip()
+            if _caption_text and parsed:
+                _cap_weapon, _cap_subclass = parse_submission_text(_caption_text)
+                if parsed.get('weapon') is None and _cap_weapon:
+                    parsed['weapon'] = _cap_weapon
+                    print(f"[CAPTION] weapon prefilled from caption: {_cap_weapon}")
+                if parsed.get('subclass') is None and _cap_subclass:
+                    parsed['subclass'] = _cap_subclass
+                    print(f"[CAPTION] subclass prefilled from caption: {_cap_subclass}")
+
             vision_useful = parsed and any(
                 parsed.get(f) is not None
                 for f in ('weapon', 'subclass', 'takedowns', 'kills', 'deaths')
