@@ -645,14 +645,28 @@ def _classify_board(name, board_type):
     return 'weapon'
 
 
+def _safe_int(v, default=0):
+    try:
+        return int(str(v).strip())
+    except (ValueError, TypeError):
+        return default
+
+
 async def _render_board(guild, lb_row, lb_name):
     """Re-render a single board's Discord messages from its current DB rows."""
+    # A board with no thread/message ids was never set up in Discord — skip it
+    # rather than crashing the whole rebuild on int('').
+    thread_raw = str(lb_row.get('Thread ID') or '').strip()
+    msg_raw = str(lb_row.get('Message ID') or '').strip()
+    if not thread_raw or not msg_raw:
+        print(f"[REBUILD] Skipping render for '{lb_name}' — no thread/message id.")
+        return
     board_rows = await _db.get_leaderboard_by_board(lb_name)
     entries = []
     for row in board_rows:
         entries.append({
             'player': row[1] if len(row) > 1 else '',
-            'score': int(row[3]) if len(row) > 3 and row[3] else 0,
+            'score': _safe_int(row[3]) if len(row) > 3 else 0,
             'link': row[4] if len(row) > 4 else '',
             'weapon': row[5] if len(row) > 5 else '',
         })
@@ -662,8 +676,11 @@ async def _render_board(guild, lb_row, lb_name):
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
     embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
     header_content = _map_header(lb_name) if is_map else ""
-    thread_id = int(lb_row['Thread ID'])
-    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+    thread_id = int(thread_raw)
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
+    if not message_ids:
+        print(f"[REBUILD] Skipping render for '{lb_name}' — no valid message ids.")
+        return
     try:
         thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
         new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
@@ -729,7 +746,7 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
         existing_by_id = {}
         for r in existing_rows:
             eid = r[2] if len(r) > 2 else ''
-            esc = int(r[3]) if len(r) > 3 and r[3] else 0
+            esc = _safe_int(r[3]) if len(r) > 3 else 0
             existing_by_id[eid] = esc
         for did, (score, pname, link, wpn) in best.items():
             ex = existing_by_id.get(did)
