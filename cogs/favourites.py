@@ -255,30 +255,30 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     weapons_master = best_placement_title(weapon_placements, min_boards=9, breadth_first=True)
     campaign_master = best_placement_title(map_placements, min_boards=6, breadth_first=True)
 
-    # Headhunter — 100 Kills board: best average kills score, tiebreak on submission count
-    # Butcher — 200 Takedowns board: best average takedowns score, tiebreak on submission count
+    # Headhunter / Butcher — ROLLING WEEKLY window: highest AVERAGE among a player's
+    # qualifying runs *this week* (100+ kills / 200+ takedowns), min 3 runs. These
+    # two titles (and their roles) rotate weekly; Grand Marshal / Weapons Master /
+    # Campaign Master stay all-time. Computed from the week-scoped `subs`.
     kills_scores = {}
     td_scores = {}
-
-    for row in ld:
-        if len(row) < 3:
+    for row in subs:
+        if len(row) < 9:
             continue
-        lb_name = row[0].strip()
         player = row[1].strip()
         try:
-            score = int(row[2])
+            _td = int(row[7]); _kills = int(row[8])
         except (ValueError, IndexError):
             continue
-        if lb_name == '100 Kills':
-            kills_scores.setdefault(player, []).append(score)
-        elif lb_name == '200 Takedowns':
-            td_scores.setdefault(player, []).append(score)
+        if _kills >= 100:
+            kills_scores.setdefault(player, []).append(_kills)
+        if _td >= 200:
+            td_scores.setdefault(player, []).append(_td)
 
-    def best_score_title(d):
-        if not d:
+    def best_score_title(d, min_runs=3):
+        eligible = {p: v for p, v in d.items() if len(v) >= min_runs}
+        if not eligible:
             return None
-        import math
-        return max(d.keys(), key=lambda p: (sum(d[p]) / len(d[p])) * math.log(len(d[p]) + 1))
+        return max(eligible, key=lambda p: round(sum(eligible[p]) / len(eligible[p])))
 
     headhunter = best_score_title(kills_scores)
     butcher = best_score_title(td_scores)
@@ -361,6 +361,15 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         inline=False,
     )
 
+    embed.add_field(
+        name="─── This Week's Titles ───",
+        value=(
+            f"<a:topkill:1360314538364240024> **Apex** — `{stats['headhunter']}`  *(avg kills, 100+ runs)*\n"
+            f"<a:200tkd:1363648828414230538> **Frenzied** — `{stats['butcher']}`  *(avg takedowns, 200+ runs)*"
+        ),
+        inline=False,
+    )
+
     embed.add_field(name="​", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
     embed.add_field(
@@ -394,9 +403,7 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         value=(
             f"<a:grandmarshal:1519928617407348877> **Grand Marshal** — `{stats['grand_marshal']}`\n"
             f"<a:weaponsmaster:1519928521445605488> **Weapons Master** — `{stats['weapons_master']}`\n"
-            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`\n"
-            f"<a:topkill:1360314538364240024> **Headhunter** — `{stats['headhunter']}`\n"
-            f"<a:200tkd:1363648828414230538> **Butcher** — `{stats['butcher']}`"
+            f"<a:campaignmaster:1520497947115262083> **Campaign Master** — `{stats['campaign_master']}`"
         ),
         inline=False,
     )

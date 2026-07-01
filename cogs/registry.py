@@ -298,8 +298,8 @@ async def get_butler_titles_for_player(discord_id, stats, cached_data=None):
         ('grand_marshal',   f"{_te['Grand Marshal']} Grand Marshal"),
         ('weapons_master',  f"{_te['Weapons Master']} Weapons Master"),
         ('campaign_master', f"{_te['Campaign Master']} Campaign Master"),
-        ('headhunter',      f"{_te['Headhunter']} Headhunter"),
-        ('butcher',         f"{_te['Butcher']} Butcher"),
+        ('headhunter',      f"{_te['Headhunter']} Apex"),
+        ('butcher',         f"{_te['Butcher']} Frenzied"),
     ]
     rows = (cached_data or {}).get('players') or await _db.get_all_players()
     player_name = None
@@ -2244,6 +2244,8 @@ class RegistryCog(commands.Cog):
 
         player_kills_best = _avg(kills_best.get(resolved_name, []))
         player_td_best = _avg(td_best.get(resolved_name, []))
+        player_kills_runs = len(kills_best.get(resolved_name, []))
+        player_td_runs = len(td_best.get(resolved_name, []))
 
         # Total board counts
         total_combined_boards = len(set(holder_combined.keys()) and holder_combined) and len(holder_combined) or 0
@@ -2255,9 +2257,9 @@ class RegistryCog(commands.Cog):
         total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn"}])
         total_map_boards = len([b for b in all_board_names if " - " in b])
 
-        _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Headhunter", "Butcher"])
+        _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Apex", "Frenzied"])
 
-        def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True, total=None):
+        def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True, total=None, player_runs=None):
             padded = f"{label:<{_TITLE_PAD}}"
             if is_board:
                 total_str = f"/{total}" if total is not None else ""
@@ -2268,6 +2270,13 @@ class RegistryCog(commands.Cog):
             # Stat titles (Headhunter / Butcher): minimalist average display
             if resolved == holder_name and holder_name not in (None, "N/A"):
                 return f"{emoji} `{padded}` \u2014 avg {player_val} \U0001f451"
+            # Below the qualifying-run minimum: say so, instead of an apples-to-oranges compare
+            if player_runs is not None and player_runs < _MIN_QUALIFYING_RUNS:
+                you = (f"avg {player_val} ({player_runs}/{_MIN_QUALIFYING_RUNS} runs to qualify)"
+                       if player_val else f"{player_runs}/{_MIN_QUALIFYING_RUNS} runs to qualify")
+                if holder_name in (None, "N/A") or not holder_val:
+                    return f"{emoji} `{padded}` \u2014 {you}"
+                return f"{emoji} `{padded}` \u2014 {you} \u00b7 leader {holder_name} ({holder_val})"
             parts = []
             if player_val:
                 parts.append(f"avg {player_val}")
@@ -2281,8 +2290,8 @@ class RegistryCog(commands.Cog):
             fmt_title(config.TITLE_EMOJIS["Grand Marshal"],   "Grand Marshal",   player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
             fmt_title(config.TITLE_EMOJIS["Weapons Master"],  "Weapons Master",  player_weapon_boards,   wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
             fmt_title(config.TITLE_EMOJIS["Campaign Master"], "Campaign Master", player_map_boards,      cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
-            fmt_title(config.TITLE_EMOJIS["Headhunter"],      "Headhunter",      player_kills_best,      hh_holder or "N/A", hh_score, resolved_name, is_board=False),
-            fmt_title(config.TITLE_EMOJIS["Butcher"],         "Butcher",         player_td_best,         bt_holder or "N/A", bt_score, resolved_name, is_board=False),
+            fmt_title(config.TITLE_EMOJIS["Headhunter"],      "Apex",            player_kills_best,      hh_holder or "N/A", hh_score, resolved_name, is_board=False, player_runs=player_kills_runs),
+            fmt_title(config.TITLE_EMOJIS["Butcher"],         "Frenzied",        player_td_best,         bt_holder or "N/A", bt_score, resolved_name, is_board=False, player_runs=player_td_runs),
         ]
 
         # Weapon ranks — Gold+ only, top 10

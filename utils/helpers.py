@@ -264,8 +264,8 @@ def build_favourites_explainer_embed():
             "`Grand Marshal` — #1 across the most leaderboards overall\n"
             "`Weapons Master` — #1 across the most weapon boards\n"
             "`Campaign Master` — #1 across the most map boards\n"
-            "`Headhunter` — highest weighted average kills on the 100 Kills board\n"
-            "`Butcher` — highest weighted average takedowns on the 200 Takedowns board"
+            "`Apex` — highest average kills on 100+ kill runs\n"
+            "`Frenzied` — highest average takedowns on 200+ takedown runs"
         ),
         inline=False,
     )

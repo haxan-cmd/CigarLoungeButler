@@ -321,12 +321,12 @@ class AdminCog(commands.Cog):
             inline=False
         )
         embed.add_field(
-            name="💀 Headhunter",
+            name="💀 Apex",
             value="Hit 100+ kills in a single match and submit your scoreboard to enter the 100 Kills board. The title goes to the highest average kills across your qualifying runs (minimum 3 runs).",
             inline=False
         )
         embed.add_field(
-            name="🩸 Butcher",
+            name="🩸 Frenzied",
             value="Hit 200+ takedowns in a single match and submit your scoreboard to enter the 200 Takedowns board. The title goes to the highest average takedowns across your qualifying runs (minimum 3 runs).",
             inline=False
         )
