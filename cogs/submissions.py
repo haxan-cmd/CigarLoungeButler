@@ -1758,12 +1758,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
     edit_view._message = summary_reply
 
-    await asyncio.sleep(1)
-    try:
-        await prompt_msg.delete()
-    except discord.NotFound:
-        pass
-
     # React to the original screenshot
     async def safe_react(emoji):
         try:
@@ -1771,266 +1765,35 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Reaction failed ({emoji}): {e}")
 
-    await safe_react("<:cigar:1444893851427803298>")
-    if deaths == 0:
-        await safe_react("<a:flawless:1360358300834599062>")
+    # Delete the "Scorecard detected" prompt in the background — don't gate the
+    # reactions/blurb on it (there used to be a hard 1s sleep here).
+    async def _cleanup_prompt():
+        try:
+            await asyncio.sleep(1)
+            await prompt_msg.delete()
+        except (discord.NotFound, AttributeError):
+            pass
+        except Exception as _pe:
+            print(f"Prompt delete error: {_pe}")
+    if prompt_msg:
+        asyncio.create_task(_cleanup_prompt())
+
+    # Fire the immediate (stat-based) reactions concurrently instead of one at a time.
     _is_triple = takedowns >= 150 and kills >= 100 and score_over_20k
+    _immediate = ["<:cigar:1444893851427803298>"]
+    if deaths == 0:
+        _immediate.append("<a:flawless:1360358300834599062>")
     if _is_triple:
-        await safe_react("<a:triple:1365532698260668466>")
+        _immediate.append("<a:triple:1365532698260668466>")
     if kills >= 100:
-        await safe_react("<a:100kill:1361412390339608686>")
+        _immediate.append("<a:100kill:1361412390339608686>")
     if takedowns >= 200:
-        await safe_react("<a:200tkd:1363648828414230538>")
+        _immediate.append("<a:200tkd:1363648828414230538>")
     if takedowns >= 150 and deaths == 0:
-        await safe_react("<a:predator:1366794896081555567>")
+        _immediate.append("<a:predator:1366794896081555567>")
+    await asyncio.gather(*(safe_react(e) for e in _immediate), return_exceptions=True)
 
     is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
-
-    # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
-    # and beats the player's own existing score on that board
-    if not vip and not is_ranged:
-        all_ld = await _db.get_all_leaderboard_data()
-        weapon_entries = [row for row in all_ld if row[0] == selected_weapon]
-        scores = sorted(
-            [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
-            reverse=True
-        )
-        qualifies_board = len(scores) < 10 or takedowns > scores[9]
-        # Check if player already has a higher score on this board
-        discord_id_str = str(interaction.user.id)
-        player_existing = [
-            int(row[3]) for row in weapon_entries
-            if len(row) > 3 and row[3] and len(row) > 2 and row[2] == discord_id_str
-        ]
-        beats_personal_best = not player_existing or takedowns > max(player_existing)
-        if qualifies_board and beats_personal_best:
-            await safe_react("<:weapon_hs:1350656128635375698>")
-
-    # Update leaderboards (skip for ranged submissions)
-    any_updated = False
-    placements = []
-    newly_completed = False
-    if not is_ranged:
-        try:
-            any_updated, placements = await update_leaderboards(
-                interaction, selected_weapon, selected_map, faction,
-                takedowns, kills, deaths, vip, feats,
-                interaction.user.display_name, message_link,
-                bot_user=interaction.client.user,
-                second_place_td=_second_place_td,
-            )
-        except Exception as e:
-            print(f"Leaderboard update error: {e}")
-
-    # Hundred Handed: track subclass+weapon combos (any submission counts)
-    if selected_weapon and selected_class and not selected_class.startswith("Marksman"):
-        try:
-            is_new = await _db.add_hundred_handed(
-                str(interaction.user.id), interaction.user.display_name,
-                selected_class, selected_weapon
-            )
-            if is_new:
-                print(f"[HUNDRED_HANDED] New combo: {interaction.user.display_name} — {selected_class} / {selected_weapon}")
-                await _refresh_hundred_handed_board(interaction.guild)
-        except Exception as e:
-            nerve_log_error("Hundred-Handed check", e)
-
-    if any_updated:
-        await safe_react("<a:highscore:1360312918545269057>")
-        # Write High Score feat back to the Submissions sheet so mark totals count it (any PB on any board)
-        _high_score_written = False
-        if submission_row:
-            try:
-                current_feats = await _db.get_submission_feats(submission_row)
-                if 'High Score' not in current_feats:
-                    if current_feats in ('', 'None'):
-                        updated_feats = 'High Score'
-                    else:
-                        updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
-                    await _db.update_submission_feats(submission_row, updated_feats)
-                    _high_score_written = True
-            except Exception as e:
-                print(f"Highscore feat write error: {e}")
-        # Re-run registry card now that High Score is in the sheet — the bg_tasks pass
-        # ran before leaderboard update so it missed this mark.
-        if _high_score_written:
-            try:
-                await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
-                print(f"[HIGHSCORE] Registry card refreshed after High Score feat write for {interaction.user.display_name}")
-            except Exception as e:
-                print(f"Highscore registry refresh error: {e}")
-        # Edit summary message to show the bonus mark
-        try:
-            async for msg in original_message.channel.history(limit=10, after=original_message):
-                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                    import re as _re
-                    def increment_marks(content):
-                        def replacer(m):
-                            n = int(m.group(1)) + 1
-                            return f"**{n} mark{'s' if n != 1 else ''}**"
-                        # Match "**1 mark**" or "**2 marks**" (no + prefix)
-                        return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
-                    new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
-                    await msg.edit(content=new_content)
-                    break
-        except Exception as e:
-            print(f"Highscore mark edit error: {e}")
-    if any(lb == "TUFF" for lb, _ in placements):
-        await safe_react("<a:TUFF2:1520779243879927898>")
-
-    # Bounty check (skip for ranged submissions)
-    if not is_ranged:
-        try:
-            bounty_hit = await update_bounty(
-                interaction.guild, selected_weapon,
-                interaction.user.display_name, interaction.user.id, takedowns
-            )
-            print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
-            if bounty_hit:
-                await safe_react("🐱")
-                # Check if this run completed the bounty
-                _bounty = await get_active_bounty()
-                if _bounty:
-                    newly_completed = await check_bounty_completion(
-                        interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
-                    )
-        except Exception as e:
-            import traceback
-            print(f"Bounty update error: {e}")
-            traceback.print_exc()
-
-    # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
-    try:
-        main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
-        now = datetime.now(timezone.utc)
-        player = interaction.user.display_name
-
-        if main_channel:
-            # Dry spell — first submission after 4+ hours of silence
-            if submission_state['last_submission_time'] and (now - submission_state['last_submission_time']).total_seconds() > 14400:
-                line = await butler_quip(
-                    "The lounge has been dead for hours and someone just submitted a run. "
-                    "React as the Butler — one dry line about finally seeing some activity. Vary it each time.",
-                    fallback="The lounge stirs. About time."
-                )
-                await main_channel.send(f"*{line}*")
-
-            # New player first submission
-            if is_new_player:
-                line = await butler_quip(
-                    f"A new player named {player} has just submitted their first run. "
-                    "Acknowledge them briefly as the Butler — dry, not warm, but not unkind. One sentence.",
-                    fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
-                )
-                await main_channel.send(line if line.startswith('*') else f"*{line}*")
-                try:
-                    unbound_role = interaction.guild.get_role(config.UNBOUND_ROLE_ID)
-                    member = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
-                    if unbound_role and member and unbound_role not in member.roles:
-                        await member.add_roles(unbound_role, reason="First blood — first submission")
-                        print(f"[UNBOUND] Assigned Unbound role to {player}")
-                except Exception as ub_e:
-                    nerve_log_error("Unbound role assign", ub_e)
-
-            # New #1 on any leaderboard
-            new_firsts = [lb for lb, pos in placements if pos == 1]
-            if new_firsts:
-                boards = ", ".join(new_firsts)
-                line = await butler_quip(
-                    f"{player} just took the top spot on the {boards} leaderboard. "
-                    "React as the Butler — acknowledge it but add doubt or dry skepticism about how long it lasts. One sentence.",
-                    fallback="On top. But for how long."
-                )
-                await main_channel.send(f"*{line}*")
-
-            # Bounty completion
-            if newly_completed:
-                try:
-                    _bseason = await _db.get_current_season()
-                    if _bseason:
-                        await _db.award_season_bonus(_bseason['id'], player, config.BOUNTY_COMPLETION_BONUS, "Bounty completion")
-                except Exception as _be:
-                    print(f"[SEASON] bounty bonus error: {_be}")
-                line = await butler_quip(
-                    f"{player} just completed the bounty. React as the Butler — acknowledge it, "
-                    "maybe reference the bald woman (Bald Female, a server legend) in comparison. One or two sentences.",
-                    fallback=f"The bounty is settled. **{player}** has seen to it."
-                )
-                await main_channel.send(line)
-
-        # Flawless — reply in submissions channel
-        if deaths == 0:
-            line = await butler_quip(
-                f"{player} just submitted a run with 0 deaths on the {selected_weapon}. "
-                "React as the Butler — one dry line about a flawless run. Can reference the bald woman's shiny head as a metaphor for perfection. Vary it each time.",
-                fallback="*Immaculate. Not a scratch.*"
-            )
-            await original_message.reply(
-                line if line.startswith('*') else f"*{line}*",
-                mention_author=False
-            )
-
-        submission_state['last_submission_time'] = now
-        submission_state['dry_spell_posted'] = False
-
-    except Exception as e:
-        print(f"Butler personality error: {e}")
-
-    # Edit the summary reply to include placements, and — only for boards this
-    # submission actually placed on — swap the plain weapon/map text for a
-    # hyperlink to that board. A submission that doesn't place shouldn't link
-    # to a board it didn't make.
-    if placements:
-        # Each feat board shows its own logo; weapon_hs is reserved for the actual
-        # weapon board. Map boards use the trophy.
-        _FEAT_EMOJI = {
-            "100 Kills":     "<a:100kill:1361412390339608686>",
-            "200 Takedowns": "<a:200tkd:1363648828414230538>",
-            "Triple":        "<a:triple:1365532698260668466>",
-            "TUFF":          "<a:TUFF2:1520779243879927898>",
-            "Flawless":      "<a:flawless:1360358300834599062>",
-            "Mallet":        "🔨",
-            "Knife":         "🗡️",
-        }
-        def _placement_line(lb, pos):
-            if ' - ' in lb:                       # map board
-                return f"🏆 {lb} — #{pos}"
-            if lb == "TUFF":                      # TUFF shows emoji only, no name
-                return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
-            if lb in _FEAT_EMOJI:                 # feat boards: own logo + rank
-                return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
-            # actual weapon board — the only place weapon_hs belongs
-            return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
-        placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
-        try:
-            placed_boards = {lb for lb, _ in placements}
-            map_lb_name = f"{selected_map} - {faction}"
-            if selected_weapon in placed_boards or map_lb_name in placed_boards:
-                from cogs.leaderboards import _get_lb_records as _lb_get_records
-                _lb_rows_for_links = await _lb_get_records()
-                _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
-            # Find the reply we sent and edit it
-            async for msg in original_message.channel.history(limit=10, after=original_message):
-                if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                    new_content = msg.content
-                    if selected_weapon in placed_boards:
-                        weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
-                        new_content = new_content.replace(
-                            f"│ {selected_weapon} • {selected_class}",
-                            f"│ {weapon_link} • {selected_class}",
-                            1,
-                        )
-                    if map_lb_name in placed_boards:
-                        map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
-                        new_content = new_content.replace(
-                            f"│ {selected_map} / {faction}",
-                            f"│ {map_link}",
-                            1,
-                        )
-                    await msg.edit(content=new_content + f"\n{placement_lines}")
-                    break
-        except Exception as e:
-            print(f"Placement edit error: {e}")
 
     # Background tasks — run after confirmation is posted
     _guild = interaction.guild
@@ -2038,6 +1801,275 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _user_name = interaction.user.display_name
 
     async def _bg_tasks():
+        # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
+        # and beats the player's own existing score on that board
+        if not vip and not is_ranged:
+            all_ld = await _db.get_all_leaderboard_data()
+            weapon_entries = [row for row in all_ld if row[0] == selected_weapon]
+            scores = sorted(
+                [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
+                reverse=True
+            )
+            qualifies_board = len(scores) < 10 or takedowns > scores[9]
+            # Check if player already has a higher score on this board
+            discord_id_str = str(interaction.user.id)
+            player_existing = [
+                int(row[3]) for row in weapon_entries
+                if len(row) > 3 and row[3] and len(row) > 2 and row[2] == discord_id_str
+            ]
+            beats_personal_best = not player_existing or takedowns > max(player_existing)
+            if qualifies_board and beats_personal_best:
+                await safe_react("<:weapon_hs:1350656128635375698>")
+
+        # Update leaderboards (skip for ranged submissions)
+        any_updated = False
+        placements = []
+        newly_completed = False
+        if not is_ranged:
+            try:
+                any_updated, placements = await update_leaderboards(
+                    interaction, selected_weapon, selected_map, faction,
+                    takedowns, kills, deaths, vip, feats,
+                    interaction.user.display_name, message_link,
+                    bot_user=interaction.client.user,
+                    second_place_td=_second_place_td,
+                )
+            except Exception as e:
+                print(f"Leaderboard update error: {e}")
+
+        # Hundred Handed: track subclass+weapon combos (any submission counts)
+        if selected_weapon and selected_class and not selected_class.startswith("Marksman"):
+            try:
+                is_new = await _db.add_hundred_handed(
+                    str(interaction.user.id), interaction.user.display_name,
+                    selected_class, selected_weapon
+                )
+                if is_new:
+                    print(f"[HUNDRED_HANDED] New combo: {interaction.user.display_name} — {selected_class} / {selected_weapon}")
+                    await _refresh_hundred_handed_board(interaction.guild)
+            except Exception as e:
+                nerve_log_error("Hundred-Handed check", e)
+
+        if any_updated:
+            await safe_react("<a:highscore:1360312918545269057>")
+            # Write High Score feat back to the Submissions sheet so mark totals count it (any PB on any board)
+            _high_score_written = False
+            if submission_row:
+                try:
+                    current_feats = await _db.get_submission_feats(submission_row)
+                    if 'High Score' not in current_feats:
+                        if current_feats in ('', 'None'):
+                            updated_feats = 'High Score'
+                        else:
+                            updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
+                        await _db.update_submission_feats(submission_row, updated_feats)
+                        _high_score_written = True
+                except Exception as e:
+                    print(f"Highscore feat write error: {e}")
+            # Re-run registry card now that High Score is in the sheet — the bg_tasks pass
+            # ran before leaderboard update so it missed this mark.
+            if _high_score_written:
+                try:
+                    await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
+                    print(f"[HIGHSCORE] Registry card refreshed after High Score feat write for {interaction.user.display_name}")
+                except Exception as e:
+                    print(f"Highscore registry refresh error: {e}")
+            # Edit summary message to show the bonus mark
+            try:
+                async for msg in original_message.channel.history(limit=10, after=original_message):
+                    if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                        import re as _re
+                        def increment_marks(content):
+                            def replacer(m):
+                                n = int(m.group(1)) + 1
+                                return f"**{n} mark{'s' if n != 1 else ''}**"
+                            # Match "**1 mark**" or "**2 marks**" (no + prefix)
+                            return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
+                        new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
+                        await msg.edit(content=new_content)
+                        break
+            except Exception as e:
+                print(f"Highscore mark edit error: {e}")
+        if any(lb == "TUFF" for lb, _ in placements):
+            await safe_react("<a:TUFF2:1520779243879927898>")
+
+        # Bounty check (skip for ranged submissions)
+        bounty_line = ""  # convenience hyperlink to the player's bounty post, if hit
+        if not is_ranged:
+            try:
+                bounty_hit = await update_bounty(
+                    interaction.guild, selected_weapon,
+                    interaction.user.display_name, interaction.user.id, takedowns
+                )
+                print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
+                if bounty_hit:
+                    await safe_react("🐱")
+                    # Check if this run completed the bounty
+                    _bounty = await get_active_bounty()
+                    if _bounty:
+                        newly_completed = await check_bounty_completion(
+                            interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
+                        )
+                        # Link the player straight to their own bounty progress post.
+                        try:
+                            from cogs.bounty import get_player_bounty_progress
+                            _pbr = await get_player_bounty_progress(_bounty['title'], str(interaction.user.id))
+                            _fp = _pbr.get('forum_post_id') if _pbr else None
+                            if _fp:
+                                bounty_line = (
+                                    f"🐱 [+1 {_bounty['title']}]"
+                                    f"(https://discord.com/channels/{interaction.guild.id}/{_fp})"
+                                )
+                        except Exception as _blerr:
+                            print(f"[BOUNTY] link build error: {_blerr}")
+            except Exception as e:
+                import traceback
+                print(f"Bounty update error: {e}")
+                traceback.print_exc()
+
+        # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
+        try:
+            main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
+            now = datetime.now(timezone.utc)
+            player = interaction.user.display_name
+
+            if main_channel:
+                # Dry spell — first submission after 4+ hours of silence
+                if submission_state['last_submission_time'] and (now - submission_state['last_submission_time']).total_seconds() > 14400:
+                    line = await butler_quip(
+                        "The lounge has been dead for hours and someone just submitted a run. "
+                        "React as the Butler — one dry line about finally seeing some activity. Vary it each time.",
+                        fallback="The lounge stirs. About time."
+                    )
+                    await main_channel.send(f"*{line}*")
+
+                # New player first submission
+                if is_new_player:
+                    line = await butler_quip(
+                        f"A new player named {player} has just submitted their first run. "
+                        "Acknowledge them briefly as the Butler — dry, not warm, but not unkind. One sentence.",
+                        fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
+                    )
+                    await main_channel.send(line if line.startswith('*') else f"*{line}*")
+                    try:
+                        unbound_role = interaction.guild.get_role(config.UNBOUND_ROLE_ID)
+                        member = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
+                        if unbound_role and member and unbound_role not in member.roles:
+                            await member.add_roles(unbound_role, reason="First blood — first submission")
+                            print(f"[UNBOUND] Assigned Unbound role to {player}")
+                    except Exception as ub_e:
+                        nerve_log_error("Unbound role assign", ub_e)
+
+                # New #1 on any leaderboard
+                new_firsts = [lb for lb, pos in placements if pos == 1]
+                if new_firsts:
+                    boards = ", ".join(new_firsts)
+                    line = await butler_quip(
+                        f"{player} just took the top spot on the {boards} leaderboard. "
+                        "React as the Butler — acknowledge it but add doubt or dry skepticism about how long it lasts. One sentence.",
+                        fallback="On top. But for how long."
+                    )
+                    await main_channel.send(f"*{line}*")
+
+                # Bounty completion
+                if newly_completed:
+                    try:
+                        _bseason = await _db.get_current_season()
+                        if _bseason:
+                            await _db.award_season_bonus(_bseason['id'], player, config.BOUNTY_COMPLETION_BONUS, "Bounty completion")
+                    except Exception as _be:
+                        print(f"[SEASON] bounty bonus error: {_be}")
+                    line = await butler_quip(
+                        f"{player} just completed the bounty. React as the Butler — acknowledge it, "
+                        "maybe reference the bald woman (Bald Female, a server legend) in comparison. One or two sentences.",
+                        fallback=f"The bounty is settled. **{player}** has seen to it."
+                    )
+                    await main_channel.send(line)
+
+            # Flawless — reply in submissions channel
+            if deaths == 0:
+                line = await butler_quip(
+                    f"{player} just submitted a run with 0 deaths on the {selected_weapon}. "
+                    "React as the Butler — one dry line about a flawless run. Can reference the bald woman's shiny head as a metaphor for perfection. Vary it each time.",
+                    fallback="*Immaculate. Not a scratch.*"
+                )
+                await original_message.reply(
+                    line if line.startswith('*') else f"*{line}*",
+                    mention_author=False
+                )
+
+            submission_state['last_submission_time'] = now
+            submission_state['dry_spell_posted'] = False
+
+        except Exception as e:
+            print(f"Butler personality error: {e}")
+
+        # Edit the summary reply to include placements, and — only for boards this
+        # submission actually placed on — swap the plain weapon/map text for a
+        # hyperlink to that board. A submission that doesn't place shouldn't link
+        # to a board it didn't make.
+        if placements or bounty_line:
+            # Each feat board shows its own logo; weapon_hs is reserved for the actual
+            # weapon board. Map boards use the trophy.
+            _FEAT_EMOJI = {
+                "100 Kills":     "<a:100kill:1361412390339608686>",
+                "200 Takedowns": "<a:200tkd:1363648828414230538>",
+                "Triple":        "<a:triple:1365532698260668466>",
+                "TUFF":          "<a:TUFF2:1520779243879927898>",
+                "Flawless":      "<a:flawless:1360358300834599062>",
+                "Mallet":        "🔨",
+                "Knife":         "🗡️",
+            }
+            def _placement_line(lb, pos):
+                if ' - ' in lb:                       # map board
+                    return f"🏆 {lb} — #{pos}"
+                if lb == "TUFF":                      # TUFF shows emoji only, no name
+                    return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
+                if lb in _FEAT_EMOJI:                 # feat boards: own logo + rank
+                    return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
+                # actual weapon board — the only place weapon_hs belongs
+                return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
+            placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
+            trailer = placement_lines
+            try:
+                placed_boards = {lb for lb, _ in placements}
+                map_lb_name = f"{selected_map} - {faction}"
+                if selected_weapon in placed_boards or map_lb_name in placed_boards:
+                    from cogs.leaderboards import _get_lb_records as _lb_get_records
+                    _lb_rows_for_links = await _lb_get_records()
+                    _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
+                # Find the reply we sent and edit it
+                async for msg in original_message.channel.history(limit=10, after=original_message):
+                    if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
+                        new_content = msg.content
+                        if selected_weapon in placed_boards:
+                            weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
+                            new_content = new_content.replace(
+                                f"│ {selected_weapon} • {selected_class}",
+                                f"│ {weapon_link} • {selected_class}",
+                                1,
+                            )
+                        if map_lb_name in placed_boards:
+                            map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
+                            new_content = new_content.replace(
+                                f"│ {selected_map} / {faction}",
+                                f"│ {map_link}",
+                                1,
+                            )
+                        if bounty_line:
+                            # Slot the bounty link under the VIP line, just above the
+                            # marks rundown (the cigar line begins marks_summary).
+                            _mark_anchor = "<:cigar:1444893851427803298>"
+                            if _mark_anchor in new_content:
+                                new_content = new_content.replace(
+                                    _mark_anchor, f"{bounty_line}\n{_mark_anchor}", 1)
+                            else:
+                                new_content = f"{new_content}\n{bounty_line}"
+                        await msg.edit(content=new_content + (f"\n{trailer}" if trailer else ""))
+                        break
+            except Exception as e:
+                print(f"Placement edit error: {e}")
+
         # Auto-learn IGN: if vision read a name from the scoreboard that differs from Discord name, save it
         _vision_name = (vision_data or {}).get('name')
         if _vision_name and _vision_name.strip().lower() != _user_name.strip().lower():
@@ -2211,7 +2243,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Butler favourites update error: {e}")
 
-    asyncio.create_task(_bg_tasks())
+    async def _bg_runner():
+        # Backstop so the detached background job can't hang forever. Each block
+        # inside _bg_tasks has its own try/except for errors; this bounds total
+        # runtime if a Discord/DB call stalls instead of erroring.
+        try:
+            await asyncio.wait_for(_bg_tasks(), timeout=120)
+        except asyncio.TimeoutError:
+            print("[BG] background tasks exceeded 120s — aborted (blurb/reactions already sent)")
+        except Exception as _bge:
+            print(f"[BG] background tasks error: {_bge}")
+    asyncio.create_task(_bg_runner())
 
 
 _active_vision: set[int] = set()  # prevents double-processing same message
