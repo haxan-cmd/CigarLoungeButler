@@ -25,7 +25,9 @@ MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
 COUNTING_CHANNEL_ID         = config.COUNTING_CHANNEL_ID
 CLOWN_TARGET_USER_ID        = config.CLOWN_TARGET_USER_ID
 REACT_BLOCKED_USER_ID       = config.REACT_BLOCKED_USER_ID
-CLOWN_REACT_CHANCE          = 0.4  # ~40% of that user's messages get a clown react
+CLOWN_REACT_CHANCE          = 0.4  # roll per eligible message
+CLOWN_REACT_COOLDOWN        = 300  # min seconds between clowns for the same user (keeps it organic)
+CLOWN_REACT_COOLDOWNS       = {}
 NERVE_CENTER_CHANNEL_ID     = config.NERVE_CENTER_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
 BUTLERS_MANUAL_CHANNEL_ID   = config.BUTLERS_MANUAL_CHANNEL_ID
@@ -819,13 +821,16 @@ class PersonalityCog(commands.Cog):
         if message.author.bot:
             return
 
-        # Clown a designated person — often, not every message
-        if (CLOWN_TARGET_USER_ID and message.author.id == CLOWN_TARGET_USER_ID
-                and random.random() < CLOWN_REACT_CHANCE):
-            try:
-                await message.add_reaction('\U0001f921')
-            except Exception:
-                pass
+        # Clown a designated person — occasional and spaced out, never every message
+        if CLOWN_TARGET_USER_ID and message.author.id == CLOWN_TARGET_USER_ID:
+            _ct = time.time()
+            if (_ct - CLOWN_REACT_COOLDOWNS.get(message.author.id, 0) > CLOWN_REACT_COOLDOWN
+                    and random.random() < CLOWN_REACT_CHANCE):
+                CLOWN_REACT_COOLDOWNS[message.author.id] = _ct
+                try:
+                    await message.add_reaction('\U0001f921')
+                except Exception:
+                    pass
 
         # Middle finger at the bot = middle finger back
         if self.bot.user in message.mentions and '\U0001f595' in message.content:
