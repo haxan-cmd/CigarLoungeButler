@@ -8,6 +8,22 @@ from discord.ext import commands
 import config
 import utils.db as _db
 
+
+def _all_weapons():
+    s = set()
+    for ws in config.CLASS_WEAPON_MAP.values():
+        s.update(ws)
+    return sorted(s)
+
+async def _weapon_ac(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    return [app_commands.Choice(name=w, value=w) for w in _all_weapons() if cur in w.lower()][:25]
+
+async def _subclass_ac(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    subs = sorted(config.CLASS_WEAPON_MAP.keys())
+    return [app_commands.Choice(name=s, value=s) for s in subs if cur in s.lower()][:25]
+
 MOD_ROLE_ID             = config.MOD_ROLE_ID
 GUILD_ID                = config.GUILD_ID
 CHALLENGE_RULES_CHANNEL_ID = config.CHALLENGE_RULES_CHANNEL_ID
@@ -508,6 +524,11 @@ class AdminCog(commands.Cog):
         feat="Which feat: 100 Kills, 200 Takedowns, or Triple",
         count="Number of times they've achieved this feat"
     )
+    @app_commands.choices(feat=[
+        app_commands.Choice(name="100 Kills", value="100 Kills"),
+        app_commands.Choice(name="200 Takedowns", value="200 Takedowns"),
+        app_commands.Choice(name="Triple", value="Triple"),
+    ])
     async def set_feat_count(self, interaction: discord.Interaction, player: discord.Member, feat: str, count: int):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -546,6 +567,7 @@ class AdminCog(commands.Cog):
         subclass="Subclass (e.g. Knight, Vanguard) — required for shared weapons",
         marks="Number of marks to add"
     )
+    @app_commands.autocomplete(weapon=_weapon_ac, subclass=_subclass_ac)
     async def award_marks(self, interaction: discord.Interaction, player: discord.Member, weapon: str, subclass: str, marks: int):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That\'s not for you.", ephemeral=True)

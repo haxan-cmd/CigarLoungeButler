@@ -18,6 +18,17 @@ from config import (
 import utils.db as _db
 from utils.helpers import format_weapon_marks, nerve_log_error
 
+
+async def _player_name_ac(interaction: discord.Interaction, current: str):
+    """Autocomplete a player param from known player names."""
+    cur = current.lower()
+    try:
+        rows = await _db.get_all_players()
+        names = sorted({r[1].strip() for r in rows if r and len(r) > 1 and r[1].strip()})
+    except Exception:
+        names = []
+    return [app_commands.Choice(name=n, value=n) for n in names if cur in n.lower()][:25]
+
 # Local lock for registry card updates (was imported from utils.sheets)
 _registry_lock = asyncio.Lock()
 
@@ -2098,6 +2109,7 @@ class RegistryCog(commands.Cog):
 
     @app_commands.command(name="stats", description="Show a player's title standings and weapon ranks.")
     @app_commands.describe(player="Player name (leave blank for your own)")
+    @app_commands.autocomplete(player=_player_name_ac)
     async def progress_command(self, interaction: discord.Interaction, player: str = None):
         await interaction.response.defer()
 

@@ -295,8 +295,8 @@ def build_manual_embed():
     embed.add_field(
         name="🏹 Bounty",
         value=(
-            "`/bounty_status` — The active bounty card and your personal progress.\n"
-            "`/bounty_hunt` — Top 5 hunters for the active bounty."
+            "`/bounty status` — The active bounty card and your personal progress.\n"
+            "`/bounty hunt` — Top 5 hunters for the active bounty."
         ),
         inline=False,
     )

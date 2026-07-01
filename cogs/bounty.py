@@ -428,6 +428,8 @@ def _build_bonus_board_text(bounty):
 
 
 class BountyCog(commands.Cog):
+    bounty_group = app_commands.Group(name="bounty", description="Active bounty status and hunters")
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -638,7 +640,7 @@ class BountyCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
 
-    @app_commands.command(name="bounty_status", description="Show the current active bounty card and your personal progress")
+    @bounty_group.command(name="status", description="Show the active bounty card and your personal progress")
     async def bounty_status(self, interaction: discord.Interaction):
         # Merged with the old standalone /my_bounty command (removed 2026-06-30) —
         # this now shows the server-wide aggregate card plus the command runner's
@@ -659,7 +661,7 @@ class BountyCog(commands.Cog):
         card = "\n\n".join(b for b in (completions_block, personal_block) if b)
         await interaction.response.send_message(card, ephemeral=True)
 
-    @app_commands.command(name="bounty_hunt", description="Show the top hunters for the active bounty")
+    @bounty_group.command(name="hunt", description="Show the top hunters for the active bounty")
     async def bounty_hunt(self, interaction: discord.Interaction):
         bounty = await get_active_bounty()
         if not bounty:

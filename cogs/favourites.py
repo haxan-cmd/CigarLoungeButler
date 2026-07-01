@@ -359,11 +359,10 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         subset = items[:n]
         if not subset:
             return "│ *—*"
-        pad = max(len(name) for name, _ in subset)
         lines = []
         for i, (name, val) in enumerate(subset):
             sfx = f" {suffix}" if (suffix and i == 0) else ""
-            lines.append(f"│ `{name:<{pad}}` — {val}{sfx}")
+            lines.append(f"│ `{name}` — {val}{sfx}")
         return "\n".join(lines)
 
     def fmt_plain(items, n=3):
@@ -377,13 +376,12 @@ def build_favourites_embed(stats, bot_avatar_url=None):
                 parsed.append((name, rest))
             else:
                 parsed.append((p, None))
-        pad = max(len(name) for name, _ in parsed)
         lines = []
         for name, rest in parsed:
             if rest is not None:
-                lines.append(f"│ `{name:<{pad}}` — {rest}")
+                lines.append(f"│ `{name}` — {rest}")
             else:
-                lines.append(f"│ `{name:<{pad}}`")
+                lines.append(f"│ `{name}`")
         return "\n".join(lines)
 
     week_label = stats.get('week_label', '')
@@ -410,7 +408,7 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         ("<:warlord:1520490364039860347> Warlord  *(TD share %)*", warlord_text),
     )
 
-    embed.add_field(name="─── This Week ───", value="​", inline=False)
+    _spacer()
 
     _tt = stats.get('top_total_tally') or []
     _fl = stats.get('top_fastest_learner') or []

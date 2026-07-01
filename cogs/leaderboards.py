@@ -12,6 +12,17 @@ import config
 import utils.db as _db
 from utils.helpers import nerve_log_error
 
+
+async def _rank_name_ac(interaction: discord.Interaction, current: str):
+    """Autocomplete /rank with real board names (weapons, feats, maps)."""
+    cur = current.lower()
+    try:
+        rows = await _db.get_all_leaderboard_data()
+        boards = sorted({r[0].strip() for r in rows if r and r[0].strip()})
+    except Exception:
+        boards = []
+    return [app_commands.Choice(name=b, value=b) for b in boards if cur in b.lower()][:25]
+
 MOD_ROLE_ID       = config.MOD_ROLE_ID
 _ASSETS_DIR       = os.path.join(os.path.dirname(__file__), '..', 'assets')
 DECORATION_TOP    = os.path.join(_ASSETS_DIR, 'WMMR_Spacer_Top.png')
@@ -997,6 +1008,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
     @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
+    @app_commands.autocomplete(name=_rank_name_ac)
     async def rank_command(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer()
 
