@@ -91,7 +91,7 @@ BUTLER_AI_COOLDOWN_SECONDS = 15
 import os as _os
 _anthropic_client = None
 try:
-    _anthropic_client = anthropic.Anthropic(api_key=_os.environ['ANTHROPIC_API_KEY'])
+    _anthropic_client = anthropic.AsyncAnthropic(api_key=_os.environ['ANTHROPIC_API_KEY'])
 except Exception as _e:
     print(f"Butler AI unavailable: {_e}")
 
@@ -246,7 +246,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
             chaos_note = ''
         user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
-        response = _anthropic_client.messages.create(
+        response = await _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
             max_tokens=60,
             system=BUTLER_SYSTEM_PROMPT,
@@ -312,7 +312,7 @@ async def _generate_absurd_poll():
     AI is unavailable or its output doesn't parse as valid JSON."""
     if _anthropic_client:
         try:
-            response = _anthropic_client.messages.create(
+            response = await _anthropic_client.messages.create(
                 model='claude-haiku-4-5-20251001',
                 max_tokens=150,
                 system=BUTLER_SYSTEM_PROMPT,
@@ -454,7 +454,7 @@ class PersonalityCog(commands.Cog):
             main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
             if not main_ch:
                 return
-            response = _anthropic_client.messages.create(
+            response = await _anthropic_client.messages.create(
                 model='claude-haiku-4-5-20251001',
                 max_tokens=50,
                 system=BUTLER_SYSTEM_PROMPT,

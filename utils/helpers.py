@@ -8,7 +8,7 @@ import config
 _anthropic_client = None
 try:
     import anthropic as _anthropic
-    _anthropic_client = _anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+    _anthropic_client = _anthropic.AsyncAnthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 except Exception:
     pass
 
@@ -26,12 +26,12 @@ _BUTLER_SYSTEM_BRIEF = (
     "Never say 'great', 'awesome', or use exclamation marks. Never break character."
 )
 
-def butler_quip(prompt: str, fallback: str = '') -> str:
+async def butler_quip(prompt: str, fallback: str = '') -> str:
     """Call Haiku for a short Butler line. Returns fallback if unavailable."""
     if not _anthropic_client:
         return fallback
     try:
-        r = _anthropic_client.messages.create(
+        r = await _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
             max_tokens=60,
             system=_BUTLER_SYSTEM_BRIEF,
