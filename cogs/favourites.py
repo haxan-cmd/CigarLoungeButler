@@ -422,14 +422,17 @@ def build_favourites_embed(stats, bot_avatar_url=None):
         ("<a:topkill:1360314538364240024> Most Kills", fmt_list(stats['top_kills_list'], "kills")),
         ("<a:toptkd:1360312666475728958> Highest Takedowns", fmt_list(stats['top_td_list'], "TDs")),
     )
+    _spacer()
     embed.add_field(name="🏃 Busiest", value=fmt_list(stats['top_busiest'], "runs"), inline=False)
 
+    _spacer()
     embed.add_field(name="─── Meta ───", value="​", inline=False)
     _pair(
         ("🗡️ Top Weapons", fmt_list(stats['top_weapons'], "runs")),
         ("🗺️ Top Maps", fmt_list(stats['top_maps'], "runs")),
     )
 
+    _spacer()
     embed.add_field(
         name="─── All-Time Titles ───",
         value=(
