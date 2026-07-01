@@ -322,12 +322,12 @@ class AdminCog(commands.Cog):
         )
         embed.add_field(
             name="💀 Headhunter",
-            value="Held by the #1 player on the 100 Kills board. Hit 100+ kills in a single match and submit your scoreboard to enter. Ranked by average kills score, weighted by number of submissions.",
+            value="Hit 100+ kills in a single match and submit your scoreboard to enter the 100 Kills board. The title goes to the highest average kills across your qualifying runs (minimum 3 runs).",
             inline=False
         )
         embed.add_field(
             name="🩸 Butcher",
-            value="Held by the #1 player on the 200 Takedowns board. Hit 200+ takedowns in a single match and submit your scoreboard to enter. Ranked by average takedowns score, weighted by number of submissions.",
+            value="Hit 200+ takedowns in a single match and submit your scoreboard to enter the 200 Takedowns board. The title goes to the highest average takedowns across your qualifying runs (minimum 3 runs).",
             inline=False
         )
         embed.set_footer(text="Only one player holds each title at a time.")

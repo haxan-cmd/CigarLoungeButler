@@ -2208,7 +2208,7 @@ class RegistryCog(commands.Cog):
         wm_holder, wm_count = breadth_leader(holder_weapon, 9)
         cm_holder, cm_count = breadth_leader(holder_map, 6)
 
-        # Headhunter / Butcher — best score from 100 Kills / 200 TD boards
+        # Headhunter / Butcher — average score across a player's 100-Kill / 200-TD runs
         kills_best = {}  # player -> list of scores
         td_best = {}   # player -> list of scores
         for row in ld:
@@ -2225,18 +2225,25 @@ class RegistryCog(commands.Cog):
             elif lb_name == "200 Takedowns":
                 td_best.setdefault(p_name, []).append(score)
 
-        import math as _math
-        def _weighted(scores):
-            if not scores: return 0
-            return (sum(scores) / len(scores)) * _math.log(len(scores) + 1)
+        # Highest AVERAGE score among players with enough qualifying runs — a
+        # single lucky game shouldn't crown anyone.
+        _MIN_QUALIFYING_RUNS = 3
 
-        hh_holder = max(kills_best, key=lambda p: _weighted(kills_best[p])) if kills_best else None
-        hh_score = round(_weighted(kills_best[hh_holder])) if hh_holder else 0
-        bt_holder = max(td_best, key=lambda p: _weighted(td_best[p])) if td_best else None
-        bt_score = round(_weighted(td_best[bt_holder])) if bt_holder else 0
+        def _avg(scores):
+            return round(sum(scores) / len(scores)) if scores else 0
 
-        player_kills_best = round(_weighted(kills_best.get(resolved_name, [])))
-        player_td_best = round(_weighted(td_best.get(resolved_name, [])))
+        def _title_holder(best):
+            eligible = {p: s for p, s in best.items() if len(s) >= _MIN_QUALIFYING_RUNS}
+            if not eligible:
+                return None, 0
+            holder = max(eligible, key=lambda p: _avg(eligible[p]))
+            return holder, _avg(eligible[holder])
+
+        hh_holder, hh_score = _title_holder(kills_best)
+        bt_holder, bt_score = _title_holder(td_best)
+
+        player_kills_best = _avg(kills_best.get(resolved_name, []))
+        player_td_best = _avg(td_best.get(resolved_name, []))
 
         # Total board counts
         total_combined_boards = len(set(holder_combined.keys()) and holder_combined) and len(holder_combined) or 0
@@ -2251,12 +2258,24 @@ class RegistryCog(commands.Cog):
         _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Headhunter", "Butcher"])
 
         def fmt_title(emoji, label, player_val, holder_name, holder_val, resolved, is_board=True, total=None):
-            total_str = f"/{total}" if total is not None else ""
             padded = f"{label:<{_TITLE_PAD}}"
-            if resolved == holder_name:
-                return f"{emoji} `{padded}` \u2713 ({player_val}{total_str})"
-            diff = holder_val - player_val
-            return f"{emoji} `{padded}` \u2014 `{player_val}{total_str}` / `{holder_val}{total_str}` {holder_name} **(-{diff})**"
+            if is_board:
+                total_str = f"/{total}" if total is not None else ""
+                if resolved == holder_name:
+                    return f"{emoji} `{padded}` \u2713 ({player_val}{total_str})"
+                diff = holder_val - player_val
+                return f"{emoji} `{padded}` \u2014 `{player_val}{total_str}` / `{holder_val}{total_str}` {holder_name} **(-{diff})**"
+            # Stat titles (Headhunter / Butcher): minimalist average display
+            if resolved == holder_name and holder_name not in (None, "N/A"):
+                return f"{emoji} `{padded}` \u2014 avg {player_val} \U0001f451"
+            parts = []
+            if player_val:
+                parts.append(f"avg {player_val}")
+            if holder_name not in (None, "N/A") and holder_val:
+                parts.append(f"leader {holder_name} ({holder_val})")
+            if not parts:
+                parts.append("no runs yet")
+            return f"{emoji} `{padded}` \u2014 " + " \u00b7 ".join(parts)
 
         title_lines = [
             fmt_title(config.TITLE_EMOJIS["Grand Marshal"],   "Grand Marshal",   player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
