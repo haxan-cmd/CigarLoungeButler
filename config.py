@@ -386,6 +386,7 @@ WEAPON_ALIASES = {
     "polehammer": "Polehammer", "maul": "Maul", "war club": "War Club",
     "shovel": "Shovel", "pick axe": "Pick Axe", "pickaxe": "Pick Axe",
     "mallet": "Mallet",
+    "messer": "Messer", "axe": "Axe",
     "sledge": "Sledge Hammer", "sledgehammer": "Sledge Hammer", "sledge hammer": "Sledge Hammer",
     "highland sword": "Highland Sword",
     "warhammer": "Warhammer", "war hammer": "Warhammer",
