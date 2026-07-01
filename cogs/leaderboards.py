@@ -721,6 +721,11 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
             did = s[2] or ''
             if only_player is not None and did != str(only_player):
                 continue
+            pname_s = (s[1] or '').strip()
+            # Legacy submissions have blank discord_ids. Key them by name (synthetic
+            # "legacy:<name>" id) so they still land on boards AND re-runs stay
+            # idempotent (upsert on the synthetic id updates in place).
+            key = did if did else (f"legacy:{pname_s.lower()}" if pname_s else '')
             try:
                 td = int(s[7]) if s[7] else 0
             except (ValueError, TypeError):
@@ -735,26 +740,34 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 if f"{s[5]} - {s[6]}" != nm:
                     continue
                 score = td
-            if score <= 0 or not did:
+            if score <= 0 or not key:
                 continue
-            cur = best.get(did)
+            cur = best.get(key)
             if cur is None or score > cur[0]:
-                best[did] = (score, s[1] or '', s[12] or '', s[3] or '')
+                best[key] = (score, s[1] or '', s[12] or '', s[3] or '')
 
         # 2. Merge additively with existing entries (keep the higher score).
         existing_rows = await _db.get_leaderboard_by_board(nm)
         existing_by_id = {}
         for r in existing_rows:
-            eid = r[2] if len(r) > 2 else ''
+            eid = (r[2] if len(r) > 2 else '') or ''
+            ename = (r[1] if len(r) > 1 else '').strip()
+            ekey = eid if eid else (f"legacy:{ename.lower()}" if ename else '')
             esc = _safe_int(r[3]) if len(r) > 3 else 0
-            existing_by_id[eid] = esc
-        for did, (score, pname, link, wpn) in best.items():
-            ex = existing_by_id.get(did)
+            if ekey and (ekey not in existing_by_id or esc > existing_by_id[ekey]):
+                existing_by_id[ekey] = esc
+        for key, (score, pname, link, wpn) in best.items():
+            ex = existing_by_id.get(key)
+            if ex is not None and score <= ex:
+                continue
+            # For name-keyed legacy entries, clear any stale blank-id row for that
+            # name first so the synthetic-id upsert doesn't leave a duplicate.
+            if key.startswith('legacy:'):
+                await _db.delete_blank_id_entries_by_name(nm, pname)
+            await _db.upsert_leaderboard_entry(nm, pname, key, score, link, wpn)
             if ex is None:
-                await _db.upsert_leaderboard_entry(nm, pname, did, score, link, wpn)
                 summary['added'] += 1
-            elif score > ex:
-                await _db.upsert_leaderboard_entry(nm, pname, did, score, link, wpn)
+            else:
                 summary['updated'] += 1
 
         # 3. Cap to top-10 (weapon + map boards are top-10 boards). Trim by
@@ -1720,6 +1733,59 @@ class LeaderboardsCog(commands.Cog):
             f"Added {summary['added']}, updated {summary['updated']}, "
             f"evicted {summary['evicted']} beyond top-10."
         ))
+
+    @app_commands.command(name="add_board_score", description="Manually add/restore a single board entry (mod only).")
+    @app_commands.describe(board="Exact board name (e.g. War Axe, Heavy Mace, Rudhelm - Mason)",
+                           player="Player name as shown on the board",
+                           score="Score (takedowns for weapon/map boards)",
+                           link="Optional message link")
+    @app_commands.autocomplete(board=_rank_name_ac)
+    async def add_board_score_cmd(self, interaction: discord.Interaction, board: str,
+                                  player: str, score: int, link: str = None):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        board = board.strip()
+        player = player.strip()
+
+        # Resolve a real discord_id by name if the player is registered, so the
+        # entry dedupes with their live submissions; otherwise store it as a
+        # name-keyed legacy row.
+        discord_id = ''
+        try:
+            for p in await _db.get_all_players():
+                if p and len(p) > 1 and p[1] and p[1].strip().lower() == player.lower():
+                    discord_id = (p[0] or '').strip()
+                    break
+        except Exception:
+            pass
+        key = discord_id if discord_id else f"legacy:{player.lower()}"
+
+        kind = _classify_board(board, '')
+        weapon = board if kind == 'weapon' else ''
+        if key.startswith('legacy:'):
+            await _db.delete_blank_id_entries_by_name(board, player)
+        await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
+
+        # Re-cap top-10 for weapon/map boards, then re-render.
+        if kind in ('weapon', 'map'):
+            rows = await _db.get_leaderboard_by_board(board)
+            for _ in range(max(0, len(rows) - 10)):
+                await _db.delete_lowest_leaderboard_entry(board)
+
+        rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
+        if rec:
+            await _render_board(interaction.guild, rec, board)
+
+        # Report whether it survived the top-10 cap.
+        final = sorted(await _db.get_leaderboard_by_board(board),
+                       key=lambda r: _safe_int(r[3]) if len(r) > 3 else 0, reverse=True)
+        survived = any((r[1] or '').strip().lower() == player.lower()
+                       and _safe_int(r[3]) == score for r in final[:10])
+        note = "" if survived else " ⚠️ (ranked below top-10, stored but not shown)"
+        await interaction.edit_original_response(
+            content=f"✅ Set **{player}** = {score} on **{board}**.{note}")
 
     @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):

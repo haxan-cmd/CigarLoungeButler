@@ -664,6 +664,21 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
         """, board_name, str(discord_id))
 
 
+async def delete_blank_id_entries_by_name(board_name: str, player_name: str):
+    """Delete blank/null-discord_id rows on a board matching a player name
+    (case-insensitive). Used to clean stale legacy rows before re-inserting a
+    name-keyed entry, so rebuilds stay dupe-free and idempotent."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM leaderboard_data WHERE board_name=$1 "
+            "AND (discord_id IS NULL OR discord_id='') "
+            "AND lower(player_name)=lower($2)",
+            board_name, player_name
+        )
+
+
 async def delete_lowest_leaderboard_entry(board_name: str):
     """Delete the single lowest-scoring row on a board (tie-break: oldest id).
 
