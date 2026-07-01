@@ -1821,23 +1821,50 @@ class LeaderboardsCog(commands.Cog):
         board = board.strip()
         player = player.strip()
 
-        # Resolve a real discord_id by name if the player is registered, so the
-        # entry dedupes with their live submissions; otherwise store it as a
-        # name-keyed legacy row.
-        discord_id = ''
         try:
-            for p in await _db.get_all_players():
+            players = await _db.get_all_players()
+        except Exception:
+            players = []
+
+        # If the mod @mentioned the player, Discord passes it as "<@id>"/"<@!id>".
+        # Resolve it to the real discord_id + canonical board name, and remember the
+        # junk "legacy:<@id>" key so we can purge a row a mistaken mention-add left.
+        discord_id = ''
+        stale_keys = []
+        _m = _re.match(r'^<@!?(\d+)>$', player)
+        if _m:
+            mid = _m.group(1)
+            discord_id = mid
+            stale_keys += [f"legacy:<@{mid}>", f"legacy:<@!{mid}>"]
+            canon = next(((p[1] or '').strip() for p in players
+                          if p and (p[0] or '').strip() == mid and (p[1] or '').strip()), '')
+            if not canon:
+                _mem = interaction.guild.get_member(int(mid))
+                canon = _mem.display_name if _mem else player
+            player = canon
+        else:
+            for p in players:
                 if p and len(p) > 1 and p[1] and p[1].strip().lower() == player.lower():
                     discord_id = (p[0] or '').strip()
                     break
-        except Exception:
-            pass
+            if discord_id:
+                stale_keys += [f"legacy:<@{discord_id}>", f"legacy:<@!{discord_id}>"]
+
         key = discord_id if discord_id else f"legacy:{player.lower()}"
 
         kind = _classify_board(board, '')
         weapon = board if kind == 'weapon' else ''
-        if key.startswith('legacy:'):
+        # Purge stale rows for this person: blank-id legacy rows by name, plus any
+        # junk mention-keyed rows from a bad add.
+        try:
             await _db.delete_blank_id_entries_by_name(board, player)
+        except Exception:
+            pass
+        for _sk in stale_keys:
+            try:
+                await _db.delete_leaderboard_entry_by_board_and_player(board, _sk)
+            except Exception:
+                pass
         await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
 
         # Re-cap top-10 for weapon/map boards, then re-render.
