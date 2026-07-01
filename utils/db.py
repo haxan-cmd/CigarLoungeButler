@@ -900,15 +900,101 @@ async def get_hundred_handed_progress(discord_id: str) -> list:
 
 
 async def get_hundred_handed_leaderboard() -> list:
-    """Return [(discord_id, player_name, count)] — completers sorted by completion time, then in-progress by count desc."""
+    """Return [(discord_id, player_name, count)]. Completers first (earliest
+    completion), then in-progress by count desc.
+
+    Collapses duplicate identities — the same person split across id/name
+    spellings (a rename, or a legacy-backfill id vs their live id) — so nobody
+    shows twice, e.g. in both the completed and in-progress lists. Keeps their
+    highest count. Purely a display fix; the underlying rows are untouched."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT discord_id, player_name, COUNT(*) as cnt, MAX(achieved_at) as last_entry "
-            "FROM hundred_handed GROUP BY discord_id, player_name "
-            "ORDER BY cnt DESC, last_entry ASC"
+            "FROM hundred_handed GROUP BY discord_id, player_name"
         )
-    return [(r['discord_id'], r['player_name'], int(r['cnt'])) for r in rows]
+
+    recs = [((r['discord_id'] or '').strip(), (r['player_name'] or '').strip(),
+             int(r['cnt']), r['last_entry']) for r in rows]
+
+    def _collapse(records, keyfn):
+        best = {}
+        for did, name, cnt, last in records:
+            k = keyfn(did, name)
+            cur = best.get(k)
+            if cur is None or cnt > cur[2] or (cnt == cur[2] and name and not cur[1]):
+                best[k] = (did, name, cnt, last)
+        return list(best.values())
+
+    recs = _collapse(recs, lambda did, name: did or name.lower())   # merge name variants under one id
+    recs = _collapse(recs, lambda did, name: name.lower() or did)   # merge one name across ids
+    recs.sort(key=lambda x: (-x[2], x[3] or datetime.min))
+    return [(did, name, cnt) for did, name, cnt, last in recs]
+
+
+async def consolidate_hundred_handed(dry_run: bool = False) -> dict:
+    """Merge duplicate Hundred Handed identities — the same player split across
+    different discord_id / player_name spellings — into a single canonical
+    id+name, deduping (subclass, weapon) combos and keeping the earliest
+    achieved_at per combo. Canonical id/name come from the players table when the
+    name matches, else the most common id / non-empty name in the group.
+    Returns {'players', 'removed', 'details'}. dry_run computes but writes nothing."""
+    from collections import Counter
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        prows = await conn.fetch("SELECT discord_id, player_name FROM players")
+        canon = {}
+        for r in prows:
+            nm = (r['player_name'] or '').strip()
+            if nm:
+                canon[nm.lower()] = (str(r['discord_id']), nm)
+        hh = await conn.fetch("SELECT discord_id, player_name, subclass, weapon, achieved_at FROM hundred_handed")
+
+        groups = {}
+        for r in hh:
+            nm = (r['player_name'] or '').strip()
+            did = (r['discord_id'] or '').strip()
+            groups.setdefault(nm.lower() or did, []).append(r)
+
+        details, merged_players, removed = [], 0, 0
+        for key, rows in groups.items():
+            ids = {(r['discord_id'] or '').strip() for r in rows}
+            names = {(r['player_name'] or '').strip() for r in rows}
+            if len(ids) <= 1 and len(names) <= 1:
+                continue  # single clean identity — nothing to merge
+            if key in canon:
+                canon_id, canon_name = canon[key]
+            else:
+                id_counts = Counter(i for i in ((r['discord_id'] or '').strip() for r in rows) if i)
+                canon_id = id_counts.most_common(1)[0][0] if id_counts else ''
+                nonempty = [(r['player_name'] or '').strip() for r in rows if (r['player_name'] or '').strip()]
+                canon_name = Counter(nonempty).most_common(1)[0][0] if nonempty else ''
+            if not canon_id:
+                continue  # can't consolidate without a real id
+            combo = {}
+            for r in rows:
+                ck = (r['subclass'], r['weapon'])
+                at = r['achieved_at']
+                if ck not in combo:
+                    combo[ck] = at
+                elif at is not None and (combo[ck] is None or at < combo[ck]):
+                    combo[ck] = at
+            removed += len(rows) - len(combo)
+            merged_players += 1
+            details.append(f"{canon_name or canon_id}: {len(rows)} rows / {len(ids)} id(s) -> {len(combo)} combos")
+            if not dry_run:
+                async with conn.transaction():
+                    await conn.execute(
+                        "DELETE FROM hundred_handed WHERE LOWER(TRIM(player_name)) = $1 OR discord_id = ANY($2::text[])",
+                        key, list(ids)
+                    )
+                    for (sub, wpn), at in combo.items():
+                        await conn.execute(
+                            "INSERT INTO hundred_handed (discord_id, player_name, subclass, weapon, achieved_at) "
+                            "VALUES ($1,$2,$3,$4,$5) ON CONFLICT (discord_id, subclass, weapon) DO NOTHING",
+                            canon_id, canon_name, sub, wpn, at
+                        )
+    return {"players": merged_players, "removed": removed, "details": details}
 
 
 # ── Snapshots ─────────────────────────────────────────────────────────────────

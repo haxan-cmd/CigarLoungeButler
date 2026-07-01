@@ -1692,6 +1692,33 @@ class LeaderboardsCog(commands.Cog):
         role_msg = f"\n\U0001f396\ufe0f Role assigned to: {', '.join(hh_role_assigned)}" if hh_role_assigned else ""
         await interaction.edit_original_response(content=f"\u2705 Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
 
+    @app_commands.command(name="consolidate_hundred_handed", description="Merge duplicate Hundred Handed identities into one per player (mod only).")
+    @app_commands.describe(confirm="Apply the merge. Leave off for a dry-run preview.")
+    async def consolidate_hundred_handed(self, interaction: discord.Interaction, confirm: bool = False):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            res = await _db.consolidate_hundred_handed(dry_run=not confirm)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Error: {e}", ephemeral=True)
+            return
+        if res["players"] == 0:
+            await interaction.followup.send("No duplicate Hundred Handed identities found \u2014 nothing to merge.", ephemeral=True)
+            return
+        detail = "\n".join(res["details"][:15])
+        more = f"\n\u2026and {len(res['details']) - 15} more" if len(res["details"]) > 15 else ""
+        if confirm:
+            await refresh_hundred_handed_board(interaction.guild)
+            await interaction.followup.send(
+                f"\u2705 Merged **{res['players']}** duplicate identities, removed **{res['removed']}** redundant rows. Board refreshed.\n{detail}{more}",
+                ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"**Dry run** \u2014 would merge **{res['players']}** identities and remove **{res['removed']}** rows:\n{detail}{more}\n\nRun again with `confirm: True` to apply.",
+                ephemeral=True)
+
 
 async def refresh_hundred_handed_board(guild):
     """Rebuild The Hundred Handed embed in its thread."""
