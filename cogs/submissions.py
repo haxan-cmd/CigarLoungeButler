@@ -1288,6 +1288,16 @@ async def _apply_edit(interaction, ev):
     except Exception as e:
         print(f"Edit DB update error: {e}")
 
+    # Recompute marks + refresh the registry card so the edit actually propagates.
+    # Previously the edit only rewrote the summary message, leaving the card and
+    # cached mark totals stale (e.g. a class edit didn't move the mark).
+    try:
+        from cogs.registry import create_or_update_registry_card
+        await create_or_update_registry_card(
+            ev.original_message.guild, ev.author.id, ev.author.display_name)
+    except Exception as e:
+        print(f"Edit card refresh error: {e}")
+
     # Rebuild summary
     _edit_player_row = await _db.get_player(str(ev.author.id))
     _edit_thread_id = _edit_player_row[2] if _edit_player_row and _edit_player_row[2] else None
