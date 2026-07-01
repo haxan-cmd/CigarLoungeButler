@@ -165,10 +165,10 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             img = _PIEnhance.Contrast(img).enhance(1.3)
             img = _PIEnhance.Sharpness(img).enhance(2.0)
             buf = _io.BytesIO()
-            img.save(buf, format='PNG', optimize=True)
+            img.save(buf, format='JPEG', quality=90)
             image_bytes = buf.getvalue()
-            content_type = 'image/png'
-            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} PNG ({len(image_bytes)} bytes)")
+            content_type = 'image/jpeg'
+            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} JPEG ({len(image_bytes)} bytes)")
         except Exception as pp_err:
             print(f"[VISION] Pre-process skipped: {pp_err}")
 
@@ -195,7 +195,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
                     config=_gtypes.GenerateContentConfig(
                         temperature=0,
                         response_mime_type='application/json',
-                        thinking_config=_gtypes.ThinkingConfig(thinking_budget=2048),
+                        thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
                 raw = r.text.strip()
