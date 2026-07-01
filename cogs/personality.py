@@ -22,6 +22,7 @@ from cogs.favourites import calculate_butler_stats, build_favourites_embed, upda
 
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
+COUNTING_CHANNEL_ID         = config.COUNTING_CHANNEL_ID
 NERVE_CENTER_CHANNEL_ID     = config.NERVE_CENTER_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
 BUTLERS_MANUAL_CHANNEL_ID   = config.BUTLERS_MANUAL_CHANNEL_ID
@@ -88,12 +89,48 @@ BUTLER_IDIOT_ROLE_ID = 1510070252044554390
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 15
 
+# Counting-channel Idiot insults
+BUTLER_COUNTING_INSULT_COOLDOWN = 30  # sec, per user — avoid double-fire on rapid role churn
+BUTLER_IDIOT_INSULT_COOLDOWNS = {}    # user_id -> last insult ts
+_COUNTING_INSULT_FALLBACKS = [
+    "back to the corner. Counting is evidently not for everyone.",
+    "a number came, a number went, and you fumbled it. Predictable.",
+    "the sequence asked for one thing, in order. You improvised.",
+    "one number. After the last one. And still.",
+    "I would explain where you went wrong, but we are short on crayons.",
+    "the count endured for years without your help. It will recover.",
+]
+
 import os as _os
 _anthropic_client = None
 try:
     _anthropic_client = anthropic.AsyncAnthropic(api_key=_os.environ['ANTHROPIC_API_KEY'])
 except Exception as _e:
     print(f"Butler AI unavailable: {_e}")
+
+
+async def _generate_counting_insult(name):
+    """One dry, condescending line for whoever just broke the count. AI with a
+    static fallback. The caller prepends the offender's mention, so the line
+    itself should not use their name."""
+    if _anthropic_client:
+        try:
+            r = await _anthropic_client.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=50,
+                system=BUTLER_SYSTEM_PROMPT,
+                messages=[{'role': 'user', 'content': (
+                    f"{name} just broke the count in the counting channel and earned the Idiot role. "
+                    "Give one dry, condescending one-line insult about their inability to count in order. "
+                    "One sentence. No emoji. Do not use their name. Vary it each time."
+                )}]
+            )
+            line = r.content[0].text.strip()
+            if line and line != 'SKIP':
+                return line
+        except Exception as e:
+            print(f"Counting insult generation error: {e}")
+    return random.choice(_COUNTING_INSULT_FALLBACKS)
 
 async def count_qualifying_runs(weapon_name, min_td=100):
     """Count runs with TD >= min_td for a weapon using LeaderboardData (includes legacy)."""
@@ -492,15 +529,13 @@ class PersonalityCog(commands.Cog):
         await main_ch.send(f"*{question}*")
         print(f"[POLL] Posted question: {question}")
 
-    @tasks.loop(hours=12)
+    @tasks.loop(hours=6)
     async def butler_poll_post(self):
-        """Occasionally post a poll in main. ~30% chance each 12-hour window
-        — roughly once every day and a half. Note: task loops run their body
-        immediately on start (not after the first interval), so this rolls
-        the dice once right at startup too — with a 30% chance, expect long
-        stretches (days) of nothing by design, not a bug. Use /force_poll to
-        post one on demand without waiting on the odds."""
-        if random.random() > 0.3:
+        """Post a Butler question in main once every 6 hours. Skips the
+        immediate on-boot run (task loops fire their body on start) so
+        redeploys don't trigger an extra post — the first question lands
+        ~6h after startup. Use /force_poll to post one on demand."""
+        if self.butler_poll_post.current_loop == 0:
             return
         try:
             await self._run_poll_logic()
@@ -512,6 +547,30 @@ class PersonalityCog(commands.Cog):
         print(f"Poll post task crashed, restarting: {error}")
         if not self.butler_poll_post.is_running():
             self.butler_poll_post.restart()
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before, after):
+        """When someone earns the Idiot role (broke the count), the Butler
+        insults them in the counting channel. No-ops until COUNTING_CHANNEL_ID
+        is set in config."""
+        if not COUNTING_CHANNEL_ID or after.guild.id != GUILD_ID:
+            return
+        had = any(r.id == BUTLER_IDIOT_ROLE_ID for r in before.roles)
+        has = any(r.id == BUTLER_IDIOT_ROLE_ID for r in after.roles)
+        if had or not has:
+            return  # only fire on the transition into the Idiot role
+        now_ts = time.time()
+        if now_ts - BUTLER_IDIOT_INSULT_COOLDOWNS.get(after.id, 0) < BUTLER_COUNTING_INSULT_COOLDOWN:
+            return
+        BUTLER_IDIOT_INSULT_COOLDOWNS[after.id] = now_ts
+        try:
+            channel = after.guild.get_channel(COUNTING_CHANNEL_ID) or await after.guild.fetch_channel(COUNTING_CHANNEL_ID)
+            if not channel:
+                return
+            line = await _generate_counting_insult(after.display_name)
+            await channel.send(f"{after.mention} {line}")
+        except Exception as e:
+            print(f"Counting insult error: {e}")
 
     async def _run_nerve_logic(self):
         """Core nerve center post logic. Called by the hourly loop."""
@@ -753,6 +812,9 @@ class PersonalityCog(commands.Cog):
 
         content_lower = message.content.lower()
         mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
+        mentions_bald_female = 'bald female' in content_lower or 'bald woman' in content_lower
+        mentions_manager = 'manager' in content_lower
+        mentions_stats = 'stats' in content_lower
 
         # ── Command help redirect — fire in main if someone asks about commands ───
         _cmd_triggers = [
@@ -780,7 +842,8 @@ class PersonalityCog(commands.Cog):
         # ── Main only — only respond if pinged or butler/clanker mentioned ────────
         if not is_main:
             return
-        should_respond = is_pinged or mentions_butler
+        should_respond = (is_pinged or mentions_butler or mentions_bald_female
+                          or mentions_manager or mentions_stats)
         if should_respond and _anthropic_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'
