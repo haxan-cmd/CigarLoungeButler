@@ -475,38 +475,51 @@ class PersonalityCog(commands.Cog):
         if not self.butler_organic_post.is_running():
             self.butler_organic_post.restart()
 
+    async def _run_poll_logic(self):
+        """Core poll-posting logic — separated from the schedule/chance check
+        so /force_poll can trigger it directly, same pattern as
+        _run_snapshot_logic / /force_snapshot. Half the time posts a stats
+        poll grounded in real config data (favourite map/weapon/faction/
+        subclass — options pulled straight from config so the Butler can't
+        invent fake choices), half the time a random silly/abstract one from
+        the AI (static fallback if generation fails)."""
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            print("[POLL] guild not found")
+            return
+        main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
+        if not main_ch:
+            print("[POLL] main channel not found")
+            return
+
+        if random.random() < 0.5:
+            question, options = _build_stats_poll()
+        else:
+            question, options = await _generate_absurd_poll()
+
+        if not question or len(options) < 2:
+            print("[POLL] question/options invalid, skipping")
+            return
+
+        poll = discord.Poll(question=question, duration=timedelta(hours=24), multiple=False)
+        for opt in options[:10]:
+            poll.add_answer(text=opt)
+
+        await main_ch.send(poll=poll)
+        print(f"[POLL] Posted: {question}")
+
     @tasks.loop(hours=12)
     async def butler_poll_post(self):
-        """Occasionally post a poll in main — half the time grounded in real
-        server stats (favourite map/weapon/faction/subclass, options pulled
-        straight from config so the Butler can't invent fake choices), half
-        the time a random silly/abstract one from the AI (static fallback if
-        generation fails). ~30% chance each 12-hour window — roughly once
-        every day and a half."""
+        """Occasionally post a poll in main. ~30% chance each 12-hour window
+        — roughly once every day and a half. Note: task loops run their body
+        immediately on start (not after the first interval), so this rolls
+        the dice once right at startup too — with a 30% chance, expect long
+        stretches (days) of nothing by design, not a bug. Use /force_poll to
+        post one on demand without waiting on the odds."""
         if random.random() > 0.3:
             return
         try:
-            guild = self.bot.get_guild(GUILD_ID)
-            if not guild:
-                return
-            main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
-            if not main_ch:
-                return
-
-            if random.random() < 0.5:
-                question, options = _build_stats_poll()
-            else:
-                question, options = await _generate_absurd_poll()
-
-            if not question or len(options) < 2:
-                return
-
-            poll = discord.Poll(question=question, duration=timedelta(hours=24), multiple=False)
-            for opt in options[:10]:
-                poll.add_answer(text=opt)
-
-            await main_ch.send(poll=poll)
-            print(f"[POLL] Posted: {question}")
+            await self._run_poll_logic()
         except Exception as e:
             print(f"Butler poll post error: {e}")
 

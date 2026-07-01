@@ -486,6 +486,22 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
+    @app_commands.command(name="force_poll", description="Manually post a Butler poll in main right now (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def force_poll(self, interaction: discord.Interaction):
+        """Bypasses the 30%-per-12-hours dice roll in butler_poll_post so a
+        poll can be tested/posted on demand instead of waiting on the odds."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            personality_cog = interaction.client.cogs.get("PersonalityCog")
+            if not personality_cog:
+                await interaction.followup.send("❌ PersonalityCog not loaded.", ephemeral=True)
+                return
+            await personality_cog._run_poll_logic()
+            await interaction.followup.send("✅ Poll posted in main.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
     @app_commands.command(name="set_feat_count", description="Manually set a player's 100 Kills / 200 Takedowns / Triple count (mod only).")
     @app_commands.describe(
         player="@ mention or Discord ID of the player",
