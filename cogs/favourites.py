@@ -150,33 +150,31 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # -- Median-anchored qualification floor for the average categories: you need
-    # about half as many games as a typical player (min 3), so one lucky game
-    # can't top a percentage board. Robust to grinders (median ignores whales).
-    import statistics as _stats
-    _active = [c for c in player_counts.values() if c > 0]
-    _min_games = max(3, int(_stats.median(_active) // 2)) if _active else 3
+    # Volume-adjusted (Bayesian shrinkage) ranking for the ratio categories:
+    # pull each player's average toward the global mean based on how few games
+    # they've played, so a few lucky games can't top a percentage board and
+    # sustained high performance over many games ranks highest.
+    #   adjusted = (sum_of_ratios + PRIOR * global_mean) / (games + PRIOR)
+    _PRIOR = 5   # pseudo-games at the global mean; higher = rewards volume more
+    _MIN = 2     # ignore truly tiny samples
 
-    # ── LETHALITY -- avg kills ÷ takedowns %, median-floor qualified ──
-    lethal_candidates = {p for p, v in lethal_ratios.items() if len(v) >= _min_games}
-    lethal_ranked = sorted(lethal_candidates, key=lambda p: -(sum(lethal_ratios[p]) / len(lethal_ratios[p])))
+    def _shrunk_rank(data):
+        elig = {p: v for p, v in data.items() if len(v) >= _MIN}
+        allv = [x for v in elig.values() for x in v]
+        gmean = (sum(allv) / len(allv)) if allv else 0.0
+        ranked = [(p, (sum(v) + _PRIOR * gmean) / (len(v) + _PRIOR), len(v)) for p, v in elig.items()]
+        ranked.sort(key=lambda t: -t[1])
+        return ranked
 
-    def lethality_label(p):
-        ratios = lethal_ratios.get(p, [])
-        avg = sum(ratios) / len(ratios) if ratios else 0
-        return f"{p} -- {avg * 100:.1f}%"
+    # ── LETHALITY -- volume-adjusted kills ÷ takedowns % (games shown in parens) ──
+    _leth = _shrunk_rank(lethal_ratios)
+    lethal_ranked = [p for p, _adj, _n in _leth]
+    most_lethal_top5 = [f"{p} -- {adj * 100:.1f}% ({n})" for p, adj, n in _leth[:5]]
 
-    most_lethal_top5 = [lethality_label(p) for p in lethal_ranked[:5]]
-
-    # ── WARLORD -- avg team TD share %, min 3 runs with team data ──
-    warlord_candidates = {p for p, v in team_td_shares.items() if len(v) >= _min_games}
-    dom_ranked = sorted(warlord_candidates, key=lambda p: -(sum(team_td_shares[p]) / len(team_td_shares[p])))
-
-    most_dominant = []
-    for p in dom_ranked[:5]:
-        shares = team_td_shares.get(p, [])
-        avg = sum(shares) / len(shares) if shares else 0
-        most_dominant.append(f"{p} -- {avg:.1f}%")
+    # ── WARLORD -- volume-adjusted team TD share % ──
+    _dom = _shrunk_rank(team_td_shares)
+    dom_ranked = [p for p, _adj, _n in _dom]
+    most_dominant = [f"{p} -- {adj:.1f}% ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
@@ -362,6 +360,9 @@ async def calculate_butler_stats(week_start=None, week_end=None):
 async def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
+    def _short(nm, m=16):
+        return nm if len(nm) <= m else nm[:m - 1] + "…"
+
     def fmt_list(items, suffix="", n=3):
         subset = items[:n]
         if not subset:
@@ -369,7 +370,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
         lines = []
         for i, (name, val) in enumerate(subset):
             sfx = f" {suffix}" if (suffix and i == 0) else ""
-            lines.append(f"│ `{name}` — {val}{sfx}")
+            lines.append(f"│ `{_short(name)}` — {val}{sfx}")
         return "\n".join(lines)
 
     def fmt_plain(items, n=3):
@@ -386,9 +387,9 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
         lines = []
         for name, rest in parsed:
             if rest is not None:
-                lines.append(f"│ `{name}` — {rest}")
+                lines.append(f"│ `{_short(name)}` — {rest}")
             else:
-                lines.append(f"│ `{name}`")
+                lines.append(f"│ `{_short(name)}`")
         return "\n".join(lines)
 
     week_label = stats.get('week_label', '')
