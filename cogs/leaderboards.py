@@ -1734,6 +1734,78 @@ class LeaderboardsCog(commands.Cog):
             f"evicted {summary['evicted']} beyond top-10."
         ))
 
+    @app_commands.command(name="board_audit", description="Read-only: list submission scores missing from weapon/map boards (mod only).")
+    @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
+    @app_commands.autocomplete(name=_rank_name_ac)
+    async def board_audit_cmd(self, interaction: discord.Interaction, name: str = None):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        all_lb = await _get_lb_records()
+        all_subs = await _db.get_all_submissions()
+        lines = []
+        total = 0
+
+        for rec in all_lb:
+            nm = rec["Leaderboard Name"]
+            kind = _classify_board(nm, rec.get("Type", ""))
+            if kind not in ("weapon", "map"):
+                continue
+            if name and nm != name:
+                continue
+
+            best = {}
+            for s in all_subs:
+                if len(s) < 13:
+                    continue
+                pname_s = (s[1] or "").strip()
+                did = s[2] or ""
+                key = did if did else (("legacy:" + pname_s.lower()) if pname_s else "")
+                td = _safe_int(s[7])
+                if kind == "weapon":
+                    if s[3] != nm:
+                        continue
+                    if (s[10] or "").strip().lower() == "yes":
+                        continue
+                    score = td
+                else:
+                    if (str(s[5]) + " - " + str(s[6])) != nm:
+                        continue
+                    score = td
+                if score <= 0 or not key:
+                    continue
+                if key not in best or score > best[key][0]:
+                    best[key] = (score, pname_s)
+
+            existing = await _db.get_leaderboard_by_board(nm)
+            existing_names = {(r[1] or "").strip().lower() for r in existing}
+            existing_scores = sorted((_safe_int(r[3]) for r in existing), reverse=True)
+            cap10 = existing_scores[9] if len(existing_scores) >= 10 else 0
+
+            missing = [(sc, pn) for sc, pn in best.values()
+                       if pn.lower() not in existing_names and sc > cap10]
+            if missing:
+                missing.sort(reverse=True)
+                total += len(missing)
+                lines.append("**" + nm + "** - " + str(len(missing)) + " missing:")
+                for sc, pn in missing[:6]:
+                    lines.append("  - " + pn + " - " + str(sc))
+
+        if not lines:
+            await interaction.edit_original_response(
+                content="No submission-backed scores are missing from any board top-10.")
+            return
+
+        board_count = sum(1 for l in lines if l.startswith("**"))
+        noun = "entry" if total == 1 else "entries"
+        header = "**Board audit** - " + str(total) + " " + noun + " missing from top-10 across " + str(board_count) + " board(s):\n\n"
+        msg = header + "\n".join(lines)
+        if len(msg) > 1950:
+            msg = msg[:1900] + "\n... (truncated - run with a board name for detail)"
+        await interaction.edit_original_response(content=msg)
+
     @app_commands.command(name="add_board_score", description="Manually add/restore a single board entry (mod only).")
     @app_commands.describe(board="Exact board name (e.g. War Axe, Heavy Mace, Rudhelm - Mason)",
                            player="Player name as shown on the board",
