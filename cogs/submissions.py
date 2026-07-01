@@ -1805,6 +1805,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _user_name = interaction.user.display_name
 
     async def _bg_tasks():
+        # is_new_player is (re)computed later in this task's milestone section, which
+        # makes it a local — initialize it up front so the butler hooks below can
+        # read it without an UnboundLocalError (regression from backgrounding).
+        is_new_player = False
         # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
         # and beats the player's own existing score on that board
         if not vip and not is_ranged:
