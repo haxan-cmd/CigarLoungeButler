@@ -1515,6 +1515,42 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if selected_weapon in FEAT_WEAPONS and kills >= 100:
         feats.append(selected_weapon)
 
+    # ── Instant acknowledgment ────────────────────────────────────────────────
+    # Fire the stat-based reactions on the scorecard FIRST — before the blurb,
+    # any DB write, and all leaderboard/card work — so the player gets immediate
+    # feedback. These depend only on the stats already confirmed. safe_react is
+    # defined here (outer scope) so the deferred result reactions can reuse it.
+    async def safe_react(emoji):
+        try:
+            await original_message.add_reaction(emoji)
+        except Exception as e:
+            print(f"Reaction failed ({emoji}): {e}")
+
+    _immediate = ["<:cigar:1444893851427803298>"]
+    if deaths == 0:
+        _immediate.append("<a:flawless:1360358300834599062>")
+    if is_triple:
+        _immediate.append("<a:triple:1365532698260668466>")
+    if kills >= 100:
+        _immediate.append("<a:100kill:1361412390339608686>")
+    if takedowns >= 200:
+        _immediate.append("<a:200tkd:1363648828414230538>")
+    if takedowns >= 150 and deaths == 0:
+        _immediate.append("<a:predator:1366794896081555567>")
+    await asyncio.gather(*(safe_react(e) for e in _immediate), return_exceptions=True)
+
+    # Clear the "Scorecard detected" prompt in the background (never blocks).
+    async def _cleanup_prompt():
+        try:
+            await asyncio.sleep(1)
+            await prompt_msg.delete()
+        except (discord.NotFound, AttributeError):
+            pass
+        except Exception as _pe:
+            print(f"Prompt delete error: {_pe}")
+    if prompt_msg:
+        asyncio.create_task(_cleanup_prompt())
+
     vip_str = "Yes" if vip else "No"
 
     caption = original_message.content.strip() if original_message.content else ""
@@ -1757,41 +1793,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
     edit_view._message = summary_reply
-
-    # React to the original screenshot
-    async def safe_react(emoji):
-        try:
-            await original_message.add_reaction(emoji)
-        except Exception as e:
-            print(f"Reaction failed ({emoji}): {e}")
-
-    # Delete the "Scorecard detected" prompt in the background — don't gate the
-    # reactions/blurb on it (there used to be a hard 1s sleep here).
-    async def _cleanup_prompt():
-        try:
-            await asyncio.sleep(1)
-            await prompt_msg.delete()
-        except (discord.NotFound, AttributeError):
-            pass
-        except Exception as _pe:
-            print(f"Prompt delete error: {_pe}")
-    if prompt_msg:
-        asyncio.create_task(_cleanup_prompt())
-
-    # Fire the immediate (stat-based) reactions concurrently instead of one at a time.
-    _is_triple = takedowns >= 150 and kills >= 100 and score_over_20k
-    _immediate = ["<:cigar:1444893851427803298>"]
-    if deaths == 0:
-        _immediate.append("<a:flawless:1360358300834599062>")
-    if _is_triple:
-        _immediate.append("<a:triple:1365532698260668466>")
-    if kills >= 100:
-        _immediate.append("<a:100kill:1361412390339608686>")
-    if takedowns >= 200:
-        _immediate.append("<a:200tkd:1363648828414230538>")
-    if takedowns >= 150 and deaths == 0:
-        _immediate.append("<a:predator:1366794896081555567>")
-    await asyncio.gather(*(safe_react(e) for e in _immediate), return_exceptions=True)
 
     is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
 
