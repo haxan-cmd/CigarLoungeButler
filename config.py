@@ -16,11 +16,6 @@ GUILD_ID = 1324379304544567356
 DECORATION_TOP    = os.getenv('DECORATION_TOP',    'WMMR_Spacer_Top.png')
 DECORATION_BOTTOM = os.getenv('DECORATION_BOTTOM', 'WMMR_Spacer_Bottom.png')
 
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive',
-]
-
 # ── Channel IDs ───────────────────────────────────────────────────────────────
 SUBMISSIONS_CHANNEL_ID      = 1328832440927518920
 MAIN_CHANNEL_ID             = 1324447691467526338
