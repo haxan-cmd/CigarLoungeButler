@@ -1163,6 +1163,14 @@ async def end_current_season():
     return dict(r) if r else None
 
 
+async def get_all_seasons():
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, label, started_at, ended_at, thread_id FROM seasons ORDER BY id DESC")
+    return [dict(r) for r in rows]
+
+
 async def get_finished_seasons():
     pool = _pool_check()
     async with pool.acquire() as conn:
@@ -1176,6 +1184,12 @@ async def set_season_thread(season_id: int, thread_id: str):
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE seasons SET thread_id = $1 WHERE id = $2", str(thread_id), season_id)
+
+
+async def set_season_start(season_id: int, started_at):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE seasons SET started_at = $1 WHERE id = $2", started_at, season_id)
 
 
 async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str) -> bool:

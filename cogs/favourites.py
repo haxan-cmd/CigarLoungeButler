@@ -590,14 +590,17 @@ async def _hof_index_refresh(guild):
     if not forum:
         return
     lines = ["**\U0001f3c1 Hall of Fame — Index**", "", "*Champions of each season.*", ""]
-    for s in await _db.get_finished_seasons():
+    for s in await _db.get_all_seasons():
+        tid = s.get("thread_id")
+        if not tid:
+            continue
         label = s.get("label") or f"Season {s['id']}"
         bonuses = await _db.get_season_bonuses(s["id"])
         standings, _ = await compute_season_standings(s["started_at"], s.get("ended_at"), bonuses)
         champ = standings[0][0] if standings else "—"
-        tid = s.get("thread_id")
-        link = f"  https://discord.com/channels/{guild.id}/{tid}" if tid else ""
-        lines.append(f"**{label}** — \U0001f3c6 {champ}{link}")
+        status = "" if s.get("ended_at") else "  *(in progress)*"
+        link = f"  https://discord.com/channels/{guild.id}/{tid}"
+        lines.append(f"**{label}** — \U0001f3c6 {champ}{status}{link}")
     body = "\n".join(lines)
     idx = next((p for p in await _db.get_all_index_posts() if p[0] == "hall_of_fame"), None)
     if idx and idx[1]:
@@ -656,6 +659,28 @@ class FavouritesCog(commands.Cog):
         sid = await _db.start_season(label)
         await interaction.followup.send(
             f"Season **{label}** opened (id {sid}). Stats accrue from now until the bounty ends.", ephemeral=True)
+
+    @app_commands.command(name="season_set_start", description="Backdate the current season's start date (mod only).")
+    @app_commands.describe(date="Start date YYYY-MM-DD — e.g. the day the bounty began")
+    async def season_set_start(self, interaction: discord.Interaction, date: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        from datetime import datetime, timezone
+        await interaction.response.defer(ephemeral=True)
+        try:
+            dt = datetime.strptime(date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            await interaction.followup.send("Date must be YYYY-MM-DD, e.g. 2026-06-22.", ephemeral=True)
+            return
+        season = await _db.get_current_season()
+        if not season:
+            await interaction.followup.send("No season is running.", ephemeral=True)
+            return
+        await _db.set_season_start(season["id"], dt)
+        label = season.get("label") or f"Season {season['id']}"
+        await interaction.followup.send(
+            f"Season **{label}** now starts **{date}** — the report and standings include everything from then.", ephemeral=True)
 
     @app_commands.command(name="season_standings", description="Live standings for the current season (this bounty cycle).")
     async def season_standings(self, interaction: discord.Interaction):
@@ -724,13 +749,17 @@ class FavouritesCog(commands.Cog):
 
         try:
             _now = datetime.now(timezone.utc)
-            days_since_monday = _now.weekday()
-            week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
-            if week_start_dt > _now:
-                week_start_dt -= timedelta(weeks=1)
-            week_label = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
-            stats['week_label'] = week_label
+            _season = await _db.get_current_season()
+            if _season:
+                stats = await calculate_butler_stats(week_start=_season['started_at'].timestamp(), week_end=_now.timestamp())
+                stats['week_label'] = (_season.get('label') or f"Season {_season['id']}") + " — season so far"
+            else:
+                days_since_monday = _now.weekday()
+                week_start_dt = (_now - timedelta(days=days_since_monday)).replace(hour=12, minute=0, second=0, microsecond=0)
+                if week_start_dt > _now:
+                    week_start_dt -= timedelta(weeks=1)
+                stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
+                stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
             embed_text = build_favourites_embed(stats, bot_avatar_url=interaction.guild.me.display_avatar.url if interaction.guild else None)
 
             await interaction.followup.send(embed=embed_text)
