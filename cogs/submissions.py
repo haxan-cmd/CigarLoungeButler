@@ -1591,7 +1591,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_lines.append(f"*<a:200tkd:1363648828414230538> +1 Takedowns*")
     if '100 Kills' in feats:
         marks_earned += 1
-        marks_lines.append(f"*<a:100kill:1361412390339608686> +1 Kills*")
+        marks_lines.append(f"*<a:100kill:1361412390339608686> +*")
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
