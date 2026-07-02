@@ -41,8 +41,6 @@ PLAYER_TITLES           = config.PLAYER_TITLES
 GRAND_MARSHAL_ROLE_ID   = config.GRAND_MARSHAL_ROLE_ID
 WEAPONS_MASTER_ROLE_ID  = config.WEAPONS_MASTER_ROLE_ID
 CAMPAIGN_MASTER_ROLE_ID = config.CAMPAIGN_MASTER_ROLE_ID
-HEADHUNTER_ROLE_ID      = config.HEADHUNTER_ROLE_ID
-BUTCHER_ROLE_ID         = config.BUTCHER_ROLE_ID
 
 def build_challenge_rules_embeds():
     """Return a list of discord.Embed objects for the challenge rules channel."""

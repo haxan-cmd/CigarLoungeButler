@@ -351,8 +351,8 @@ async def _alltime_title_holders(cached_data=None):
         'grand_marshal':   breadth_leader(holder_combined, 15),
         'weapons_master':  breadth_leader(holder_weapon, 9),
         'campaign_master': breadth_leader(holder_map, 6),
-        'headhunter':      title_holder(kills_best),
-        'butcher':         title_holder(td_best),
+        'apex':            title_holder(kills_best),
+        'frenzied':        title_holder(td_best),
     }
 
 
@@ -375,8 +375,8 @@ async def get_butler_titles_for_player(discord_id, stats=None, cached_data=None)
         ('grand_marshal',   f"{_te['Grand Marshal']} Grand Marshal"),
         ('weapons_master',  f"{_te['Weapons Master']} Weapons Master"),
         ('campaign_master', f"{_te['Campaign Master']} Campaign Master"),
-        ('headhunter',      f"{_te['Headhunter']} Apex"),
-        ('butcher',         f"{_te['Butcher']} Frenzied"),
+        ('apex',            f"{_te['apex_title']} Apex"),
+        ('frenzied',        f"{_te['frenzied_title']} Frenzied"),
     ]
     return [label for key, label in labels if holders.get(key) == player_name]
 
@@ -2281,7 +2281,7 @@ class RegistryCog(commands.Cog):
         wm_holder, wm_count = breadth_leader(holder_weapon, 9)
         cm_holder, cm_count = breadth_leader(holder_map, 6)
 
-        # Headhunter / Butcher — average score across a player's 100-Kill / 200-TD runs
+        # Apex / Frenzied — average score across a player's 100-Kill / 200-TD runs
         kills_best = {}  # player -> list of scores
         td_best = {}   # player -> list of scores
         for row in ld:
@@ -2340,7 +2340,7 @@ class RegistryCog(commands.Cog):
                     return f"{emoji} `{padded}` \u2713 ({player_val}{total_str})"
                 diff = holder_val - player_val
                 return f"{emoji} `{padded}` \u2014 `{player_val}{total_str}` / `{holder_val}{total_str}` {holder_name} **(-{diff})**"
-            # Stat titles (Headhunter / Butcher): minimalist average display
+            # Stat titles (Apex / Frenzied): minimalist average display
             if resolved == holder_name and holder_name not in (None, "N/A"):
                 return f"{emoji} `{padded}` \u2014 avg {player_val} \U0001f451"
             # Below the qualifying-run minimum: say so, instead of an apples-to-oranges compare
@@ -2363,8 +2363,8 @@ class RegistryCog(commands.Cog):
             fmt_title(config.TITLE_EMOJIS["Grand Marshal"],   "Grand Marshal",   player_combined_boards, gm_holder or "N/A", gm_count, resolved_name, total=total_combined_boards),
             fmt_title(config.TITLE_EMOJIS["Weapons Master"],  "Weapons Master",  player_weapon_boards,   wm_holder or "N/A", wm_count, resolved_name, total=total_weapon_boards),
             fmt_title(config.TITLE_EMOJIS["Campaign Master"], "Campaign Master", player_map_boards,      cm_holder or "N/A", cm_count, resolved_name, total=total_map_boards),
-            fmt_title(config.TITLE_EMOJIS["Headhunter"],      "Apex",            player_kills_best,      hh_holder or "N/A", hh_score, resolved_name, is_board=False, player_runs=player_kills_runs),
-            fmt_title(config.TITLE_EMOJIS["Butcher"],         "Frenzied",        player_td_best,         bt_holder or "N/A", bt_score, resolved_name, is_board=False, player_runs=player_td_runs),
+            fmt_title(config.TITLE_EMOJIS["apex_title"],      "Apex",            player_kills_best,      hh_holder or "N/A", hh_score, resolved_name, is_board=False, player_runs=player_kills_runs),
+            fmt_title(config.TITLE_EMOJIS["frenzied_title"],         "Frenzied",        player_td_best,         bt_holder or "N/A", bt_score, resolved_name, is_board=False, player_runs=player_td_runs),
         ]
 
         # Weapon ranks — Gold+ only, top 10
@@ -2538,8 +2538,8 @@ class RegistryCog(commands.Cog):
         if gm_holder and gm_holder == resolved_name: butler_titles.append(f"{_te2['Grand Marshal']} Grand Marshal")
         if wm_holder and wm_holder == resolved_name: butler_titles.append(f"{_te2['Weapons Master']} Weapons Master")
         if cm_holder and cm_holder == resolved_name: butler_titles.append(f"{_te2['Campaign Master']} Campaign Master")
-        if hh_holder and hh_holder == resolved_name: butler_titles.append(f"{_te2['Headhunter']} Apex")
-        if bt_holder and bt_holder == resolved_name: butler_titles.append(f"{_te2['Butcher']} Frenzied")
+        if hh_holder and hh_holder == resolved_name: butler_titles.append(f"{_te2['apex_title']} Apex")
+        if bt_holder and bt_holder == resolved_name: butler_titles.append(f"{_te2['frenzied_title']} Frenzied")
 
         # -- Total marks
         total_marks = sum(flat_marks.values())

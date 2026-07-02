@@ -21,8 +21,7 @@ PLAYER_TITLES              = config.PLAYER_TITLES
 GRAND_MARSHAL_ROLE_ID      = config.GRAND_MARSHAL_ROLE_ID
 WEAPONS_MASTER_ROLE_ID     = config.WEAPONS_MASTER_ROLE_ID
 CAMPAIGN_MASTER_ROLE_ID    = config.CAMPAIGN_MASTER_ROLE_ID
-HEADHUNTER_ROLE_ID         = config.HEADHUNTER_ROLE_ID
-BUTCHER_ROLE_ID            = config.BUTCHER_ROLE_ID
+MOST_LETHAL_ROLE_ID        = config.MOST_LETHAL_ROLE_ID
 WARLORD_ROLE_ID            = config.WARLORD_ROLE_ID
 
 _butlers_report_cooldowns = {}
@@ -281,7 +280,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     weapons_master = best_placement_title(weapon_placements, min_boards=9, breadth_first=True)
     campaign_master = best_placement_title(map_placements, min_boards=6, breadth_first=True)
 
-    # Headhunter / Butcher — ROLLING WEEKLY window: highest AVERAGE among a player's
+    # Apex / Frenzied — ROLLING WEEKLY window: highest AVERAGE among a player's
     # qualifying runs *this week* (100+ kills / 200+ takedowns), min 3 runs. These
     # two titles (and their roles) rotate weekly; Grand Marshal / Weapons Master /
     # Campaign Master stay all-time. Computed from the week-scoped `subs`.
@@ -306,8 +305,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             return None
         return max(eligible, key=lambda p: round(sum(eligible[p]) / len(eligible[p])))
 
-    headhunter = best_score_title(kills_scores)
-    butcher = best_score_title(td_scores)
+    apex = best_score_title(kills_scores)
+    frenzied = best_score_title(td_scores)
 
     # Fastest Learner — most personal-best runs set THIS WEEK (a run beating the
     # player's prior best kills or takedowns). Debut runs don't count. Rewards
@@ -368,8 +367,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         '_weapon_placements': weapon_placements,
         '_map_placements': map_placements,
         '_combined_placements': combined,
-        'headhunter': headhunter or "N/A",
-        'butcher': butcher or "N/A",
+        'apex': apex or "N/A",
+        'frenzied': frenzied or "N/A",
         'top_fastest_learner': top_fastest_learner,
         'top_total_tally': top_total_tally,
         'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
@@ -476,7 +475,7 @@ async def update_title_roles(guild, stats, include_weekly=True):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', HEADHUNTER_ROLE_ID, 'Most Lethal',
+        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Most Lethal',
          "The kill tallies have been reviewed. {old}, your edge has been lost. {new}, the Most Lethal title is yours. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
