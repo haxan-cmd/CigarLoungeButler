@@ -239,6 +239,9 @@ REGISTRY_CLASS_MAP = {
     "Archer":   ["Longbowman", "Crossbowman", "Skirmisher"],
 }
 
+MASTERY_THRESHOLD  = 100   # qualifying (100+ TD) primary-weapon runs to master a weapon
+VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
+
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
     "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},
