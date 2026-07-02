@@ -380,10 +380,13 @@ async def get_feats_for_player(discord_id, cached_data=None):
         hh_progress = await _db.get_hundred_handed_progress(discord_id_str)
         _hh_done = {(r[0], r[1]) for r in hh_progress}
         _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+        # Progress counts only the required PRIMARY (subclass, weapon) slots — the
+        # table can hold secondary-weapon combos too, which don't count toward /46.
+        _hh_matched = _hh_done & _hh_required
         if _hh_required and _hh_required.issubset(_hh_done):
             named_feats.add('hhanded')
-        elif _hh_done:
-            named_feats.add(f'hhanded_progress:{len(_hh_done)}:{HH_TOTAL}')
+        elif _hh_matched:
+            named_feats.add(f'hhanded_progress:{len(_hh_matched)}:{HH_TOTAL}')
     except Exception:
         pass
 
@@ -962,11 +965,23 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         lines.append("")
 
     lines.append("**Mastered Weapons:**")
-    if mastered:
-        for w in mastered:
-            lines.append(f"• {w}")
+    _MASTER = config.MASTERY_THRESHOLD
+    _VIRT = config.VIRTUOSO_THRESHOLD
+    _counts = mastered if isinstance(mastered, dict) else {w: _MASTER for w in (mastered or [])}
+    _done = sorted(((w, c) for w, c in _counts.items() if c >= _MASTER), key=lambda t: -t[1])
+    if _done:
+        for w, c in _done:
+            if c >= _VIRT:
+                lines.append(f"• 💎 **{w}** ×{c} — *Virtuoso*")
+            else:
+                lines.append(f"• 👑 {w} ×{c}")
     else:
-        lines.append("• None")
+        lines.append("• None yet")
+    # Progress toward the next mastery (closest weapon still under the threshold).
+    _near = sorted(((w, c) for w, c in _counts.items() if c < _MASTER), key=lambda t: -t[1])
+    if _near:
+        _w, _c = _near[0]
+        lines.append(f"• *Closest: {_w} — {_c}/{_MASTER}*")
     lines.append("")
 
     if special_ops:
