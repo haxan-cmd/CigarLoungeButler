@@ -155,26 +155,40 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     # they've played, so a few lucky games can't top a percentage board and
     # sustained high performance over many games ranks highest.
     #   adjusted = (sum_of_ratios + PRIOR * global_mean) / (games + PRIOR)
-    _PRIOR = 5   # pseudo-games at the global mean; higher = rewards volume more
-    _MIN = 2     # ignore truly tiny samples
+    _PRIOR = 5      # pseudo-games at the global mean; higher = rewards volume more
+    _MIN = 2        # ignore truly tiny samples
+    _HALFLIFE = 30.0  # submissions — recent games weigh most, older ones fade (never fully drop)
 
     def _shrunk_rank(data):
+        # Recency-weighted Bayesian shrinkage: each game is weighted by how recent
+        # it is (0.5 ** games_ago/HALFLIFE), then blended toward the league mean via
+        # the prior. So the stat tracks current form, and low volume still can't cheese it.
         elig = {p: v for p, v in data.items() if len(v) >= _MIN}
         allv = [x for v in elig.values() for x in v]
         gmean = (sum(allv) / len(allv)) if allv else 0.0
-        ranked = [(p, (sum(v) + _PRIOR * gmean) / (len(v) + _PRIOR), len(v)) for p, v in elig.items()]
+        ranked = []
+        for p, v in elig.items():
+            n = len(v)  # v is chronological (oldest first)
+            wsum = 0.0
+            wtot = 0.0
+            for i, r in enumerate(v):
+                w = 0.5 ** ((n - 1 - i) / _HALFLIFE)  # newest game -> weight 1
+                wsum += w * r
+                wtot += w
+            adj = (wsum + _PRIOR * gmean) / (wtot + _PRIOR)
+            ranked.append((p, adj, n))
         ranked.sort(key=lambda t: -t[1])
         return ranked
 
     # ── LETHALITY -- volume-adjusted kills ÷ takedowns % (games shown in parens) ──
     _leth = _shrunk_rank(lethal_ratios)
     lethal_ranked = [p for p, _adj, _n in _leth]
-    most_lethal_top5 = [f"{p} -- {adj * 100:.1f}% ({n})" for p, adj, n in _leth[:5]]
+    most_lethal_top5 = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _leth[:5]]
 
     # ── WARLORD -- volume-adjusted team TD share % ──
     _dom = _shrunk_rank(team_td_shares)
     dom_ranked = [p for p, _adj, _n in _dom]
-    most_dominant = [f"{p} -- {adj:.1f}% ({n})" for p, adj, n in _dom[:5]]
+    most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
@@ -416,10 +430,10 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
             embed.add_field(name="⭐ Special Features  *(random this season)*", value=_table(frows), inline=False)
         embed.add_field(name=_RULE, value="​", inline=False)
 
-    embed.add_field(name="<a:mostlethal:1520490418817601658> Most Lethal  *(kills ÷ td %)*",
+    embed.add_field(name="<a:mostlethal:1520490418817601658> Most Lethal  *(Lethality Score · recent-weighted)*",
                     value=_table(_rows(stats.get("high_lethality"), plain=True)) if stats.get("high_lethality") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(TD share %)*",
+    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(Warlord Score · recent-weighted)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
 
