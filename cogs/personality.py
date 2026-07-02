@@ -94,6 +94,16 @@ BUTLER_IDIOT_ROLE_ID = 1510070252044554390
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 15
 
+# Idiot role — occasionally dismiss them with a curt line (not every message).
+BUTLER_IDIOT_REPLY_CHANCE = 0.10       # ~1 in 10 of their eligible messages
+BUTLER_IDIOT_REPLY_COOLDOWN = 1800     # sec, per user — keeps it occasional
+BUTLER_IDIOT_REPLY_COOLDOWNS = {}      # user_id -> last reply ts
+BUTLER_IDIOT_REPLIES = [
+    "Okay, idiot.", "Yes, idiot.", "Mm. Okay, idiot.", "Noted, idiot.",
+    "If you say so, idiot.", "Very good, idiot.", "Sure. Okay, idiot.",
+    "Right. Okay, idiot.",
+]
+
 # Counting-channel Idiot insults
 BUTLER_COUNTING_INSULT_COOLDOWN = 30  # sec, per user — avoid double-fire on rapid role churn
 BUTLER_IDIOT_INSULT_COOLDOWNS = {}    # user_id -> last insult ts
@@ -836,6 +846,22 @@ class PersonalityCog(commands.Cog):
         channel_id = message.channel.id
         is_main = channel_id == MAIN_CHANNEL_ID
         is_pinged = self.bot.user in message.mentions
+
+        # Idiot role — every now and then, curtly dismiss them. Skipped when they
+        # actually ping the Butler (so a direct question still gets a real answer),
+        # rate-limited per user so it never becomes every-message spam.
+        if (is_main and not is_pinged
+                and any(getattr(r, 'id', None) == BUTLER_IDIOT_ROLE_ID
+                        for r in getattr(message.author, 'roles', []))):
+            _idt = time.time()
+            if (_idt - BUTLER_IDIOT_REPLY_COOLDOWNS.get(message.author.id, 0) > BUTLER_IDIOT_REPLY_COOLDOWN
+                    and random.random() < BUTLER_IDIOT_REPLY_CHANCE):
+                BUTLER_IDIOT_REPLY_COOLDOWNS[message.author.id] = _idt
+                try:
+                    await message.reply(random.choice(BUTLER_IDIOT_REPLIES), mention_author=False)
+                except Exception:
+                    pass
+                return
 
         content_lower = message.content.lower()
         mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
