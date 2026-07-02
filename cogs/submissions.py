@@ -1629,6 +1629,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         asyncio.create_task(_cleanup_prompt())
 
     vip_str = "Yes" if vip else "No"
+    is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
 
     caption = original_message.content.strip() if original_message.content else ""
 
@@ -1870,8 +1871,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
     edit_view._message = summary_reply
-
-    is_ranged = bool(selected_class and selected_class.startswith("Marksman"))
 
     # Background tasks — run after confirmation is posted
     _guild = interaction.guild
