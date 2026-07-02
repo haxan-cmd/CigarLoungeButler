@@ -495,48 +495,18 @@ def is_primary_weapon(weapon, subclass):
 
 
 async def get_mastered_weapons_for_player(discord_id, cached_data=None):
-    """Weapons with 100+ primary-weapon submissions. Checks Submissions and LegacyMarks."""
-    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
-    discord_id_str = str(discord_id)
-    weapon_counts = {}
-    for row in subs:
-        if len(row) < 9 or row[2].strip() != discord_id_str:
+    """Weapons with MASTERY_THRESHOLD+ total weapon marks, summed across ALL
+    classes/subclasses that wield the weapon. Marks are the same currency the
+    weapon-rank system uses (1 per submission + feat bonuses + legacy + board
+    entries). Returns dict: weapon -> total marks across classes."""
+    marks = await calculate_weapon_marks_for_player(discord_id, cached_data)
+    flat = {}
+    for k, v in marks.items():
+        w = k[0] if isinstance(k, tuple) else k
+        if not w or w in ('Other', 'Multiple Weapons'):
             continue
-        weapon = row[3].strip()
-        subclass = row[4].strip() if len(row) > 4 else ''
-        if not is_primary_weapon(weapon, subclass):
-            continue
-        try:
-            td = int(row[7])
-        except (ValueError, IndexError):
-            continue
-        if td >= 100:
-            weapon_counts[weapon] = weapon_counts.get(weapon, 0) + 1
-
-    # Also check LegacyMarks — 100+ marks = 100+ submissions
-    try:
-        player_rows = (cached_data or {}).get('players') or await _db.get_all_players()
-        player_name = None
-        for row in player_rows:
-            if row and row[0].strip() == discord_id_str:
-                player_name = row[1].strip() if len(row) > 1 else None
-                break
-        if player_name:
-            legacy_rows = (cached_data or {}).get('legacy_marks') or await _db.get_legacy_marks_for_player(player_name)
-            for row in legacy_rows:
-                if len(row) < 4 or row[0].strip().lower() != player_name.lower():
-                    continue
-                weapon = row[1].strip()
-                try:
-                    marks = int(row[3])
-                except ValueError:
-                    continue
-                if marks >= 100:
-                    weapon_counts[weapon] = max(weapon_counts.get(weapon, 0), marks)
-    except Exception as e:
-        print(f"LegacyMarks mastered check error: {e}")
-
-    return {w: c for w, c in weapon_counts.items() if c >= 100}
+        flat[w] = flat.get(w, 0) + v
+    return {w: c for w, c in flat.items() if c >= config.MASTERY_THRESHOLD}
 
 async def get_lobby_stats_for_player(discord_id, cached_data=None):
     """Return avg team TD/kill share percentages from submissions with lobby data."""
@@ -2505,13 +2475,16 @@ class RegistryCog(commands.Cog):
                         best_lethality = leth
             except (ValueError, IndexError):
                 continue
-        # ── Butler titles ────────────────────────────────────────────────
-        try:
-            from cogs.favourites import calculate_butler_stats
-            fav_stats = await calculate_butler_stats()
-            butler_titles = await get_butler_titles_for_player(int(discord_id_str), fav_stats)
-        except Exception:
-            butler_titles = []
+        # Held titles are derived from the SAME holders computed for the standings
+        # below, so "Current Titles" can never disagree with "Title Standings"
+        # (previously these used calculate_butler_stats, which ranks differently).
+        _te2 = config.TITLE_EMOJIS
+        butler_titles = []
+        if gm_holder and gm_holder == resolved_name: butler_titles.append(f"{_te2['Grand Marshal']} Grand Marshal")
+        if wm_holder and wm_holder == resolved_name: butler_titles.append(f"{_te2['Weapons Master']} Weapons Master")
+        if cm_holder and cm_holder == resolved_name: butler_titles.append(f"{_te2['Campaign Master']} Campaign Master")
+        if hh_holder and hh_holder == resolved_name: butler_titles.append(f"{_te2['Headhunter']} Apex")
+        if bt_holder and bt_holder == resolved_name: butler_titles.append(f"{_te2['Butcher']} Frenzied")
 
         # -- Total marks
         total_marks = sum(flat_marks.values())
