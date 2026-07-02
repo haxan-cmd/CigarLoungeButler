@@ -483,11 +483,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
     updates = []
 
-    if not vip:
+    # Guard against junk boards: never create a board for a missing/None weapon or
+    # map (that's what produced "None - Agatha" and blank weapon boards).
+    if (not vip and selected_weapon and str(selected_weapon).strip()
+            and str(selected_weapon).strip().lower() != 'none'):
         updates.append((selected_weapon, takedowns, True, True, False))
 
     map_lb_name = f"{selected_map} - {faction}"
-    updates.append((map_lb_name, takedowns, True, True, False))
+    if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
+            and faction and str(faction).strip()):
+        updates.append((map_lb_name, takedowns, True, True, False))
 
     if "Flawless" in feats:
         updates.append(("Flawless", takedowns, False, True, False))
@@ -1714,6 +1719,16 @@ class LeaderboardsCog(commands.Cog):
         if errors:
             summary += "\n⚠️ Errors:\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary[:1900])
+
+    @app_commands.command(name="cleanup_boards", description="Remove junk board entries with missing map/weapon names (mod only).")
+    async def cleanup_boards_cmd(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        n = await _db.delete_junk_leaderboard_rows()
+        await interaction.edit_original_response(
+            content=f"\u2705 Removed {n} junk board entr{'y' if n == 1 else 'ies'} (missing map/weapon names).")
 
     @app_commands.command(name="rebuild_boards", description="Rebuild weapon + map boards from full submission history (mod only).")
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")

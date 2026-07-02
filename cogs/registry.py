@@ -610,6 +610,11 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
         if len(row) < 4 or not row[3]:
             continue
         lb_name = row[0].strip()
+        # Skip junk boards (missing map/weapon name): "", "None - Agatha", " - X".
+        _lo = lb_name.lower()
+        if (not lb_name or _lo == 'none' or _lo.startswith('none -')
+                or lb_name.startswith(' - ') or lb_name.endswith(' - ')):
+            continue
         try:
             score = int(row[3])
         except ValueError:

@@ -705,6 +705,25 @@ async def delete_leaderboard_entries_by_board_and_name(board_name: str, player_n
         return 0
 
 
+async def delete_junk_leaderboard_rows() -> int:
+    """Delete leaderboard_data rows with a junk board name (missing map/weapon):
+    empty, 'None', 'None - X', ' - X', 'X - '. Returns how many rows were removed."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM leaderboard_data WHERE "
+            "board_name IS NULL OR trim(board_name)='' "
+            "OR lower(trim(board_name))='none' "
+            "OR lower(board_name) LIKE 'none - %' "
+            "OR board_name LIKE ' - %' OR board_name LIKE '% - '"
+        )
+    try:
+        return int(str(res).split()[-1])
+    except Exception:
+        return 0
+
+
 async def delete_blank_id_entries_by_name(board_name: str, player_name: str):
     """Delete blank/null-discord_id rows on a board matching a player name
     (case-insensitive). Used to clean stale legacy rows before re-inserting a

@@ -219,6 +219,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         if len(row) < 4:
             continue
         lb_name = row[0].strip()
+        _lo = lb_name.lower()
+        if (not lb_name or _lo == 'none' or _lo.startswith('none -')
+                or lb_name.startswith(' - ') or lb_name.endswith(' - ')):
+            continue  # junk board (missing map/weapon name)
         player = row[1].strip()
         try:
             score = int(row[3]) if row[3] else 0
