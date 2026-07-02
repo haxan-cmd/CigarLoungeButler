@@ -260,6 +260,24 @@ class SubmitView(discord.ui.View):
                     parsed['kills'] = None  # kills can't exceed takedowns
                 if d is not None and (d < 0 or d > 100):
                     parsed['deaths'] = None
+
+                # Self-check: compare the read takedowns against the rest of the
+                # lobby (arrays we already parsed). A value far above everyone else
+                # is usually an OCR digit error — flag it (never auto-change).
+                parsed['_stat_warn'] = None
+                try:
+                    _others = [s for s in (list(parsed.get('team_scores') or [])
+                                           + list(parsed.get('enemy_scores') or []))
+                               if isinstance(s, int) and s > 0]
+                    _td = parsed.get('takedowns')
+                    if _others and _td is not None:
+                        _hi = max(_others)
+                        if _td > 250 and _td > _hi * 2.5:
+                            parsed['_stat_warn'] = (
+                                f"Takedowns `{_td}` is far above the rest of the lobby "
+                                f"(next highest ~{_hi}) — double-check it's not a misread.")
+                except Exception:
+                    pass
     
             # Caption keyword prefill: vision usually can't read weapon/subclass, so
             # if the player typed them in the caption (e.g. "Poleman Halberd") use
@@ -290,6 +308,8 @@ class SubmitView(discord.ui.View):
                 if parsed.get('takedowns') is not None: lines.append(f"Takedowns: `{parsed['takedowns']}`")
                 if parsed.get('kills') is not None:     lines.append(f"Kills: `{parsed['kills']}`")
                 if parsed.get('deaths') is not None:    lines.append(f"Deaths: `{parsed['deaths']}`")
+                if parsed.get('_stat_warn'):
+                    lines.append(f"\n⚠️ {parsed['_stat_warn']}")
                 missing = [f for f in ('subclass', 'weapon', 'map', 'faction', 'takedowns', 'kills', 'deaths') if parsed.get(f) is None]
                 if missing:
                     lines.append(f"\n*Could not read: {', '.join(missing)} \u2014 you'll be asked for those next.*")
@@ -1405,6 +1425,11 @@ async def _submission_worker(guild_id):
                 pass
         except Exception as e:
             print(f"Submission worker error: {e}")
+            try:
+                from utils.helpers import nerve_alert
+                await nerve_alert(interaction.client, "submission worker", e)
+            except Exception:
+                pass
         finally:
             _queued_msgs.discard(item[1].id)
             queue.task_done()
@@ -2042,6 +2067,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
         except Exception as e:
             print(f"Butler personality error: {e}")
+            try:
+                from utils.helpers import nerve_alert
+                await nerve_alert(interaction.client, "submission butler hooks", e)
+            except Exception:
+                pass
 
         # Edit the summary reply to include placements, and — only for boards this
         # submission actually placed on — swap the plain weapon/map text for a
@@ -2290,8 +2320,18 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             await asyncio.wait_for(_bg_tasks(), timeout=120)
         except asyncio.TimeoutError:
             print("[BG] background tasks exceeded 120s — aborted (blurb/reactions already sent)")
+            try:
+                from utils.helpers import nerve_alert
+                await nerve_alert(interaction.client, "background tasks", "exceeded 120s timeout")
+            except Exception:
+                pass
         except Exception as _bge:
             print(f"[BG] background tasks error: {_bge}")
+            try:
+                from utils.helpers import nerve_alert
+                await nerve_alert(interaction.client, "background tasks", _bge)
+            except Exception:
+                pass
     asyncio.create_task(_bg_runner())
 
 

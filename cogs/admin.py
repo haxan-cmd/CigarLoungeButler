@@ -1,9 +1,13 @@
 # Admin and mod commands — rules, challenge rules, patch notes, submission removal, seeding.
 import asyncio
 import os
+import io
+import gzip
+import json
+import datetime as _dt
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 import utils.db as _db
@@ -198,6 +202,67 @@ async def save_challenge_rules_message_ids(msg_ids):
 class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.db_backup_loop.start()
+
+    def cog_unload(self):
+        self.db_backup_loop.cancel()
+
+    async def _run_backup(self, reason="scheduled", force=False):
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            return None
+        ch = (guild.get_channel(config.NERVE_CENTER_CHANNEL_ID)
+              or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID))
+        if not ch:
+            return None
+        # Skip if a backup was already posted in the last ~20h (unless forced) so
+        # frequent redeploys don't spam the channel.
+        if not force:
+            try:
+                cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=20)
+                async for m in ch.history(limit=50, after=cutoff):
+                    if (m.author.id == self.bot.user.id and m.attachments
+                            and any('clb_backup' in (a.filename or '') for a in m.attachments)):
+                        return None
+            except Exception:
+                pass
+        data = await _db.dump_database()
+        counts = ", ".join(f"{k}:{len(v)}" for k, v in data.items() if isinstance(v, list))
+        payload = json.dumps(data, default=str, ensure_ascii=False).encode('utf-8')
+        gz = gzip.compress(payload)
+        stamp = _dt.datetime.now(_dt.timezone.utc).strftime('%Y-%m-%d_%H%M')
+        fname = f"clb_backup_{stamp}.json.gz"
+        await ch.send(
+            f"\U0001f5c4\ufe0f **DB backup** ({reason}) — {len(gz)//1024} KB\n{counts}",
+            file=discord.File(io.BytesIO(gz), filename=fname))
+        return fname
+
+    @tasks.loop(hours=24)
+    async def db_backup_loop(self):
+        try:
+            await self._run_backup(reason="scheduled")
+        except Exception as e:
+            print(f"[BACKUP] loop error: {e}")
+
+    @db_backup_loop.before_loop
+    async def _before_db_backup(self):
+        await self.bot.wait_until_ready()
+
+    @app_commands.command(name="backup_now", description="Force an immediate DB backup to the nerve centre (mod only).")
+    async def backup_now(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            fname = await self._run_backup(reason="manual", force=True)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"\u274c Backup failed: {e}")
+            return
+        if fname:
+            await interaction.edit_original_response(content=f"\u2705 Backup posted to the nerve centre: `{fname}`")
+        else:
+            await interaction.edit_original_response(content="\u26a0\ufe0f Backup could not post — nerve centre channel not found.")
 
     @app_commands.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
     @app_commands.checks.has_permissions(administrator=True)

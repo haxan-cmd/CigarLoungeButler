@@ -76,6 +76,19 @@ async def on_ready():
         print(f"❌ Command sync failed: {e}")
 
 
+@bot.event
+async def on_error(event_method, *args, **kwargs):
+    """Any unhandled error in an event handler → nerve centre, so crashes surface
+    in seconds instead of going unnoticed."""
+    err = traceback.format_exc()
+    print(f"[ON_ERROR] {event_method}:\n{err}")
+    try:
+        from utils.helpers import nerve_alert
+        await nerve_alert(bot, f"event:{event_method}", err)
+    except Exception:
+        pass
+
+
 @bot.tree.error
 async def on_app_command_error(
     interaction: discord.Interaction,
@@ -95,7 +108,23 @@ async def on_app_command_error(
             ephemeral=True,
         )
     else:
-        raise error
+        # Unexpected command failure — surface it to the nerve centre immediately
+        # and let the user know, instead of failing silently.
+        from utils.helpers import nerve_alert
+        _cmd = getattr(interaction.command, "name", "?")
+        try:
+            await nerve_alert(interaction.client, f"/{_cmd}", error)
+        except Exception:
+            pass
+        try:
+            _msg = "Something went wrong there — the Butler has made a note of it."
+            if interaction.response.is_done():
+                await interaction.followup.send(_msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(_msg, ephemeral=True)
+        except Exception:
+            pass
+        traceback.print_exc()
 
 
 async def _graceful_shutdown():

@@ -113,6 +113,30 @@ def _row_to_player(r) -> list:
 
 # ── Submissions ───────────────────────────────────────────────────────────────
 
+async def dump_database() -> dict:
+    """Return {table_name: [row-dicts]} for every public table — used by the
+    scheduled backup. Caller serializes with json(default=str)."""
+    pool = _pool_check()
+    out = {}
+    # Skip tables holding donor PII (names/amounts/transaction ids) — no need to
+    # snapshot those into a file mods can download.
+    _EXCLUDE = {"kofi_donations"}
+    async with pool.acquire() as conn:
+        tbls = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+        for t in tbls:
+            name = t['tablename']
+            if name in _EXCLUDE:
+                out[name] = "[excluded from backup — contains donor PII]"
+                continue
+            try:
+                rows = await conn.fetch(f'SELECT * FROM "{name}"')
+                out[name] = [dict(r) for r in rows]
+            except Exception as e:
+                out[name] = [{"__error__": str(e)}]
+    return out
+
+
 async def get_all_submissions() -> list[list]:
     cached = _cache_get('submissions')
     if cached is not None:
