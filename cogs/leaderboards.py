@@ -14,14 +14,19 @@ from utils.helpers import nerve_log_error
 
 
 async def _rank_name_ac(interaction: discord.Interaction, current: str):
-    """Autocomplete /rank with real board names (weapons, feats, maps)."""
+    """Autocomplete /rank with real board names (weapons, feats, maps). Matches on
+    normalized text too, so 'pickaxe' surfaces 'Pick Axe', 'onehanded' -> 'One-Handed Spear'."""
     cur = current.lower()
+    curn = _re.sub(r'[^a-z0-9]', '', cur)
     try:
         rows = await _db.get_all_leaderboard_data()
         boards = sorted({r[0].strip() for r in rows if r and r[0].strip()})
     except Exception:
         boards = []
-    return [app_commands.Choice(name=b, value=b) for b in boards if cur in b.lower()][:25]
+    def _hit(b):
+        bl = b.lower()
+        return cur in bl or (curn and curn in _re.sub(r'[^a-z0-9]', '', bl))
+    return [app_commands.Choice(name=b, value=b) for b in boards if _hit(b)][:25]
 
 MOD_ROLE_ID       = config.MOD_ROLE_ID
 _ASSETS_DIR       = os.path.join(os.path.dirname(__file__), '..', 'assets')
@@ -1187,15 +1192,35 @@ class LeaderboardsCog(commands.Cog):
 
         entries = await get_leaderboard_entries(name)
         if not entries:
-            # Try case-insensitive match
             all_rows = await _db.get_all_leaderboard_data()
-            all_boards = {row[0].strip() for row in all_rows if row}
+            all_boards = {row[0].strip() for row in all_rows if row and row[0].strip()}
+            _norm = lambda s: _re.sub(r'[^a-z0-9]', '', s.lower())
+            _nname = _norm(name)
+
+            # 1. exact (case-insensitive)
             match = next((b for b in all_boards if b.lower() == name.lower()), None)
+            # 2. weapon-alias resolution (pickaxe -> Pick Axe, 1h spear -> One-Handed Spear, hmace -> Heavy Mace)
+            if not match:
+                try:
+                    from utils.parsing import parse_submission_text
+                    _aw, _ = parse_submission_text(name)
+                    if _aw:
+                        match = next((b for b in all_boards if b.lower() == _aw.lower()), None)
+                except Exception:
+                    pass
+            # 3. normalized match — ignore spaces/hyphens ("pickaxe" == "Pick Axe")
+            if not match and _nname:
+                match = next((b for b in all_boards if _norm(b) == _nname), None)
+
             if match:
                 entries = await get_leaderboard_entries(match)
                 name = match
             else:
-                suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
+                # Suggestions: normalized substring either way, fall back to loose contains.
+                suggestions = [b for b in sorted(all_boards)
+                               if _nname and (_nname in _norm(b) or _norm(b) in _nname)][:5]
+                if not suggestions:
+                    suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
                 msg = f"No leaderboard found for **{name}**."
                 if suggestions:
                     msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
