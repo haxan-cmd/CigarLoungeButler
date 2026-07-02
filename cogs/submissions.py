@@ -214,9 +214,10 @@ class SubmitView(discord.ui.View):
         try:
             print(f"[VISION] Attachments: {[(a.filename, a.content_type) for a in self.original_message.attachments]}")
             player_display_name = self.original_message.author.display_name
+            stored_igns = []
             # Use stored IGNs as hint if available (more reliable than Discord name)
             try:
-                stored_igns = await _db.get_player_igns(self.original_message.author.id)
+                stored_igns = await _db.get_player_igns(self.original_message.author.id) or []
                 if stored_igns:
                     # Pass all known aliases; Discord name appended as last resort
                     vision_name_hint = ', '.join(stored_igns + [player_display_name])
@@ -278,6 +279,22 @@ class SubmitView(discord.ui.View):
                                 f"(next highest ~{_hi}) — double-check it's not a misread.")
                 except Exception:
                     pass
+
+                # Name-match guard: if the identified row's name doesn't match the
+                # submitter (Discord name or a known IGN), warn — this is how a
+                # shared clan tag lets vision grab a teammate's row.
+                parsed['_name_warn'] = None
+                try:
+                    _read = re.sub(r'[^a-z0-9]', '', (parsed.get('name') or '').lower())
+                    _known = [re.sub(r'[^a-z0-9]', '', (n or '').lower())
+                              for n in ([player_display_name] + list(stored_igns or []))]
+                    _known = [k for k in _known if len(k) >= 2]
+                    if _read and _known and not any(k in _read or _read in k for k in _known):
+                        parsed['_name_warn'] = (
+                            f"the scorecard row reads **{parsed.get('name')}**, which doesn't match "
+                            f"your name — make sure this is YOUR run, not a teammate's.")
+                except Exception:
+                    pass
     
             # Caption keyword prefill: vision usually can't read weapon/subclass, so
             # if the player typed them in the caption (e.g. "Poleman Halberd") use
@@ -308,6 +325,8 @@ class SubmitView(discord.ui.View):
                 if parsed.get('takedowns') is not None: lines.append(f"Takedowns: `{parsed['takedowns']}`")
                 if parsed.get('kills') is not None:     lines.append(f"Kills: `{parsed['kills']}`")
                 if parsed.get('deaths') is not None:    lines.append(f"Deaths: `{parsed['deaths']}`")
+                if parsed.get('_name_warn'):
+                    lines.append(f"\n⚠️ {parsed['_name_warn']}")
                 if parsed.get('_stat_warn'):
                     lines.append(f"\n⚠️ {parsed['_stat_warn']}")
                 missing = [f for f in ('subclass', 'weapon', 'map', 'faction', 'takedowns', 'kills', 'deaths') if parsed.get(f) is None]
@@ -1940,18 +1959,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     print(f"Highscore registry refresh error: {e}")
             # Edit summary message to show the bonus mark
             try:
-                async for msg in original_message.channel.history(limit=10, after=original_message):
-                    if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                        import re as _re
-                        def increment_marks(content):
-                            def replacer(m):
-                                n = int(m.group(1)) + 1
-                                return f"**{n} mark{'s' if n != 1 else ''}**"
-                            # Match "**1 mark**" or "**2 marks**" (no + prefix)
-                            return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
-                        new_content = increment_marks(msg.content) + f"\n<a:highscore:1360312918545269057> +1 High Score"
-                        await msg.edit(content=new_content)
-                        break
+                import re as _re
+                def increment_marks(content):
+                    def replacer(m):
+                        n = int(m.group(1)) + 1
+                        return f"**{n} mark{'s' if n != 1 else ''}**"
+                    return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
+                # Edit the reply via our held reference — the old history(limit=10)
+                # scan missed it once the work was backgrounded and the reply had
+                # scrolled out of the recent window (hi-score reacted, blurb didn't update).
+                new_content = increment_marks(summary_reply.content) + "\n<a:highscore:1360312918545269057> +1 High Score"
+                await summary_reply.edit(content=new_content)
             except Exception as e:
                 print(f"Highscore mark edit error: {e}")
         if any(lb == "TUFF" for lb, _ in placements):
@@ -2109,35 +2127,31 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     from cogs.leaderboards import _get_lb_records as _lb_get_records
                     _lb_rows_for_links = await _lb_get_records()
                     _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
-                # Find the reply we sent and edit it
-                async for msg in original_message.channel.history(limit=10, after=original_message):
-                    if msg.author == original_message.guild.me and msg.reference and msg.reference.message_id == original_message.id:
-                        new_content = msg.content
-                        if selected_weapon in placed_boards:
-                            weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
-                            new_content = new_content.replace(
-                                f"│ {selected_weapon} • {selected_class}",
-                                f"│ {weapon_link} • {selected_class}",
-                                1,
-                            )
-                        if map_lb_name in placed_boards:
-                            map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
-                            new_content = new_content.replace(
-                                f"│ {selected_map} / {faction}",
-                                f"│ {map_link}",
-                                1,
-                            )
-                        if bounty_line:
-                            # Slot the bounty link under the VIP line, just above the
-                            # marks rundown (the cigar line begins marks_summary).
-                            _mark_anchor = "<:cigar:1444893851427803298>"
-                            if _mark_anchor in new_content:
-                                new_content = new_content.replace(
-                                    _mark_anchor, f"{bounty_line}\n{_mark_anchor}", 1)
-                            else:
-                                new_content = f"{new_content}\n{bounty_line}"
-                        await msg.edit(content=new_content + (f"\n{trailer}" if trailer else ""))
-                        break
+                # Edit the reply directly via our held reference (robust in a busy channel).
+                new_content = summary_reply.content
+                if selected_weapon in placed_boards:
+                    weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
+                    new_content = new_content.replace(
+                        f"│ {selected_weapon} • {selected_class}",
+                        f"│ {weapon_link} • {selected_class}",
+                        1,
+                    )
+                if map_lb_name in placed_boards:
+                    map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
+                    new_content = new_content.replace(
+                        f"│ {selected_map} / {faction}",
+                        f"│ {map_link}",
+                        1,
+                    )
+                if bounty_line:
+                    # Slot the bounty link under the VIP line, above the marks rundown.
+                    _mark_anchor = "<:cigar:1444893851427803298>"
+                    if _mark_anchor in new_content:
+                        new_content = new_content.replace(
+                            _mark_anchor, f"{bounty_line}\n{_mark_anchor}", 1)
+                    else:
+                        new_content = f"{new_content}\n{bounty_line}"
+                await summary_reply.edit(content=new_content + (f"\n{trailer}" if trailer else ""))
             except Exception as e:
                 print(f"Placement edit error: {e}")
 
