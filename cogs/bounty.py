@@ -995,44 +995,50 @@ class BountyCog(commands.Cog):
             weapons = json.loads(brow[4]) if brow[4] else {}
         except Exception:
             weapons = {}
-        if not weapons:
-            await interaction.followup.send(f"\u274c `{title}` has no weapon requirements recorded.", ephemeral=True)
-            return
-
         player_id = str(member.id)
-        player_name = member.nick or member.display_name
+        # Use the player's REGISTERED name so the card's legacy-bounty lookup matches.
+        _reg = await _db.get_player(player_id)
+        player_name = ((_reg[1].strip() if _reg and len(_reg) > 1 and _reg[1] else None)
+                       or member.nick or member.display_name)
 
-        # 1. Set this player's progress to meet every requirement (card marks it done).
-        prow = await get_player_bounty_progress(title, player_id)
-        progress = prow['progress'] if prow else {}
-        forum_post_id = prow['forum_post_id'] if prow else None
-        for w, t in weapons.items():
-            progress[w] = t['total'] if isinstance(t, dict) else int(t)
-        await save_player_bounty_progress(title, player_id, player_name, forum_post_id, progress)
+        # If the bounty has weapon requirements, satisfy them + record the completion
+        # in its list (keeps the in-app state correct). Bounties with none (e.g. Plague)
+        # simply skip this and rely on the retroactive credit below.
+        if weapons:
+            prow = await get_player_bounty_progress(title, player_id)
+            progress = prow['progress'] if prow else {}
+            forum_post_id = prow['forum_post_id'] if prow else None
+            for w, t in weapons.items():
+                progress[w] = t['total'] if isinstance(t, dict) else int(t)
+            await save_player_bounty_progress(title, player_id, player_name, forum_post_id, progress)
+            try:
+                completions = json.loads(brow[7]) if brow[7] else []
+            except Exception:
+                completions = []
+            already = any((isinstance(e, dict) and str(e.get('id')) == player_id) or str(e) == player_id
+                          for e in completions)
+            if not already:
+                import datetime as _dt
+                completions.append({"id": player_id, "name": player_name,
+                                    "date": _dt.datetime.now(_dt.timezone.utc).strftime('%b %d')})
+                await save_bounty_state(brow[15], weapons, brow[6] == '1', completions)
 
-        # 2. Add to that bounty's completion list (for placement), if not already there.
+        # Retroactive credit — a legacy-bounties record shows on the card directly,
+        # no matter the weapon requirements. This is what makes Plague work.
         try:
-            completions = json.loads(brow[7]) if brow[7] else []
-        except Exception:
-            completions = []
-        already = any((isinstance(e, dict) and str(e.get('id')) == player_id) or str(e) == player_id
-                      for e in completions)
-        if not already:
-            import datetime as _dt
-            completions.append({"id": player_id, "name": player_name,
-                                "date": _dt.datetime.now(_dt.timezone.utc).strftime('%b %d')})
-            await save_bounty_state(brow[15], weapons, brow[6] == '1', completions)
+            await _db.add_legacy_bounty(player_name, title, None)
+        except Exception as e:
+            print(f"[BOUNTY_COMPLETE] legacy credit error: {e}")
 
-        # 3. Refresh the player's registry card.
+        # Refresh the player's registry card.
         try:
             from cogs.registry import create_or_update_registry_card
             await create_or_update_registry_card(interaction.guild, member.id, player_name)
         except Exception as e:
             print(f"[BOUNTY_COMPLETE] card refresh error: {e}")
 
-        _place = " (already recorded)" if already else ""
         await interaction.followup.send(
-            f"\u2705 Marked **{player_name}** as completing **{title}**{_place}. Card refreshed.", ephemeral=True)
+            f"\u2705 Credited **{player_name}** with completing **{title}**. Card refreshed.", ephemeral=True)
 
 
 async def setup(bot):
