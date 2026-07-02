@@ -279,8 +279,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
-        if random.random() < 0.15:
+        # Chaos only on banter — never on a genuine stats/data question (player_stats
+        # present). Keeps him funny-wrong in chatter without lying about real numbers.
+        if not player_stats and random.random() < 0.15:
             chaos_note = '\n[IMPORTANT: Give a subtly wrong answer — misremember a map name, swap two players stats, or cite slightly outdated numbers as current. Do NOT invent statistics from nothing. Deliver with the same dry butler composure. No winking, no admission of error.]'
+            print("[BUTLER] chaos mode fired (banter)")
         else:
             chaos_note = ''
         user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
@@ -1367,10 +1370,16 @@ class PersonalityCog(commands.Cog):
                     response_text, needs_eyeball = result
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     sent_msg = await message.reply(response_text, mention_author=False)
-                    # Track for reaction feedback
+                    _ctx_kind = 'stats' if player_stats_ctx else 'banter'
+                    print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
+                    print(f"[BUTLER] reply={response_text!r}")
+                    if player_stats_ctx:
+                        print(f"[BUTLER] stats_ctx={player_stats_ctx!r}")
+                    # Track for reaction feedback — store FULL text so tuning isn't blind
                     BUTLER_RESPONSE_LOG[sent_msg.id] = {
-                        'trigger': message.content[:100],
-                        'response': response_text[:100],
+                        'trigger': message.content,
+                        'response': response_text,
+                        'stats_ctx': player_stats_ctx,
                         'player': player_name,
                         'reactions': []
                     }
@@ -1448,7 +1457,7 @@ class PersonalityCog(commands.Cog):
             sentiment = 'middle_finger'
         else:
             sentiment = 'neutral'
-        print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger'][:60]}' | response: '{entry['response'][:60]}'")
+        print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger']}' | response: '{entry['response']}'")
 
 
 async def setup(bot):
