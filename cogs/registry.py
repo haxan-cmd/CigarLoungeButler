@@ -300,30 +300,85 @@ async def get_player_bounties_completed(discord_id):
     except Exception:
         return 0
 
-async def get_butler_titles_for_player(discord_id, stats, cached_data=None):
-    """Return list of Butler's Favourites titles held by this player."""
+async def _alltime_title_holders(cached_data=None):
+    """All-time holders of the five board titles, computed IDENTICALLY to the
+    /stats "Title Standings" so the card's Current Titles can never disagree.
+    (Grand Marshal/Weapons Master/Campaign Master = board-breadth leaders;
+    Apex/Frenzied = highest average on the 100 Kills / 200 Takedowns boards.)"""
+    ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
+    SKIP_LB = {"100 Kills", "200 Takedowns"}
+    NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn"}
+    lb_groups = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        lb_groups.setdefault(row[0].strip(), []).append(row[1].strip())
+    holder_weapon, holder_map, holder_combined = {}, {}, {}
+    for lb_name, players_on_board in lb_groups.items():
+        if lb_name in SKIP_LB:
+            continue
+        is_map = " - " in lb_name
+        is_nwf = lb_name in NON_WEAPON_FEAT_BOARDS
+        for p in players_on_board[:10]:
+            if is_map:
+                holder_map[p] = holder_map.get(p, 0) + 1
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+            elif is_nwf:
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+            else:
+                holder_weapon[p] = holder_weapon.get(p, 0) + 1
+                holder_combined[p] = holder_combined.get(p, 0) + 1
+    def breadth_leader(d, min_boards):
+        q = {p: v for p, v in d.items() if v >= min_boards}
+        return max(q, key=lambda p: q[p]) if q else None
+    kills_best, td_best = {}, {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        lb = row[0].strip()
+        try:
+            score = int(row[3])
+        except (ValueError, IndexError):
+            continue
+        if lb == "100 Kills":
+            kills_best.setdefault(row[1].strip(), []).append(score)
+        elif lb == "200 Takedowns":
+            td_best.setdefault(row[1].strip(), []).append(score)
+    def title_holder(best, min_runs=3):
+        el = {p: s for p, s in best.items() if len(s) >= min_runs}
+        return max(el, key=lambda p: sum(el[p]) / len(el[p])) if el else None
+    return {
+        'grand_marshal':   breadth_leader(holder_combined, 15),
+        'weapons_master':  breadth_leader(holder_weapon, 9),
+        'campaign_master': breadth_leader(holder_map, 6),
+        'headhunter':      title_holder(kills_best),
+        'butcher':         title_holder(td_best),
+    }
+
+
+async def get_butler_titles_for_player(discord_id, stats=None, cached_data=None):
+    """Titles this player currently holds, derived from the all-time standings
+    (via _alltime_title_holders) so the card and /stats agree. `stats` is kept
+    for signature compatibility but no longer determines holder identity."""
     discord_id_str = str(discord_id)
-    titles = []
+    rows = (cached_data or {}).get('players') or await _db.get_all_players()
+    player_name = None
+    for row in rows:
+        if row and row[0].strip() == discord_id_str:
+            player_name = (row[1].strip() if len(row) > 1 else None)
+            break
+    if not player_name:
+        return []
+    holders = await _alltime_title_holders(cached_data)
     _te = config.TITLE_EMOJIS
-    title_checks = [
+    labels = [
         ('grand_marshal',   f"{_te['Grand Marshal']} Grand Marshal"),
         ('weapons_master',  f"{_te['Weapons Master']} Weapons Master"),
         ('campaign_master', f"{_te['Campaign Master']} Campaign Master"),
         ('headhunter',      f"{_te['Headhunter']} Apex"),
         ('butcher',         f"{_te['Butcher']} Frenzied"),
     ]
-    rows = (cached_data or {}).get('players') or await _db.get_all_players()
-    player_name = None
-    for row in rows:
-        if row and row[0] == discord_id_str:
-            player_name = row[1] if len(row) > 1 else None
-            break
-    if not player_name:
-        return []
-    for key, label in title_checks:
-        if stats.get(key) == player_name:
-            titles.append(label)
-    return titles
+    return [label for key, label in labels if holders.get(key) == player_name]
 
 async def get_special_ops_for_player(discord_id, cached_data=None):
     """Find qualifying Special Ops submissions (feat weapons with 100+ TD)."""

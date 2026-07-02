@@ -2071,21 +2071,26 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     )
                     await main_channel.send(line)
 
-                # Weapon mastery milestone — 100 = Mastered, 250 = Virtuoso.
-                if takedowns >= 100 and not is_ranged and selected_weapon:
+                # Weapon mastery milestone — marks-based, summed across ALL classes
+                # (matches the card). Fires once, when this run pushes the weapon's
+                # total marks across a threshold.
+                _fstr = feats if isinstance(feats, str) else ", ".join(feats or [])
+                if not is_ranged and selected_weapon and "Resubmit" not in _fstr:
                     try:
-                        _prim = config._SUBCLASS_PRIMARIES.get(selected_class, set())
-                        if selected_weapon in _prim:
-                            _all_m = await _db.get_all_submissions()
-                            _q = sum(1 for r in _all_m if len(r) > 7 and r[2].strip() == discord_id_str
-                                     and r[3].strip() == selected_weapon
-                                     and r[7].strip().lstrip('-').isdigit() and int(r[7]) >= 100)
-                            if _q == config.VIRTUOSO_THRESHOLD:
-                                await main_channel.send(
-                                    f"\U0001f48e **{player}** has reached **Virtuoso** on the {selected_weapon} \u2014 {_q} mastered runs. Exceptional.")
-                            elif _q == config.MASTERY_THRESHOLD:
-                                await main_channel.send(
-                                    f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {config.MASTERY_THRESHOLD} qualifying runs. The Butler tips his hat.")
+                        from cogs.registry import calculate_weapon_marks_for_player
+                        _marks = await calculate_weapon_marks_for_player(interaction.user.id)
+                        _new = sum(v for k, v in _marks.items()
+                                   if (k[0] if isinstance(k, tuple) else k) == selected_weapon)
+                        _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)
+                        if "Triple" in _fstr: _rm += 1
+                        if "High Score" in _fstr: _rm += 1
+                        _old = _new - _rm
+                        if _old < config.VIRTUOSO_THRESHOLD <= _new:
+                            await main_channel.send(
+                                f"\U0001f48e **{player}** has reached **Virtuoso** on the {selected_weapon} \u2014 {_new} marks across all classes. Exceptional.")
+                        elif _old < config.MASTERY_THRESHOLD <= _new:
+                            await main_channel.send(
+                                f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {_new} marks. The Butler tips his hat.")
                     except Exception as _me:
                         print(f"[MASTERY] announce error: {_me}")
 
