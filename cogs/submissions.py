@@ -1886,8 +1886,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # weapon_hs — only if score qualifies for the weapon leaderboard (not VIP, not ranged)
         # and beats the player's own existing score on that board
         if not vip and not is_ranged:
-            all_ld = await _db.get_all_leaderboard_data()
-            weapon_entries = [row for row in all_ld if row[0] == selected_weapon]
+            # Targeted, indexed read of just this weapon's board — not the whole
+            # leaderboard table — so the board-dependent weapon_hs reaction lands
+            # as quickly as possible.
+            weapon_entries = await _db.get_leaderboard_by_board(selected_weapon)
             scores = sorted(
                 [int(row[3]) for row in weapon_entries if len(row) > 3 and row[3]],
                 reverse=True

@@ -547,15 +547,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         if tuff_gap > 0:
             updates.append(("TUFF", tuff_gap, False, False, True))
 
-    # Fetch all data once at the start
-    all_values = await _db.get_all_leaderboard_data()
+    # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
+    # inside the loop via the indexed get_leaderboard_by_board — no full-table scan.
     all_lb_rows = await _get_lb_records()
 
     for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
+        board_values = await _db.get_leaderboard_by_board(lb_name)
         # Find existing entry for this player on this board
         existing_score = None
-        for row in all_values:
-            if row[0] == lb_name and row[2] == discord_id:
+        for row in board_values:
+            if row[2] == discord_id:
                 existing_score = int(row[3]) if row[3] else 0
                 break
         existing_entry = existing_score is not None
@@ -563,15 +564,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         if unlimited_top50:
             # No cap — but skip if this exact submission link already on the board
             already_exists = any(
-                r[0] == lb_name and r[2] == discord_id
+                r[2] == discord_id
                 and (r[4] if len(r) > 4 else '') == (message_link or '')
-                for r in all_values
+                for r in board_values
             )
             if already_exists:
                 continue
             await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             any_updated = True
-            all_board = [int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]]
+            all_board = [int(r[3]) for r in board_values if len(r) > 3 and r[3]]
             all_board.append(score)
             all_board.sort(reverse=True)
             pos = all_board.index(score) + 1
@@ -580,7 +581,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             if existing_entry:
                 if score > existing_score:
                     await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                    _all = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                    _all = sorted([int(r[3]) for r in board_values if len(r) > 3 and r[3]], reverse=True)
                     board_scores = [s for s in _all if s != existing_score]
                     board_scores.append(score)
                     board_scores.sort(reverse=True)
@@ -599,7 +600,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     continue
             else:
                 if top_10:
-                    board_entries = [row for row in all_values if row[0] == lb_name]
+                    board_entries = list(board_values)
                     board_entries_sorted = sorted(
                         board_entries, key=lambda x: int(x[3]) if len(x) > 3 and x[3] else 0, reverse=True
                     )
@@ -611,10 +612,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         # discord_id. Legacy entries have blank discord_ids, and
                         # deleting by ''+oldest nuked arbitrary high legacy rows.
                         await _db.delete_lowest_leaderboard_entry(lb_name)
-                        all_values = await _db.get_all_leaderboard_data()
+                        board_values = await _db.get_leaderboard_by_board(lb_name)
                 await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
                 any_updated = True  # New entry on a board counts as a PB
-                board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+                board_scores = sorted([int(r[3]) for r in board_values if len(r) > 3 and r[3]], reverse=True)
                 board_scores.append(score)
                 board_scores.sort(reverse=True)
                 pos = board_scores.index(score) + 1
@@ -622,7 +623,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         else:
             await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             any_updated = True
-            board_scores = sorted([int(r[3]) for r in all_values if r[0] == lb_name and len(r) > 3 and r[3]], reverse=True)
+            board_scores = sorted([int(r[3]) for r in board_values if len(r) > 3 and r[3]], reverse=True)
             board_scores.append(score)
             board_scores.sort(reverse=True)
             pos = board_scores.index(score) + 1
