@@ -536,7 +536,7 @@ async def get_mastered_weapons_for_player(discord_id, cached_data=None):
     except Exception as e:
         print(f"LegacyMarks mastered check error: {e}")
 
-    return [w for w, c in weapon_counts.items() if c >= 100]
+    return {w: c for w, c in weapon_counts.items() if c >= 100}
 
 async def get_lobby_stats_for_player(discord_id, cached_data=None):
     """Return avg team TD/kill share percentages from submissions with lobby data."""
@@ -2584,13 +2584,18 @@ class RegistryCog(commands.Cog):
             lines.append(f"**Bounties**")
             lines.append(f"│ {bounty_row}")
 
-        mastered_weapons = [w for w, m in flat_marks.items() if m >= 100]
-        if mastered_weapons:
-            _iridescent = WEAPON_RANK_EMOJIS.get("Iridescent", "")
+        _mcounts = await get_mastered_weapons_for_player(int(discord_id_str))
+        if _mcounts:
+            _VIRT = config.VIRTUOSO_THRESHOLD
+            _vdefault = getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "\U0001f48e")
             lines.append("")
             lines.append("**Mastered Weapons**")
-            for w in sorted(mastered_weapons):
-                lines.append(f"│ {_iridescent} {w}")
+            for w, c in sorted(_mcounts.items(), key=lambda t: -t[1]):
+                if c >= _VIRT:
+                    _e = config.VIRTUOSO_WEAPON_EMOJIS.get(w, _vdefault)
+                    lines.append(f"│ {_e} **{w}** ×{c} — *Virtuoso*")
+                else:
+                    lines.append(f"│ 👑 {w} ×{c}")
 
         output = "\n".join(lines)
         await interaction.followup.send(output[:1900])
