@@ -1297,6 +1297,12 @@ class EditVIPView(discord.ui.View):
 
 async def _apply_edit(interaction, ev):
     """Write the updated submission back to the DB and update the summary message."""
+    # Ack immediately — the board propagation below can take several seconds, which
+    # blows past Discord's 3s interaction window and makes the edit show "error".
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
     try:
         if ev.submission_row:
             feats_str = ", ".join(ev.feats) if ev.feats else "None"
@@ -1370,7 +1376,10 @@ async def _apply_edit(interaction, ev):
     except Exception:
         pass
 
-    await interaction.response.send_message("✅ Submission updated!", ephemeral=True)
+    try:
+        await interaction.followup.send("✅ Submission updated!", ephemeral=True)
+    except Exception:
+        pass
 
 
 async def _submission_worker(guild_id):

@@ -53,6 +53,8 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 - D: Deaths - typically 0–50
 - PING: last column, network latency in ms - ignore this
 
+DIGIT ACCURACY (CRITICAL): T/K/D digits are small and easily misread. Read each digit precisely and re-check before answering. Watch especially for 3 vs 8, 8 vs 6, 5 vs 6, 0 vs 8, and 1 vs 7. If a digit is ambiguous, prefer the shape that best matches the pixels rather than guessing.
+
 CRITICAL: The submitting player's row is visually highlighted - it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE - top, middle, or bottom of the scoreboard.
 
 LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In large lobbies the text is small - read carefully. Do not skip rows.
@@ -156,7 +158,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             # screenshots only add upload + processing time (the old code left
             # big images at full size — a 4K PNG is multi-MB and slow). Small
             # images are still upscaled to 1920 so dense-lobby text stays legible.
-            TARGET_W = 1920
+            TARGET_W = 2560
             if w > 0 and w != TARGET_W:
                 scale = TARGET_W / w
                 img = img.resize((TARGET_W, max(1, int(h * scale))), _PImage.LANCZOS)
@@ -165,7 +167,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             img = _PIEnhance.Contrast(img).enhance(1.3)
             img = _PIEnhance.Sharpness(img).enhance(2.0)
             buf = _io.BytesIO()
-            img.save(buf, format='JPEG', quality=90)
+            img.save(buf, format='JPEG', quality=95)
             image_bytes = buf.getvalue()
             content_type = 'image/jpeg'
             print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} JPEG ({len(image_bytes)} bytes)")
