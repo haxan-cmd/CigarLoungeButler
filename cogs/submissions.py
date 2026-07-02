@@ -1633,8 +1633,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     caption = original_message.content.strip() if original_message.content else ""
 
-    # Tag resubmissions so they're excluded from weekly stats
-    if "resubmit" in caption.lower():
+    # Tag resubmissions so they're excluded from weekly stats. Accept common
+    # short forms as whole words: resubmit, resub, resubmission, re-sub, re-submit.
+    if re.search(r'\bre[-\s]?sub(mit|mission)?\b', caption.lower()):
         feats.append("Resubmit")
 
     feats_str = ", ".join(feats) if feats else None
@@ -2068,6 +2069,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         fallback=f"The bounty is settled. **{player}** has seen to it."
                     )
                     await main_channel.send(line)
+
+                # Weapon mastery milestone — 100 = Mastered, 250 = Virtuoso.
+                if takedowns >= 100 and not is_ranged and selected_weapon:
+                    try:
+                        _prim = config._SUBCLASS_PRIMARIES.get(selected_class, set())
+                        if selected_weapon in _prim:
+                            _all_m = await _db.get_all_submissions()
+                            _q = sum(1 for r in _all_m if len(r) > 7 and r[2].strip() == discord_id_str
+                                     and r[3].strip() == selected_weapon
+                                     and r[7].strip().lstrip('-').isdigit() and int(r[7]) >= 100)
+                            if _q == config.VIRTUOSO_THRESHOLD:
+                                await main_channel.send(
+                                    f"\U0001f48e **{player}** has reached **Virtuoso** on the {selected_weapon} \u2014 {_q} mastered runs. Exceptional.")
+                            elif _q == config.MASTERY_THRESHOLD:
+                                await main_channel.send(
+                                    f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {config.MASTERY_THRESHOLD} qualifying runs. The Butler tips his hat.")
+                    except Exception as _me:
+                        print(f"[MASTERY] announce error: {_me}")
 
             # Flawless — reply in submissions channel
             if deaths == 0:
