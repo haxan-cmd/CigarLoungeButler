@@ -183,6 +183,22 @@ async def save_player_bounty_progress(bounty_title, discord_id, player_name, for
     )
 
 
+async def _bounty_title_ac(interaction: discord.Interaction, current: str):
+    try:
+        rows = await _db.get_all_bounties()
+        titles = [r[0].strip() for r in rows if r and r[0] and r[0].strip()]
+    except Exception:
+        titles = []
+    cur = current.lower()
+    seen, out = set(), []
+    for t in reversed(titles):  # newest first
+        if t.lower() in seen or cur not in t.lower():
+            continue
+        seen.add(t.lower())
+        out.append(app_commands.Choice(name=t, value=t))
+    return out[:25]
+
+
 def build_player_bounty_card(bounty, player_progress):
     """Build a personal bounty card. Uses plain text so Discord strikethrough renders."""
     weapons = bounty['weapons']
@@ -958,6 +974,65 @@ class BountyCog(commands.Cog):
             f"\u2705 {_verb} **{player_name}** {_n} hit{'s' if _n != 1 else ''} on **{matched_key}** — now {new_total}/{w['total']}.",
             ephemeral=True
         )
+
+
+    @app_commands.command(name="bounty_complete", description="Manually mark a player as having completed a bounty, past or present (mod only).")
+    @app_commands.describe(member="The player", bounty="Bounty title (past or present)")
+    @app_commands.autocomplete(bounty=_bounty_title_ac)
+    async def bounty_complete(self, interaction: discord.Interaction, member: discord.Member, bounty: str):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        rows = await _db.get_all_bounties()
+        brow = next((r for r in rows if r and r[0].strip().lower() == bounty.strip().lower()), None)
+        if not brow:
+            valid = ", ".join(sorted({r[0].strip() for r in rows if r and r[0].strip()}))
+            await interaction.followup.send(f"\u274c No bounty titled `{bounty}`.\nKnown: {valid}", ephemeral=True)
+            return
+        title = brow[0].strip()
+        try:
+            weapons = json.loads(brow[4]) if brow[4] else {}
+        except Exception:
+            weapons = {}
+        if not weapons:
+            await interaction.followup.send(f"\u274c `{title}` has no weapon requirements recorded.", ephemeral=True)
+            return
+
+        player_id = str(member.id)
+        player_name = member.nick or member.display_name
+
+        # 1. Set this player's progress to meet every requirement (card marks it done).
+        prow = await get_player_bounty_progress(title, player_id)
+        progress = prow['progress'] if prow else {}
+        forum_post_id = prow['forum_post_id'] if prow else None
+        for w, t in weapons.items():
+            progress[w] = t['total'] if isinstance(t, dict) else int(t)
+        await save_player_bounty_progress(title, player_id, player_name, forum_post_id, progress)
+
+        # 2. Add to that bounty's completion list (for placement), if not already there.
+        try:
+            completions = json.loads(brow[7]) if brow[7] else []
+        except Exception:
+            completions = []
+        already = any((isinstance(e, dict) and str(e.get('id')) == player_id) or str(e) == player_id
+                      for e in completions)
+        if not already:
+            import datetime as _dt
+            completions.append({"id": player_id, "name": player_name,
+                                "date": _dt.datetime.now(_dt.timezone.utc).strftime('%b %d')})
+            await save_bounty_state(brow[15], weapons, brow[6] == '1', completions)
+
+        # 3. Refresh the player's registry card.
+        try:
+            from cogs.registry import create_or_update_registry_card
+            await create_or_update_registry_card(interaction.guild, member.id, player_name)
+        except Exception as e:
+            print(f"[BOUNTY_COMPLETE] card refresh error: {e}")
+
+        _place = " (already recorded)" if already else ""
+        await interaction.followup.send(
+            f"\u2705 Marked **{player_name}** as completing **{title}**{_place}. Card refreshed.", ephemeral=True)
 
 
 async def setup(bot):
