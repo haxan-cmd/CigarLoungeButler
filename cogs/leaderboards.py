@@ -19,8 +19,8 @@ async def _rank_name_ac(interaction: discord.Interaction, current: str):
     cur = current.lower()
     curn = _re.sub(r'[^a-z0-9]', '', cur)
     try:
-        rows = await _db.get_all_leaderboard_data()
-        boards = sorted({r[0].strip() for r in rows if r and r[0].strip()})
+        recs = await _get_lb_records()
+        boards = sorted({r['Leaderboard Name'].strip() for r in recs if r.get('Leaderboard Name')})
     except Exception:
         boards = []
     def _hit(b):
@@ -1190,42 +1190,46 @@ class LeaderboardsCog(commands.Cog):
     async def rank_command(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer()
 
+        # Source of truth = SET-UP boards (leaderboards table), not just boards that
+        # have entries — so empty boards (e.g. a fresh archer board) still resolve,
+        # and junk entry-only names don't get suggested.
+        try:
+            board_names = {r['Leaderboard Name'].strip()
+                           for r in await _get_lb_records() if r.get('Leaderboard Name')}
+        except Exception:
+            board_names = set()
+
+        _norm = lambda s: _re.sub(r'[^a-z0-9]', '', s.lower())
+        _nname = _norm(name)
+
+        match = next((b for b in board_names if b.lower() == name.lower()), None)
+        if not match:
+            try:
+                from utils.parsing import parse_submission_text
+                _aw, _ = parse_submission_text(name)
+                if _aw:
+                    match = next((b for b in board_names if b.lower() == _aw.lower()), None)
+            except Exception:
+                pass
+        if not match and _nname:
+            match = next((b for b in board_names if _norm(b) == _nname), None)
+
+        if not match:
+            suggestions = [b for b in sorted(board_names)
+                           if _nname and (_nname in _norm(b) or _norm(b) in _nname)][:5]
+            if not suggestions:
+                suggestions = [b for b in sorted(board_names) if name.lower() in b.lower()][:5]
+            msg = f"No leaderboard found for **{name}**."
+            if suggestions:
+                msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+
+        name = match
         entries = await get_leaderboard_entries(name)
         if not entries:
-            all_rows = await _db.get_all_leaderboard_data()
-            all_boards = {row[0].strip() for row in all_rows if row and row[0].strip()}
-            _norm = lambda s: _re.sub(r'[^a-z0-9]', '', s.lower())
-            _nname = _norm(name)
-
-            # 1. exact (case-insensitive)
-            match = next((b for b in all_boards if b.lower() == name.lower()), None)
-            # 2. weapon-alias resolution (pickaxe -> Pick Axe, 1h spear -> One-Handed Spear, hmace -> Heavy Mace)
-            if not match:
-                try:
-                    from utils.parsing import parse_submission_text
-                    _aw, _ = parse_submission_text(name)
-                    if _aw:
-                        match = next((b for b in all_boards if b.lower() == _aw.lower()), None)
-                except Exception:
-                    pass
-            # 3. normalized match — ignore spaces/hyphens ("pickaxe" == "Pick Axe")
-            if not match and _nname:
-                match = next((b for b in all_boards if _norm(b) == _nname), None)
-
-            if match:
-                entries = await get_leaderboard_entries(match)
-                name = match
-            else:
-                # Suggestions: normalized substring either way, fall back to loose contains.
-                suggestions = [b for b in sorted(all_boards)
-                               if _nname and (_nname in _norm(b) or _norm(b) in _nname)][:5]
-                if not suggestions:
-                    suggestions = [b for b in sorted(all_boards) if name.lower() in b.lower()][:5]
-                msg = f"No leaderboard found for **{name}**."
-                if suggestions:
-                    msg += f" Did you mean: {', '.join(f'`{s}`' for s in suggestions)}?"
-                await interaction.followup.send(msg, ephemeral=True)
-                return
+            await interaction.followup.send(f"**{name}** — no entries on the board yet.")
+            return
 
         top = entries[:10]
         total = len(entries)
