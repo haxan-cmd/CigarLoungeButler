@@ -299,6 +299,7 @@ def build_manual_embed():
         value=(
             "`/stats` — Your title standings and weapon rank progress. Use `/stats [name]` for any player.\n"
             "`/rank` — Top 10 for any weapon board. e.g. `/rank Messer`\n"
+            "`/title_standings` — Who leads each all-time title (Grand Marshal, Weapons Master, Campaign Master), with the board-count + average-placement tiebreak shown.\n"
             "`/butlers_report` — Summon the Butler's Favourites weekly report."
         ),
         inline=False,
@@ -307,7 +308,8 @@ def build_manual_embed():
         name="🏹 Bounty",
         value=(
             "`/bounty status` — The active bounty card and your personal progress.\n"
-            "`/bounty hunt` — Top 5 hunters for the active bounty."
+            "`/bounty hunt` — Top 5 hunters for the active bounty.\n"
+            "`/season_standings` — Live standings for the current season (this bounty cycle)."
         ),
         inline=False,
     )
