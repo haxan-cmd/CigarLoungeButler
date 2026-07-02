@@ -220,15 +220,18 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             continue
         lb_name = row[0].strip()
         player = row[1].strip()
-        if lb_name not in lb_groups:
-            lb_groups[lb_name] = []
-        lb_groups[lb_name].append(player)
+        try:
+            score = int(row[3]) if row[3] else 0
+        except (ValueError, TypeError):
+            score = 0
+        lb_groups.setdefault(lb_name, []).append((player, score))
 
-    for lb_name, players in lb_groups.items():
+    for lb_name, entries in lb_groups.items():
         if lb_name in SKIP_LB:
             continue
         is_map = ' - ' in lb_name
-        for i, player in enumerate(players[:10]):
+        ranked_entries = sorted(entries, key=lambda t: -t[1])
+        for i, (player, _sc) in enumerate(ranked_entries[:10]):
             placement = i + 1
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
@@ -344,6 +347,9 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'grand_marshal': grand_marshal or "N/A",
         'weapons_master': weapons_master or "N/A",
         'campaign_master': campaign_master or "N/A",
+        '_weapon_placements': weapon_placements,
+        '_map_placements': map_placements,
+        '_combined_placements': combined,
         'headhunter': headhunter or "N/A",
         'butcher': butcher or "N/A",
         'top_fastest_learner': top_fastest_learner,
@@ -824,6 +830,36 @@ class FavouritesCog(commands.Cog):
         for i, (nm, pts) in enumerate(standings[:15], 1):
             lines.append(f"`{i:>2}.` **{nm}** — {pts} pts")
         await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="title_standings", description="Board count + average placement for the all-time titles (the tiebreak).")
+    async def title_standings(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        stats = await calculate_butler_stats()  # all-time (no window)
+        titles = [
+            ("Grand Marshal",   "_combined_placements", 15),
+            ("Weapons Master",  "_weapon_placements",    9),
+            ("Campaign Master", "_map_placements",       6),
+        ]
+        out = []
+        for label, key, min_boards in titles:
+            dct = stats.get(key) or {}
+            ranked = sorted(
+                ((p, len(v), sum(v) / len(v)) for p, v in dct.items() if len(v) >= min_boards),
+                key=lambda t: (-t[1], t[2]))
+            out.append(f"**{label}**  \u00b7  *needs {min_boards}+ boards*")
+            if not ranked:
+                out.append("  *no one qualifies yet*")
+            else:
+                for i, (p, cnt, avg) in enumerate(ranked[:6], 1):
+                    holder = "  \U0001f451" if i == 1 else ""
+                    out.append(f"  `{i}.` **{p}** \u2014 {cnt} boards \u00b7 avg #{avg:.2f}{holder}")
+            out.append("")
+        header = (
+            "**All-Time Title Standings**\n"
+            "Ranked by how many boards you place on, then **average placement** breaks ties "
+            "(lower is better). \U0001f451 = current holder.\n\n"
+        )
+        await interaction.followup.send(header + "\n".join(out).rstrip())
 
     @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
     async def force_finalize_season(self, interaction: discord.Interaction):

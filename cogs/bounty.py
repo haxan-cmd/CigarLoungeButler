@@ -861,9 +861,10 @@ class BountyCog(commands.Cog):
 
         await interaction.followup.send(f"⚜️ Bonus marked complete for **{player_name}**.", ephemeral=True)
 
-    @app_commands.command(name="bounty_credit", description="Manually credit a player with a bounty weapon hit (mod only).")
-    @app_commands.describe(member="The player to credit", weapon="The bounty weapon to credit them for")
-    async def bounty_credit(self, interaction: discord.Interaction, member: discord.Member, weapon: str):
+    @app_commands.command(name="bounty_credit", description="Add or remove a player's bounty weapon hits (mod only).")
+    @app_commands.describe(member="The player", weapon="The bounty weapon",
+                           amount="How many hits to add — use a NEGATIVE number to remove (default +1).")
+    async def bounty_credit(self, interaction: discord.Interaction, member: discord.Member, weapon: str, amount: int = 1):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -887,9 +888,12 @@ class BountyCog(commands.Cog):
         player_name = member.nick if member.nick else member.display_name
         player_id = str(member.id)
 
-        # Increment global weapon counter
+        if amount == 0:
+            await interaction.followup.send("Amount is 0 — nothing to do.", ephemeral=True)
+            return
+        # Adjust global weapon counter (clamped at 0)
         w = weapons[matched_key]
-        w['current'] += 1
+        w['current'] = max(0, int(w.get('current', 0)) + amount)
         weapons[matched_key] = w
 
         # Update player progress
@@ -903,11 +907,12 @@ class BountyCog(commands.Cog):
 
         raw = player_progress.get(matched_key, 0)
         cur = raw['current'] if isinstance(raw, dict) else int(raw)
-        player_progress[matched_key] = cur + 1
+        new_total = max(0, cur + amount)
+        player_progress[matched_key] = new_total
 
         # Assign bounty role if not already
         bounty_role = guild.get_role(bounty['role_id']) if bounty['role_id'] else None
-        if bounty_role and bounty_role not in member.roles:
+        if amount > 0 and bounty_role and bounty_role not in member.roles:
             try:
                 await member.add_roles(bounty_role, reason="Bounty credit (manual)")
             except Exception as e:
@@ -947,8 +952,10 @@ class BountyCog(commands.Cog):
         await save_player_bounty_progress(bounty['title'], str(member.id), player_name, forum_post_id, player_progress)
         await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
 
+        _verb = "Credited" if amount > 0 else "Removed"
+        _n = abs(amount)
         await interaction.followup.send(
-            f"\u2705 Credited **{player_name}** with 1 hit on **{weapon}** ({new_total}/{w['total']})",
+            f"\u2705 {_verb} **{player_name}** {_n} hit{'s' if _n != 1 else ''} on **{matched_key}** — now {new_total}/{w['total']}.",
             ephemeral=True
         )
 
