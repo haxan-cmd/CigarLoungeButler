@@ -1,0 +1,18 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Tests only touch config + utils/parsing (pure), so we don't need the
+      # full bot dependency stack — just dotenv (config imports it) and pytest.
+      - run: pip install pytest python-dotenv
+      - run: python -m pytest tests/ -q

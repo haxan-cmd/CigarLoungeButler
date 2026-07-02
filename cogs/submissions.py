@@ -1344,21 +1344,22 @@ async def _apply_edit(interaction, ev):
     try:
         from cogs.leaderboards import update_leaderboards, rebuild_score_boards
         _edit_guild = ev.original_message.guild
-        _old_boards = await _db.delete_leaderboard_entries_by_link(ev.message_link)
-        try:
-            await update_leaderboards(
-                interaction, ev.weapon, ev.map_name, ev.faction,
-                ev.takedowns, ev.kills, ev.deaths, ev.vip, (ev.feats or []),
-                ev.author.display_name, ev.message_link,
-            )
-        except Exception as _e_upd:
-            print(f"[EDIT] update_leaderboards error: {_e_upd}")
-        _new_boards = {b for b in (None if ev.vip else ev.weapon,
-                                   f"{ev.map_name} - {ev.faction}") if b}
-        _affected = set(_old_boards) | _new_boards
-        if _affected:
-            await rebuild_score_boards(
-                _edit_guild, board_names=list(_affected), only_player=str(ev.author.id))
+        async with _BOARD_LOCK:
+            _old_boards = await _db.delete_leaderboard_entries_by_link(ev.message_link)
+            try:
+                await update_leaderboards(
+                    interaction, ev.weapon, ev.map_name, ev.faction,
+                    ev.takedowns, ev.kills, ev.deaths, ev.vip, (ev.feats or []),
+                    ev.author.display_name, ev.message_link,
+                )
+            except Exception as _e_upd:
+                print(f"[EDIT] update_leaderboards error: {_e_upd}")
+            _new_boards = {b for b in (None if ev.vip else ev.weapon,
+                                       f"{ev.map_name} - {ev.faction}") if b}
+            _affected = set(_old_boards) | _new_boards
+            if _affected:
+                await rebuild_score_boards(
+                    _edit_guild, board_names=list(_affected), only_player=str(ev.author.id))
     except Exception as e:
         print(f"[EDIT] board propagation error: {e}")
 
@@ -1889,13 +1890,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         newly_completed = False
         if not is_ranged:
             try:
-                any_updated, placements = await update_leaderboards(
-                    interaction, selected_weapon, selected_map, faction,
-                    takedowns, kills, deaths, vip, feats,
-                    interaction.user.display_name, message_link,
-                    bot_user=interaction.client.user,
-                    second_place_td=_second_place_td,
-                )
+                async with _BOARD_LOCK:
+                    any_updated, placements = await update_leaderboards(
+                        interaction, selected_weapon, selected_map, faction,
+                        takedowns, kills, deaths, vip, feats,
+                        interaction.user.display_name, message_link,
+                        bot_user=interaction.client.user,
+                        second_place_td=_second_place_td,
+                    )
             except Exception as e:
                 print(f"Leaderboard update error: {e}")
 
@@ -2337,6 +2339,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
 _active_vision: set[int] = set()  # prevents double-processing same message
 _queued_msgs: set[int] = set()  # prevents same message being finalised twice
+# Serializes board read-modify-writes across detached background tasks so two
+# concurrent submissions to the same board can't lose an update / dup.
+_BOARD_LOCK = asyncio.Lock()
 
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):

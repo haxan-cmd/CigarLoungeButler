@@ -332,75 +332,8 @@ def build_manual_content():
     return "See pinned embed above."
 
 
-def parse_submission_text(text):
-    # Sort aliases longest-first so "war bow" matches before "bow" - otherwise
-    # shorter aliases steal the match from longer ones that overlap.
-    from difflib import get_close_matches
-    text_lower = text.lower().strip()
-    words = text_lower.split()
-    detected_weapon   = None
-    detected_subclass = None
-
-    # 1. Exact alias substring match (original behaviour)
-    for alias in sorted(config.WEAPON_ALIASES.keys(), key=len, reverse=True):
-        if alias in text_lower:
-            detected_weapon = config.WEAPON_ALIASES[alias]
-            break
-
-    # 2. Fuzzy fallback - check each word against all weapon aliases
-    if not detected_weapon:
-        all_weapon_aliases = list(config.WEAPON_ALIASES.keys())
-        for word in words:
-            if len(word) < 3:
-                continue
-            matches = get_close_matches(word, all_weapon_aliases, n=1, cutoff=0.82)
-            if matches:
-                detected_weapon = config.WEAPON_ALIASES[matches[0]]
-                break
-        # Also try two-word combinations for aliases like "war bow"
-        if not detected_weapon:
-            for i in range(len(words) - 1):
-                phrase = words[i] + ' ' + words[i+1]
-                matches = get_close_matches(phrase, all_weapon_aliases, n=1, cutoff=0.82)
-                if matches:
-                    detected_weapon = config.WEAPON_ALIASES[matches[0]]
-                    break
-
-    detected_parent = None
-    # 3. Exact alias substring match for subclass
-    for alias in sorted(config.SUBCLASS_ALIASES.keys(), key=len, reverse=True):
-        if alias in text_lower:
-            raw = config.SUBCLASS_ALIASES[alias]
-            if raw in config.PARENT_TO_SUBCLASSES:
-                detected_parent = raw
-            else:
-                detected_subclass = raw
-            break
-
-    # 4. Fuzzy fallback for subclass
-    if not detected_subclass and not detected_parent:
-        all_sub_aliases = list(config.SUBCLASS_ALIASES.keys())
-        for word in words:
-            if len(word) < 3:
-                continue
-            matches = get_close_matches(word, all_sub_aliases, n=1, cutoff=0.82)
-            if matches:
-                raw = config.SUBCLASS_ALIASES[matches[0]]
-                if raw in config.PARENT_TO_SUBCLASSES:
-                    detected_parent = raw
-                else:
-                    detected_subclass = raw
-                break
-
-    # If they said a parent class (e.g. "vanguard") and a weapon, try to narrow
-    # it down to the specific subclass automatically - saves them having to type it.
-    if detected_parent and detected_weapon:
-        subs = config.PARENT_TO_SUBCLASSES[detected_parent]
-        candidates = [s for s in subs if detected_weapon in config.CLASS_WEAPON_MAP.get(s, [])]
-        if len(candidates) == 1:
-            detected_subclass = candidates[0]
-
-    return detected_weapon, detected_subclass
+# parse_submission_text extracted to utils/parsing.py (pure + unit-tested).
+from utils.parsing import parse_submission_text  # noqa: F401
 
 
 def format_weapon_marks(marks):
