@@ -2150,10 +2150,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 # stale in-memory copy didn't reflect it, so placing on a board was
                 # silently dropping the High Score line and the extra mark.
                 try:
-                    summary_reply = await summary_reply.channel.fetch_message(summary_reply.id)
+                    _fresh_reply = await summary_reply.channel.fetch_message(summary_reply.id)
                 except Exception:
-                    pass
-                new_content = summary_reply.content
+                    _fresh_reply = summary_reply
+                new_content = _fresh_reply.content
                 if selected_weapon in placed_boards:
                     weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
                     new_content = new_content.replace(
