@@ -242,6 +242,13 @@ REGISTRY_CLASS_MAP = {
 MASTERY_THRESHOLD  = 100   # qualifying (100+ TD) primary-weapon runs to master a weapon
 VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 
+# Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
+# Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
+VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji
+VIRTUOSO_WEAPON_EMOJIS = {
+    "Executioner's Axe": "<a:ExecAxeVirtuoso:1522338416425959624>",
+}
+
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
     "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},

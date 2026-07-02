@@ -972,7 +972,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     if _done:
         for w, c in _done:
             if c >= _VIRT:
-                lines.append(f"• 💎 **{w}** ×{c} — *Virtuoso*")
+                _vemoji = config.VIRTUOSO_WEAPON_EMOJIS.get(w, getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "💎"))
+                lines.append(f"• {_vemoji} **{w}** ×{c} — *Virtuoso*")
             else:
                 lines.append(f"• 👑 {w} ×{c}")
     else:
