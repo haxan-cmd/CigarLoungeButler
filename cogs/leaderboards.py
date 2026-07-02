@@ -363,9 +363,36 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 embeds.append(e)
             return embeds
 
+        def _safe_fields(fields):
+            # Discord rejects an embed (400 / 50035) if any field value is empty or
+            # >1024 chars. Split long link-lists on line boundaries; drop empties.
+            out = []
+            for fname, fval in fields:
+                fval = (fval or "").strip()
+                if not fval:
+                    continue
+                fname = (str(fname).strip() or "\u200b")[:256]
+                if len(fval) <= 1024:
+                    out.append((fname, fval[:1024]))
+                    continue
+                cur = ""
+                first = True
+                for ln in fval.split("\n"):
+                    add = ln if not cur else "\n" + ln
+                    if len(cur) + len(add) > 1024:
+                        if cur:
+                            out.append((fname if first else "\u200b", cur[:1024]))
+                            first = False
+                        cur = ln[:1024]
+                    else:
+                        cur += add
+                if cur:
+                    out.append((fname if first else "\u200b", cur[:1024]))
+            return out or [("No boards yet", "*Nothing here yet.*")]
+
         if not embed_fields:
             embed_fields = [("No boards yet", "*Nothing here yet.*")]
-        embeds = _build_embeds(embed_fields)
+        embeds = _build_embeds(_safe_fields(embed_fields))
 
         _known_index_ids = {
             "1H Weapons":  INDEX_THREAD_1H,

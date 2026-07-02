@@ -2016,6 +2016,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
             now = datetime.now(timezone.utc)
             player = interaction.user.display_name
+            discord_id_str = str(interaction.user.id)  # bind early: mastery genexpr (~L2079) referenced it before its later assignment
 
             if main_channel:
                 # Dry spell — first submission after 4+ hours of silence
