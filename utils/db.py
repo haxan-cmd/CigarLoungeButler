@@ -664,6 +664,23 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
         """, board_name, str(discord_id))
 
 
+async def delete_leaderboard_entries_by_board_and_name(board_name: str, player_name: str) -> int:
+    """Delete every row on a board whose player_name matches (case-insensitive),
+    regardless of discord_id. Returns how many rows were removed. Used by the
+    /remove_board_score mod command to undo a manual add."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM leaderboard_data WHERE board_name=$1 AND lower(player_name)=lower($2)",
+            board_name, player_name
+        )
+    try:
+        return int(str(res).split()[-1])
+    except Exception:
+        return 0
+
+
 async def delete_blank_id_entries_by_name(board_name: str, player_name: str):
     """Delete blank/null-discord_id rows on a board matching a player name
     (case-insensitive). Used to clean stale legacy rows before re-inserting a
