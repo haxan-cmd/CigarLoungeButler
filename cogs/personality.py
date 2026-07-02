@@ -1383,6 +1383,7 @@ class PersonalityCog(commands.Cog):
         image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
         # Check if this is an art post in the active bounty channel
+        from cogs.bounty import get_active_bounty
         bounty = await get_active_bounty()
         if bounty and message.channel.id == bounty['channel_id']:
             has_image = any(

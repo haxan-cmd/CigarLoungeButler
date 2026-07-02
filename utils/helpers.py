@@ -421,8 +421,25 @@ def nerve_log_milestone(player, weapon, rank):
     _nerve_events['milestones'].append((player, weapon, rank))
 
 
+_nerve_alert_sent = {}          # signature -> last-sent timestamp
+_NERVE_ALERT_COOLDOWN = 600     # sec — same error won't re-post within 10 min
+
+
 async def nerve_alert(bot_instance, context, error):
     # Fire-and-forget critical error to nerve center - don't let this crash anything else
+    try:
+        import time as _t
+        _lines = [l for l in str(error).splitlines() if l.strip()]
+        _sig = f"{context}::{(_lines[-1] if _lines else '')[:120]}"
+        _now = _t.time()
+        if _now - _nerve_alert_sent.get(_sig, 0) < _NERVE_ALERT_COOLDOWN:
+            return  # suppress duplicate spam — same error already reported recently
+        _nerve_alert_sent[_sig] = _now
+        if len(_nerve_alert_sent) > 200:
+            for _k in sorted(_nerve_alert_sent, key=_nerve_alert_sent.get)[:100]:
+                _nerve_alert_sent.pop(_k, None)
+    except Exception:
+        pass
     try:
         guild = bot_instance.get_guild(config.GUILD_ID)
         if not guild:

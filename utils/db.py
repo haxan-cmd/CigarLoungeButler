@@ -120,7 +120,7 @@ async def dump_database() -> dict:
     out = {}
     # Skip tables holding donor PII (names/amounts/transaction ids) — no need to
     # snapshot those into a file mods can download.
-    _EXCLUDE = {"kofi_donations"}
+    _EXCLUDE = {"kofi_donations", "kofi_dashboard"}
     async with pool.acquire() as conn:
         tbls = await conn.fetch(
             "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
