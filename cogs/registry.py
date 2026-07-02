@@ -1310,6 +1310,9 @@ def _chunk_message(msg_text, limit=1900):
     return chunks
 
 
+_bot_ref = None  # set in RegistryCog.__init__; lets module-level card fns raise nerve alerts
+
+
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None, skip_index=False):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
@@ -1424,6 +1427,13 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
     except Exception as e:
         print(f"Registry card error for {player_name}: {e}")
+        try:
+            _bi = _bot_ref or (guild._state._get_client() if guild else None)
+            if _bi:
+                from utils.helpers import nerve_alert
+                await nerve_alert(_bi, f"registry card render ({player_name})", e)
+        except Exception:
+            pass
     finally:
         _registry_lock.release()
 
@@ -1664,6 +1674,8 @@ async def _save_legacy_feats(player_name, legacy_feats):
 class RegistryCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        global _bot_ref
+        _bot_ref = bot
 
     @app_commands.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
     @app_commands.checks.has_permissions(administrator=True)

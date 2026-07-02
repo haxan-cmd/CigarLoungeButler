@@ -489,19 +489,3 @@ def nerve_flush():
     _nerve_events['milestones'].clear()
 
     return "\n".join(parts) if parts else ""
-
-
-async def nerve_alert(bot_instance, context, error):
-    try:
-        guild = bot_instance.get_guild(config.GUILD_ID)
-        if not guild:
-            return
-        ch = (guild.get_channel(config.NERVE_CENTER_CHANNEL_ID)
-              or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID))
-        if ch:
-            import discord as _discord
-            if isinstance(ch, _discord.Thread) and ch.archived:
-                await ch.edit(archived=False)
-            await ch.send(f"\u26a0\ufe0f **Critical Error** - {context}\n```{str(error)[:300]}```")
-    except Exception:
-        pass
