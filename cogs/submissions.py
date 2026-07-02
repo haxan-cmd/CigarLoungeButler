@@ -1934,9 +1934,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 nerve_log_error("Hundred-Handed check", e)
 
         if any_updated:
+            # Immediate visual feedback FIRST — react + bump the blurb before any
+            # bookkeeping, so the user sees the High Score right away.
             await safe_react("<a:highscore:1360312918545269057>")
-            # Write High Score feat back to the Submissions sheet so mark totals count it (any PB on any board)
-            _high_score_written = False
+            try:
+                import re as _re
+                def increment_marks(content):
+                    def replacer(m):
+                        n = int(m.group(1)) + 1
+                        return f"**{n} mark{'s' if n != 1 else ''}**"
+                    return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
+                new_content = increment_marks(summary_reply.content) + "\n<a:highscore:1360312918545269057> +1 High Score"
+                await summary_reply.edit(content=new_content)
+            except Exception as e:
+                print(f"Highscore mark edit error: {e}")
+            # Bookkeeping (lower priority): record the High Score feat so mark totals
+            # count it. The player card is refreshed ONCE at the end of _bg_tasks, so we
+            # deliberately do NOT refresh it here — that heavy work must never delay the
+            # visual feedback above.
             if submission_row:
                 try:
                     current_feats = await _db.get_submission_feats(submission_row)
@@ -1946,32 +1961,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         else:
                             updated_feats = (current_feats.rstrip(', ') + ', High Score').lstrip(', ')
                         await _db.update_submission_feats(submission_row, updated_feats)
-                        _high_score_written = True
                 except Exception as e:
                     print(f"Highscore feat write error: {e}")
-            # Re-run registry card now that High Score is in the sheet — the bg_tasks pass
-            # ran before leaderboard update so it missed this mark.
-            if _high_score_written:
-                try:
-                    await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
-                    print(f"[HIGHSCORE] Registry card refreshed after High Score feat write for {interaction.user.display_name}")
-                except Exception as e:
-                    print(f"Highscore registry refresh error: {e}")
-            # Edit summary message to show the bonus mark
-            try:
-                import re as _re
-                def increment_marks(content):
-                    def replacer(m):
-                        n = int(m.group(1)) + 1
-                        return f"**{n} mark{'s' if n != 1 else ''}**"
-                    return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
-                # Edit the reply via our held reference — the old history(limit=10)
-                # scan missed it once the work was backgrounded and the reply had
-                # scrolled out of the recent window (hi-score reacted, blurb didn't update).
-                new_content = increment_marks(summary_reply.content) + "\n<a:highscore:1360312918545269057> +1 High Score"
-                await summary_reply.edit(content=new_content)
-            except Exception as e:
-                print(f"Highscore mark edit error: {e}")
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
 
@@ -2152,6 +2143,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _lb_rows_for_links = await _lb_get_records()
                     _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
                 # Edit the reply directly via our held reference (robust in a busy channel).
+                # Re-fetch first so we build on (not clobber) the High Score edit above —
+                # it bumped the mark count and appended the "+1 High Score" line, but the
+                # stale in-memory copy didn't reflect it, so placing on a board was
+                # silently dropping the High Score line and the extra mark.
+                try:
+                    summary_reply = await summary_reply.channel.fetch_message(summary_reply.id)
+                except Exception:
+                    pass
                 new_content = summary_reply.content
                 if selected_weapon in placed_boards:
                     weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
