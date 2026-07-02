@@ -1115,6 +1115,52 @@ class PersonalityCog(commands.Cog):
                             except Exception:
                                 pass
 
+                            # Per-weapon best takedowns — lets the Butler answer "which weapons do I still
+                            # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
+                            # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
+                            try:
+                                _NON_WEAPON = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+                                weapon_boards = set()
+                                for _lr in ld_for_pb:
+                                    _b = _lr[0].strip() if _lr else ''
+                                    if _b and ' - ' not in _b and _b not in _NON_WEAPON:
+                                        weapon_boards.add(_b)
+                                best_td_by_weapon = {}
+                                for _r in player_subs_pb:
+                                    if len(_r) < 8:
+                                        continue
+                                    _w = _r[3].strip() if len(_r) > 3 else ''
+                                    try:
+                                        _td = int(_r[7])
+                                    except (ValueError, IndexError):
+                                        continue
+                                    if _w:
+                                        best_td_by_weapon[_w] = max(best_td_by_weapon.get(_w, 0), _td)
+                                for _lr in ld_for_pb:
+                                    if len(_lr) < 4:
+                                        continue
+                                    _b = _lr[0].strip()
+                                    if _b in weapon_boards and _lr[1].strip() == player_name_for_ld:
+                                        try:
+                                            best_td_by_weapon[_b] = max(best_td_by_weapon.get(_b, 0), int(_lr[3]))
+                                        except ValueError:
+                                            pass
+                                if weapon_boards:
+                                    _have = sorted((w for w in weapon_boards if best_td_by_weapon.get(w, 0) > 0),
+                                                   key=lambda w: -best_td_by_weapon[w])
+                                    _none = sorted(w for w in weapon_boards if best_td_by_weapon.get(w, 0) == 0)
+                                    _have_str = ", ".join(f"{w}: {best_td_by_weapon[w]}" for w in _have) or "none"
+                                    _none_str = ", ".join(_none)
+                                    player_stats_ctx += (
+                                        "\n\nPer-weapon best takedowns (best single-run TD on each weapon that has a "
+                                        "leaderboard; a weapon below a target TD is one the player still needs that many with): "
+                                        + _have_str
+                                        + (f". Weapon boards with NO recorded run yet (best TD 0): {_none_str}"
+                                           if _none else ". The player has a recorded run on every weapon board.")
+                                    )
+                            except Exception:
+                                pass
+
                             # Hundred Handed progress — which primary weapon+subclass combos are missing
                             try:
                                 cwm = config.CLASS_WEAPON_MAP
