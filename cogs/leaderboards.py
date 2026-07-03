@@ -240,14 +240,12 @@ async def build_ledger_entrance(guild, stats=None):
         # Each tuple is one message: list of (label, channel_id) buttons
         message_groups = [
             [("⚖️ Challenge Rules",         1460713024082935930)],
-            [("🗂️ Members Archive",          REGISTRY_INDEX_THREAD_ID),
-             ("🏅 Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
-            [(f"{bounty_emoji} {bounty_label}", bounty_channel_id),
-             ("📋 Butler Monthly",     1518822798116524092)],
+            [("🗂️ Members Archive",          REGISTRY_INDEX_THREAD_ID)],
             [("🏆 Map Records",             idx_maps.id if idx_maps else None),
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
             [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
+            [("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
         ]
 
         # Delete all previous entrance messages then resend fresh
@@ -265,7 +263,22 @@ async def build_ledger_entrance(guild, stats=None):
         except Exception as de:
             print(f"Entrance cleanup error: {de}")
 
+        # Themed header so the entrance reads as a designed landing page, not bare buttons.
+        header = discord.Embed(
+            title="📜  The Archives",
+            description="*" + random.choice(_ENTRANCE_GREETINGS) + "*",
+            colour=discord.Colour.from_str("#C9A24B"),
+        )
+        _hbanner = getattr(config, 'LEDGER_ENTRANCE_BANNER_URL', '') or ''
+        if _hbanner:
+            header.set_image(url=_hbanner)
+
         _entrance_message_ids.clear()
+        try:
+            _hs = await channel.send(embed=header)
+            _entrance_message_ids['entrance_header'] = _hs.id
+        except Exception as _he:
+            print(f"Entrance header send error: {_he}")
         for i, group in enumerate(message_groups):
             view = make_view(*group)
             sent = await channel.send(content="​", view=view)
