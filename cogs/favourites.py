@@ -990,13 +990,47 @@ class FavouritesCog(commands.Cog):
                 description=(f"*{stats.get('week_label','')}*" if stats.get('week_label') else None),
                 colour=_discord.Colour.from_str("#C9A24B"),
             )
-            _lines = _champion_lines(stats)
+            def _top1(lst):
+                if lst and isinstance(lst[0], (list, tuple)) and len(lst[0]) >= 2:
+                    return f"**{lst[0][0]}** ({lst[0][1]})"
+                return None
+
+            _lines = _champion_lines(stats, ['apex', 'frenzied', 'most_lethal_player', 'warlord_player'])
             if _lines:
-                summary.add_field(name="👑 Reigning Champions", value="\n".join(_lines), inline=False)
+                summary.add_field(name="👑 Reigning Champions  *(this season)*", value="\n".join(_lines), inline=False)
+
+            _records = []
+            _mk = _top1(stats.get('top_kills_list'))
+            if _mk: _records.append(f"<a:topkill:1360314538364240024> Most Kills \u2014 {_mk}")
+            _mt = _top1(stats.get('top_td_list'))
+            if _mt: _records.append(f"<a:toptkd:1360312666475728958> Highest TD \u2014 {_mt}")
+            _tt = _top1(stats.get('top_total_tally'))
+            if _tt: _records.append(f"<a:200tkd:1363648828414230538> Total Tally \u2014 {_tt}")
+            _fl = _top1(stats.get('top_fastest_learner'))
+            if _fl: _records.append(f"📈 Fastest Learner \u2014 {_fl}")
+            _bz = _top1(stats.get('top_busiest'))
+            if _bz: _records.append(f"🏃 Busiest \u2014 {_bz}")
+            if _records:
+                summary.add_field(name="🎯 Season Records", value="\n".join(_records), inline=False)
+
+            _meta = []
+            _tw = stats.get('top_weapons')
+            if _tw:
+                _meta.append("🗡️ Weapons \u2014 " + ", ".join(f"{w} ({c})" for w, c in _tw[:3]))
+            _tm = stats.get('top_maps')
+            if _tm:
+                _meta.append("🗺️ Maps \u2014 " + ", ".join(f"{m} ({c})" for m, c in _tm[:3]))
+            if _meta:
+                summary.add_field(name="📋 Meta", value="\n".join(_meta), inline=False)
+
             _runs = stats.get('total_runs'); _players = stats.get('total_players')
             if _runs is not None:
                 _pulse = f"**{_runs}** runs" + (f" \u00b7 **{_players}** players" if _players else "")
                 summary.add_field(name="📊 This Season", value=_pulse, inline=False)
+
+            _alltime = _champion_lines(stats, ['grand_marshal', 'weapons_master', 'campaign_master'])
+            if _alltime:
+                summary.add_field(name="🏛️ All-Time Titles", value="\n".join(_alltime), inline=False)
             await interaction.followup.send(embed=summary, ephemeral=True)
 
         except Exception as e:

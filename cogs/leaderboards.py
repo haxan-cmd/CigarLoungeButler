@@ -132,22 +132,25 @@ def _champ(v):
     return None if v in ('', 'N/A') else v
 
 
-def _champion_lines(stats):
-    te = getattr(config, 'TITLE_EMOJIS', {})
-    rows = [
-        ('grand_marshal',      te.get('Grand Marshal', '🎖️'),   'Grand Marshal'),
-        ('weapons_master',     te.get('Weapons Master', '⚔️'),      'Weapons Master'),
-        ('campaign_master',    te.get('Campaign Master', '🗺️'), 'Campaign Master'),
-        ('apex',               te.get('apex_title', '💀'),            'Apex'),
-        ('frenzied',           te.get('frenzied_title', '🪓'),        'Frenzied'),
-        ('most_lethal_player', te.get('Lethality', '🧪'),             'Most Lethal'),
-        ('warlord_player',     '🛡️',                            'Warlord'),
-    ]
+def _champion_lines(stats, keys=None):
+    te = getattr(config, "TITLE_EMOJIS", {})
+    rows = {
+        'grand_marshal':      (te.get('Grand Marshal', '\U0001f396\ufe0f'),   'Grand Marshal'),
+        'weapons_master':     (te.get('Weapons Master', '\u2694\ufe0f'),       'Weapons Master'),
+        'campaign_master':    (te.get('Campaign Master', '\U0001f5fa\ufe0f'),  'Campaign Master'),
+        'apex':               (te.get('apex_title', '\U0001f480'),              'Apex'),
+        'frenzied':           (te.get('frenzied_title', '\U0001fa93'),          'Frenzied'),
+        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Most Lethal'),
+        'warlord_player':     (te.get('Warlord', '\U0001f6e1\ufe0f'),          'Warlord'),
+    }
+    order = keys or ['grand_marshal', 'weapons_master', 'campaign_master',
+                     'apex', 'frenzied', 'most_lethal_player', 'warlord_player']
     out = []
-    for key, emoji, label in rows:
+    for key in order:
+        emoji, label = rows[key]
         name = _champ(stats.get(key))
         if name:
-            out.append(f"{emoji} **{label}** — {name}")
+            out.append(f"{emoji} **{label}** \u2014 {name}")
     return out
 
 
