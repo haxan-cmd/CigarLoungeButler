@@ -1755,49 +1755,6 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="purge_archive", description="Delete all threads in butlers-archive (admin only).")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def purge_archive(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            forum = interaction.guild.get_channel(REGISTRY_FORUM_CHANNEL_ID)
-            if not forum:
-                await interaction.followup.send("Could not find butlers-archive channel.", ephemeral=True)
-                return
-
-            deleted = 0
-
-            # Delete active threads
-            for thread in list(forum.threads):
-                try:
-                    await thread.delete()
-                    deleted += 1
-                except Exception as e:
-                    print(f"Error deleting thread {thread.name}: {e}")
-
-            # Delete archived threads
-            async for thread in forum.archived_threads(limit=200):
-                try:
-                    await thread.delete()
-                    deleted += 1
-                except Exception as e:
-                    print(f"Error deleting archived thread {thread.name}: {e}")
-
-            # Clear thread IDs from registry_cards so import doesn't get 404s
-            try:
-                reg_rows = await _db.get_all_registry_cards()
-                for row in reg_rows:
-                    if row and len(row) > 2 and row[2]:
-                        await _db.upsert_registry_card(row[0], row[1], '')
-            except Exception as e:
-                print(f"Error clearing registry thread IDs: {e}")
-
-            await interaction.followup.send(f"Purge complete — deleted {deleted} threads.", ephemeral=True)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            await interaction.followup.send(f"Purge error: {e}", ephemeral=True)
-
     @app_commands.command(name="update_index", description="Rebuild an index thread in a forum (admin only).")
     @app_commands.describe(forum="Which forum to rebuild the index for (omit for all)")
     @app_commands.choices(forum=[
