@@ -450,10 +450,6 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="<a:200tkd:1363648828414230538> Total Tally  *(takedowns)*",
                     value=_table([(_short(n), f"{v:,}") for n, v in _tt[:5]]) if _tt else "```\n—\n```",
                     inline=False)
-    _flg = stats.get("top_fastest_learner") or []
-    embed.add_field(name="📈 Fastest Learner  *(PBs)*",
-                    value=_table([(_short(n), str(c)) for n, c in _flg[:5]]) if _flg else "```\n—\n```",
-                    inline=False)
 
     embed.add_field(name="<a:topkill:1360314538364240024> Most Kills",
                     value=_table(_rows(stats.get("top_kills_list"))), inline=False)
@@ -543,10 +539,8 @@ _SEASON_CATEGORIES = [
     ("Most Lethal", "high_lethality", True),
     ("Warlord", "most_dominant", True),
     ("Total Tally", "top_total_tally", False),
-    ("Fastest Learner", "top_fastest_learner", False),
     ("Most Kills", "top_kills_list", False),
     ("Highest Takedowns", "top_td_list", False),
-    ("Busiest", "top_busiest", False),
 ]
 _GP_POINTS = [3, 2, 1]
 
