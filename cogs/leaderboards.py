@@ -156,7 +156,7 @@ class EntranceView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Pull My Card", emoji="🎴",
+    @discord.ui.button(label="Grab a Report", emoji="📋",
                        style=discord.ButtonStyle.secondary, custom_id="entrance:mycard")
     async def my_card(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
@@ -164,7 +164,7 @@ class EntranceView(discord.ui.View):
             tid = await get_registry_thread_id(str(interaction.user.id))
             if tid:
                 url = f"https://discord.com/channels/{interaction.guild.id}/{tid}"
-                await interaction.response.send_message(f"🎴 Your registry card: {url}", ephemeral=True)
+                await interaction.response.send_message(f"📋 Your report: {url}", ephemeral=True)
             else:
                 await interaction.response.send_message(
                     "You don't have a registry card yet — submit a run and the Butler will draw one up.",
