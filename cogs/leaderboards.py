@@ -1655,40 +1655,47 @@ def _boards_in_window(all_subs, window_start):
 
 
 async def _monthly_index(guild, forum, index_name, units):
-    """Rebuild + pin the Monthly Report index: grouped Maps / 2H / 1H / Archer."""
+    """Rebuild + pin the Monthly Report index. One embed per category (Maps / 2H /
+    1H / Archer) with the board links in the description, so long lists don't get
+    the field-split blank-line gaps."""
     groups = [
         ("🗺️ Maps",        "Map"),
         ("⚔️ 2H Weapons",   "2H"),
         ("🗡️ 1H Weapons",   "1H"),
         ("🏹 Archer",        "Archer"),
     ]
-    embed = discord.Embed(
+    colour = discord.Colour.from_str("#C9A24B")
+    embeds = [discord.Embed(
         title="📋 Monthly Report — Index",
-        description="Live Lethality (kills/TD) and Warlord (% of your team's takedowns) ratings for the current "
-                    "month — top 5 per weapon and map. Resets each season; resubmissions don't count. "
-                    "Jump to a board below.",
-        colour=discord.Colour.from_str("#C9A24B"),
-    )
+        description="Live Lethality (kills/TD) and Warlord (% of your team's takedowns) ratings for the "
+                    "current month — top 5 per weapon and map. Resets each season; resubmissions don't "
+                    "count. Jump to a board below.",
+        colour=colour,
+    )]
     for glabel, gkey in groups:
         items = sorted([(lbl, th) for cat, lbl, th in units if cat == gkey and th],
                        key=lambda x: x[0].lower())
         if not items:
             continue
         links = [f"[{lbl}](https://discord.com/channels/{guild.id}/{th.id})" for lbl, th in items]
-        chunk = ""
-        first = True
+        # Split into <=4000-char descriptions (a second embed only if a category is huge).
+        chunks, cur = [], ""
         for ln in links:
-            add = ln if not chunk else "\n" + ln
-            if len(chunk) + len(add) > 1024:
-                embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
-                first = False
-                chunk = ln
+            add = ln if not cur else "\n" + ln
+            if len(cur) + len(add) > 4000:
+                chunks.append(cur)
+                cur = ln
             else:
-                chunk += add
-        if chunk:
-            embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
-    if not embed.fields:
-        embed.add_field(name="No boards yet", value="*Post a run to populate the monthly boards.*", inline=False)
+                cur += add
+        if cur:
+            chunks.append(cur)
+        for i, ch in enumerate(chunks):
+            embeds.append(discord.Embed(
+                title=glabel if i == 0 else f"{glabel} (cont.)",
+                description=ch, colour=colour))
+    if len(embeds) == 1:
+        embeds[0].description += "\n\n*No boards yet — post a run to populate them.*"
+    embeds = embeds[:10]  # Discord hard cap: 10 embeds per message
 
     index_thread = None
     for t in forum.threads:
@@ -1708,7 +1715,7 @@ async def _monthly_index(guild, forum, index_name, units):
         async for msg in index_thread.history(limit=50, oldest_first=True):
             msgs.append(msg)
         if msgs:
-            await msgs[0].edit(embed=embed)
+            await msgs[0].edit(embeds=embeds)
             for msg in msgs[1:]:
                 try:
                     await msg.delete()
@@ -1716,9 +1723,9 @@ async def _monthly_index(guild, forum, index_name, units):
                 except Exception:
                     pass
         else:
-            await index_thread.send(embed=embed)
+            await index_thread.send(embeds=embeds)
     else:
-        res = await forum.create_thread(name=index_name, embed=embed)
+        res = await forum.create_thread(name=index_name, embeds=embeds)
         index_thread = res.thread
     try:
         await index_thread.edit(pinned=True)
