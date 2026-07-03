@@ -1141,7 +1141,20 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     else:
         min_games = 5
 
+    # Resolve discord_id -> current display name (Players sheet is source of truth).
+    # One person can submit under several display names; bucket by stable id so they
+    # collapse into a single rating row instead of appearing as duplicates. Legacy
+    # rows have blank discord_ids -> key them by name (matching rebuild_score_boards).
+    id_to_name = {}
+    try:
+        for prow in await _db.get_all_players():
+            if prow and len(prow) > 1 and (prow[0] or '').strip():
+                id_to_name[str(prow[0]).strip()] = (prow[1] or '').strip()
+    except Exception:
+        pass
+
     leth, warl = {}, {}
+    names = {}  # key -> display name to show
     for row in subs:
         if len(row) < 9:
             continue
@@ -1157,29 +1170,35 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
             if _vip:
                 continue
         player = row[1].strip()
+        did = row[2].strip() if len(row) > 2 and row[2] else ''
+        key = did if did else (f"legacy:{player.lower()}" if player else '')
+        if not key:
+            continue
+        # Prefer the current Players-sheet name for real ids; else the submission name.
+        names[key] = id_to_name.get(did) or names.get(key) or player
         ts = row[0].strip()
         try:
             td = int(row[7]); kills = int(row[8])
         except (ValueError, IndexError):
             td = kills = 0
         if td > 0 and kills > 0:
-            leth.setdefault(player, []).append((ts, kills / td))
+            leth.setdefault(key, []).append((ts, kills / td))
         try:
             tds = float(row[21]) if len(row) > 21 and row[21] else None
         except (ValueError, TypeError):
             tds = None
         if tds and 0 < tds <= 100:
-            warl.setdefault(player, []).append((ts, tds))
+            warl.setdefault(key, []).append((ts, tds))
 
     def _peak(dct):
         out = []
-        for p, arr in dct.items():
+        for k, arr in dct.items():
             if len(arr) < min_games:
                 continue
             vals = [v for _, v in sorted(arr)]
             w = min(5, len(vals))
             best = max(sum(vals[i:i + w]) / w for i in range(len(vals) - w + 1))
-            out.append((p, best))
+            out.append((names.get(k, k), best))
         out.sort(key=lambda t: -t[1])
         return out
 
