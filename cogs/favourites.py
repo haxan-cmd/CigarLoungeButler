@@ -777,6 +777,45 @@ async def finalize_season(guild, season):
         print(f"[HOF] Failed to post season: {e}")
 
 
+async def refresh_favourites_message(guild, embed):
+    """Post/update the Butler Monthly report in its channel WITH the interactive
+    buttons, and keep it pinned so it stays the anchor post of the channel. Shared
+    by every place that refreshes the report so the buttons/pin can\'t be dropped."""
+    if not BUTLERS_FAVOURITES_CHANNEL_ID:
+        return
+    ch = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+    if not ch:
+        try:
+            ch = await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
+        except Exception:
+            return
+    try:
+        from cogs.leaderboards import EntranceView
+        view = EntranceView()
+    except Exception:
+        view = None
+    target = None
+    try:
+        async for msg in ch.history(limit=10):
+            if msg.author == guild.me and msg.embeds and 'Butler Monthly' in (msg.embeds[0].title or ''):
+                target = msg
+                break
+    except Exception:
+        pass
+    try:
+        if target:
+            await target.edit(content=None, embed=embed, view=view)
+        else:
+            target = await ch.send(embed=embed, view=view)
+        try:
+            if not target.pinned:
+                await target.pin(reason="Butler Monthly report — keep it anchored")
+        except Exception as _pe:
+            print(f"Favourites pin error: {_pe}")
+    except Exception as e:
+        print(f"Favourites refresh error: {e}")
+
+
 class FavouritesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -952,18 +991,7 @@ class FavouritesCog(commands.Cog):
 
             await interaction.followup.send(embed=embed_text)
 
-            if BUTLERS_FAVOURITES_CHANNEL_ID:
-                fav_channel = interaction.guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
-                if fav_channel:
-                    try:
-                        async for msg in fav_channel.history(limit=5):
-                            if msg.author == interaction.guild.me:
-                                await msg.edit(content=None, embed=embed_text)
-                                break
-                        else:
-                            await fav_channel.send(embed=embed_text)
-                    except Exception as e:
-                        print(f"Favourites channel update error: {e}")
+            await refresh_favourites_message(interaction.guild, embed_text)
 
         except Exception as e:
             await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
