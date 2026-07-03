@@ -273,7 +273,7 @@ async def _build_ledger_entrance_impl(guild, stats=None):
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
             [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
-            [("🏅 All-Time Records",         getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0)),
+            [("🗓️ Monthly Report",           getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0)),
              ("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
         ]
 
@@ -1119,7 +1119,7 @@ def _lb_title(lb_name, show_title, cont=False):
     base = emoji if emoji else lb_name
     return f"{base} (cont.)" if cont else base
 
-async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None):
+async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None):
     """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (team score
     ratio) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
     window a player has ever posted with that weapon/map. Minimum 5 games for
@@ -1127,6 +1127,21 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     map (rare maps need fewer). Weapon boards exclude VIP; map boards allow it.
     Returns (lethality_rows, warlord_rows, min_games) with rows = sorted [(player, score)]."""
     subs = all_subs if all_subs is not None else await _db.get_all_submissions()
+
+    # Monthly ratings only: drop resubmissions (feats contains "Resubmit") and,
+    # when window_start (a UTC timestamp) is given, anything before that instant.
+    def _rk(r):
+        if len(r) > 11 and r[11] and 'Resubmit' in str(r[11]):
+            return False
+        if window_start is not None:
+            try:
+                _t = datetime.strptime(str(r[0]).strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+                if _t < window_start:
+                    return False
+            except Exception:
+                return False
+        return True
+    subs = [r for r in subs if _rk(r)]
 
     if is_map:
         if map_totals is None:
@@ -1206,17 +1221,10 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
 
 
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
-    """format_leaderboard_embeds + Lethality/Warlord rating fields for weapon and
-    map boards (feat boards like 100 Kills get none)."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
-    lr = wr = None
-    rmin = 5
-    if is_map or (lb_name not in _FEAT and ' - ' not in lb_name):
-        try:
-            lr, wr, rmin = await compute_board_ratings(lb_name, is_map=is_map, all_subs=all_subs)
-        except Exception as e:
-            print(f"[RATING] compute error ({lb_name}): {e}")
-    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title, lr, wr, rmin)
+    """Plain takedown board embeds. Lethality/Warlord ratings have moved to the
+    Monthly Report boards (render_monthly_boards); takedown boards, which are now
+    permanent all-time, no longer carry rating fields."""
+    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title)
 
 
 def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
@@ -1357,8 +1365,9 @@ async def archive_and_reset_boards(guild):
         except Exception as _ae:
             print(f"[ALLTIME] merge error ({_b}): {_ae}")
 
-    cleared = await _db.clear_leaderboard_boards(list(boards.keys()))
-    return len(weapon_boards), len(map_boards), cleared, thread_url
+    # Takedown boards are permanent (all-time) and are never cleared. The
+    # month-end reset only archives a snapshot; the boards stay up across seasons.
+    return len(weapon_boards), len(map_boards), 0, thread_url
 
 
 def _alltime_lines(records):
@@ -1573,6 +1582,206 @@ async def render_alltime_boards(guild):
     return len(units)
 
 
+def _monthly_rating_lines(rows, fmt):
+    if not rows:
+        return "*Not enough games yet.*"
+    return "\n".join(f"`{i}.` **{p}** — {fmt(s)}" for i, (p, s) in enumerate(rows[:5], 1))
+
+
+def _monthly_weapon_embed(weapon, lr, wr):
+    te = getattr(config, 'TITLE_EMOJIS', {})
+    le = te.get('Lethality', '🧪')
+    we = te.get('Warlord', '🛡️')
+    e = discord.Embed(title=f"{weapon} — This Month", colour=discord.Colour.from_str("#C9A24B"))
+    e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
+    e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
+    e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (team dominance) · top 5 · resets each month")
+    return e
+
+
+def _monthly_map_embed(map_name, faction_data):
+    """faction_data: list of (faction_label, lr, wr)."""
+    te = getattr(config, 'TITLE_EMOJIS', {})
+    le = te.get('Lethality', '🧪')
+    we = te.get('Warlord', '🛡️')
+    e = discord.Embed(title=f"{map_name} — This Month", colour=discord.Colour.from_str("#C9A24B"))
+    any_field = False
+    for fac, lr, wr in faction_data:
+        e.add_field(name=f"{fac} · {le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=True)
+        e.add_field(name=f"{fac} · {we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=True)
+        e.add_field(name="​", value="​", inline=False)
+        any_field = True
+    if not any_field:
+        e.description = "*No games yet this month.*"
+    e.set_footer(text="Monthly · top 5 per faction · resets each month")
+    return e
+
+
+def _monthly_window_start():
+    now = datetime.now(timezone.utc)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+async def _current_window_start():
+    season = None
+    try:
+        season = await _db.get_current_season()
+    except Exception:
+        season = None
+    if season and season.get('started_at'):
+        return season['started_at'].timestamp(), (season.get('label') or None)
+    return _monthly_window_start(), None
+
+
+def _boards_in_window(all_subs, window_start):
+    weapons, maps = set(), {}
+    for r in all_subs:
+        if len(r) > 11 and r[11] and 'Resubmit' in str(r[11]):
+            continue
+        try:
+            _t = datetime.strptime(str(r[0]).strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            continue
+        if _t < window_start:
+            continue
+        w = (r[3].strip() if len(r) > 3 and r[3] else '')
+        if w:
+            weapons.add(w)
+        m = (r[5].strip() if len(r) > 5 and r[5] else '')
+        fac = (r[6].strip() if len(r) > 6 and r[6] else '')
+        if m and fac:
+            maps.setdefault(m, set()).add(fac)
+    return weapons, maps
+
+
+async def render_monthly_boards(guild, only_boards=None):
+    """Live monthly Lethality/Warlord top-5 boards rendered into the repurposed
+    Monthly Report forum (ALLTIME_RECORDS_FORUM_ID). Scoped to the current season
+    window; resubmissions excluded. only_boards limits the refresh to given boards."""
+    fid = getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0
+    if not fid:
+        print("[MONTHLY] ALLTIME_RECORDS_FORUM_ID not set - skipping render.")
+        return 0
+    forum = guild.get_channel(fid) or await guild.fetch_channel(fid)
+    if not forum:
+        print(f"[MONTHLY] forum {fid} not found.")
+        return 0
+
+    window_start, _ = await _current_window_start()
+    all_subs = await _db.get_all_submissions()
+    weapons, maps = _boards_in_window(all_subs, window_start)
+
+    if only_boards is not None:
+        ob = set(only_boards)
+        weapons = {w for w in weapons if w in ob}
+        maps = {m: fs for m, fs in maps.items() if any(f"{m} - {f}" in ob for f in fs)}
+
+    index_name = "📋 Monthly Report Index"
+    existing = {}
+    try:
+        active = await guild._state.http.get_active_threads(guild.id)
+        for t in active.get('threads', []):
+            if int(t['parent_id']) == fid and t['name'] != index_name:
+                obj = forum.get_thread(int(t['id'])) or await guild.fetch_channel(int(t['id']))
+                existing[t['name']] = obj
+    except Exception as e:
+        print(f"[MONTHLY] active thread fetch: {e}")
+        for t in forum.threads:
+            if t.name != index_name:
+                existing[t.name] = t
+    try:
+        async for t in forum.archived_threads(limit=None):
+            if t.name != index_name and t.name not in existing:
+                existing[t.name] = t
+    except Exception as e:
+        print(f"[MONTHLY] archived thread fetch: {e}")
+
+    async def _post(tname, embed):
+        thread = existing.get(tname)
+        if thread:
+            starter = None
+            try:
+                starter = thread.starter_message or await thread.fetch_message(thread.id)
+            except Exception:
+                starter = None
+            if starter:
+                await starter.edit(embed=embed)
+            else:
+                await thread.send(embed=embed)
+            return thread
+        res = await forum.create_thread(name=tname, embed=embed)
+        return res.thread
+
+    count = 0
+    for w in sorted(weapons):
+        try:
+            lr, wr, _ = await compute_board_ratings(w, is_map=False, all_subs=all_subs, window_start=window_start)
+            tname = f"🗓️ {w}"[:100]
+            await _post(tname, _monthly_weapon_embed(w, lr, wr))
+            count += 1
+            await asyncio.sleep(0.4)
+        except Exception as e:
+            print(f"[MONTHLY] render weapon {w}: {e}")
+    for m in sorted(maps):
+        try:
+            fdata = []
+            for fac in sorted(maps[m]):
+                lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
+                fdata.append((fac, lr, wr))
+            tname = f"🗓️ {m}"[:100]
+            await _post(tname, _monthly_map_embed(m, fdata))
+            count += 1
+            await asyncio.sleep(0.4)
+        except Exception as e:
+            print(f"[MONTHLY] render map {m}: {e}")
+    return count
+
+
+async def snapshot_monthly_to_hof(guild):
+    """Month-end: snapshot monthly Lethality/Warlord top-5 for every weapon and map
+    board into a Butler Hall of Fame thread. Non-destructive. Returns (n, url)."""
+    fid = config.HALL_OF_FAME_FORUM_ID
+    forum = guild.get_channel(fid) or await guild.fetch_channel(fid)
+    if not forum:
+        print("[MONTHLY HOF] Hall of Fame forum not found.")
+        return 0, None
+    window_start, label = await _current_window_start()
+    label = label or datetime.now(timezone.utc).strftime('%B %Y')
+    all_subs = await _db.get_all_submissions()
+    weapons, maps = _boards_in_window(all_subs, window_start)
+
+    def _top(rows, fmt):
+        return " · ".join(f"{i}. {p} {fmt(s)}" for i, (p, s) in enumerate((rows or [])[:5], 1)) or "—"
+
+    lines = []
+    for w in sorted(weapons):
+        lr, wr, _ = await compute_board_ratings(w, is_map=False, all_subs=all_subs, window_start=window_start)
+        if lr or wr:
+            lines.append(f"**{w}**\n· Lethality: {_top(lr, lambda s: f'{s*100:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
+    for m in sorted(maps):
+        for fac in sorted(maps[m]):
+            lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
+            if lr or wr:
+                lines.append(f"**{m} — {fac}**\n· Lethality: {_top(lr, lambda s: f'{s*100:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
+    if not lines:
+        return 0, None
+
+    title = f"🗄️ {label} — Monthly Report"[:100]
+    res = await forum.create_thread(name=title, content=f"**{label} — Monthly Report**\nLethality + Warlord top 5 per board, preserved at month-end.")
+    tobj = res.thread
+    url = f"https://discord.com/channels/{guild.id}/{tobj.id}"
+    buf = ""
+    for ln in lines:
+        add = ln + "\n\n"
+        if len(buf) + len(add) > 1900:
+            await tobj.send(buf)
+            buf = ""
+        buf += add
+    if buf.strip():
+        await tobj.send(buf)
+    return len(lines), url
+
+
 async def check_and_merge_alltime(board_name, player, discord_id, score):
     """Merge one fresh score into the permanent all-time top-10 (live) and report
     whether it newly placed. Returns {'rank': int|None, 'record': bool}: rank is
@@ -1627,7 +1836,7 @@ async def seed_alltime_from_current(guild):
             await _db.merge_alltime_records(b, entries)
         except Exception as e:
             print(f"[ALLTIME] seed merge error ({b}): {e}")
-    await render_alltime_boards(guild)
+    await render_monthly_boards(guild)
     return len(boards)
 
 
@@ -1635,30 +1844,26 @@ class LeaderboardsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="season_reset", description="Archive top-3 board records to Hall of Fame and reset weapon/map boards (admin only).")
+    @app_commands.command(name="season_reset", description="Snapshot this month's Lethality/Warlord boards to the Hall of Fame (admin only). Non-destructive.")
     @app_commands.checks.has_permissions(administrator=True)
     async def season_reset(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            wb, mb, cleared, url = await archive_and_reset_boards(interaction.guild)
+            n, url = await snapshot_monthly_to_hof(interaction.guild)
         except Exception as e:
-            await interaction.followup.send(f"\u274c Season reset failed: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Snapshot failed: {e}", ephemeral=True)
             return
-        if wb == 0 and mb == 0:
-            await interaction.followup.send("Nothing to reset \u2014 no weapon/map board entries found.", ephemeral=True)
-            return
-        loc = f" ({url})" if url else " (archive post FAILED \u2014 boards were NOT cleared)"
-        alltime_note = ""
+        loc = f" ({url})" if url else ""
         try:
-            rendered = await render_alltime_boards(interaction.guild)
-            if rendered:
-                alltime_note = f"\nUpdated the all-time top-10 archive (**{rendered}** boards)."
-        except Exception as _ae:
-            alltime_note = f"\n\u26a0\ufe0f All-time archive render failed: {_ae}"
+            await render_monthly_boards(interaction.guild)
+        except Exception as _re2:
+            print(f"[MONTHLY] post-snapshot render error: {_re2}")
+        if n == 0:
+            await interaction.followup.send("Nothing to snapshot — no rated games in this month's window yet.", ephemeral=True)
+            return
         await interaction.followup.send(
-            f"\u2705 Archived top 3 of **{wb}** weapon + **{mb}** map boards to the Hall of Fame{loc}, "
-            f"cleared **{cleared}** entries.{alltime_note}\nMarks, ranks and mastery are untouched. "
-            f"Run **/refresh_all** to re-render the now-empty boards.",
+            f"✅ Snapshotted **{n}** boards' monthly Lethality/Warlord top 5 to the Hall of Fame{loc}.\n"
+            f"Nothing was cleared — takedown boards stay permanent; the Monthly Report resets with the new season window.",
             ephemeral=True)
 
     @app_commands.command(name="alltime_refresh", description="Merge current board scores into the permanent all-time top-10 and refresh the archive (admin only).")

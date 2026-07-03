@@ -309,6 +309,50 @@ class AdminCog(commands.Cog):
         else:
             await interaction.edit_original_response(content="\u26a0\ufe0f Backup could not post — nerve centre channel not found.")
 
+    @app_commands.command(name="purge_forum", description="Delete ALL threads in a forum channel (admin only). Irreversible.")
+    @app_commands.describe(channel="The forum channel to wipe", confirm="Set True to actually delete — every thread, including the pinned index")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def purge_forum(self, interaction: discord.Interaction, channel: discord.ForumChannel, confirm: bool = False):
+        await interaction.response.defer(ephemeral=True)
+
+        # Gather active + archived threads, de-duplicated.
+        threads = list(channel.threads)
+        try:
+            async for t in channel.archived_threads(limit=None):
+                threads.append(t)
+        except Exception as e:
+            print(f"[PURGE] archived fetch error: {e}")
+        seen = set()
+        unique = []
+        for t in threads:
+            if t.id not in seen:
+                seen.add(t.id)
+                unique.append(t)
+
+        if not confirm:
+            await interaction.followup.send(
+                f"⚠️ This will permanently delete **{len(unique)}** threads in {channel.mention} "
+                f"(including the pinned index). Re-run with `confirm: True` to proceed.",
+                ephemeral=True)
+            return
+
+        if not unique:
+            await interaction.followup.send(f"Nothing to delete in {channel.mention}.", ephemeral=True)
+            return
+
+        deleted = failed = 0
+        for t in unique:
+            try:
+                await t.delete()
+                deleted += 1
+                await asyncio.sleep(0.6)  # stay under Discord's delete rate limit
+            except Exception as e:
+                failed += 1
+                print(f"[PURGE] delete error ({t.name}): {e}")
+        note = f" ({failed} could not be deleted)" if failed else ""
+        await interaction.followup.send(
+            f"🧹 Deleted **{deleted}** threads in {channel.mention}{note}.", ephemeral=True)
+
     @app_commands.command(name="seed_players", description="Seed the Players tab from a Discord role (admin only)")
     @app_commands.checks.has_permissions(administrator=True)
     async def seed_players(self, interaction: discord.Interaction):
@@ -597,20 +641,6 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         for embed in build_challenge_rules_embeds():
             await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="force_snapshot", description="Manually trigger the weekly snapshot (admin only).")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def force_snapshot(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            personality_cog = interaction.client.cogs.get("PersonalityCog")
-            if not personality_cog:
-                await interaction.followup.send("❌ PersonalityCog not loaded.", ephemeral=True)
-                return
-            await personality_cog._run_snapshot_logic()
-            await interaction.followup.send("✅ Snapshot complete — Butler Monthly updated.", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     @app_commands.command(name="force_poll", description="Manually post a dry Butler question in main right now (admin only).")
     @app_commands.checks.has_permissions(administrator=True)

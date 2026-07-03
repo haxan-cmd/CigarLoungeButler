@@ -601,9 +601,17 @@ class BountyCog(commands.Cog):
         # Close the season tied to this bounty: post the Hall of Fame entry, then end it.
         try:
             from cogs.favourites import finalize_season
+            from cogs.leaderboards import snapshot_monthly_to_hof
             _season = await _db.get_current_season()
             if _season:
                 await finalize_season(guild, _season)
+                # Snapshot this month's Lethality/Warlord boards to the Hall of Fame
+                # while the season is still active — the snapshot derives its window
+                # from the current season, so it must run before end_current_season().
+                try:
+                    await snapshot_monthly_to_hof(guild)
+                except Exception as _me:
+                    print(f"[MONTHLY HOF] snapshot error: {_me}")
                 await _db.end_current_season()
         except Exception as _se:
             print(f"[SEASON] finalize error: {_se}")

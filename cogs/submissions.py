@@ -2004,14 +2004,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     await summary_reply.edit(content=_fresh_at.content + "\n" + "\n".join(_at_lines))
                 except Exception as _abe:
                     print(f"[ALLTIME] blurb edit error: {_abe}")
-                # New all-time entry \u2192 redraw the forum in the background (non-blocking;
-                # these are infrequent, so a full refresh is fine here).
-                try:
-                    _rt = asyncio.create_task(render_alltime_boards(interaction.guild))
-                    globals().setdefault('_ALLTIME_RTASKS', set()).add(_rt)
-                    _rt.add_done_callback(lambda t: globals().get('_ALLTIME_RTASKS', set()).discard(t))
-                except Exception as _rte:
-                    print(f"[ALLTIME] render task error: {_rte}")
+                # (Monthly Report forum is refreshed live per-submission below.)
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
@@ -2403,6 +2396,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     await update_title_roles(_guild, stats, include_weekly=False)
         except Exception as e:
             print(f"Butler favourites update error: {e}")
+
+        # Refresh the live Monthly Report boards for the weapon + map this run hit.
+        try:
+            if not is_ranged:
+                from cogs.leaderboards import render_monthly_boards
+                _mb = {selected_weapon}
+                if selected_map and faction:
+                    _mb.add(f"{selected_map} - {faction}")
+                await render_monthly_boards(_guild, only_boards=_mb)
+        except Exception as _mbe:
+            print(f"Monthly boards update error: {_mbe}")
 
     async def _bg_runner():
         # Backstop so the detached background job can't hang forever. Each block
