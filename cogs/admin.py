@@ -171,7 +171,7 @@ def build_challenge_rules_embeds():
     ), inline=False)
     e.add_field(name="<a:mostlethal:1520490418817601658> Lethality & <:warlord:1520490364039860347> Warlord", value=(
         "Every weapon/map board also ranks two live ratings — <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) "
-        "and <:warlord:1520490364039860347> **Warlord** (team dominance). Your rating is your **best 5-game streak ever** with that "
+        "and <:warlord:1520490364039860347> **Warlord** (your share of your team's takedowns). Your rating is your **best 5-game streak ever** with that "
         "weapon/map, so it never drops for a bad game — keep submitting. Min 5 games on weapons; "
         "rarely-played maps need fewer."
     ), inline=False)
@@ -192,7 +192,7 @@ def build_challenge_rules_embeds():
         "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
         "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
         "<a:mostlethal:1520490418817601658> **Most Lethal** — best lethality\n"
-        "<:warlord:1520490364039860347> **Warlord** — best team dominance"
+        "<:warlord:1520490364039860347> **Warlord** — highest share of your team's takedowns"
     ), inline=False)
     embeds.append(e)
 

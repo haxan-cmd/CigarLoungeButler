@@ -1120,8 +1120,8 @@ def _lb_title(lb_name, show_title, cont=False):
     return f"{base} (cont.)" if cont else base
 
 async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None):
-    """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (team score
-    ratio) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
+    """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (share of your team's
+    takedowns) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
     window a player has ever posted with that weapon/map. Minimum 5 games for
     weapons; for maps the minimum scales with the map's popularity vs the busiest
     map (rare maps need fewer). Weapon boards exclude VIP; map boards allow it.
@@ -1595,7 +1595,7 @@ def _monthly_weapon_embed(weapon, lr, wr):
     e = discord.Embed(title=f"{weapon} — This Month", colour=discord.Colour.from_str("#C9A24B"))
     e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
     e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
-    e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (team dominance) · top 5 · resets each month")
+    e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (% of your team's takedowns) · top 5 · resets each month")
     return e
 
 
@@ -1664,7 +1664,7 @@ async def _monthly_index(guild, forum, index_name, units):
     ]
     embed = discord.Embed(
         title="📋 Monthly Report — Index",
-        description="Live Lethality (kills/TD) and Warlord (team dominance) ratings for the current "
+        description="Live Lethality (kills/TD) and Warlord (% of your team's takedowns) ratings for the current "
                     "month — top 5 per weapon and map. Resets each season; resubmissions don't count. "
                     "Jump to a board below.",
         colour=discord.Colour.from_str("#C9A24B"),
