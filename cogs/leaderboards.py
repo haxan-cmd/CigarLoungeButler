@@ -1178,21 +1178,19 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
     if not embeds or (not lethality_rows and not warlord_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     def _fld(rows, fmt):
         out = []
         for i, (p, sc) in enumerate((rows or [])[:5], 1):
-            m = medals.get(i, f"`{i}.`")
-            out.append(f"{m} `{p}` \u2014 {fmt(sc)}")
+            out.append(f"`{i}.` `{p}` \u2014 {fmt(sc)}")
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
     if lethality_rows is not None:
         tail.add_field(
-            name=f"{te.get('Lethality', '🧪')} Lethality  *(best 5-game avg \u00b7 min {rating_min})*",
+            name=f"{te.get('Lethality', '🧪')} Lethality",
             value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=True)
     if warlord_rows is not None:
         tail.add_field(
-            name=f"{te.get('Warlord', '🛡️')} Warlord  *(best 5-game avg \u00b7 min {rating_min})*",
+            name=f"{te.get('Warlord', '🛡️')} Warlord",
             value=_fld(warlord_rows, lambda s: f"{s:.2f}x"), inline=True)
 
 
