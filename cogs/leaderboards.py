@@ -1139,11 +1139,11 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         if td > 0 and kills > 0:
             leth.setdefault(player, []).append((ts, kills / td))
         try:
-            tsr = float(row[19]) if len(row) > 19 and row[19] else None
+            tds = float(row[21]) if len(row) > 21 and row[21] else None
         except (ValueError, TypeError):
-            tsr = None
-        if tsr and tsr > 0:
-            warl.setdefault(player, []).append((ts, tsr))
+            tds = None
+        if tds and 0 < tds <= 100:
+            warl.setdefault(player, []).append((ts, tds))
 
     def _peak(dct):
         out = []
@@ -1191,7 +1191,7 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
     if warlord_rows is not None:
         tail.add_field(
             name=f"{te.get('Warlord', '🛡️')} Warlord",
-            value=_fld(warlord_rows, lambda s: f"{s:.2f}x"), inline=False)
+            value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
 
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5):
