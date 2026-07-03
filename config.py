@@ -253,6 +253,7 @@ VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji
 VIRTUOSO_WEAPON_EMOJIS = {
     "Executioner's Axe": "<a:ExecAxeVirtuoso:1522338416425959624>",
+    "Messer": "<a:messervirtuoso:1522715847485952231>",
 }
 
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
