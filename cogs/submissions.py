@@ -1744,7 +1744,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_lines.append(f"*<a:200tkd:1363648828414230538> +1 Takedowns*")
     if '100 Kills' in feats:
         marks_earned += 1
-        marks_lines.append(f"*<a:100kill:1361412390339608686> +*")
+        marks_lines.append(f"*<a:100kill:1361412390339608686> +1*")
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
@@ -2180,6 +2180,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 except Exception:
                     _fresh_reply = summary_reply
                 new_content = _fresh_reply.content
+                # 100 Kills board rank onto the "+1" line (hyperlinked to the board).
+                _kills_pos = next((p for lb, p in placements if lb == "100 Kills"), None)
+                if _kills_pos is not None:
+                    _ktid = _lb_thread_map.get("100 Kills")
+                    _kr = (f"[#{_kills_pos}](https://discord.com/channels/{_guild_id}/{_ktid})"
+                           if _ktid else f"#{_kills_pos}")
+                    new_content = new_content.replace(
+                        "<a:100kill:1361412390339608686> +1*",
+                        f"<a:100kill:1361412390339608686> +1 — {_kr}*", 1)
                 if selected_weapon in placed_boards:
                     weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
                     new_content = new_content.replace(
