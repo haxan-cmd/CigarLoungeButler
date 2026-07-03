@@ -1654,6 +1654,78 @@ def _boards_in_window(all_subs, window_start):
     return weapons, maps
 
 
+async def _monthly_index(guild, forum, index_name, units):
+    """Rebuild + pin the Monthly Report index: grouped Maps / 2H / 1H / Archer."""
+    groups = [
+        ("🗺️ Maps",        "Map"),
+        ("⚔️ 2H Weapons",   "2H"),
+        ("🗡️ 1H Weapons",   "1H"),
+        ("🏹 Archer",        "Archer"),
+    ]
+    embed = discord.Embed(
+        title="📋 Monthly Report — Index",
+        description="Live Lethality (kills/TD) and Warlord (team dominance) ratings for the current "
+                    "month — top 5 per weapon and map. Resets each season; resubmissions don't count. "
+                    "Jump to a board below.",
+        colour=discord.Colour.from_str("#C9A24B"),
+    )
+    for glabel, gkey in groups:
+        items = sorted([(lbl, th) for cat, lbl, th in units if cat == gkey and th],
+                       key=lambda x: x[0].lower())
+        if not items:
+            continue
+        links = [f"[{lbl}](https://discord.com/channels/{guild.id}/{th.id})" for lbl, th in items]
+        chunk = ""
+        first = True
+        for ln in links:
+            add = ln if not chunk else "\n" + ln
+            if len(chunk) + len(add) > 1024:
+                embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
+                first = False
+                chunk = ln
+            else:
+                chunk += add
+        if chunk:
+            embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
+    if not embed.fields:
+        embed.add_field(name="No boards yet", value="*Post a run to populate the monthly boards.*", inline=False)
+
+    index_thread = None
+    for t in forum.threads:
+        if t.name == index_name:
+            index_thread = t
+            break
+    if not index_thread:
+        try:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == index_name:
+                    index_thread = t
+                    break
+        except Exception:
+            pass
+    if index_thread:
+        msgs = []
+        async for msg in index_thread.history(limit=50, oldest_first=True):
+            msgs.append(msg)
+        if msgs:
+            await msgs[0].edit(embed=embed)
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.2)
+                except Exception:
+                    pass
+        else:
+            await index_thread.send(embed=embed)
+    else:
+        res = await forum.create_thread(name=index_name, embed=embed)
+        index_thread = res.thread
+    try:
+        await index_thread.edit(pinned=True)
+    except Exception as e:
+        print(f"[MONTHLY] index pin: {e}")
+
+
 async def render_monthly_boards(guild, only_boards=None):
     """Live monthly Lethality/Warlord top-5 boards rendered into the repurposed
     Monthly Report forum (ALLTIME_RECORDS_FORUM_ID). Scoped to the current season
@@ -1712,13 +1784,13 @@ async def render_monthly_boards(guild, only_boards=None):
         res = await forum.create_thread(name=tname, embed=embed)
         return res.thread
 
-    count = 0
+    units = []
     for w in sorted(weapons):
         try:
             lr, wr, _ = await compute_board_ratings(w, is_map=False, all_subs=all_subs, window_start=window_start)
             tname = f"🗓️ {w}"[:100]
-            await _post(tname, _monthly_weapon_embed(w, lr, wr))
-            count += 1
+            th = await _post(tname, _monthly_weapon_embed(w, lr, wr))
+            units.append((_alltime_category(w), w, th))
             await asyncio.sleep(0.4)
         except Exception as e:
             print(f"[MONTHLY] render weapon {w}: {e}")
@@ -1729,12 +1801,19 @@ async def render_monthly_boards(guild, only_boards=None):
                 lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
                 fdata.append((fac, lr, wr))
             tname = f"🗓️ {m}"[:100]
-            await _post(tname, _monthly_map_embed(m, fdata))
-            count += 1
+            th = await _post(tname, _monthly_map_embed(m, fdata))
+            units.append(("Map", m, th))
             await asyncio.sleep(0.4)
         except Exception as e:
             print(f"[MONTHLY] render map {m}: {e}")
-    return count
+
+    # Full render (not a per-submission touch): rebuild + pin the index.
+    if only_boards is None:
+        try:
+            await _monthly_index(guild, forum, index_name, units)
+        except Exception as e:
+            print(f"[MONTHLY] index: {e}")
+    return len(units)
 
 
 async def snapshot_monthly_to_hof(guild):
@@ -1864,6 +1943,23 @@ class LeaderboardsCog(commands.Cog):
         await interaction.followup.send(
             f"✅ Snapshotted **{n}** boards' monthly Lethality/Warlord top 5 to the Hall of Fame{loc}.\n"
             f"Nothing was cleared — takedown boards stay permanent; the Monthly Report resets with the new season window.",
+            ephemeral=True)
+
+    @app_commands.command(name="refresh_monthly", description="Rebuild all Monthly Report boards + pinned index now (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refresh_monthly(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not (getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0):
+            await interaction.followup.send(
+                "❌ The Monthly Report forum (`ALLTIME_RECORDS_FORUM_ID`) isn't set in config.", ephemeral=True)
+            return
+        try:
+            n = await render_monthly_boards(interaction.guild)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Monthly refresh failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Rebuilt **{n}** Monthly Report boards (Lethality + Warlord, top 5) and pinned the index.",
             ephemeral=True)
 
     @app_commands.command(name="alltime_refresh", description="Merge current board scores into the permanent all-time top-10 and refresh the archive (admin only).")
