@@ -1006,8 +1006,6 @@ class FavouritesCog(commands.Cog):
             if _mt: _records.append(f"<a:toptkd:1360312666475728958> Highest TD \u2014 {_mt}")
             _tt = _top1(stats.get('top_total_tally'))
             if _tt: _records.append(f"<a:200tkd:1363648828414230538> Total Tally \u2014 {_tt}")
-            _fl = _top1(stats.get('top_fastest_learner'))
-            if _fl: _records.append(f"📈 Fastest Learner \u2014 {_fl}")
             _bz = _top1(stats.get('top_busiest'))
             if _bz: _records.append(f"🏃 Busiest \u2014 {_bz}")
             if _records:
@@ -1020,6 +1018,12 @@ class FavouritesCog(commands.Cog):
             _tm = stats.get('top_maps')
             if _tm:
                 _meta.append("🗺️ Maps \u2014 " + ", ".join(f"{m} ({c})" for m, c in _tm[:3]))
+            _ks = stats.get("top_weapons_by_kill_share")
+            if _ks and isinstance(_ks[0], (list, tuple)) and len(_ks[0]) >= 2:
+                _meta.append(f"💥 Top Kill Share — **{_ks[0][0]}** ({_ks[0][1]}%)")
+            _ts = stats.get("top_weapons_by_td_share")
+            if _ts and isinstance(_ts[0], (list, tuple)) and len(_ts[0]) >= 2:
+                _meta.append(f"🩸 Top TD Share — **{_ts[0][0]}** ({_ts[0][1]}%)")
             if _meta:
                 summary.add_field(name="📋 Meta", value="\n".join(_meta), inline=False)
 
