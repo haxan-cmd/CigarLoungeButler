@@ -764,6 +764,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         for row in board_rows:
             entries.append({
                 'player': row[1] if len(row) > 1 else '',
+                'did': row[2] if len(row) > 2 else '',
                 'score': int(row[3]) if len(row) > 3 and row[3] else 0,
                 'link': row[4] if len(row) > 4 else '',
                 'weapon': row[5] if len(row) > 5 else '',
@@ -833,6 +834,7 @@ async def _render_board(guild, lb_row, lb_name):
     for row in board_rows:
         entries.append({
             'player': row[1] if len(row) > 1 else '',
+            'did': row[2] if len(row) > 2 else '',
             'score': _safe_int(row[3]) if len(row) > 3 else 0,
             'link': row[4] if len(row) > 4 else '',
             'weapon': row[5] if len(row) > 5 else '',
@@ -996,6 +998,7 @@ async def get_leaderboard_entries(name):
         if row[0] == name:
             entries.append({
                 'player': row[1] if len(row) > 1 else '',
+                'did': row[2] if len(row) > 2 else '',
                 'score': int(row[3]) if len(row) > 3 and row[3] else 0,
                 'link': row[4] if len(row) > 4 else '',
                 'weapon': row[5] if len(row) > 5 else ''
@@ -1263,9 +1266,9 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"│ {idx}. `{_lb_display_name(e['player'])}` — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"│ {idx}. `{_lb_display_name(e['player'])}` — {score_str}{weapon_str}")
+            lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
 
@@ -2279,6 +2282,7 @@ class LeaderboardsCog(commands.Cog):
                 if row[0] == lb_name:
                     entries.append({
                         'player': row[1] if len(row) > 1 else '',
+                        'did': row[2] if len(row) > 2 else '',
                         'score': int(row[3]) if len(row) > 3 and row[3] else 0,
                         'link': row[4] if len(row) > 4 else '',
                         'weapon': row[5] if len(row) > 5 else '',

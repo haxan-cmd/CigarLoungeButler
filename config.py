@@ -444,8 +444,8 @@ PLAYER_COMMANDS = [
 # Leaderboard display-name overrides. Keys may be a discord_id (all digits) or an
 # exact display name -> replacement. LEADERBOARD_NAME_CONTAINS matches messy or
 # unicode-lookalike names by folded substrings: (required_substrings, replacement).
-LEADERBOARD_NAME_OVERRIDES = {}
-LEADERBOARD_NAME_CONTAINS = [
-    (["aboombatron"], "Yaboombatron"),
-    (["massive", "ggplant"], "massive egglant"),
-]
+LEADERBOARD_NAME_OVERRIDES = {
+    "1522660063704125610": "Yaboombatron",    # yaboomba
+    "1522689472657883306": "massive egglant",  # eggplant
+}
+LEADERBOARD_NAME_CONTAINS = []
