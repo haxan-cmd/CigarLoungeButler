@@ -105,6 +105,10 @@ def build_challenge_rules_embeds():
         "<:level12_85:1430217099648962651> **Prestige Crimson** — 141\n"
         "<:level13_100:1459253823481712895> **Iridescent** — 150"
     ), inline=True)
+    e.add_field(name="👑 Mastery", value=(
+        "Past Iridescent, keep grinding the same weapon: **100 qualifying runs = 👑 Mastered**, "
+        "**250 = 💎 Virtuoso** (counts across every class that wields it)."
+    ), inline=False)
     embeds.append(e)
 
     # 4. Subclass & class progression
@@ -154,6 +158,44 @@ def build_challenge_rules_embeds():
     ), inline=False)
     embeds.append(e)
 
+    # 5b. Leaderboards & ratings
+    e = discord.Embed(
+        title="📊  Leaderboards",
+        description="Every weapon and map keeps a live board. Beat your own best and you set a High Score (+1 mark).",
+        colour=C("#2B6CB0"),
+    )
+    e.add_field(name="Boards", value=(
+        "• **Weapon boards** — best takedown game per weapon\n"
+        "• **Map boards** — best takedown game per map/faction (VIP counts here)\n"
+        "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF"
+    ), inline=False)
+    e.add_field(name="🧪 Lethality & 🛡️ Warlord", value=(
+        "Every weapon/map board also ranks two live ratings — 🧪 **Lethality** (kills per takedown) "
+        "and 🛡️ **Warlord** (team dominance). Your rating is your **best 5-game streak ever** with that "
+        "weapon/map, so it never drops for a bad game — keep submitting. Min 5 games on weapons; "
+        "rarely-played maps need fewer."
+    ), inline=False)
+    embeds.append(e)
+
+    # 5c. Titles
+    e = discord.Embed(
+        title="🏅  Titles",
+        description="Held by the best across the boards. Some are forever; some reset every month.",
+        colour=C("#B57EDC"),
+    )
+    e.add_field(name="All-time (never reset)", value=(
+        "<a:grandmarshal:1519928617407348877> **Grand Marshal** — most boards overall\n"
+        "<a:weaponsmaster:1519928521445605488> **Weapons Master** — most weapon boards\n"
+        "<a:campaignmaster:1520497947115262083> **Campaign Master** — most map boards"
+    ), inline=False)
+    e.add_field(name="This season (reset each bounty)", value=(
+        "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
+        "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
+        "<a:mostlethal:1520490418817601658> **Most Lethal** — best lethality\n"
+        "<:warlord:1520490364039860347> **Warlord** — best team dominance"
+    ), inline=False)
+    embeds.append(e)
+
     # 6. Player titles
     e = discord.Embed(
         title="🏆  Player Titles",
@@ -166,15 +208,20 @@ def build_challenge_rules_embeds():
     ), inline=False)
     embeds.append(e)
 
-    # 7. Bounties
+    # 7. Monthly cycle
     e = discord.Embed(
-        title="🎯  Bounties",
+        title="🗓️  The Monthly Cycle",
         description=(
-            "Monthly objectives tracked on separate bounty cards. "
-            "Complete them — that's how you rank up. They don't run forever."
+            "Each month opens a new **bounty** and **season** together. Complete the bounty's "
+            "weapon objectives to climb your player title (Unbound → Legend)."
         ),
         colour=C("#C9A84C"),
     )
+    e.add_field(name="When the month ends", value=(
+        "The season's champions are enshrined in the **Hall of Fame**, and the season titles "
+        "(Apex, Frenzied, Most Lethal, Warlord) reset — always up for grabs. Weapon ranks, marks, "
+        "and all-time titles carry over forever."
+    ), inline=False)
     embeds.append(e)
 
     return embeds
@@ -187,8 +234,8 @@ async def get_challenge_rules_message_ids():
         return []
 
 async def save_challenge_rules_message_ids(msg_ids):
-    labels = ['Intro + Weapon Ranks', 'Earning Marks', 'Subclass & Class Progression',
-              'Subclass Ranks', 'Class Ranks', 'Player Titles', 'Feats of Legend', 'Bounties']
+    labels = ['Intro', 'Earning Marks', 'Weapon Ranks', 'Subclass & Class', 'Feats of Legend',
+              'Leaderboards', 'Titles', 'Player Titles', 'Monthly Cycle']
     try:
         await _db.save_challenge_rules(msg_ids, labels)
     except Exception as e:

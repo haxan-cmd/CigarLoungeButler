@@ -300,7 +300,7 @@ def build_manual_embed():
             "`/stats` — Your title standings and weapon rank progress. Use `/stats [name]` for any player.\n"
             "`/rank` — Top 10 for any weapon board. e.g. `/rank Messer`\n"
             "`/title_standings` — Who leads each all-time title (Grand Marshal, Weapons Master, Campaign Master), with the board-count + average-placement tiebreak shown.\n"
-            "`/butlers_report` — Summon the Butler's Favourites weekly report."
+            "`/butlers_report` — Your current-standings snapshot (season champions, records, all-time titles)."
         ),
         inline=False,
     )
