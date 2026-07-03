@@ -440,3 +440,12 @@ PLAYER_COMMANDS = [
     ("/bounty_status",  "Show the current active bounty card and your personal progress."),
     ("/bounty_hunt",    "Show the top 5 hunters for the active bounty."),
 ]
+
+# Leaderboard display-name overrides. Keys may be a discord_id (all digits) or an
+# exact display name -> replacement. LEADERBOARD_NAME_CONTAINS matches messy or
+# unicode-lookalike names by folded substrings: (required_substrings, replacement).
+LEADERBOARD_NAME_OVERRIDES = {}
+LEADERBOARD_NAME_CONTAINS = [
+    (["aboombatron"], "Yaboombatron"),
+    (["massive", "ggplant"], "massive egglant"),
+]

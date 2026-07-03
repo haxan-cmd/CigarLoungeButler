@@ -6,6 +6,7 @@ import os
 import re as _re
 import discord
 import random
+import unicodedata
 from discord import app_commands
 from discord.ext import commands
 
@@ -1190,7 +1191,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         if not key:
             continue
         # Prefer the current Players-sheet name for real ids; else the submission name.
-        names[key] = id_to_name.get(did) or names.get(key) or player
+        names[key] = _lb_display_name(id_to_name.get(did) or names.get(key) or player, did)
         ts = row[0].strip()
         try:
             td = int(row[7]); kills = int(row[8])
@@ -1262,9 +1263,9 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"│ {idx}. `{e['player']}` — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"│ {idx}. `{_lb_display_name(e['player'])}` — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"│ {idx}. `{e['player']}` — {score_str}{weapon_str}")
+            lines.append(f"│ {idx}. `{_lb_display_name(e['player'])}` — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
 
@@ -1582,38 +1583,62 @@ async def render_alltime_boards(guild):
     return len(units)
 
 
+_LOOKALIKE = str.maketrans({
+    'Υ':'Y','Λ':'A','Β':'B','Ε':'E','Ζ':'Z','Η':'H','Ι':'I','Κ':'K','Μ':'M','Ν':'N',
+    'Ο':'O','Ρ':'P','Τ':'T','Χ':'X','Α':'A','Σ':'E','Δ':'D','Θ':'O','Ø':'O','ø':'o',
+    'Я':'R','А':'A','В':'B','Е':'E','К':'K','М':'M','Н':'H','О':'O','Р':'P','С':'C',
+    'Т':'T','У':'Y','Х':'X','Ѕ':'S','і':'i','ѕ':'s',
+})
+
+
+def _fold_name(name):
+    """Fold unicode lookalikes + accents to plain lowercase ASCII-ish for matching."""
+    s = unicodedata.normalize('NFKD', name or '').translate(_LOOKALIKE)
+    s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+    return s.lower()
+
+
+def _lb_display_name(name, did=''):
+    """Apply leaderboard display-name overrides (discord_id, exact name, or folded
+    substring rules) so messy names render cleanly on the boards."""
+    ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+    if did and str(did) in ov:
+        return ov[str(did)]
+    if name in ov:
+        return ov[name]
+    folded = _fold_name(name)
+    for subs, repl in getattr(config, 'LEADERBOARD_NAME_CONTAINS', []) or []:
+        if all(str(sub).lower() in folded for sub in subs):
+            return repl
+    return name
+
+
 def _monthly_rating_lines(rows, fmt):
     if not rows:
         return "*Not enough games yet.*"
-    return "\n".join(f"`{i}.` **{p}** — {fmt(s)}" for i, (p, s) in enumerate(rows[:5], 1))
+    return "\n".join(f"│ {i}. `{p}` — {fmt(s)}" for i, (p, s) in enumerate(rows[:5], 1))
 
 
 def _monthly_weapon_embed(weapon, lr, wr):
     te = getattr(config, 'TITLE_EMOJIS', {})
     le = te.get('Lethality', '🧪')
     we = te.get('Warlord', '🛡️')
-    e = discord.Embed(title=f"{weapon} — This Month", colour=discord.Colour.from_str("#C9A24B"))
+    e = discord.Embed(title=f"{weapon} — This Month", colour=_embed_colour(weapon))
     e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
     e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
     e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (% of your team's takedowns) · top 5 · resets each month")
     return e
 
 
-def _monthly_map_embed(map_name, faction_data):
-    """faction_data: list of (faction_label, lr, wr)."""
+def _monthly_faction_embed(map_name, faction, lr, wr):
+    """One vertical faction board, coloured like the original map scoreboards."""
     te = getattr(config, 'TITLE_EMOJIS', {})
     le = te.get('Lethality', '🧪')
     we = te.get('Warlord', '🛡️')
-    e = discord.Embed(title=f"{map_name} — This Month", colour=discord.Colour.from_str("#C9A24B"))
-    any_field = False
-    for fac, lr, wr in faction_data:
-        e.add_field(name=f"{fac} · {le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=True)
-        e.add_field(name=f"{fac} · {we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=True)
-        e.add_field(name="​", value="​", inline=False)
-        any_field = True
-    if not any_field:
-        e.description = "*No games yet this month.*"
-    e.set_footer(text="Monthly · top 5 per faction · resets each month")
+    e = discord.Embed(title=f"{map_name} · {faction} — This Month", colour=_embed_colour(f"{map_name} - {faction}"))
+    e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
+    e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
+    e.set_footer(text="Monthly · top 5 · resets each month")
     return e
 
 
@@ -1775,7 +1800,7 @@ async def render_monthly_boards(guild, only_boards=None):
     except Exception as e:
         print(f"[MONTHLY] archived thread fetch: {e}")
 
-    async def _post(tname, embed):
+    async def _post(tname, embeds):
         thread = existing.get(tname)
         if thread:
             starter = None
@@ -1784,11 +1809,11 @@ async def render_monthly_boards(guild, only_boards=None):
             except Exception:
                 starter = None
             if starter:
-                await starter.edit(embed=embed)
+                await starter.edit(embeds=embeds)
             else:
-                await thread.send(embed=embed)
+                await thread.send(embeds=embeds)
             return thread
-        res = await forum.create_thread(name=tname, embed=embed)
+        res = await forum.create_thread(name=tname, embeds=embeds)
         return res.thread
 
     units = []
@@ -1796,19 +1821,21 @@ async def render_monthly_boards(guild, only_boards=None):
         try:
             lr, wr, _ = await compute_board_ratings(w, is_map=False, all_subs=all_subs, window_start=window_start)
             tname = f"🗓️ {w}"[:100]
-            th = await _post(tname, _monthly_weapon_embed(w, lr, wr))
+            th = await _post(tname, [_monthly_weapon_embed(w, lr, wr)])
             units.append((_alltime_category(w), w, th))
             await asyncio.sleep(0.4)
         except Exception as e:
             print(f"[MONTHLY] render weapon {w}: {e}")
     for m in sorted(maps):
         try:
-            fdata = []
+            m_embeds = []
             for fac in sorted(maps[m]):
                 lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
-                fdata.append((fac, lr, wr))
+                m_embeds.append(_monthly_faction_embed(m, fac, lr, wr))
+            if not m_embeds:
+                m_embeds = [discord.Embed(title=f"{m} — This Month", description="*No games yet this month.*", colour=_embed_colour(m))]
             tname = f"🗓️ {m}"[:100]
-            th = await _post(tname, _monthly_map_embed(m, fdata))
+            th = await _post(tname, m_embeds)
             units.append(("Map", m, th))
             await asyncio.sleep(0.4)
         except Exception as e:
