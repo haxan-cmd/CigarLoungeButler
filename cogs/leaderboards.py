@@ -1263,9 +1263,99 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     return embeds
 
 
+async def archive_and_reset_boards(guild):
+    """Snapshot top 3 of every weapon and map board into a compact Hall of Fame
+    thread, then clear those boards. Feat boards, marks, ranks and mastery are
+    untouched. Boards are only cleared AFTER a successful archive.
+    Returns (weapon_boards, map_boards, rows_cleared, thread_url|None)."""
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+    ld = await _db.get_all_leaderboard_data()
+    boards = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        b = (row[0] or '').strip()
+        if not b or b in _FEAT:
+            continue
+        try:
+            sc = int(row[3])
+        except (ValueError, TypeError):
+            continue
+        boards.setdefault(b, []).append((sc, (row[1] or '').strip()))
+    if not boards:
+        return 0, 0, 0, None
+    weapon_boards = sorted(b for b in boards if ' - ' not in b)
+    map_boards = sorted(b for b in boards if ' - ' in b)
+
+    def _top3(b):
+        top = sorted(boards[b], key=lambda t: -t[0])[:3]
+        return " \u00b7 ".join(f"{i}. {p} {s}" for i, (s, p) in enumerate(top, 1))
+
+    first = not any((pp[0] if isinstance(pp, (list, tuple)) else pp) == 'board_records_done'
+                    for pp in await _db.get_all_index_posts())
+    if first:
+        title = "Pre-Season Legacy \u2014 Board Records"
+    else:
+        season = await _db.get_current_season()
+        title = f"{(season.get('label') if season else None) or 'Season'} \u2014 Board Records"
+
+    forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
+    if not forum:
+        print("[SEASON RESET] Hall of Fame forum not found \u2014 aborting (no clear).")
+        return len(weapon_boards), len(map_boards), 0, None
+    try:
+        res = await forum.create_thread(
+            name=f"\U0001f5c3\ufe0f {title}"[:100],
+            content=f"**{title}**\nTop 3 on every weapon and map board, preserved before the reset.")
+        tobj = res.thread
+        thread_url = f"https://discord.com/channels/{guild.id}/{tobj.id}"
+
+        async def _post(header, blist):
+            if not blist:
+                return
+            buf = f"__{header}__\n"
+            for b in blist:
+                ln = f"**{b}** \u2014 {_top3(b)}\n"
+                if len(buf) + len(ln) > 1900:
+                    await tobj.send(buf)
+                    buf = ""
+                buf += ln
+            if buf.strip():
+                await tobj.send(buf)
+        await _post("Weapon Boards", weapon_boards)
+        await _post("Map Boards", map_boards)
+        if first:
+            await _db.upsert_index_post('board_records_done', str(tobj.id), '1')
+    except Exception as e:
+        print(f"[SEASON RESET] HoF archive failed, boards NOT cleared: {e}")
+        return len(weapon_boards), len(map_boards), 0, None
+
+    cleared = await _db.clear_leaderboard_boards(list(boards.keys()))
+    return len(weapon_boards), len(map_boards), cleared, thread_url
+
+
 class LeaderboardsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @app_commands.command(name="season_reset", description="Archive top-3 board records to Hall of Fame and reset weapon/map boards (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def season_reset(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            wb, mb, cleared, url = await archive_and_reset_boards(interaction.guild)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Season reset failed: {e}", ephemeral=True)
+            return
+        if wb == 0 and mb == 0:
+            await interaction.followup.send("Nothing to reset \u2014 no weapon/map board entries found.", ephemeral=True)
+            return
+        loc = f" ({url})" if url else " (archive post FAILED \u2014 boards were NOT cleared)"
+        await interaction.followup.send(
+            f"\u2705 Archived top 3 of **{wb}** weapon + **{mb}** map boards to the Hall of Fame{loc}, "
+            f"cleared **{cleared}** entries.\nMarks, ranks and mastery are untouched. "
+            f"Run **/refresh_all** to re-render the now-empty boards.",
+            ephemeral=True)
 
     @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread")
     @app_commands.describe(

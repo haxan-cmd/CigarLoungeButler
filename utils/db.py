@@ -724,6 +724,24 @@ async def delete_junk_leaderboard_rows() -> int:
         return 0
 
 
+async def clear_leaderboard_boards(board_names) -> int:
+    """Delete ALL leaderboard_data rows for the given board names. Used by the
+    seasonal reset to wipe weapon/map boards while leaving feat boards and
+    everything else intact. Returns how many rows were removed."""
+    names = [b for b in (board_names or []) if b]
+    if not names:
+        return 0
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM leaderboard_data WHERE board_name = ANY($1::text[])", names)
+    try:
+        return int(str(res).split()[-1])
+    except Exception:
+        return 0
+
+
 async def delete_blank_id_entries_by_name(board_name: str, player_name: str):
     """Delete blank/null-discord_id rows on a board matching a player name
     (case-insensitive). Used to clean stale legacy rows before re-inserting a
