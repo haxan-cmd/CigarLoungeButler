@@ -256,6 +256,12 @@ VIRTUOSO_WEAPON_EMOJIS = {
     "Messer": "<a:messervirtuoso:1522715847485952231>",
 }
 
+# Per-weapon animated emoji shown on the blurb at 100-mark Mastery (Virtuoso, 250,
+# takes precedence when a weapon has both).
+MASTERY_WEAPON_EMOJIS = {
+    "Halberd": "<a:halberdmastery:1522718086225068215>",
+}
+
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
 _SUBCLASS_PRIMARIES = {
     "Officer":        {"Longsword", "War Axe", "Greatsword", "Pole Axe", "Heavy Mace"},
