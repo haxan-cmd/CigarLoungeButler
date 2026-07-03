@@ -154,7 +154,8 @@ async def build_ledger_entrance(guild):
         # Each tuple is one message: list of (label, channel_id) buttons
         message_groups = [
             [("⚖️ Challenge Rules",         1460713024082935930)],
-            [("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID)],
+            [("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID),
+             ("🏅 Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
             [(f"{bounty_emoji} {bounty_label}", bounty_channel_id),
              ("📋 Butler Monthly",     1518822798116524092)],
             [("🏆 Map Records",             idx_maps.id if idx_maps else None),
