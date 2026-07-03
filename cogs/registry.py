@@ -1022,7 +1022,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 _vemoji = config.VIRTUOSO_WEAPON_EMOJIS.get(w, getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "💎"))
                 lines.append(f"• {_vemoji} **{w}** ×{c} — *Virtuoso*")
             else:
-                lines.append(f"• 👑 {w} ×{c}")
+                _me = getattr(config, "MASTERY_WEAPON_EMOJIS", {}).get(w, "👑")
+                lines.append(f"• {_me} {w} ×{c}")
     else:
         lines.append("• None yet")
     # Progress toward the next mastery (closest weapon still under the threshold).
@@ -2589,7 +2590,8 @@ class RegistryCog(commands.Cog):
                     _e = config.VIRTUOSO_WEAPON_EMOJIS.get(w, _vdefault)
                     lines.append(f"│ {_e} **{w}** ×{c} — *Virtuoso*")
                 else:
-                    lines.append(f"│ 👑 {w} ×{c}")
+                    _me = getattr(config, "MASTERY_WEAPON_EMOJIS", {}).get(w, "👑")
+                    lines.append(f"│ {_me} {w} ×{c}")
 
         output = "\n".join(lines)
         await interaction.followup.send(output[:1900])
