@@ -2074,6 +2074,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         _marks = await calculate_weapon_marks_for_player(interaction.user.id)
                         _new = sum(v for k, v in _marks.items()
                                    if (k[0] if isinstance(k, tuple) else k) == selected_weapon)
+                        # Virtuoso badge on the blurb if the submitter has Virtuoso on this weapon.
+                        if _new >= config.VIRTUOSO_THRESHOLD:
+                            _vemoji = config.VIRTUOSO_WEAPON_EMOJIS.get(
+                                selected_weapon, getattr(config, 'VIRTUOSO_DEFAULT_EMOJI', '💎'))
+                            try:
+                                _vfresh = await summary_reply.channel.fetch_message(summary_reply.id)
+                                if 'Virtuoso' not in _vfresh.content:
+                                    await summary_reply.edit(content=_vfresh.content + f"\n{_vemoji} **Virtuoso**")
+                            except Exception as _vbe:
+                                print(f"[VIRTUOSO] badge error: {_vbe}")
                         _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)
                         if "Triple" in _fstr: _rm += 1
                         if "High Score" in _fstr: _rm += 1

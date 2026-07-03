@@ -1187,11 +1187,11 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
     if lethality_rows is not None:
         tail.add_field(
             name=f"{te.get('Lethality', '🧪')} Lethality",
-            value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=True)
+            value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=False)
     if warlord_rows is not None:
         tail.add_field(
             name=f"{te.get('Warlord', '🛡️')} Warlord",
-            value=_fld(warlord_rows, lambda s: f"{s:.2f}x"), inline=True)
+            value=_fld(warlord_rows, lambda s: f"{s:.2f}x"), inline=False)
 
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5):
