@@ -273,7 +273,8 @@ async def _build_ledger_entrance_impl(guild, stats=None):
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
             [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
-            [("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
+            [("🏅 All-Time Records",         getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0)),
+             ("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
         ]
 
         # Delete all previous entrance messages then resend fresh
@@ -2827,4 +2828,3 @@ async def refresh_hundred_handed_board(guild):
 
 async def setup(bot):
     await bot.add_cog(LeaderboardsCog(bot))
-
