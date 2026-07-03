@@ -1564,6 +1564,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         return
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, refresh_hundred_handed_board as _refresh_hundred_handed_board
+    from cogs.leaderboards import check_and_merge_alltime, render_alltime_boards
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1967,6 +1968,50 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     print(f"Highscore feat write error: {e}")
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
+
+        # ── ALL-TIME RECORDS: flag scores that crack the permanent top-10 ─────────
+        # Check the weapon + map boards this run touched (VIP counts on maps, not on
+        # weapon boards — mirrors update_leaderboards). Merge is live + idempotent.
+        if not is_ranged:
+            _at_targets = []
+            if (not vip and selected_weapon and str(selected_weapon).strip()
+                    and str(selected_weapon).strip().lower() != 'none'):
+                _at_targets.append((selected_weapon, selected_weapon))
+            if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
+                    and faction and str(faction).strip()):
+                _at_targets.append((f"{selected_map} - {faction}", f"{selected_map} ({faction})"))
+            _at_lines = []
+            _at_record = False
+            for _board, _label in _at_targets:
+                try:
+                    _res = await check_and_merge_alltime(
+                        _board, interaction.user.display_name, str(interaction.user.id), takedowns)
+                except Exception as _ate:
+                    print(f"[ALLTIME] check error ({_board}): {_ate}")
+                    continue
+                _rank = _res.get('rank')
+                if not _rank:
+                    continue
+                if _res.get('record'):
+                    _at_record = True
+                    _at_lines.append(f"\U0001f451 **ALL-TIME RECORD** \u00b7 {_label} \u2014 #1 of all time")
+                else:
+                    _at_lines.append(f"\U0001f3c5 **All-Time Top 10** \u00b7 {_label} \u2014 #{_rank} ever")
+            if _at_lines:
+                await safe_react("\U0001f451" if _at_record else "\U0001f3c5")
+                try:
+                    _fresh_at = await summary_reply.channel.fetch_message(summary_reply.id)
+                    await summary_reply.edit(content=_fresh_at.content + "\n" + "\n".join(_at_lines))
+                except Exception as _abe:
+                    print(f"[ALLTIME] blurb edit error: {_abe}")
+                # New all-time entry \u2192 redraw the forum in the background (non-blocking;
+                # these are infrequent, so a full refresh is fine here).
+                try:
+                    _rt = asyncio.create_task(render_alltime_boards(interaction.guild))
+                    globals().setdefault('_ALLTIME_RTASKS', set()).add(_rt)
+                    _rt.add_done_callback(lambda t: globals().get('_ALLTIME_RTASKS', set()).discard(t))
+                except Exception as _rte:
+                    print(f"[ALLTIME] render task error: {_rte}")
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger

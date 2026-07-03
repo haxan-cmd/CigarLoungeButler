@@ -1554,6 +1554,34 @@ async def render_alltime_boards(guild):
     return len(units)
 
 
+async def check_and_merge_alltime(board_name, player, discord_id, score):
+    """Merge one fresh score into the permanent all-time top-10 (live) and report
+    whether it newly placed. Returns {'rank': int|None, 'record': bool}: rank is
+    the 1-based all-time position if this score newly reached the top 10 AND
+    improved this player's own all-time best; record=True when it's the new #1."""
+    try:
+        score = int(score)
+    except (ValueError, TypeError):
+        return {'rank': None, 'record': False}
+    board_name = (board_name or '').strip()
+    player = (player or '').strip()
+    if not board_name or not player or score <= 0:
+        return {'rank': None, 'record': False}
+    before = await _db.get_alltime_records(board_name)
+    prev_best = max((r[2] for r in before if r[0] == player), default=0)
+    prev_top = before[0][2] if before else 0
+    await _db.merge_alltime_records(board_name, [(player, discord_id, score)])
+    after = await _db.get_alltime_records(board_name)
+    rank = None
+    for i, r in enumerate(after, 1):
+        if r[0] == player and r[2] == score:
+            rank = i
+            break
+    if rank is None or score <= prev_best:
+        return {'rank': None, 'record': False}
+    return {'rank': rank, 'record': (rank == 1 and score > prev_top)}
+
+
 async def seed_alltime_from_current(guild):
     """Merge the CURRENT seasonal board scores into the all-time top-10 WITHOUT
     clearing anything, then render. Safe to run repeatedly \u2014 keeps each
