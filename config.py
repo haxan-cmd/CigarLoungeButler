@@ -30,6 +30,8 @@ HALL_OF_FAME_FORUM_ID       = 1521858440593670235   # season Hall of Fame forum
 # Optional banner image shown atop the Ledger entrance dashboard (paste a Discord
 # CDN image URL or any public image URL; leave "" to show no banner).
 LEDGER_BANNER_URL = ""
+# Banner atop the archive-entrance (The Ledger) header embed.
+LEDGER_ENTRANCE_BANNER_URL = ""
 BOUNTY_COMPLETION_BONUS     = 5   # season GP points awarded for completing the bounty
 BOUNTY_FORUM_CHANNEL_ID     = 1456640264004435978   # Ledger forum for bounty cards
 BULLETIN_BOARD_CATEGORY_ID  = 1359537379039252550
