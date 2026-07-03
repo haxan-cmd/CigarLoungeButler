@@ -789,11 +789,7 @@ async def refresh_favourites_message(guild, embed):
             ch = await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
         except Exception:
             return
-    try:
-        from cogs.leaderboards import EntranceView
-        view = EntranceView()
-    except Exception:
-        view = None
+    view = None  # buttons removed — report is a clean pinned embed
     target = None
     try:
         async for msg in ch.history(limit=10):

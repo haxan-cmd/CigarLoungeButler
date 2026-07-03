@@ -2331,8 +2331,4 @@ async def refresh_hundred_handed_board(guild):
 
 async def setup(bot):
     await bot.add_cog(LeaderboardsCog(bot))
-    # Persistent view so the entrance dashboard buttons work across restarts.
-    try:
-        bot.add_view(EntranceView())
-    except Exception as _e:
-        print(f"EntranceView register error: {_e}")
+
