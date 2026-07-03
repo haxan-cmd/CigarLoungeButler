@@ -968,7 +968,7 @@ class FavouritesCog(commands.Cog):
 
         _butlers_report_cooldowns[interaction.user.id] = now
 
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
         try:
             _now = datetime.now(timezone.utc)
@@ -983,11 +983,21 @@ class FavouritesCog(commands.Cog):
                     week_start_dt -= timedelta(weeks=1)
                 stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
                 stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
-            embed_text = await build_favourites_embed(stats, bot_avatar_url=interaction.guild.me.display_avatar.url if interaction.guild else None)
-
-            await interaction.followup.send(embed=embed_text)
-
-            await refresh_favourites_message(interaction.guild, embed_text)
+            import discord as _discord
+            from cogs.leaderboards import _champion_lines
+            summary = _discord.Embed(
+                title="🏛️  Current Standings",
+                description=(f"*{stats.get('week_label','')}*" if stats.get('week_label') else None),
+                colour=_discord.Colour.from_str("#C9A24B"),
+            )
+            _lines = _champion_lines(stats)
+            if _lines:
+                summary.add_field(name="👑 Reigning Champions", value="\n".join(_lines), inline=False)
+            _runs = stats.get('total_runs'); _players = stats.get('total_players')
+            if _runs is not None:
+                _pulse = f"**{_runs}** runs" + (f" \u00b7 **{_players}** players" if _players else "")
+                summary.add_field(name="📊 This Season", value=_pulse, inline=False)
+            await interaction.followup.send(embed=summary, ephemeral=True)
 
         except Exception as e:
             await interaction.followup.send(f"❌ The butler has encountered an error: {e}")
