@@ -750,7 +750,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-        embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+        embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
         header_content = _map_header(lb_name) if is_map else ""
 
         thread_id = int(lb_row['Thread ID'])
@@ -814,7 +814,7 @@ async def _render_board(guild, lb_row, lb_name):
     show_weapon = lb_name in ("100 Kills", "200 Takedowns")
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-    embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+    embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
     header_content = _map_header(lb_name) if is_map else ""
     thread_id = int(thread_raw)
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
@@ -1093,13 +1093,117 @@ def _lb_title(lb_name, show_title, cont=False):
     base = emoji if emoji else lb_name
     return f"{base} (cont.)" if cont else base
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True):
+async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None):
+    """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (team score
+    ratio) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
+    window a player has ever posted with that weapon/map. Minimum 5 games for
+    weapons; for maps the minimum scales with the map's popularity vs the busiest
+    map (rare maps need fewer). Weapon boards exclude VIP; map boards allow it.
+    Returns (lethality_rows, warlord_rows, min_games) with rows = sorted [(player, score)]."""
+    subs = all_subs if all_subs is not None else await _db.get_all_submissions()
+
+    if is_map:
+        if map_totals is None:
+            map_totals = {}
+            for r in subs:
+                if len(r) > 6 and r[5].strip() and r[6].strip():
+                    k = f"{r[5].strip()} - {r[6].strip()}"
+                    map_totals[k] = map_totals.get(k, 0) + 1
+        busiest = max(map_totals.values()) if map_totals else 1
+        this_total = map_totals.get(lb_name, 0)
+        min_games = max(1, min(5, round(5 * this_total / busiest))) if busiest else 5
+    else:
+        min_games = 5
+
+    leth, warl = {}, {}
+    for row in subs:
+        if len(row) < 9:
+            continue
+        if is_map:
+            m = row[5].strip() if len(row) > 5 else ''
+            fac = row[6].strip() if len(row) > 6 else ''
+            if not m or not fac or f"{m} - {fac}" != lb_name:
+                continue
+        else:
+            if (row[3].strip() if len(row) > 3 else '') != lb_name:
+                continue
+            _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
+            if _vip:
+                continue
+        player = row[1].strip()
+        ts = row[0].strip()
+        try:
+            td = int(row[7]); kills = int(row[8])
+        except (ValueError, IndexError):
+            td = kills = 0
+        if td > 0 and kills > 0:
+            leth.setdefault(player, []).append((ts, kills / td))
+        try:
+            tsr = float(row[19]) if len(row) > 19 and row[19] else None
+        except (ValueError, TypeError):
+            tsr = None
+        if tsr and tsr > 0:
+            warl.setdefault(player, []).append((ts, tsr))
+
+    def _peak(dct):
+        out = []
+        for p, arr in dct.items():
+            if len(arr) < min_games:
+                continue
+            vals = [v for _, v in sorted(arr)]
+            w = min(5, len(vals))
+            best = max(sum(vals[i:i + w]) / w for i in range(len(vals) - w + 1))
+            out.append((p, best))
+        out.sort(key=lambda t: -t[1])
+        return out
+
+    return _peak(leth), _peak(warl), min_games
+
+
+async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
+    """format_leaderboard_embeds + Lethality/Warlord rating fields for weapon and
+    map boards (feat boards like 100 Kills get none)."""
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+    lr = wr = None
+    rmin = 5
+    if is_map or (lb_name not in _FEAT and ' - ' not in lb_name):
+        try:
+            lr, wr, rmin = await compute_board_ratings(lb_name, is_map=is_map, all_subs=all_subs)
+        except Exception as e:
+            print(f"[RATING] compute error ({lb_name}): {e}")
+    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title, lr, wr, rmin)
+
+
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
+    if not embeds or (not lethality_rows and not warlord_rows):
+        return
+    te = getattr(config, 'TITLE_EMOJIS', {})
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    def _fld(rows, fmt):
+        out = []
+        for i, (p, sc) in enumerate((rows or [])[:5], 1):
+            m = medals.get(i, f"`{i}.`")
+            out.append(f"{m} `{p}` \u2014 {fmt(sc)}")
+        return "\n".join(out) if out else "*Not enough games yet.*"
+    tail = embeds[-1]
+    if lethality_rows is not None:
+        tail.add_field(
+            name=f"{te.get('Lethality', '🧪')} Lethality  *(best 5-game avg \u00b7 min {rating_min})*",
+            value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=True)
+    if warlord_rows is not None:
+        tail.add_field(
+            name=f"{te.get('Warlord', '🛡️')} Warlord  *(best 5-game avg \u00b7 min {rating_min})*",
+            value=_fld(warlord_rows, lambda s: f"{s:.2f}x"), inline=True)
+
+
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min)
         return [e]
 
     lines = []
@@ -1132,6 +1236,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min)
     return embeds
 
 
@@ -1250,7 +1355,7 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
             header_content = _map_header(lb_name) if is_map else ""
 
             thread_id = int(lb_row['Thread ID'])
@@ -1294,7 +1399,7 @@ class LeaderboardsCog(commands.Cog):
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
                 header_content = _map_header(lb_name) if is_map else ""
 
                 thread_id = int(thread_id_raw)
@@ -1411,7 +1516,7 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = format_leaderboard_embeds(lb_name, entries, 0, show_weapon, score_prefix, show_title=not is_map)
+            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
             header_content = _map_header(lb_name) if is_map else ""
 
             old_ids_str = lb_row['Message ID']
