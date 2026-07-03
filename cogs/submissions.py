@@ -1564,7 +1564,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         return
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, refresh_hundred_handed_board as _refresh_hundred_handed_board
-    from cogs.leaderboards import check_and_merge_alltime, render_alltime_boards
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
     from cogs.registry import (
         create_or_update_registry_card,
@@ -1969,43 +1968,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
 
-        # ── ALL-TIME RECORDS: flag scores that crack the permanent top-10 ─────────
-        # Check the weapon + map boards this run touched (VIP counts on maps, not on
-        # weapon boards — mirrors update_leaderboards). Merge is live + idempotent.
-        if not is_ranged:
-            _at_targets = []
-            if (not vip and selected_weapon and str(selected_weapon).strip()
-                    and str(selected_weapon).strip().lower() != 'none'):
-                _at_targets.append((selected_weapon, selected_weapon))
-            if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
-                    and faction and str(faction).strip()):
-                _at_targets.append((f"{selected_map} - {faction}", f"{selected_map} ({faction})"))
-            _at_lines = []
-            _at_record = False
-            for _board, _label in _at_targets:
-                try:
-                    _res = await check_and_merge_alltime(
-                        _board, interaction.user.display_name, str(interaction.user.id), takedowns)
-                except Exception as _ate:
-                    print(f"[ALLTIME] check error ({_board}): {_ate}")
-                    continue
-                _rank = _res.get('rank')
-                if not _rank:
-                    continue
-                if _res.get('record'):
-                    _at_record = True
-                    _at_lines.append(f"\U0001f451 **ALL-TIME RECORD** \u00b7 {_label} \u2014 #1 of all time")
-                else:
-                    _at_lines.append(f"\U0001f3c5 **All-Time Top 10** \u00b7 {_label} \u2014 #{_rank} ever")
-            if _at_lines:
-                await safe_react("\U0001f451" if _at_record else "\U0001f3c5")
-                try:
-                    _fresh_at = await summary_reply.channel.fetch_message(summary_reply.id)
-                    await summary_reply.edit(content=_fresh_at.content + "\n" + "\n".join(_at_lines))
-                except Exception as _abe:
-                    print(f"[ALLTIME] blurb edit error: {_abe}")
-                # (Monthly Report forum is refreshed live per-submission below.)
-
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
         # its completion bonus; resubmits still count for all-time boards + card).
@@ -2181,24 +2143,33 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 "Mallet":        "🔨",
                 "Knife":         "🗡️",
             }
+            # Board thread map — used to hyperlink the board-record line to its board.
+            _lb_thread_map = {}
+            try:
+                from cogs.leaderboards import _get_lb_records as _lb_get_records
+                _lb_rows_for_links = await _lb_get_records()
+                _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
+            except Exception as _tme:
+                print(f"[LINK] thread map error: {_tme}")
             def _placement_line(lb, pos):
+                _tid = _lb_thread_map.get(lb)
+                _name = f"[{lb}](https://discord.com/channels/{_guild_id}/{_tid})" if _tid else lb
                 if ' - ' in lb:                       # map board
-                    return f"🏆 {lb} — #{pos}"
+                    return f"🏆 {_name} — #{pos}"
                 if lb == "TUFF":                      # TUFF shows emoji only, no name
                     return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
                 if lb in _FEAT_EMOJI:                 # feat boards: own logo + rank
                     return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
                 # actual weapon board — the only place weapon_hs belongs
-                return f"<:weapon_hs:1350656128635375698> {lb} — #{pos}"
-            placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in placements)
+                return f"<:weapon_hs:1350656128635375698> {_name} — #{pos}"
+            # Feat boards (100 Kills, 200 Takedowns, Triple, TUFF, Flawless…) are already
+            # named in the run's feats line above — don't repeat them in the trailer.
+            _shown = [(lb, pos) for lb, pos in placements if lb not in _FEAT_EMOJI]
+            placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in _shown)
             trailer = placement_lines
             try:
                 placed_boards = {lb for lb, _ in placements}
                 map_lb_name = f"{selected_map} - {faction}"
-                if selected_weapon in placed_boards or map_lb_name in placed_boards:
-                    from cogs.leaderboards import _get_lb_records as _lb_get_records
-                    _lb_rows_for_links = await _lb_get_records()
-                    _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
                 # Edit the reply directly via our held reference (robust in a busy channel).
                 # Re-fetch first so we build on (not clobber) the High Score edit above —
                 # it bumped the mark count and appended the "+1 High Score" line, but the
@@ -2403,17 +2374,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     await update_title_roles(_guild, stats, include_weekly=False)
         except Exception as e:
             print(f"Butler favourites update error: {e}")
-
-        # Refresh the live Monthly Report boards for the weapon + map this run hit.
-        try:
-            if not is_ranged:
-                from cogs.leaderboards import render_monthly_boards
-                _mb = {selected_weapon}
-                if selected_map and faction:
-                    _mb.add(f"{selected_map} - {faction}")
-                await render_monthly_boards(_guild, only_boards=_mb)
-        except Exception as _mbe:
-            print(f"Monthly boards update error: {_mbe}")
 
     async def _bg_runner():
         # Backstop so the detached background job can't hang forever. Each block
