@@ -2121,7 +2121,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         elif _new >= config.MASTERY_THRESHOLD:
                             _memoji = getattr(config, 'MASTERY_WEAPON_EMOJIS', {}).get(selected_weapon)
                             if _memoji:
-                                _badge = (_memoji, "Mastered")
+                                _badge = (_memoji, "Master")
                         if _badge:
                             try:
                                 _vfresh = await summary_reply.channel.fetch_message(summary_reply.id)
