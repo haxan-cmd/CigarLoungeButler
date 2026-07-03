@@ -1741,7 +1741,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     marks_lines = ["*+1 submission*"]
     if '200 Takedowns' in feats:
         marks_earned += 1
-        marks_lines.append(f"*<a:200tkd:1363648828414230538> +1 Takedowns*")
+        marks_lines.append(f"*<a:200tkd:1363648828414230538> +1*")
     if '100 Kills' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:100kill:1361412390339608686> +1*")
@@ -2189,6 +2189,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     new_content = new_content.replace(
                         "<a:100kill:1361412390339608686> +1*",
                         f"<a:100kill:1361412390339608686> +1 — {_kr}*", 1)
+                _td_pos = next((p for lb, p in placements if lb == "200 Takedowns"), None)
+                if _td_pos is not None:
+                    _ttid = _lb_thread_map.get("200 Takedowns")
+                    _tr = (f"[#{_td_pos}](https://discord.com/channels/{_guild_id}/{_ttid})"
+                           if _ttid else f"#{_td_pos}")
+                    new_content = new_content.replace(
+                        "<a:200tkd:1363648828414230538> +1*",
+                        f"<a:200tkd:1363648828414230538> +1 — {_tr}*", 1)
                 if selected_weapon in placed_boards:
                     weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
                     new_content = new_content.replace(
