@@ -195,7 +195,32 @@ class EntranceView(discord.ui.View):
             await interaction.followup.send("Couldn't fetch the standings just now.", ephemeral=True)
 
 
-async def build_ledger_entrance(guild, stats=None):
+_ENTRANCE_LOCK = asyncio.Lock()
+_entrance_last_sig = "__init__"
+
+
+async def build_ledger_entrance(guild, stats=None, force=False):
+    """Serialized + change-guarded entry point. Only rebuilds when the active
+    bounty changed (or when forced / first run this session), and never
+    concurrently \u2014 so the entrance stops re-posting on every submission and
+    can't duplicate itself from two rebuilds racing."""
+    global _entrance_last_sig
+    sig = None
+    try:
+        for b in await _db.get_all_bounties():
+            if len(b) > 8 and b[8] == 'TRUE':
+                sig = str(b[1]) if len(b) > 1 else 'active'
+                break
+    except Exception:
+        pass
+    async with _ENTRANCE_LOCK:
+        if not force and sig == _entrance_last_sig and _entrance_message_ids:
+            return
+        await _build_ledger_entrance_impl(guild, stats)
+        _entrance_last_sig = sig
+
+
+async def _build_ledger_entrance_impl(guild, stats=None):
     """
     Post or refresh the ledger entrance in LEDGER_ENTRANCE_CHANNEL_ID.
     Mirrors the Discord sidebar structure top-to-bottom with bold hyperlinks.
@@ -1608,7 +1633,7 @@ class LeaderboardsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         _entrance_message_ids.clear()
         try:
-            await build_ledger_entrance(interaction.guild)
+            await build_ledger_entrance(interaction.guild, force=True)
             await interaction.followup.send("✅ Ledger entrance refreshed.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ {e}", ephemeral=True)
@@ -1625,7 +1650,7 @@ class LeaderboardsCog(commands.Cog):
         _entrance_message_ids.clear()
 
         try:
-            await build_ledger_entrance(guild)
+            await build_ledger_entrance(guild, force=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Entrance build failed: {e}", ephemeral=True)
             return
