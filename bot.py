@@ -164,6 +164,17 @@ async def main():
                 traceback.print_exc()
         try:
             await bot.start(config.TOKEN)
+        except discord.HTTPException as e:
+            # 429 at login means Discord/Cloudflare rate-limited the token — usually
+            # from rapid redeploys/restarts. Back off hard instead of exiting fast, so
+            # we don't crash-loop into a Cloudflare 1015 IP ban. The healthcheck server
+            # is already running, so Railway keeps the container alive during the wait
+            # rather than restarting straight into another login attempt.
+            if getattr(e, "status", None) == 429:
+                print("[LOGIN] 429 rate limited on login — backing off 15 min before exit "
+                      "to let the rate limit / Cloudflare ban clear.")
+                await asyncio.sleep(900)
+            raise
         finally:
             if bot._db_close:
                 await bot._db_close()
