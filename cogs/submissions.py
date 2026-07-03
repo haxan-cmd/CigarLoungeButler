@@ -2322,7 +2322,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"ButlersArchive bg update error: {e}")
 
-        # Update Butler's Favourites
+        # Update Butler Monthly report
         try:
             # Import here so these names are bound regardless of the any_updated
             # branch above (that branch's local import otherwise makes them

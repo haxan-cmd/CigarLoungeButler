@@ -371,16 +371,16 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="title_guide", description="Post the Butler's Favourites title guide to the favourites channel (mod only).")
+    @app_commands.command(name="title_guide", description="Post the Butler Monthly title guide to the favourites channel (mod only).")
     @app_commands.checks.has_permissions(administrator=True)
     async def title_guide(self, interaction: discord.Interaction):
         channel = self.bot.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
         if not channel:
-            await interaction.response.send_message("Could not find the Butler's Favourites channel.", ephemeral=True)
+            await interaction.response.send_message("Could not find the Butler Monthly channel.", ephemeral=True)
             return
 
         embed = discord.Embed(
-            title="Butler's Favourites — Title Guide",
+            title="Butler Monthly — Title Guide",
             description="Prestige titles awarded to the Lounge's top performers. Titles are recalculated automatically after every submission.",
             color=discord.Color.from_str("#c8a45a")
         )
@@ -561,7 +561,7 @@ class AdminCog(commands.Cog):
                 await interaction.followup.send("❌ PersonalityCog not loaded.", ephemeral=True)
                 return
             await personality_cog._run_snapshot_logic()
-            await interaction.followup.send("✅ Snapshot complete — Butler's Favourites updated.", ephemeral=True)
+            await interaction.followup.send("✅ Snapshot complete — Butler Monthly updated.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
@@ -684,7 +684,7 @@ class AdminCog(commands.Cog):
             ephemeral=True
         )
 
-    @app_commands.command(name="refresh_titles", description="Recalculate Butler's Favourites title holders and reassign roles (mod only).")
+    @app_commands.command(name="refresh_titles", description="Recalculate Butler Monthly title holders and reassign roles (mod only).")
     async def refresh_titles(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That’s not for you.", ephemeral=True)

@@ -156,7 +156,7 @@ async def build_ledger_entrance(guild):
             [("⚖️ Challenge Rules",         1460713024082935930)],
             [("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID)],
             [(f"{bounty_emoji} {bounty_label}", bounty_channel_id),
-             ("📋 Butler's Favourites",     1518822798116524092)],
+             ("📋 Butler Monthly",     1518822798116524092)],
             [("🏆 Map Records",             idx_maps.id if idx_maps else None),
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],

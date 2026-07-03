@@ -300,6 +300,41 @@ async def get_player_bounties_completed(discord_id):
     except Exception:
         return 0
 
+async def _season_score_bests(cached_data=None):
+    """Per-player 100+kill and 200+TD run scores DURING THE CURRENT SEASON. Apex &
+    Frenzied are season (bounty) stats that reset each month, so they are built from
+    this season's submissions rather than the all-time boards."""
+    from datetime import datetime, timezone
+    season = await _db.get_current_season()
+    sstart = season['started_at'].timestamp() if season else 0
+    subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
+    kills_best, td_best = {}, {}
+    for row in subs:
+        if len(row) < 9:
+            continue
+        try:
+            ts = datetime.strptime(row[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            continue
+        if ts < sstart:
+            continue
+        pn = row[1].strip()
+        try:
+            k = int(row[8]); t = int(row[7])
+        except (ValueError, IndexError):
+            continue
+        if k >= 100:
+            kills_best.setdefault(pn, []).append(k)
+        if t >= 200:
+            td_best.setdefault(pn, []).append(t)
+    return kills_best, td_best
+
+
+def _season_title_holder(best, min_runs=3):
+    el = {p: s for p, s in best.items() if len(s) >= min_runs}
+    return max(el, key=lambda p: sum(el[p]) / len(el[p])) if el else None
+
+
 async def _alltime_title_holders(cached_data=None):
     """All-time holders of the five board titles, computed IDENTICALLY to the
     /stats "Title Standings" so the card's Current Titles can never disagree.
@@ -331,28 +366,15 @@ async def _alltime_title_holders(cached_data=None):
     def breadth_leader(d, min_boards):
         q = {p: v for p, v in d.items() if v >= min_boards}
         return max(q, key=lambda p: q[p]) if q else None
-    kills_best, td_best = {}, {}
-    for row in ld:
-        if len(row) < 4:
-            continue
-        lb = row[0].strip()
-        try:
-            score = int(row[3])
-        except (ValueError, IndexError):
-            continue
-        if lb == "100 Kills":
-            kills_best.setdefault(row[1].strip(), []).append(score)
-        elif lb == "200 Takedowns":
-            td_best.setdefault(row[1].strip(), []).append(score)
-    def title_holder(best, min_runs=3):
-        el = {p: s for p, s in best.items() if len(s) >= min_runs}
-        return max(el, key=lambda p: sum(el[p]) / len(el[p])) if el else None
+    # Apex/Frenzied are SEASON (bounty) stats — they reset each month — so they come
+    # from this season's runs, not the all-time 100 Kills / 200 Takedowns boards.
+    kills_best, td_best = await _season_score_bests(cached_data)
     return {
         'grand_marshal':   breadth_leader(holder_combined, 15),
         'weapons_master':  breadth_leader(holder_weapon, 9),
         'campaign_master': breadth_leader(holder_map, 6),
-        'apex':            title_holder(kills_best),
-        'frenzied':        title_holder(td_best),
+        'apex':            _season_title_holder(kills_best),
+        'frenzied':        _season_title_holder(td_best),
     }
 
 
@@ -835,7 +857,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     lines.append("")
 
     if butler_titles:
-        lines.append("**Butler's Favourites:**")
+        lines.append("**Butler Monthly:**")
         for t in butler_titles:
             lines.append(f"• {t}")
         lines.append("")
@@ -2281,22 +2303,9 @@ class RegistryCog(commands.Cog):
         wm_holder, wm_count = breadth_leader(holder_weapon, 9)
         cm_holder, cm_count = breadth_leader(holder_map, 6)
 
-        # Apex / Frenzied — average score across a player's 100-Kill / 200-TD runs
-        kills_best = {}  # player -> list of scores
-        td_best = {}   # player -> list of scores
-        for row in ld:
-            if len(row) < 4:
-                continue
-            lb_name = row[0].strip()
-            p_name = row[1].strip()
-            try:
-                score = int(row[3])
-            except (ValueError, IndexError):
-                continue
-            if lb_name == "100 Kills":
-                kills_best.setdefault(p_name, []).append(score)
-            elif lb_name == "200 Takedowns":
-                td_best.setdefault(p_name, []).append(score)
+        # Apex / Frenzied are SEASON (bounty) stats that reset each month — built from
+        # this season's 100-Kill / 200-TD runs, not the all-time boards.
+        kills_best, td_best = await _season_score_bests()
 
         # Highest AVERAGE score among players with enough qualifying runs — a
         # single lucky game shouldn't crown anyone.

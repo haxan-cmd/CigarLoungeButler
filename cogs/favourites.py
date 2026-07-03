@@ -1,4 +1,4 @@
-# Stats calculation, Butler's Favourites embed, title role assignment, and /butlers_report.
+# Stats calculation, Butler Monthly embed, title role assignment, and /butlers_report.
 import time
 from datetime import datetime, timezone, timedelta
 import discord
@@ -410,7 +410,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
 
     _RULE = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     week_label = stats.get("week_label", "")
-    title = "📋  The Butler's Favourites" + (f"   {week_label}" if week_label else "")
+    title = "📋  Butler Monthly" + (f"   {week_label}" if week_label else "")
     desc = f"*{stats['total_runs']} runs · {stats['total_players']} players*"
     embed = _discord.Embed(title=title, description=desc, color=0x8b6914)
     if bot_avatar_url:
@@ -895,7 +895,7 @@ class FavouritesCog(commands.Cog):
         label = season.get("label") or f"Season {season['id']}"
         await interaction.followup.send(f"Posted/refreshed the Hall of Fame entry for {label}.", ephemeral=True)
 
-    @app_commands.command(name="butlers_report", description="Summon the Butler's Favourites report")
+    @app_commands.command(name="butlers_report", description="Summon the Butler Monthly report")
     async def butlers_report(self, interaction: discord.Interaction):
         import time
 

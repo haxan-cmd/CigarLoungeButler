@@ -402,6 +402,8 @@ class PersonalityCog(commands.Cog):
             self.butler_poll_post.start()
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.start()
+        if not self.daily_cycle_tasks.is_running():
+            self.daily_cycle_tasks.start()
         # Fire nerve center immediately on startup so it always posts on deploy
 
         # Update butlers-manual
@@ -765,7 +767,7 @@ class PersonalityCog(commands.Cog):
         )
         print(f"Weekly snapshot written for {date_str}")
 
-        # Update Butler's Favourites with weekly stats
+        # Update Butler Monthly with weekly stats
         try:
             guild = self.bot.get_guild(GUILD_ID)
             if guild:
@@ -787,11 +789,9 @@ class PersonalityCog(commands.Cog):
                             break
                     else:
                         await fav_channel.send(embed=embed_text)
-                print(f"Butler's Favourites updated for week of {week_label}")
-                try:
-                    await update_title_roles(guild, weekly_stats)
-                except Exception as _te:
-                    print(f"Weekly title update error: {_te}")
+                print(f"Butler Monthly updated for week of {week_label}")
+                # NOTE: title-role assignment (Apex/Frenzied) intentionally lives in
+                # the daily loop now — the weekly snapshot is the trend digest only.
         except Exception as e:
             print(f"Favourites weekly update error: {e}")
 
@@ -819,6 +819,50 @@ class PersonalityCog(commands.Cog):
         wait_seconds = (next_monday - now).total_seconds()
         print(f"Weekly snapshot sleeping {wait_seconds:.0f}s until {next_monday.isoformat()}")
         await asyncio.sleep(wait_seconds)
+
+    @tasks.loop(hours=24)
+    async def daily_cycle_tasks(self):
+        """Daily upkeep: remind mods to prep the next bounty as month-end nears.
+        (Apex/Frenzied already update live on every submission, scoped to the
+        current season, so they need no refresh here.)"""
+        try:
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                return
+            await self._bounty_prep_reminder(guild)
+        except Exception as e:
+            print(f"[DAILY] cycle tasks error: {e}")
+
+    @daily_cycle_tasks.before_loop
+    async def before_daily_cycle_tasks(self):
+        await self.bot.wait_until_ready()
+
+    async def _bounty_prep_reminder(self, guild):
+        """A few days before month-end, ping the mods to prep next month's bounty."""
+        from datetime import datetime, timezone
+        import calendar as _cal
+        try:
+            now = datetime.now(timezone.utc)
+            last_day = _cal.monthrange(now.year, now.month)[1]
+            days_left = last_day - now.day
+            if days_left > 3:
+                return
+            marker = f"{now.year}-{now.month:02d}"
+            if getattr(self, "_bounty_reminder_month", None) == marker:
+                return
+            self._bounty_reminder_month = marker
+            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
+                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            if ch:
+                mod = guild.get_role(config.MOD_ROLE_ID)
+                mention = mod.mention if mod else "Mods"
+                await ch.send(
+                    f"\U0001f4c5 {mention} \u2014 **{days_left} day(s) left** in this month's bounty/season. "
+                    f"Prep next month's bounty (weapon list, bonus challenge, picture) and run "
+                    f"`/bounty_create` when ready to roll it over."
+                )
+        except Exception as e:
+            print(f"[DAILY] bounty reminder error: {e}")
 
     @commands.Cog.listener()
     async def on_message_delete(self, message):

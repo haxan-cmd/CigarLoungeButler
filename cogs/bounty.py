@@ -459,7 +459,8 @@ class BountyCog(commands.Cog):
         weapon3="Weapon slot 3", weapon4="Weapon slot 4",
         weapon5="Weapon slot 5", weapon6="Weapon slot 6",
         weapon7="Weapon slot 7 (optional)",
-        special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)"
+        special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)",
+        image="Bounty picture to post in the new bounty channel (optional)"
     )
     async def bounty_create(
         self, interaction: discord.Interaction,
@@ -470,6 +471,7 @@ class BountyCog(commands.Cog):
         weapon4: str, weapon5: str, weapon6: str,
         special_challenge: str,
         weapon7: str = None,
+        image: discord.Attachment = None,
     ):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -517,6 +519,11 @@ class BountyCog(commands.Cog):
 
         bulletin_board = guild.get_channel(BULLETIN_BOARD_CATEGORY_ID)
         channel = await guild.create_text_channel(formatted_channel_name, category=bulletin_board)
+        if image is not None:
+            try:
+                await channel.send(file=await image.to_file())
+            except Exception as _ie:
+                print(f"Bounty image post error: {_ie}")
 
         ledger = guild.get_channel(LEDGER_CATEGORY_ID)
         forum_channel = None
