@@ -169,9 +169,9 @@ def build_challenge_rules_embeds():
         "• **Map boards** — best takedown game per map/faction (VIP counts here)\n"
         "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF"
     ), inline=False)
-    e.add_field(name="🧪 Lethality & 🛡️ Warlord", value=(
-        "Every weapon/map board also ranks two live ratings — 🧪 **Lethality** (kills per takedown) "
-        "and 🛡️ **Warlord** (team dominance). Your rating is your **best 5-game streak ever** with that "
+    e.add_field(name="<a:mostlethal:1520490418817601658> Lethality & <:warlord:1520490364039860347> Warlord", value=(
+        "Every weapon/map board also ranks two live ratings — <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) "
+        "and <:warlord:1520490364039860347> **Warlord** (team dominance). Your rating is your **best 5-game streak ever** with that "
         "weapon/map, so it never drops for a bad game — keep submitting. Min 5 games on weapons; "
         "rarely-played maps need fewer."
     ), inline=False)
