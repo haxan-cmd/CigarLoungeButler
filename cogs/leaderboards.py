@@ -1281,7 +1281,7 @@ async def archive_and_reset_boards(guild):
             sc = int(row[3])
         except (ValueError, TypeError):
             continue
-        boards.setdefault(b, []).append((sc, (row[1] or '').strip()))
+        boards.setdefault(b, []).append((sc, (row[1] or '').strip(), (row[2] or '').strip()))
     if not boards:
         return 0, 0, 0, None
     weapon_boards = sorted(b for b in boards if ' - ' not in b)
@@ -1289,7 +1289,7 @@ async def archive_and_reset_boards(guild):
 
     def _top3(b):
         top = sorted(boards[b], key=lambda t: -t[0])[:3]
-        return " \u00b7 ".join(f"{i}. {p} {s}" for i, (s, p) in enumerate(top, 1))
+        return " \u00b7 ".join(f"{i}. {p} {s}" for i, (s, p, *_r) in enumerate(top, 1))
 
     first = not any((pp[0] if isinstance(pp, (list, tuple)) else pp) == 'board_records_done'
                     for pp in await _db.get_all_index_posts())
@@ -1330,8 +1330,134 @@ async def archive_and_reset_boards(guild):
         print(f"[SEASON RESET] HoF archive failed, boards NOT cleared: {e}")
         return len(weapon_boards), len(map_boards), 0, None
 
+    # Merge every board's scores into the permanent all-time top-10 (never resets).
+    for _b, _entries in boards.items():
+        try:
+            await _db.merge_alltime_records(_b, [(p, did, s) for (s, p, did) in _entries])
+        except Exception as _ae:
+            print(f"[ALLTIME] merge error ({_b}): {_ae}")
+
     cleared = await _db.clear_leaderboard_boards(list(boards.keys()))
     return len(weapon_boards), len(map_boards), cleared, thread_url
+
+
+def _alltime_embed(board_name, records):
+    """One clean top-10 embed for a single all-time board."""
+    medals = {1: "\U0001f947", 2: "\U0001f948", 3: "\U0001f949"}
+    lines = []
+    for i, rec in enumerate(records, 1):
+        pn = rec[0] if len(rec) > 0 else ""
+        sc = rec[2] if len(rec) > 2 else 0
+        rank = medals.get(i, f"`{i:>2}.`")
+        lines.append(f"{rank} **{pn}** \u2014 {sc}")
+    e = discord.Embed(
+        title=f"\U0001f3c5 {board_name} \u2014 All-Time",
+        description="\n".join(lines) if lines else "*No records yet.*",
+        colour=discord.Colour.from_str("#C9A24B"),
+    )
+    e.set_footer(text="All-Time Top 10 \u00b7 best scores ever recorded, across every season")
+    return e
+
+
+async def render_alltime_boards(guild):
+    """Post/refresh the permanent all-time top-10 boards into the consolidated
+    All-Time Records forum, then rebuild its pinned index (formatted like the
+    other leaderboard forums)."""
+    fid = getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0
+    if not fid:
+        print("[ALLTIME] ALLTIME_RECORDS_FORUM_ID not set \u2014 skipping render.")
+        return 0
+    forum = guild.get_channel(fid) or await guild.fetch_channel(fid)
+    if not forum:
+        print(f"[ALLTIME] forum {fid} not found.")
+        return 0
+    board_names = await _db.get_all_alltime_boards()
+    if not board_names:
+        print("[ALLTIME] no all-time records yet.")
+        return 0
+
+    index_name = "\U0001f4cb All-Time Records Index"
+    existing = {}
+    try:
+        active = await guild._state.http.get_active_threads(guild.id)
+        for t in active.get('threads', []):
+            if int(t['parent_id']) == fid and t['name'] != index_name:
+                obj = forum.get_thread(int(t['id'])) or await guild.fetch_channel(int(t['id']))
+                existing[t['name']] = obj
+    except Exception as e:
+        print(f"[ALLTIME] active thread fetch: {e}")
+        for t in forum.threads:
+            if t.name != index_name:
+                existing[t.name] = t
+    try:
+        async for t in forum.archived_threads(limit=None):
+            if t.name != index_name and t.name not in existing:
+                existing[t.name] = t
+    except Exception as e:
+        print(f"[ALLTIME] archived thread fetch: {e}")
+
+    rendered = 0
+    for b in sorted(board_names):
+        try:
+            recs = await _db.get_alltime_records(b)
+            embed = _alltime_embed(b, recs)
+            tname = f"\U0001f3c5 {b}"[:100]
+            thread = existing.get(tname)
+            if thread:
+                starter = None
+                try:
+                    starter = thread.starter_message or await thread.fetch_message(thread.id)
+                except Exception:
+                    starter = None
+                if starter:
+                    await starter.edit(embed=embed)
+                else:
+                    await thread.send(embed=embed)
+            else:
+                await forum.create_thread(name=tname, embed=embed)
+            rendered += 1
+            await asyncio.sleep(0.4)
+        except Exception as e:
+            print(f"[ALLTIME] render {b}: {e}")
+
+    try:
+        await update_leaderboard_index(
+            guild, fid, "All-Time Records",
+            blurb="The permanent record \u2014 the ten best scores ever set on each board, "
+                  "carried across every season. Jump to a board below.")
+    except Exception as e:
+        print(f"[ALLTIME] index: {e}")
+    return rendered
+
+
+async def seed_alltime_from_current(guild):
+    """Merge the CURRENT seasonal board scores into the all-time top-10 WITHOUT
+    clearing anything, then render. Safe to run repeatedly \u2014 keeps each
+    player's best score. Used to populate/preview all-time before any reset."""
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+    ld = await _db.get_all_leaderboard_data()
+    boards = {}
+    for row in ld:
+        if len(row) < 4:
+            continue
+        b = (row[0] or '').strip()
+        if not b or b in _FEAT:
+            continue
+        try:
+            sc = int(row[3])
+        except (ValueError, TypeError):
+            continue
+        pn = (row[1] or '').strip()
+        did = (row[2] or '').strip()
+        if pn:
+            boards.setdefault(b, []).append((pn, did, sc))
+    for b, entries in boards.items():
+        try:
+            await _db.merge_alltime_records(b, entries)
+        except Exception as e:
+            print(f"[ALLTIME] seed merge error ({b}): {e}")
+    await render_alltime_boards(guild)
+    return len(boards)
 
 
 class LeaderboardsCog(commands.Cog):
@@ -1351,10 +1477,37 @@ class LeaderboardsCog(commands.Cog):
             await interaction.followup.send("Nothing to reset \u2014 no weapon/map board entries found.", ephemeral=True)
             return
         loc = f" ({url})" if url else " (archive post FAILED \u2014 boards were NOT cleared)"
+        alltime_note = ""
+        try:
+            rendered = await render_alltime_boards(interaction.guild)
+            if rendered:
+                alltime_note = f"\nUpdated the all-time top-10 archive (**{rendered}** boards)."
+        except Exception as _ae:
+            alltime_note = f"\n\u26a0\ufe0f All-time archive render failed: {_ae}"
         await interaction.followup.send(
             f"\u2705 Archived top 3 of **{wb}** weapon + **{mb}** map boards to the Hall of Fame{loc}, "
-            f"cleared **{cleared}** entries.\nMarks, ranks and mastery are untouched. "
+            f"cleared **{cleared}** entries.{alltime_note}\nMarks, ranks and mastery are untouched. "
             f"Run **/refresh_all** to re-render the now-empty boards.",
+            ephemeral=True)
+
+    @app_commands.command(name="alltime_refresh", description="Merge current board scores into the permanent all-time top-10 and refresh the archive (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def alltime_refresh(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not (getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0):
+            await interaction.followup.send(
+                "\u274c `ALLTIME_RECORDS_FORUM_ID` isn't set in config \u2014 create the All-Time Records forum "
+                "and paste its channel ID there first.", ephemeral=True)
+            return
+        try:
+            n = await seed_alltime_from_current(interaction.guild)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c All-time refresh failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"\u2705 Merged **{n}** boards into the all-time top-10 and refreshed the archive. "
+            f"Nothing was cleared \u2014 this only ever keeps each player's best score.\n"
+            f"Pin the **\U0001f4cb All-Time Records Index** thread to the top of the forum.",
             ephemeral=True)
 
     @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread")

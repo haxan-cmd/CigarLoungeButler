@@ -26,6 +26,7 @@ WEAPONS_1H_FORUM_ID         = 1486118387800346768
 FEATS_FORUM_ID              = 1486143184542105680
 BOUNTY_CARDS_FORUM_ID       = 1518657580174676021
 HALL_OF_FAME_FORUM_ID       = 1521858440593670235   # season Hall of Fame forum
+ALLTIME_RECORDS_FORUM_ID    = 1522630299337490582   # all-time-records forum
 
 # Optional banner image shown atop the Ledger entrance dashboard (paste a Discord
 # CDN image URL or any public image URL; leave "" to show no banner).

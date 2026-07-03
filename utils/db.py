@@ -1250,6 +1250,16 @@ async def season_init():
             )
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS alltime_records (
+                board_name TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                discord_id TEXT,
+                score INT NOT NULL,
+                PRIMARY KEY (board_name, player_name)
+            )
+        """)
+
 
 async def start_season(label: str) -> int:
     """Open a new season (defensively closing any still-open one). Returns its id."""
@@ -1257,6 +1267,52 @@ async def start_season(label: str) -> int:
     async with pool.acquire() as conn:
         await conn.execute("UPDATE seasons SET ended_at = NOW() WHERE ended_at IS NULL")
         return await conn.fetchval("INSERT INTO seasons (label) VALUES ($1) RETURNING id", label)
+
+
+async def merge_alltime_records(board_name, entries) -> None:
+    """Merge (player_name, discord_id, score) tuples into a board's ALL-TIME top 10.
+    Keeps each player's best score ever, then trims to the top 10. Existing records
+    are only bumped when a higher score pushes them out — nothing is lost on reset."""
+    board_name = (board_name or '').strip()
+    if not board_name:
+        return
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT player_name, discord_id, score FROM alltime_records WHERE board_name=$1", board_name)
+        best = {r['player_name']: (r['discord_id'], int(r['score'])) for r in rows}
+        for pn, did, sc in entries:
+            pn = (pn or '').strip()
+            try:
+                sc = int(sc)
+            except (ValueError, TypeError):
+                continue
+            if not pn:
+                continue
+            if pn not in best or sc > best[pn][1]:
+                best[pn] = (did or '', sc)
+        top = sorted(best.items(), key=lambda kv: -kv[1][1])[:10]
+        await conn.execute("DELETE FROM alltime_records WHERE board_name=$1", board_name)
+        for pn, (did, sc) in top:
+            await conn.execute(
+                "INSERT INTO alltime_records (board_name, player_name, discord_id, score) "
+                "VALUES ($1,$2,$3,$4)", board_name, pn, did or '', sc)
+
+
+async def get_alltime_records(board_name):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT player_name, discord_id, score FROM alltime_records "
+            "WHERE board_name=$1 ORDER BY score DESC", board_name)
+    return [[r['player_name'], r['discord_id'] or '', int(r['score'])] for r in rows]
+
+
+async def get_all_alltime_boards():
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT board_name FROM alltime_records")
+    return [r['board_name'] for r in rows]
 
 
 async def get_current_season():
