@@ -1341,28 +1341,122 @@ async def archive_and_reset_boards(guild):
     return len(weapon_boards), len(map_boards), cleared, thread_url
 
 
-def _alltime_embed(board_name, records):
-    """One clean top-10 embed for a single all-time board."""
-    medals = {1: "\U0001f947", 2: "\U0001f948", 3: "\U0001f949"}
+def _alltime_lines(records):
     lines = []
     for i, rec in enumerate(records, 1):
         pn = rec[0] if len(rec) > 0 else ""
         sc = rec[2] if len(rec) > 2 else 0
-        rank = medals.get(i, f"`{i:>2}.`")
-        lines.append(f"{rank} **{pn}** \u2014 {sc}")
+        lines.append(f"`{i:>2}.` **{pn}** - {sc}")
+    return "\n".join(lines) if lines else "*No records yet.*"
+
+
+def _alltime_weapon_embed(weapon, records):
     e = discord.Embed(
-        title=f"\U0001f3c5 {board_name} \u2014 All-Time",
-        description="\n".join(lines) if lines else "*No records yet.*",
+        title=f"{weapon} - All-Time",
+        description=_alltime_lines(records),
         colour=discord.Colour.from_str("#C9A24B"),
     )
-    e.set_footer(text="All-Time Top 10 \u00b7 best scores ever recorded, across every season")
+    e.set_footer(text="All-Time Top 10 \u00b7 best scores ever set, across every season")
     return e
+
+
+def _alltime_map_embed(map_name, faction_records):
+    """faction_records: list of (faction_label, records). Both factions share one thread."""
+    e = discord.Embed(
+        title=f"{map_name} - All-Time",
+        colour=discord.Colour.from_str("#C9A24B"),
+    )
+    any_field = False
+    for fac, recs in faction_records:
+        if not recs:
+            continue
+        e.add_field(name=fac, value=_alltime_lines(recs)[:1024], inline=False)
+        any_field = True
+    if not any_field:
+        e.description = "*No records yet.*"
+    e.set_footer(text="All-Time Top 10 \u00b7 both factions \u00b7 across every season")
+    return e
+
+
+def _alltime_category(board_name):
+    if board_name in config.WEAPONS_2H:
+        return "2H"
+    if board_name in config.WEAPONS_1H:
+        return "1H"
+    return "Archer"
+
+
+async def _alltime_index(guild, forum, index_name, units):
+    """Rebuild the pinned index: grouped Maps / 2H / 1H / Archer, formatted like
+    the other forum indexes. units = list of (category, label, thread)."""
+    groups = [
+        ("\U0001f5fa\ufe0f Maps",        "Map"),
+        ("\u2694\ufe0f 2H Weapons",       "2H"),
+        ("\U0001f5e1\ufe0f 1H Weapons",   "1H"),
+        ("\U0001f3f9 Archer",             "Archer"),
+    ]
+    embed = discord.Embed(
+        title="\U0001f4cb All-Time Records Index",
+        description="The permanent record - the ten best scores ever set on each board, "
+                    "carried across every season. Jump to a board below.",
+        colour=discord.Colour.from_str("#2b2d31"),
+    )
+    for glabel, gkey in groups:
+        items = sorted([(lbl, th) for cat, lbl, th in units if cat == gkey and th],
+                       key=lambda x: x[0].lower())
+        if not items:
+            continue
+        links = [f"[{lbl}](https://discord.com/channels/{guild.id}/{th.id})" for lbl, th in items]
+        chunk = ""
+        first = True
+        for ln in links:
+            add = ln if not chunk else "\n" + ln
+            if len(chunk) + len(add) > 1024:
+                embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
+                first = False
+                chunk = ln
+            else:
+                chunk += add
+        if chunk:
+            embed.add_field(name=(glabel if first else "\u200b"), value=chunk, inline=False)
+    if not embed.fields:
+        embed.add_field(name="No boards yet", value="*Nothing here yet.*", inline=False)
+
+    index_thread = None
+    for t in forum.threads:
+        if t.name == index_name:
+            index_thread = t
+            break
+    if not index_thread:
+        try:
+            async for t in forum.archived_threads(limit=None):
+                if t.name == index_name:
+                    index_thread = t
+                    break
+        except Exception:
+            pass
+    if index_thread:
+        msgs = []
+        async for msg in index_thread.history(limit=50, oldest_first=True):
+            msgs.append(msg)
+        if msgs:
+            await msgs[0].edit(embed=embed)
+            for msg in msgs[1:]:
+                try:
+                    await msg.delete()
+                    await asyncio.sleep(0.2)
+                except Exception:
+                    pass
+        else:
+            await index_thread.send(embed=embed)
+    else:
+        await forum.create_thread(name=index_name, embed=embed)
 
 
 async def render_alltime_boards(guild):
     """Post/refresh the permanent all-time top-10 boards into the consolidated
-    All-Time Records forum, then rebuild its pinned index (formatted like the
-    other leaderboard forums)."""
+    All-Time Records forum: one thread per weapon, one thread per map (both
+    factions together), plus a grouped pinned index (Maps / 2H / 1H / Archer)."""
     fid = getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0
     if not fid:
         print("[ALLTIME] ALLTIME_RECORDS_FORUM_ID not set \u2014 skipping render.")
@@ -1396,38 +1490,67 @@ async def render_alltime_boards(guild):
     except Exception as e:
         print(f"[ALLTIME] archived thread fetch: {e}")
 
-    rendered = 0
-    for b in sorted(board_names):
-        try:
-            recs = await _db.get_alltime_records(b)
-            embed = _alltime_embed(b, recs)
-            tname = f"\U0001f3c5 {b}"[:100]
-            thread = existing.get(tname)
-            if thread:
+    # Split boards: weapons (no ' - ') vs maps ('Map - Faction'), grouping map factions.
+    weapons = sorted(b for b in board_names if ' - ' not in b)
+    maps = {}
+    for b in board_names:
+        if ' - ' in b:
+            base, fac = b.split(' - ', 1)
+            maps.setdefault(base.strip(), []).append((fac.strip(), b))
+
+    async def _post(tname, embed):
+        thread = existing.get(tname)
+        if thread:
+            starter = None
+            try:
+                starter = thread.starter_message or await thread.fetch_message(thread.id)
+            except Exception:
                 starter = None
-                try:
-                    starter = thread.starter_message or await thread.fetch_message(thread.id)
-                except Exception:
-                    starter = None
-                if starter:
-                    await starter.edit(embed=embed)
-                else:
-                    await thread.send(embed=embed)
+            if starter:
+                await starter.edit(embed=embed)
             else:
-                await forum.create_thread(name=tname, embed=embed)
-            rendered += 1
+                await thread.send(embed=embed)
+            return thread
+        res = await forum.create_thread(name=tname, embed=embed)
+        return res.thread
+
+    units = []
+    keep_names = {index_name}
+    for w in weapons:
+        try:
+            recs = await _db.get_alltime_records(w)
+            tname = f"\U0001f3c5 {w}"[:100]
+            th = await _post(tname, _alltime_weapon_embed(w, recs))
+            keep_names.add(tname)
+            units.append((_alltime_category(w), w, th))
             await asyncio.sleep(0.4)
         except Exception as e:
-            print(f"[ALLTIME] render {b}: {e}")
+            print(f"[ALLTIME] render weapon {w}: {e}")
+    for m in sorted(maps):
+        try:
+            fr = [(fac, await _db.get_alltime_records(bname)) for fac, bname in sorted(maps[m])]
+            tname = f"\U0001f3c5 {m}"[:100]
+            th = await _post(tname, _alltime_map_embed(m, fr))
+            keep_names.add(tname)
+            units.append(("Map", m, th))
+            await asyncio.sleep(0.4)
+        except Exception as e:
+            print(f"[ALLTIME] render map {m}: {e}")
+
+    # Remove stale bot threads (e.g. old per-faction map threads) no longer used.
+    for tname, thread in existing.items():
+        if tname not in keep_names and tname.startswith("\U0001f3c5"):
+            try:
+                await thread.delete()
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                print(f"[ALLTIME] stale delete {tname}: {e}")
 
     try:
-        await update_leaderboard_index(
-            guild, fid, "All-Time Records",
-            blurb="The permanent record \u2014 the ten best scores ever set on each board, "
-                  "carried across every season. Jump to a board below.")
+        await _alltime_index(guild, forum, index_name, units)
     except Exception as e:
         print(f"[ALLTIME] index: {e}")
-    return rendered
+    return len(units)
 
 
 async def seed_alltime_from_current(guild):
