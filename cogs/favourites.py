@@ -411,8 +411,18 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     _RULE = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     week_label = stats.get("week_label", "")
     title = "📋  Butler Monthly" + (f"   {week_label}" if week_label else "")
-    desc = f"*{stats['total_runs']} runs · {stats['total_players']} players*"
+    _greet = ""
+    try:
+        import random as _r
+        from cogs.leaderboards import _ENTRANCE_GREETINGS
+        _greet = "*" + _r.choice(_ENTRANCE_GREETINGS) + "*\n\n"
+    except Exception:
+        pass
+    desc = _greet + f"*{stats['total_runs']} runs · {stats['total_players']} players*"
     embed = _discord.Embed(title=title, description=desc, color=0x8b6914)
+    _banner = getattr(config, 'LEDGER_BANNER_URL', '') or ''
+    if _banner:
+        embed.set_image(url=_banner)
     if bot_avatar_url:
         embed.set_thumbnail(url=bot_avatar_url)
 

@@ -783,12 +783,17 @@ class PersonalityCog(commands.Cog):
                 embed_text = await build_favourites_embed(weekly_stats)
                 fav_channel = guild.get_channel(BUTLERS_FAVOURITES_CHANNEL_ID) or await guild.fetch_channel(BUTLERS_FAVOURITES_CHANNEL_ID)
                 if fav_channel:
+                    try:
+                        from cogs.leaderboards import EntranceView as _EV
+                        _mview = _EV()
+                    except Exception:
+                        _mview = None
                     async for msg in fav_channel.history(limit=5):
                         if msg.author == guild.me:
-                            await msg.edit(content=None, embed=embed_text)
+                            await msg.edit(content=None, embed=embed_text, view=_mview)
                             break
                     else:
-                        await fav_channel.send(embed=embed_text)
+                        await fav_channel.send(embed=embed_text, view=_mview)
                 print(f"Butler Monthly updated for week of {week_label}")
                 # NOTE: title-role assignment (Apex/Frenzied) intentionally lives in
                 # the daily loop now — the weekly snapshot is the trend digest only.

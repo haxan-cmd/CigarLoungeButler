@@ -2343,12 +2343,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         stats = await calculate_butler_stats(week_start=week_start_dt.timestamp(), week_end=_now.timestamp())
                         stats['week_label'] = f"{week_start_dt.strftime('%b %d')} – {(week_start_dt + timedelta(days=7)).strftime('%b %d')}"
                     embed_text = await build_favourites_embed(stats, bot_avatar_url=_guild.me.display_avatar.url if _guild else None)
+                    try:
+                        from cogs.leaderboards import EntranceView as _EV
+                        _mview = _EV()
+                    except Exception:
+                        _mview = None
                     async for msg in fav_channel.history(limit=5):
                         if msg.author == _guild.me:
-                            await msg.edit(content=None, embed=embed_text)
+                            await msg.edit(content=None, embed=embed_text, view=_mview)
                             break
                     else:
-                        await fav_channel.send(embed=embed_text)
+                        await fav_channel.send(embed=embed_text, view=_mview)
                     await update_title_roles(_guild, stats, include_weekly=False)
         except Exception as e:
             print(f"Butler favourites update error: {e}")

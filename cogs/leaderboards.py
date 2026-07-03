@@ -5,6 +5,7 @@ import asyncio
 import os
 import re as _re
 import discord
+import random
 from discord import app_commands
 from discord.ext import commands
 
@@ -106,7 +107,92 @@ async def _find_index_thread(guild, forum_channel_id: int, index_label: str):
     return None
 
 
-async def build_ledger_entrance(guild):
+_ENTRANCE_GREETINGS = [
+    "The Ledger is open. Mind the ash, and mind your standings.",
+    "Welcome back to the lounge. Your betters are already on the boards.",
+    "Records don't keep themselves. Fortunately, I do.",
+    "Every mark tells a story. Most of them are cautionary tales.",
+    "The cigars are lit and the leaderboards are merciless. As it should be.",
+    "Another day, another chance to be politely humiliated on the boards.",
+    "I have tallied everything. I always tally everything.",
+    "Step in, sign the Ledger, and try to leave a mark worth remembering.",
+    "The Hall of Fame has standards. The rest of you have potential.",
+    "Glory is fleeting. The Ledger is forever.",
+]
+
+
+def _champ(v):
+    """Extract a display name from a champion value that may be a str, 'N/A',
+    None, or a (name, score) tuple/list."""
+    if not v:
+        return None
+    if isinstance(v, (list, tuple)):
+        return str(v[0]).strip() if v else None
+    v = str(v).strip()
+    return None if v in ('', 'N/A') else v
+
+
+def _champion_lines(stats):
+    te = getattr(config, 'TITLE_EMOJIS', {})
+    rows = [
+        ('grand_marshal',      te.get('Grand Marshal', '🎖️'),   'Grand Marshal'),
+        ('weapons_master',     te.get('Weapons Master', '⚔️'),      'Weapons Master'),
+        ('campaign_master',    te.get('Campaign Master', '🗺️'), 'Campaign Master'),
+        ('apex',               te.get('apex_title', '💀'),            'Apex'),
+        ('frenzied',           te.get('frenzied_title', '🪓'),        'Frenzied'),
+        ('most_lethal_player', te.get('Lethality', '🧪'),             'Most Lethal'),
+        ('warlord_player',     '🛡️',                            'Warlord'),
+    ]
+    out = []
+    for key, emoji, label in rows:
+        name = _champ(stats.get(key))
+        if name:
+            out.append(f"{emoji} **{label}** — {name}")
+    return out
+
+
+class EntranceView(discord.ui.View):
+    """Persistent interactive buttons on the Ledger entrance dashboard."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Pull My Card", emoji="🎴",
+                       style=discord.ButtonStyle.secondary, custom_id="entrance:mycard")
+    async def my_card(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            from cogs.registry import get_registry_thread_id
+            tid = await get_registry_thread_id(str(interaction.user.id))
+            if tid:
+                url = f"https://discord.com/channels/{interaction.guild.id}/{tid}"
+                await interaction.response.send_message(f"🎴 Your registry card: {url}", ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    "You don't have a registry card yet — submit a run and the Butler will draw one up.",
+                    ephemeral=True)
+        except Exception:
+            await interaction.response.send_message("Couldn't pull your card just now. Try again shortly.", ephemeral=True)
+
+    @discord.ui.button(label="Who's Winning", emoji="👑",
+                       style=discord.ButtonStyle.secondary, custom_id="entrance:winning")
+    async def whos_winning(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer(ephemeral=True)
+            from cogs.favourites import calculate_butler_stats
+            from datetime import datetime, timezone
+            season = await _db.get_current_season()
+            now = datetime.now(timezone.utc)
+            if season:
+                s = await calculate_butler_stats(week_start=season['started_at'].timestamp(), week_end=now.timestamp())
+            else:
+                s = await calculate_butler_stats()
+            lines = _champion_lines(s)
+            body = "\n".join(lines) if lines else "No champions crowned yet this season."
+            await interaction.followup.send("👑 **Reigning champions**\n" + body, ephemeral=True)
+        except Exception:
+            await interaction.followup.send("Couldn't fetch the standings just now.", ephemeral=True)
+
+
+async def build_ledger_entrance(guild, stats=None):
     """
     Post or refresh the ledger entrance in LEDGER_ENTRANCE_CHANNEL_ID.
     Mirrors the Discord sidebar structure top-to-bottom with bold hyperlinks.
@@ -154,7 +240,7 @@ async def build_ledger_entrance(guild):
         # Each tuple is one message: list of (label, channel_id) buttons
         message_groups = [
             [("⚖️ Challenge Rules",         1460713024082935930)],
-            [("🗂️ Butler's Archive",        REGISTRY_INDEX_THREAD_ID),
+            [("🗂️ Members Archive",          REGISTRY_INDEX_THREAD_ID),
              ("🏅 Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
             [(f"{bounty_emoji} {bounty_label}", bounty_channel_id),
              ("📋 Butler Monthly",     1518822798116524092)],
@@ -2232,3 +2318,8 @@ async def refresh_hundred_handed_board(guild):
 
 async def setup(bot):
     await bot.add_cog(LeaderboardsCog(bot))
+    # Persistent view so the entrance dashboard buttons work across restarts.
+    try:
+        bot.add_view(EntranceView())
+    except Exception as _e:
+        print(f"EntranceView register error: {_e}")
