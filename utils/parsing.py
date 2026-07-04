@@ -82,4 +82,14 @@ def parse_submission_text(text):
         if len(candidates) == 1:
             detected_subclass = candidates[0]
 
+    # If the detected weapon isn't valid for the detected subclass but the subclass has a
+    # single more-specific variant of it (e.g. "Spear" -> "One-Handed Spear" for Guardian),
+    # correct it. Guards against a short weapon name stealing an invalid class/weapon combo.
+    if detected_subclass and detected_weapon:
+        _scw = config.CLASS_WEAPON_MAP.get(detected_subclass, [])
+        if detected_weapon not in _scw:
+            _alt = [w for w in _scw if w.endswith(detected_weapon) or detected_weapon.endswith(w)]
+            if len(_alt) == 1:
+                detected_weapon = _alt[0]
+
     return detected_weapon, detected_subclass
