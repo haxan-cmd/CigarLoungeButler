@@ -454,6 +454,6 @@ PLAYER_COMMANDS = [
 # unicode-lookalike names by folded substrings: (required_substrings, replacement).
 LEADERBOARD_NAME_OVERRIDES = {
     "1522660063704125610": "Yaboombatron",    # yaboomba
-    "1522689472657883306": "massive egglant",  # eggplant
+    "833823649676394516": "massive egglant",  # Massive Eggplant (real submission id)
 }
 LEADERBOARD_NAME_CONTAINS = []
