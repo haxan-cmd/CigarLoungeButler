@@ -68,7 +68,7 @@ How the systems work (answer players' questions about these accurately and speci
 - Weapon ranks (marks per weapon): Bronze 1, Silver 5, Gold 12, Emerald 25, Diamond 40, Crimson 60, then Prestige Bronze 80, Prestige Silver 100, Prestige Gold 115, Prestige Emerald 125, Prestige Diamond 133, Prestige Crimson 141, and Iridescent 150 (the top rank).
 - Mastery: 100 qualifying runs with a weapon makes it Mastered, 250 makes it Virtuoso. Counts across every class that wields the weapon.
 - Subclass and class ranks: each weapon rank-up gives a subclass mark, filling a subclass meter gives a class mark. Subclass ranks go Initiate, Veteran, Master, Grandmaster, Champion, Paragon, Apex. Class ranks go Sworn, Trusted, Proven, Honored, Esteemed, Exalted, Ascended.
-- Feats: 100 kills, Triple, 200 takedowns, Predator (150 takedowns without dying). Hundred-Handed means getting a 100 with every primary weapon across all non-archer subclasses.
+- Feats: 100 kills, Triple, 200 takedowns, Predator (150 takedowns without dying). Hundred-Handed means getting a 100-takedown run with every primary weapon across all non-archer subclasses — 46 combos total (out of 46, NOT 85/86). Only the completed feat counts; partial progress is just progress.
 - Boards: every weapon and map has a takedown leaderboard for your best game. Feat boards exist for 100 Kills, 200 Takedowns, Triple, Flawless, and TUFF. Map boards allow VIP, weapon boards do not.
 - Lethality and Warlord ratings: every weapon and map board also ranks two live ratings, Lethality (kills per takedown) and Warlord (your share of your team's takedowns). A player's rating is their best 5-consecutive-game average ever with that weapon or map, so it never drops for a bad game. Minimum 5 games on weapons, rarely-played maps need fewer (the minimum scales with the map's popularity).
 - Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Most Lethal (best lethality), Warlord (highest share of your team's takedowns).
@@ -1066,31 +1066,18 @@ class PersonalityCog(commands.Cog):
                             except Exception:
                                 pass
 
-                            # Hundred Handed progress — which primary weapon+subclass combos are missing
+                            # Hundred-Handed — use the SAME source as the registry card:
+                            # PRIMARY weapon/subclass combos for non-archer subclasses (HH_TOTAL,
+                            # i.e. out of 46, not the all-weapons CLASS_WEAPON_MAP count).
                             try:
-                                cwm = config.CLASS_WEAPON_MAP
-                                ranged = set(getattr(config, 'RANGED_WEAPONS', []))
-                                done_pairs = set()
-                                for sub_r in player_subs_pb:
-                                    if len(sub_r) > 4:
-                                        done_pairs.add((sub_r[4].strip(), sub_r[3].strip()))
-                                missing_by_class = {}
-                                for cls_name, weapons in cwm.items():
-                                    for w in weapons:
-                                        if w in ranged:
-                                            continue
-                                        if (cls_name, w) not in done_pairs:
-                                            missing_by_class.setdefault(cls_name, []).append(w)
-                                total_needed = sum(len(v) for v in missing_by_class.values())
-                                total_possible = sum(
-                                    len([w for w in weapons if w not in ranged])
-                                    for weapons in cwm.values()
-                                )
-                                completed = total_possible - total_needed
-                                if total_needed == 0:
-                                    hh_str = "Hundred Handed: COMPLETE — all primary weapon/subclass combos submitted."
+                                from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+                                _hh_done = {(r[0], r[1]) for r in await _db.get_hundred_handed_progress(discord_id_str)}
+                                _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+                                _hh_matched = len(_hh_done & _hh_required)
+                                if _hh_required and _hh_required.issubset(_hh_done):
+                                    hh_str = f"Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) — a 100-takedown run with every primary weapon on every non-archer subclass."
                                 else:
-                                    hh_str = f"Hundred Handed progress: {completed}/{total_possible} combos done."
+                                    hh_str = f"Hundred-Handed progress: {_hh_matched}/{HH_TOTAL} (needs a 100-takedown run with each primary weapon on each non-archer subclass)."
                                 player_stats_ctx += f"\n{hh_str}"
                             except Exception:
                                 pass
