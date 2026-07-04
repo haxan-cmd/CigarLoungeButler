@@ -1386,6 +1386,33 @@ _bot_ref = None  # set in RegistryCog.__init__; lets module-level card fns raise
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None, skip_index=False):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
+    # No marks -> no card. A roster-wide refresh was spawning blank cards for people
+    # who've never submitted. Marks only ever increase, so a 0-mark card is always an
+    # erroneous one: skip creation, and delete any blank card that already slipped in.
+    try:
+        _wm = await calculate_weapon_marks_for_player(discord_id, cached_data)
+        _no_marks = not any(v for v in (_wm or {}).values())
+    except Exception:
+        _no_marks = False
+    if _no_marks:
+        try:
+            _tid = await get_registry_thread_id(discord_id)
+            if _tid:
+                _th = guild.get_thread(_tid)
+                if not _th:
+                    try:
+                        _th = await guild.fetch_channel(_tid)
+                    except Exception:
+                        _th = None
+                if _th:
+                    try:
+                        await _th.delete()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        print(f"Skipping registry card for {player_name} — no marks")
+        return
     try:
         await asyncio.wait_for(_registry_lock.acquire(), timeout=60)
     except asyncio.TimeoutError:
