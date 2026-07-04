@@ -828,6 +828,11 @@ def format_weapon_marks(marks):
 async def build_registry_messages(player_name, discord_id, cached_data=None):
     """Build list of message strings for a player's registry card (one per class + header)."""
     class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
+
+    def _class_total_marks(cd):
+        return sum(wd.get('marks', 0)
+                   for sd in (cd.get('subclasses') or {}).values()
+                   for wd in (sd.get('weapons') or {}).values())
     bounties_done = await get_bounty_completions_for_player(discord_id, cached_data)
     player_title = get_player_title(len(bounties_done))
     mastered = await get_mastered_weapons_for_player(discord_id, cached_data)
@@ -851,7 +856,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     lines.append(f"*{player_title}*")
     lines.append("")
     lines.append("**Titles:**")
-    for cls, cdata in class_stats.items():
+    for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines.append(f"• {cls}: {cls_emoji} — {cdata['rank']}")
     lines.append("")
@@ -1042,7 +1047,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     messages.append("\n".join(lines))
 
     # --- Messages 2-5: One per class ---
-    for cls, cdata in class_stats.items():
+    for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines = []
         lines.append(f"## {cls}: {cls_emoji} — {cdata['rank']}")
@@ -1377,29 +1382,89 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             return
 
         messages = await build_registry_messages(player_name, discord_id, cached_data)
-        full_text = "\n\n".join(m.strip() for m in messages if m and m.strip())
-
-        # Render the card as embeds packed into as few MESSAGES as possible. Discord allows
-        # ~6000 chars of embed text per message (4096 per embed), so almost every card fits
-        # in a SINGLE message — which means the forum post and a hyperlink both open on the
-        # same message, fixing the "archive drops you at the bottom of the card" quirk. Only
-        # the very largest cards spill to a 2nd message.
-        _descs = _chunk_message(full_text, limit=4000)
-        _groups, _cur, _clen = [], [], 0
-        for _d in _descs:
-            if _cur and _clen + len(_d) > 5200:
-                _groups.append(_cur); _cur, _clen = [], 0
-            _cur.append(_d); _clen += len(_d)
-        if _cur:
-            _groups.append(_cur)
-        if not _groups:
-            _groups = [[""]]
+        import re as _re2
         _CARD_COL = discord.Colour.from_str("#C9A24B")
-        def _mk_embeds(group):
-            return [discord.Embed(description=(d or "\u200b")[:4096], colour=_CARD_COL) for d in group]
+
+        def _split_desc(text, limit=4000):
+            out, cur = [], ""
+            for blk in text.split("\n\n"):
+                if cur and len(cur) + len(blk) + 2 > limit:
+                    out.append(cur.strip()); cur = blk
+                else:
+                    cur += ("\n\n" if cur else "") + blk
+            if cur.strip():
+                out.append(cur.strip())
+            return out or [""]
+
+        # --- Header card (messages[0]) -> embed FIELDS (compact stat sections inline) ---
+        _INLINE = {"titles", "personal bests", "lobby stats"}
+        header_embeds = [discord.Embed(title=player_name, colour=_CARD_COL)]
+        _cur_e = header_embeds[0]
+        _cur_chars = 0
+        _desc_lines = []
+        for _blk in (messages[0] if messages else "").split("\n\n"):
+            _blk = _blk.strip()
+            if not _blk:
+                continue
+            _first, _, _rest = _blk.partition("\n")
+            _m = _re2.search(r"\*\*(.+?)\*\*", _first)
+            _body = _rest.strip()
+            if _m and _body:
+                # field name: strip bold markdown (field names don't render it), keep emoji
+                _name = _re2.sub(r"\*\*", "", _first).strip().rstrip(":").strip()[:256] or "\u200b"
+                _inline = _name.lower() in _INLINE
+                _nm = _name
+                while _body:
+                    _piece = _body[:1024]
+                    if len(_body) > 1024:
+                        _cut = _piece.rfind("\n")
+                        if _cut > 400:
+                            _piece = _body[:_cut]
+                    _v = _piece.strip()[:1024] or "\u200b"
+                    if len(_cur_e.fields) >= 24 or _cur_chars + len(_nm) + len(_v) > 5200:
+                        _cur_e = discord.Embed(colour=_CARD_COL); header_embeds.append(_cur_e); _cur_chars = 0
+                    _cur_e.add_field(name=_nm, value=_v, inline=_inline)
+                    _cur_chars += len(_nm) + len(_v)
+                    _body = _body[len(_piece):].strip()
+                    _nm = "\u200b"
+            else:
+                _desc_lines.append(_blk)
+        if _desc_lines:
+            header_embeds[0].description = ("\n".join(_desc_lines))[:4096]
+
+        # --- Class breakdowns (messages[1:]) -> one embed each (keeps ## headers + meters) ---
+        class_embeds = []
+        for _cm in messages[1:]:
+            _cm = _cm.strip()
+            if not _cm:
+                continue
+            for _chunk in _split_desc(_cm, 4000):
+                class_embeds.append(discord.Embed(colour=_CARD_COL, description=_chunk[:4096]))
+
+        embeds = header_embeds + class_embeds
+
+        # --- Pack embeds into messages (<=~6000 chars, <=10 embeds each) ---
+        def _elen(e):
+            n = len(e.title or "") + len(e.description or "")
+            for f in e.fields:
+                n += len(f.name or "") + len(f.value or "")
+            return n
+        _groups, _g, _glen = [], [], 0
+        for _e in embeds:
+            _el = _elen(_e)
+            if _g and (_glen + _el > 5600 or len(_g) >= 10):
+                _groups.append(_g); _g, _glen = [], 0
+            _g.append(_e); _glen += _el
+        if _g:
+            _groups.append(_g)
+        if not _groups:
+            _groups = [[discord.Embed(title=player_name, colour=_CARD_COL, description="\u200b")]]
+
+        def _sig(embs):
+            return [((e.title or ""), (e.description or ""),
+                     tuple((f.name, f.value) for f in e.fields)) for e in embs]
 
         thread_id = await get_registry_thread_id(discord_id)
-
         if thread_id:
             thread = guild.get_thread(thread_id)
             if not thread:
@@ -1413,23 +1478,18 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     existing = [m async for m in thread.history(limit=50, oldest_first=True)
                                 if _meid is None or m.author.id == _meid]
                     for i, group in enumerate(_groups):
-                        embs = _mk_embeds(group)
                         if i < len(existing):
-                            want = [(d or "\u200b")[:4096] for d in group]
-                            have = [(e.description or "") for e in existing[i].embeds]
-                            if have != want or existing[i].content:
-                                await existing[i].edit(content=None, embeds=embs, attachments=[])
+                            if _sig(existing[i].embeds) != _sig(group) or existing[i].content:
+                                await existing[i].edit(content=None, embeds=group, attachments=[])
                         else:
                             await asyncio.sleep(0.4)
-                            await thread.send(embeds=embs)
-                    # Retire leftover old messages (blank the un-deletable starter, delete the rest).
+                            await thread.send(embeds=group)
                     for extra in existing[len(_groups):]:
                         try:
                             if extra.id == thread.id:
                                 await extra.edit(content="\u200b", embeds=[], attachments=[])
                             else:
-                                await extra.delete()
-                                await asyncio.sleep(0.3)
+                                await extra.delete(); await asyncio.sleep(0.3)
                         except Exception:
                             pass
                     if thread.name != player_name:
@@ -1440,17 +1500,14 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                         asyncio.create_task(update_archive_index(guild))
                     return
                 except Exception as e:
-                    # Thread exists but the edit failed — do NOT fall through to create a
-                    # duplicate; log and bail so the next refresh retries in place.
                     print(f"Registry thread edit error for {player_name}: {e}")
                     return
 
-        # No thread yet — create one; first embed-group rides the starter message.
-        thread_with_msg = await forum.create_thread(name=player_name, embeds=_mk_embeds(_groups[0]))
+        thread_with_msg = await forum.create_thread(name=player_name, embeds=_groups[0])
         thread = thread_with_msg.thread
         for group in _groups[1:]:
             await asyncio.sleep(0.4)
-            await thread.send(embeds=_mk_embeds(group))
+            await thread.send(embeds=group)
         await save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
         if not skip_index:
