@@ -697,9 +697,12 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
         pos = next((i + 1 for i, s in enumerate(scores) if s <= player_score), len(scores))
         is_map = ' - ' in lb_name
         emoji = _FEAT_BOARD_EMOJI.get(lb_name) or ('🏆' if is_map else '<:weapon_hs:1350656128635375698>')
-        # Gap to the next PLAYER if this player is #1.
+        # TUFF is a margin board — its scores ARE the "+N" the board shows, so mirror
+        # the player's score. Other boards show the lead over the next player at #1.
         gap = None
-        if pos == 1 and len(scores) >= 2:
+        if lb_name == "TUFF":
+            gap = player_score
+        elif pos == 1 and len(scores) >= 2:
             gap = player_score - scores[1]
         placements.append((pos, lb_name, emoji, gap))
 
