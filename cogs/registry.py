@@ -1379,6 +1379,10 @@ _bot_ref = None  # set in RegistryCog.__init__; lets module-level card fns raise
 async def create_or_update_registry_card(guild, discord_id, player_name, cached_data=None, skip_index=False):
     """Create or update a player's registry card in the butlers-archive forum."""
     import os
+    # Display-name override by discord_id (the same map the boards use), so clan tags /
+    # messy names stay off the card, e.g. "Ck Massive Σggplant" -> "massive egglant".
+    _ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+    player_name = _ov.get(str(discord_id), player_name)
     # No marks -> no card. A roster-wide refresh was spawning blank cards for people
     # who've never submitted. Marks only ever increase, so a 0-mark card is always an
     # erroneous one: skip creation, and delete any blank card that already slipped in.
