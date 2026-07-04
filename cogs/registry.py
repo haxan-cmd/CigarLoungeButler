@@ -1377,98 +1377,80 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             return
 
         messages = await build_registry_messages(player_name, discord_id, cached_data)
-        # Chunk every top-level message up front (including the header, messages[0])
-        # so the create path and the edit path always agree on exactly how many
-        # text messages the card needs. Previously the edit path never chunked at
-        # all: a card whose text crossed Discord's ~2000-char edit limit would
-        # either throw on .edit() (silently falling through to spawn a *second*
-        # duplicate thread while the old one stayed stale) or, if it had been
-        # chunked once before at creation time, permanently desync text_msgs[i]
-        # from messages[i] on every future refresh. That looked exactly like
-        # "the mark is in the DB but the card never updates" even though the
-        # underlying weapon-mark calculation was correct.
-        # (OctoLemon Sword/Man-at-Arms card bug, investigated 2026-06-30.)
-        chunks_per_message = [_chunk_message(m) for m in messages]
-        chunked_messages = [c for chunks in chunks_per_message for c in chunks]
-        boundary_indices = set()
-        _idx = 0
-        for _chunks in chunks_per_message:
-            boundary_indices.add(_idx)
-            _idx += len(_chunks)
+        full_text = "\n\n".join(m.strip() for m in messages if m and m.strip())
+
+        # Render the card as embeds packed into as few MESSAGES as possible. Discord allows
+        # ~6000 chars of embed text per message (4096 per embed), so almost every card fits
+        # in a SINGLE message — which means the forum post and a hyperlink both open on the
+        # same message, fixing the "archive drops you at the bottom of the card" quirk. Only
+        # the very largest cards spill to a 2nd message.
+        _descs = _chunk_message(full_text, limit=4000)
+        _groups, _cur, _clen = [], [], 0
+        for _d in _descs:
+            if _cur and _clen + len(_d) > 5200:
+                _groups.append(_cur); _cur, _clen = [], 0
+            _cur.append(_d); _clen += len(_d)
+        if _cur:
+            _groups.append(_cur)
+        if not _groups:
+            _groups = [[""]]
+        _CARD_COL = discord.Colour.from_str("#C9A24B")
+        def _mk_embeds(group):
+            return [discord.Embed(description=(d or "\u200b")[:4096], colour=_CARD_COL) for d in group]
 
         thread_id = await get_registry_thread_id(discord_id)
 
-        top_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Top.png')
-        bot_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'WMMR_Spacer_Bottom.png')
-
         if thread_id:
-            # Edit existing thread in place
-            try:
-                thread = guild.get_thread(thread_id)
-                if not thread:
+            thread = guild.get_thread(thread_id)
+            if not thread:
+                try:
                     thread = await guild.fetch_channel(thread_id)
+                except Exception:
+                    thread = None
+            if thread:
+                try:
+                    _meid = guild.me.id if guild.me else None
+                    existing = [m async for m in thread.history(limit=50, oldest_first=True)
+                                if _meid is None or m.author.id == _meid]
+                    for i, group in enumerate(_groups):
+                        embs = _mk_embeds(group)
+                        if i < len(existing):
+                            want = [(d or "\u200b")[:4096] for d in group]
+                            have = [(e.description or "") for e in existing[i].embeds]
+                            if have != want or existing[i].content:
+                                await existing[i].edit(content=None, embeds=embs, attachments=[])
+                        else:
+                            await asyncio.sleep(0.4)
+                            await thread.send(embeds=embs)
+                    # Retire leftover old messages (blank the un-deletable starter, delete the rest).
+                    for extra in existing[len(_groups):]:
+                        try:
+                            if extra.id == thread.id:
+                                await extra.edit(content="\u200b", embeds=[], attachments=[])
+                            else:
+                                await extra.delete()
+                                await asyncio.sleep(0.3)
+                        except Exception:
+                            pass
+                    if thread.name != player_name:
+                        await thread.edit(name=player_name)
+                    await save_registry_thread_id(discord_id, player_name, thread.id)
+                    print(f"Registry card updated for {player_name}")
+                    if not skip_index:
+                        asyncio.create_task(update_archive_index(guild))
+                    return
+                except Exception as e:
+                    # Thread exists but the edit failed — do NOT fall through to create a
+                    # duplicate; log and bail so the next refresh retries in place.
+                    print(f"Registry thread edit error for {player_name}: {e}")
+                    return
 
-                # Collect existing text messages (skip image-only messages).
-                # Raised from 30 -> 50 since chunking can push a long card past 30 messages.
-                existing = []
-                async for msg in thread.history(limit=50, oldest_first=True):
-                    existing.append(msg)
-                text_msgs = [m for m in existing if m.content and m.content != '🗂️']
-
-                # Edit existing text messages against the flattened, chunk-aware list
-                for i, new_text in enumerate(chunked_messages):
-                    if i < len(text_msgs):
-                        if text_msgs[i].content != new_text:
-                            await text_msgs[i].edit(content=new_text)
-                    else:
-                        # New message needed — send it
-                        await asyncio.sleep(0.5)
-                        await thread.send(new_text)
-
-                # Clear any extra messages beyond what we need
-                for extra_msg in text_msgs[len(chunked_messages):]:
-                    try:
-                        await extra_msg.edit(content='\u200b')
-                    except Exception:
-                        pass
-
-                # Update player name in thread if changed
-                if thread.name != player_name:
-                    await thread.edit(name=player_name)
-
-                await save_registry_thread_id(discord_id, player_name, thread.id)
-                print(f"Registry card updated for {player_name}")
-                if not skip_index:
-                    asyncio.create_task(update_archive_index(guild))
-                return
-            except Exception as e:
-                print(f"Registry thread edit error for {player_name}: {e}")
-                # Fall through to create new thread
-
-        # Create new thread
-        thread_with_msg = await forum.create_thread(
-            name=player_name,
-            content='🗂️',
-        )
+        # No thread yet — create one; first embed-group rides the starter message.
+        thread_with_msg = await forum.create_thread(name=player_name, embeds=_mk_embeds(_groups[0]))
         thread = thread_with_msg.thread
-
-        has_top = os.path.exists(top_path)
-        has_bot = os.path.exists(bot_path)
-
-        if has_top:
-            await asyncio.sleep(0.5)
-            await thread.send(file=discord.File(top_path))
-
-        await asyncio.sleep(0.5)
-        await thread.send(chunked_messages[0])
-
-        for i in range(1, len(chunked_messages)):
-            if has_bot and i in boundary_indices:
-                await asyncio.sleep(0.5)
-                await thread.send(file=discord.File(bot_path))
-            await asyncio.sleep(0.5)
-            await thread.send(chunked_messages[i])
-
+        for group in _groups[1:]:
+            await asyncio.sleep(0.4)
+            await thread.send(embeds=_mk_embeds(group))
         await save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
         if not skip_index:
