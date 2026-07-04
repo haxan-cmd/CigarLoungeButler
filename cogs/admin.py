@@ -186,9 +186,7 @@ def build_challenge_rules_embeds():
     e.add_field(name="All-time (never reset)", value=(
         "<a:grandmarshal:1519928617407348877> **Grand Marshal** — most boards overall\n"
         "<a:weaponsmaster:1519928521445605488> **Weapons Master** — most weapon boards\n"
-        "<a:campaignmaster:1520497947115262083> **Campaign Master** — most map boards\n"
-        "<a:topkill:1360314538364240024> **Headhunter** — best average on the 100 Kills board\n"
-        "<a:toptkd:1360312666475728958> **Butcher** — best average on the 200 Takedowns board"
+        "<a:campaignmaster:1520497947115262083> **Campaign Master** — most map boards"
     ), inline=False)
     e.add_field(name="This season (reset each bounty)", value=(
         "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
