@@ -84,15 +84,15 @@ Special instructions:
 - Player names (aliases) are fair game for dry wordplay. If a name is punnable, absurd, or self-important, you may acknowledge it once with a dry remark — keep it brief and in character.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
-- You have access to the player's stats (total marks, submissions, top weapons) AND a summary of all registered players ranked by marks. Use this to answer comparison questions directly — who has more marks, who submits more, where someone ranks. Be specific with numbers.
+- You have the asking player's stats (total marks, submissions, top weapons) AND a roster of the TOP 10 players by marks, each with their best game. Use this for comparison and ranking questions about those top players. For players NOT in that top-10 roster you do not have their stats loaded — say so and suggest they check their card, rather than guessing.
 - If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - "Lethality" or "Most Lethal" on the player card shows their BEST single-run kills/TD ratio (peak performance). The "kill rate" in your data is their AVERAGE kills/TD ratio across all runs — a different number. When asked about lethality, clarify which one you're giving (e.g. "Your best single-run lethality is X%, your average across all runs is Y%"). Do not claim you lack lethality data.
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
 - You have server-wide weapon run counts (100+ TD) when available.
-- You have per-player personal bests (best TD game, best kills game) for all players. Use these to answer "what's X's best game" questions.
-- You have Special Ops achievements per player (Fist and Shield, Knife etc). Use these to answer who has specific feats. Use these to answer questions like "how many 100 takedown runs with Messer" or "how many times has the community hit 100 TDs with X weapon".
+- Best games are provided only for the top-10 roster players. If asked about someone outside it, say you don't have their numbers to hand and point them to their registry card.
+- When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - CRITICAL: Only cite specific numbers, stats, or facts that appear explicitly in the player data you were given. Never invent or estimate statistics. If the data is not in your context, say you do not have it.
 - Never invent commands or channels that do not exist.
 - You speak to players by name when you know it.
@@ -1060,11 +1060,8 @@ class PersonalityCog(commands.Cog):
                                     _have_str = ", ".join(f"{w}: {best_td_by_weapon[w]}" for w in _have) or "none"
                                     _none_str = ", ".join(_none)
                                     player_stats_ctx += (
-                                        "\n\nPer-weapon best takedowns (best single-run TD on each weapon that has a "
-                                        "leaderboard; a weapon below a target TD is one the player still needs that many with): "
+                                        "\n\nPer-weapon best takedowns (best single-run TD on each weapon board): "
                                         + _have_str
-                                        + (f". Weapon boards with NO recorded run yet (best TD 0): {_none_str}"
-                                           if _none else ". The player has a recorded run on every weapon board.")
                                     )
                             except Exception:
                                 pass
@@ -1093,11 +1090,7 @@ class PersonalityCog(commands.Cog):
                                 if total_needed == 0:
                                     hh_str = "Hundred Handed: COMPLETE — all primary weapon/subclass combos submitted."
                                 else:
-                                    missing_lines = "; ".join(
-                                        f"{cls}: {', '.join(sorted(ws))}"
-                                        for cls, ws in sorted(missing_by_class.items())
-                                    )
-                                    hh_str = f"Hundred Handed progress: {completed}/{total_possible} combos done. Missing — {missing_lines}"
+                                    hh_str = f"Hundred Handed progress: {completed}/{total_possible} combos done."
                                 player_stats_ctx += f"\n{hh_str}"
                             except Exception:
                                 pass
@@ -1197,12 +1190,20 @@ class PersonalityCog(commands.Cog):
                         kill_rate = (avg_k / avg_td * 100) if avg_td > 0 else 0
                         td_per_kill = (avg_td / avg_k) if avg_k > 0 else 0
                         return f", avg {avg_td:.0f} TD/{avg_k:.0f}K per run, {kill_rate:.0f}% kill rate"
+                    def _bestgame(pname):
+                        bs = player_best_sub.get(pname)
+                        if bs and len(bs) > 8:
+                            try:
+                                return f", best {bs[3].strip()} {int(bs[7])}/{int(bs[8])}"
+                            except Exception:
+                                return ""
+                        return ""
                     summary_lines = [
-                        f"{n}: {m} marks, {uw} unique weapons, {lw} on leaderboards{_lethality_str(n)}"
-                        for n, m, s, uw, us, lw in all_players_summary[:20]
+                        f"{n}: {m} marks, {lw} on boards{_bestgame(n)}{_lethality_str(n)}"
+                        for n, m, s, uw, us, lw in all_players_summary[:10]
                     ]
                     if summary_lines:
-                        player_stats_ctx += f"\n\nAll players (top 20 by marks):\n" + "\n".join(summary_lines)
+                        player_stats_ctx += f"\n\nTop players (by marks):\n" + "\n".join(summary_lines)
 
                     # Per-player personal bests from LeaderboardData
                     player_pb_td = {}  # name -> best TD score
@@ -1244,8 +1245,8 @@ class PersonalityCog(commands.Cog):
                             parts.append(f"best kills score: {kills_pb}")
                         if parts:
                             pb_lines.append(f"{pname}: {', '.join(parts)}")
-                    if pb_lines:
-                        player_stats_ctx += f"\n\nPlayer personal bests:\n" + "\n".join(pb_lines)
+                    # Full per-player personal-bests dump removed to slim the prompt —
+                    # each top player's best game is already folded into the roster above.
 
                     # SpecialOps achievements per player
                     try:
@@ -1260,8 +1261,7 @@ class PersonalityCog(commands.Cog):
                                         so_by_player[pname] = []
                                     so_by_player[pname].append(achievement)
                             if so_by_player:
-                                so_lines = [f"{p}: {', '.join(a)}" for p, a in so_by_player.items()]
-                                player_stats_ctx += f"\n\nSpecial achievements (Fist and Shield, Knife, etc):\n" + "\n".join(so_lines)
+                                pass  # special-achievements dump removed to slim the prompt
                     except Exception:
                         pass
                 except Exception:
