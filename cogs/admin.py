@@ -690,7 +690,7 @@ class AdminCog(commands.Cog):
         card_status = "and refreshed their card"
         try:
             from cogs.registry import create_or_update_registry_card
-            await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
+            await create_or_update_registry_card(interaction.guild, str(player.id), _canonical_name)
         except Exception as e:
             card_status = f"but card refresh failed: {e}"
             print(f"[SET_FEAT] card refresh error for {player.display_name}: {e}")
@@ -742,8 +742,19 @@ class AdminCog(commands.Cog):
         subclass = normalized_subclass
 
         await interaction.response.defer(ephemeral=True)
+        # Store under the SAME name the card reads legacy marks by — the Players-table
+        # name (set at last submission), not the live Discord display name. Otherwise a
+        # clan tag / rename means the mark is written under one name and read under
+        # another, so it silently never shows on the card.
+        _canonical_name = player.display_name
         try:
-            await _db.add_legacy_mark(player.display_name, weapon, subclass, marks)
+            _prow = await _db.get_player(str(player.id))
+            if _prow and len(_prow) > 1 and (_prow[1] or '').strip():
+                _canonical_name = _prow[1].strip()
+        except Exception:
+            pass
+        try:
+            await _db.add_legacy_mark(_canonical_name, weapon, subclass, marks)
         except Exception as e:
             await interaction.followup.send(f"\u274c DB error: {e}", ephemeral=True)
             return
@@ -751,7 +762,7 @@ class AdminCog(commands.Cog):
         card_status = "and refreshed their card"
         try:
             from cogs.registry import create_or_update_registry_card
-            await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
+            await create_or_update_registry_card(interaction.guild, str(player.id), _canonical_name)
         except Exception as e:
             card_status = f"but card refresh failed: {e}"
 
