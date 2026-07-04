@@ -503,6 +503,62 @@ class AdminCog(commands.Cog):
         embed.set_footer(text="Only one player holds each title at a time.")
 
         await channel.send(embed=embed)
+
+    @app_commands.command(name="post_roles_guide", description="Post the ranks/titles/roles guide to the rules channel (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def post_roles_guide(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        channel = self.bot.get_channel(CHALLENGE_RULES_CHANNEL_ID)
+        if not channel:
+            try:
+                channel = await self.bot.fetch_channel(CHALLENGE_RULES_CHANNEL_ID)
+            except Exception:
+                channel = None
+        if not channel:
+            await interaction.followup.send("Could not find the rules channel.", ephemeral=True)
+            return
+        te = getattr(config, "TITLE_EMOJIS", {})
+        gm=te.get("Grand Marshal","\U0001f3c6"); wm=te.get("Weapons Master","\u2694\ufe0f"); cm=te.get("Campaign Master","\U0001f5fa\ufe0f")
+        ap=te.get("apex_title","\U0001f480"); fr=te.get("frenzied_title","\U0001fa78"); ml=te.get("Lethality","\U0001f9ea"); wl=te.get("Warlord","\U0001f6e1\ufe0f")
+        GOLD=discord.Colour.from_str("#c8a45a")
+        e1=discord.Embed(title="\U0001f4d6 Ranks & Progression", colour=GOLD,
+            description="How you climb in the Lounge. Everything updates automatically from your submitted runs.")
+        e1.add_field(name="Weapon Ranks \u2014 marks per weapon", value=(
+            "**Bronze** 1 \u00b7 **Silver** 5 \u00b7 **Gold** 12 \u00b7 **Emerald** 25 \u00b7 **Diamond** 40 \u00b7 **Crimson** 60\n"
+            "**Prestige** \u2014 Bronze 80 \u00b7 Silver 100 \u00b7 Gold 115 \u00b7 Emerald 125 \u00b7 Diamond 133 \u00b7 Crimson 141\n"
+            "**Iridescent** 150 *(top rank)*\n"
+            "*1 mark per valid 100-takedown run, plus a bonus mark each for 200 TD, 100 kills, a Triple, or a new High Score.*"), inline=False)
+        e1.add_field(name="\U0001f451 Mastery", value=(
+            "Past Iridescent, keep grinding the same weapon: **100 runs = Mastered**, **250 = Virtuoso** "
+            "(counts across every class that wields it)."), inline=False)
+        e1.add_field(name="Subclass Ranks", value=(
+            "Each weapon rank-up fills your subclass meter:\nInitiate \u2192 Veteran \u2192 Master \u2192 Grandmaster \u2192 Champion \u2192 Paragon \u2192 **Apex**."), inline=False)
+        e1.add_field(name="Class Ranks", value=(
+            "Filling a subclass meter earns a class mark:\nSworn \u2192 Trusted \u2192 Proven \u2192 Honored \u2192 Esteemed \u2192 Exalted \u2192 **Ascended**."), inline=False)
+        e2=discord.Embed(title="\U0001f396\ufe0f Titles & Roles", colour=GOLD,
+            description="Prestige roles \u2014 the all-time ones are held by a single player at a time and recalculated after every run.")
+        e2.add_field(name="Player Titles \u2014 climb by completing the monthly bounty", value=(
+            "Unbound \u2192 Proven \u2192 Respected \u2192 Distinguished \u2192 Renowned \u2192 Illustrious \u2192 Exemplar \u2192 **Legend**."), inline=False)
+        e2.add_field(name="All-Time Titles *(roles)*", value=(
+            f"{gm} **Grand Marshal** \u2014 on 15+ leaderboards overall\n"
+            f"{wm} **Weapons Master** \u2014 on 9+ weapon boards\n"
+            f"{cm} **Campaign Master** \u2014 on 6+ map boards\n"
+            f"{ap} **Headhunter** \u2014 best average on the 100 Kills board\n"
+            f"{fr} **Butcher** \u2014 best average on the 200 Takedowns board"), inline=False)
+        e2.add_field(name="Season Titles *(reset every month)*", value=(
+            f"{ap} **Apex** \u2014 best average kills (100+ kill runs)\n"
+            f"{fr} **Frenzied** \u2014 best average takedowns (200+ TD runs)\n"
+            f"{ml} **Most Lethal** \u2014 best kills-per-takedown\n"
+            f"{wl} **Warlord** \u2014 highest share of your team's takedowns"), inline=False)
+        e2.add_field(name="\U0001f431 Bounty Role", value="Given while you're taking part in the current monthly bounty.", inline=False)
+        try:
+            async for m in channel.history(limit=60):
+                if m.author == interaction.guild.me and m.embeds and (m.embeds[0].title or "") in ("\U0001f4d6 Ranks & Progression","\U0001f396\ufe0f Titles & Roles"):
+                    await m.delete(); await asyncio.sleep(0.3)
+        except Exception:
+            pass
+        await channel.send(embed=e1); await asyncio.sleep(0.4); await channel.send(embed=e2)
+        await interaction.followup.send("\u2705 Posted the ranks & titles guide.", ephemeral=True)
         await interaction.response.send_message("Title guide posted.", ephemeral=True)
 
     @app_commands.command(name="remove_submission", description="Remove a fake or erroneous submission and roll back all affected tables (admin only).")
