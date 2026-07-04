@@ -275,6 +275,11 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
                 await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
         return False
 
+    # Player already completed this bounty — don't re-credit their progress or fire the
+    # bounty (cat) reaction again. They're done; extra challenge-weapon runs shouldn't track.
+    if any(str(c.get('id')) == str(player_id) for c in bounty['completions']):
+        return False
+
     # Increment global participation counter
     w = weapons[matched_key]
     w['current'] += 1
