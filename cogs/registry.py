@@ -1383,6 +1383,8 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
 
         messages = await build_registry_messages(player_name, discord_id, cached_data)
         import re as _re2
+        # Strip leading "• " bullets — in embed fields they only add indent/width.
+        messages = [_re2.sub(r"(?m)^•\s*", "", m or "") for m in messages]
         _CARD_COL = discord.Colour.from_str("#C9A24B")
 
         def _split_desc(text, limit=4000):
