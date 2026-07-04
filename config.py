@@ -260,6 +260,7 @@ VIRTUOSO_WEAPON_EMOJIS = {
 # takes precedence when a weapon has both).
 MASTERY_WEAPON_EMOJIS = {
     "Halberd": "<a:halberdmastery:1522718086225068215>",
+    "Greatsword": "<a:greatswordmastery:1523012710621773836>",
 }
 
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
