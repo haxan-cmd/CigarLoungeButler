@@ -2244,6 +2244,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             await create_or_update_registry_card(_guild, _user_id, _user_name)
         except Exception as e:
             print(f"Registry card update error: {e}")
+        # First-time submitters: the card thread didn't exist when the blurb posted, so
+        # the name was left as plain code text. Now that the card exists, upgrade the
+        # blurb name to a hyperlink to it.
+        try:
+            _pr = await _db.get_player(str(_user_id))
+            _tid = _pr[2] if _pr and len(_pr) > 2 and _pr[2] else None
+            if _tid:
+                _plain = f"`{_user_name}`"
+                _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"
+                _fresh = await summary_reply.channel.fetch_message(summary_reply.id)
+                if _plain in (_fresh.content or ""):
+                    await summary_reply.edit(content=_fresh.content.replace(_plain, _link, 1))
+        except Exception as _nle:
+            print(f"[NAME LINK] blurb update error: {_nle}")
         await asyncio.sleep(1)
 
         # Update bounty cards index
