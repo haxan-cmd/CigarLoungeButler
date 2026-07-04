@@ -1398,15 +1398,9 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         import re as _re2
         # Strip leading "• " bullets — in embed fields they only add indent/width.
         messages = [_re2.sub(r"(?m)^•\s*", "", m or "") for m in messages]
-        # Subtitle on the card's first message so the forum preview shows an emoji +
-        # the player's title instead of Discord's "Click to see attachment" fallback.
+        # Subtitle on the card's first message so the forum preview shows an emoji
+        # instead of Discord's "Click to see attachment" fallback.
         _subtitle = "🗂️"
-        try:
-            _tl = messages[0].split("\n", 1)[0].strip() if messages else ""
-            if _tl:
-                _subtitle = f"🗂️ {_tl}"[:120]
-        except Exception:
-            pass
         _CARD_COL = discord.Colour.from_str("#C9A24B")
 
         def _split_desc(text, limit=4000):
