@@ -1713,8 +1713,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if blurb_parts:
         lobby_line = " · ".join(blurb_parts)
 
+    from cogs.registry import get_registry_thread_id as _grt
     _player_row = await _db.get_player(str(interaction.user.id))
-    _thread_id = _player_row[2] if _player_row and _player_row[2] else None
+    try:
+        _thread_id = await _grt(str(interaction.user.id))
+    except Exception:
+        _thread_id = None
+    if not _thread_id and _player_row and len(_player_row) > 2 and _player_row[2]:
+        _thread_id = _player_row[2]
     _guild_id = interaction.guild.id
     _name_display = (
         f"[{interaction.user.display_name}](https://discord.com/channels/{_guild_id}/{_thread_id})"
@@ -2248,8 +2254,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # the name was left as plain code text. Now that the card exists, upgrade the
         # blurb name to a hyperlink to it.
         try:
-            _pr = await _db.get_player(str(_user_id))
-            _tid = _pr[2] if _pr and len(_pr) > 2 and _pr[2] else None
+            from cogs.registry import get_registry_thread_id as _grt2
+            try:
+                _tid = await _grt2(str(_user_id))
+            except Exception:
+                _tid = None
+            if not _tid:
+                _pr = await _db.get_player(str(_user_id))
+                _tid = _pr[2] if _pr and len(_pr) > 2 and _pr[2] else None
             if _tid:
                 _plain = f"`{_user_name}`"
                 _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"
