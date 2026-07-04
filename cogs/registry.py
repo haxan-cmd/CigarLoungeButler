@@ -671,23 +671,36 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
             score = int(row[3])
         except ValueError:
             continue
-        board_scores.setdefault(lb_name, []).append(score)
+        board_scores.setdefault(lb_name, []).append((score, row[2].strip()))
         if row[2].strip() == discord_id_str:
             if lb_name not in player_scores or score > player_scores[lb_name]:
                 player_scores[lb_name] = score
 
-    # Calculate placement for each board the player is on
+    # Feat boards (100 Kills, 200 Takedowns, TUFF, Triple…) store MANY rows per player,
+    # so rank + gap must be computed against each player's BEST, deduped by discord_id —
+    # otherwise "+gap" measures the distance to your own 2nd entry, not the next player.
+    _FEAT_BOARD_EMOJI = dict(config.FEAT_EMOJIS)
+    _FEAT_BOARD_EMOJI.update({
+        "TUFF":         "<a:TUFF2:1520779243879927898>",
+        "Healing Horn": SPECIAL_OPS_EMOJIS.get("Healing Horn", ""),
+        "Mallet":       SPECIAL_OPS_EMOJIS.get("Mallet", "🔨"),
+        "Knife":        SPECIAL_OPS_EMOJIS.get("Knife", "🔪"),
+    })
+
     placements = []
     for lb_name, player_score in player_scores.items():
-        scores = sorted(board_scores.get(lb_name, []), reverse=True)
+        best_per_player = {}
+        for _sc, _did in board_scores.get(lb_name, []):
+            if _did not in best_per_player or _sc > best_per_player[_did]:
+                best_per_player[_did] = _sc
+        scores = sorted(best_per_player.values(), reverse=True)
         pos = next((i + 1 for i, s in enumerate(scores) if s <= player_score), len(scores))
         is_map = ' - ' in lb_name
-        emoji = '🏆' if is_map else '<:weapon_hs:1350656128635375698>'
-        # Calculate gap to #2 if player is #1
+        emoji = _FEAT_BOARD_EMOJI.get(lb_name) or ('🏆' if is_map else '<:weapon_hs:1350656128635375698>')
+        # Gap to the next PLAYER if this player is #1.
         gap = None
         if pos == 1 and len(scores) >= 2:
-            second = scores[1]
-            gap = player_score - second
+            gap = player_score - scores[1]
         placements.append((pos, lb_name, emoji, gap))
 
     # Sort: #1 entries by gap descending (bigger gap = more dominant), others by placement
@@ -1016,7 +1029,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         lines.append(f"*({lobby_stats['games']} tracked games)*")
         lines.append("")
 
-    lines.append("**Mastered Weapons:**")
+    lines.append("**Weapon Mastery:**")
     _MASTER = config.MASTERY_THRESHOLD
     _VIRT = config.VIRTUOSO_THRESHOLD
     _counts = mastered if isinstance(mastered, dict) else {w: _MASTER for w in (mastered or [])}
@@ -1385,6 +1398,15 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
         import re as _re2
         # Strip leading "• " bullets — in embed fields they only add indent/width.
         messages = [_re2.sub(r"(?m)^•\s*", "", m or "") for m in messages]
+        # Subtitle on the card's first message so the forum preview shows an emoji +
+        # the player's title instead of Discord's "Click to see attachment" fallback.
+        _subtitle = "🗂️"
+        try:
+            _tl = messages[0].split("\n", 1)[0].strip() if messages else ""
+            if _tl:
+                _subtitle = f"🗂️ {_tl}"[:120]
+        except Exception:
+            pass
         _CARD_COL = discord.Colour.from_str("#C9A24B")
 
         def _split_desc(text, limit=4000):
@@ -1480,12 +1502,13 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     existing = [m async for m in thread.history(limit=50, oldest_first=True)
                                 if _meid is None or m.author.id == _meid]
                     for i, group in enumerate(_groups):
+                        _content = _subtitle if i == 0 else None
                         if i < len(existing):
-                            if _sig(existing[i].embeds) != _sig(group) or existing[i].content:
-                                await existing[i].edit(content=None, embeds=group, attachments=[])
+                            if _sig(existing[i].embeds) != _sig(group) or (existing[i].content or None) != (_content or None):
+                                await existing[i].edit(content=_content, embeds=group, attachments=[])
                         else:
                             await asyncio.sleep(0.4)
-                            await thread.send(embeds=group)
+                            await thread.send(content=_content, embeds=group)
                     for extra in existing[len(_groups):]:
                         try:
                             if extra.id == thread.id:
@@ -1505,7 +1528,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     print(f"Registry thread edit error for {player_name}: {e}")
                     return
 
-        thread_with_msg = await forum.create_thread(name=player_name, embeds=_groups[0])
+        thread_with_msg = await forum.create_thread(name=player_name, content=_subtitle, embeds=_groups[0])
         thread = thread_with_msg.thread
         for group in _groups[1:]:
             await asyncio.sleep(0.4)
@@ -1622,7 +1645,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
         return
 
     # --- Parse legacy bounty completions ---
-    KNOWN_SECTIONS = ["Feats of Legend", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
+    KNOWN_SECTIONS = ["Feats of Legend", "Weapon Mastery", "Mastered Weapons", "Special Ops", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
     legacy_bounties = []
     in_bounties_section = False
     for line in full_text.split("\n"):
@@ -1656,7 +1679,7 @@ async def _process_registry_thread(guild, thread, cached_data=None, player_name=
     # --- Parse legacy feats of legend ---
     legacy_feats = []
     in_feats_section = False
-    FEAT_STOP_SECTIONS = ["Mastered Weapons", "Special Ops", "Bounties Completed", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
+    FEAT_STOP_SECTIONS = ["Weapon Mastery", "Mastered Weapons", "Special Ops", "Bounties Completed", "Titles:", "Vanguard:", "Knight:", "Footman:", "Archer:", "Marksman:"]
     for line in full_text.split("\n"):
         line = line.strip()
         if "Feats of Legend" in line:
@@ -2625,7 +2648,7 @@ class RegistryCog(commands.Cog):
             _VIRT = config.VIRTUOSO_THRESHOLD
             _vdefault = getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "\U0001f48e")
             lines.append("")
-            lines.append("**Mastered Weapons**")
+            lines.append("**Weapon Mastery**")
             for w, c in sorted(_mcounts.items(), key=lambda t: -t[1]):
                 if c >= _VIRT:
                     _e = config.VIRTUOSO_WEAPON_EMOJIS.get(w, _vdefault)
