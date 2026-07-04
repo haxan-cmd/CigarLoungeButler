@@ -252,15 +252,15 @@ VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji
 VIRTUOSO_WEAPON_EMOJIS = {
-    "Executioner's Axe": "<a:ExecAxeVirtuoso:1522338416425959624>",
-    "Messer": "<a:messervirtuoso:1522715847485952231>",
+    "Executioner's Axe": "<a:executioneraxevirtuoso:1523020043615731812>",
+    "Messer": "<a:messervirtuoso:1523020066923352188>",
 }
 
 # Per-weapon animated emoji shown on the blurb at 100-mark Mastery (Virtuoso, 250,
 # takes precedence when a weapon has both).
 MASTERY_WEAPON_EMOJIS = {
-    "Halberd": "<a:halberdmastery:1522718086225068215>",
-    "Greatsword": "<a:greatswordmastery:1523012710621773836>",
+    "Halberd": "<a:halberdmastery:1523019767328538765>",
+    "Greatsword": "<a:greatswordmastery:1523019414994419863>",
 }
 
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
