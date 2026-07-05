@@ -418,6 +418,7 @@ WEAPON_ALIASES = {
     "healing horn": "Healing Horn",
     "fist": "Fist and Shield", "fist and shield": "Fist and Shield",
     "heavy cavalry sword": "Heavy Cavalry Sword", "hcs": "Heavy Cavalry Sword",
+    "cav sword": "Heavy Cavalry Sword", "cavalry sword": "Heavy Cavalry Sword", "heavy cav sword": "Heavy Cavalry Sword",
     "one handed spear": "One-Handed Spear", "one hand spear": "One-Handed Spear",
     "1 hand spear": "One-Handed Spear", "1 handed spear": "One-Handed Spear", "1h spear": "One-Handed Spear",
     "two handed hammer": "Two-Handed Hammer", "2h hammer": "Two-Handed Hammer",

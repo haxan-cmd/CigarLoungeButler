@@ -22,6 +22,7 @@ MATCH = [
     ("resubmit poleman halberd",  "Halberd",  "Poleman"),    # resubmit word ignored
     ("mace",                      "Mace",     None),
     ("just used the greatsword",  "Greatsword", None),
+    ("man at arms cav sword",     "Heavy Cavalry Sword", "Man-at-Arms"),  # "cav sword" must beat plain "sword"
 ]
 
 
