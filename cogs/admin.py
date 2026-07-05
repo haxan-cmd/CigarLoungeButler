@@ -754,8 +754,8 @@ class AdminCog(commands.Cog):
             _prow = await _db.get_player(str(player.id))
             if _prow and len(_prow) > 1 and (_prow[1] or '').strip():
                 _canonical_name = _prow[1].strip()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[AWARD_MARKS] canonical-name lookup failed for {player.id}, using display_name: {e}")
         try:
             await _db.add_legacy_mark(_canonical_name, weapon, subclass, marks)
         except Exception as e:

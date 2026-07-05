@@ -179,8 +179,8 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                 else:
                     key = weapon
                 weapon_marks[key] = weapon_marks.get(key, 0) + marks
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MARKS] legacy-mark aggregation failed for {player_name}: {e}")
 
     return weapon_marks
 
@@ -462,8 +462,8 @@ async def get_feats_for_player(discord_id, cached_data=None):
         _hh_matched = _hh_done & _hh_required
         if _hh_required and _hh_required.issubset(_hh_done):
             named_feats.add('hhanded')  # only the COMPLETED feat counts here
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[HH] hundred-handed match failed for {discord_id_str}: {e}")
 
     # Collect feat submissions from Submissions sheet
     for row in subs:
