@@ -81,17 +81,15 @@ Live weapon leaderboards for all 1H and 2H weapons, plus map boards and feat boa
 Per-player forum threads in the Butler's Archive. Weapon marks are merged from live submissions, leaderboard data, and legacy records. Includes class rank progression, personal bests, and Best Placements sorted by dominance gap (gap between 1st and 2nd place). `/repair_marks` backfills missing High Score marks in bulk.
 
 ### 🎖️ Butler's Report
-Weekly stats and all-time prestige titles posted as a Discord embed. Titles recalculated after every submission — one holder per title at a time. Weekly stats reset each Monday.
+Weekly stats and all-time prestige titles posted as a Discord embed. Titles recalculated after every submission — one holder per title at a time, with a stability margin so a title only changes hands when a challenger clearly beats the current holder. Weekly stats reset each Monday.
 
 | Title | Criteria |
 |---|---|
 | **Grand Marshal** | Most leaderboard breadth — 15+ boards across all categories, ranked by average placement |
 | **Weapons Master** | 9+ weapon leaderboards, ranked by average placement |
 | **Campaign Master** | 6+ map leaderboards, ranked by average placement |
-| **Headhunter** | #1 on the 100 Kills board, ranked by average kills weighted by submission count |
-| **Butcher** | #1 on the 200 Takedowns board, ranked by average takedowns weighted by submission count |
 
-Weekly stats include Lethality Rating, Warlord (TD/kill ratio), Busiest player, Top Weapons, and Top Maps — all with a 3-run minimum.
+Weekly stats include **Lethality** (kills per takedown), **Warlord** (your share of your team's takedowns), Busiest player, Top Weapons, and Top Maps. The Lethality and Warlord ratings use a recency-weighted, volume-adjusted (Bayesian) average, so a handful of lucky games can't top the board — 3-run minimum.
 
 ### 🎯 Bounty System
 Monthly bounty cards with per-player progress tracking, a live Top Hunters board, and archival on completion. Supports per-weapon custom targets. Player commands: `/bounty_hunt`, `/my_bounty`, `/bounty_status`.
