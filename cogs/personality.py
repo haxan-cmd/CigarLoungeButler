@@ -1015,6 +1015,39 @@ class PersonalityCog(commands.Cog):
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                             logged_runs = len(player_subs_pb)
                             player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in database: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
+                            # True best single-run lethality (highest kills/TD ratio of ANY run) plus
+                            # the average kill rate, matching the registry card. The Butler used to
+                            # DERIVE "best lethality" from the best-TD game, which is a different, wrong
+                            # number — Ascension's best-TD Heavy Mace game is not their most-lethal run.
+                            try:
+                                _leth_runs = []
+                                _best_leth = None
+                                for _lr in player_subs_pb:
+                                    try:
+                                        _ltd = int(_lr[7]); _lk = int(_lr[8])
+                                    except (ValueError, IndexError):
+                                        continue
+                                    if _ltd > 0 and _lk >= 0:
+                                        _ratio = _lk / _ltd * 100
+                                        _leth_runs.append(_ratio)
+                                        if _best_leth is None or _ratio > _best_leth[0]:
+                                            _best_leth = (_ratio,
+                                                          _lr[3].strip() if len(_lr) > 3 else "?",
+                                                          _lr[5].strip() if len(_lr) > 5 else "?",
+                                                          _ltd, _lk)
+                                if _best_leth:
+                                    player_stats_ctx += (
+                                        f"\nBest single-run lethality (highest kills/TD ratio of any run, "
+                                        f"NOT the best-TD game): {_best_leth[0]:.1f}% on {_best_leth[1]} at "
+                                        f"{_best_leth[2]} ({_best_leth[4]} kills / {_best_leth[3]} TD)."
+                                    )
+                                if _leth_runs:
+                                    player_stats_ctx += (
+                                        f"\nAverage kill rate across all {len(_leth_runs)} runs: "
+                                        f"{sum(_leth_runs) / len(_leth_runs):.1f}%."
+                                    )
+                            except Exception:
+                                pass
 
                             # Build explicit leaderboard standings for this player.
                             # Group all LD entries by weapon, sort each board by score,
