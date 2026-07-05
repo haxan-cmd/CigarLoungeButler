@@ -1677,21 +1677,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     blurb_parts = []
 
-    # --- Team rank + TD share ---
+    # --- Team rank (tracked for storage) ---
     if _team_td:
         team_rank = sum(1 for s in _team_td if s >= takedowns) + 1
         team_size = len(_team_td) + 1
-        total_team_td = takedowns + sum(_team_td)
-        td_share = round(takedowns / total_team_td * 100, 1) if total_team_td > 0 else None
-        td_share_str = f"<:warlord:1520490364039860347> {td_share}% TD share" if td_share is not None else ""
-        if td_share_str:
-            blurb_parts.append(td_share_str)
 
-    # --- Lethality (kills / takedowns ratio) ---
-    if kills is not None and takedowns and takedowns > 0:
-        lethality = round(kills / takedowns * 100, 1)
-        lethal_prefix = "<a:mostlethal:1520490418817601658> " if lethality >= 5.0 else ""
-        blurb_parts.append(f"{lethal_prefix}{lethality}% lethality")
+    # --- Warlord (takedowns / team total kills) + Executioner (kills / team total kills), this game ---
+    if _team_k and kills and takedowns and takedowns > 0:
+        _tk_total = kills + sum(_team_k)
+        if _tk_total > 0:
+            _warlord_g = round(takedowns / _tk_total * 100, 1)
+            _exec_g = round(kills / _tk_total * 100, 1)
+            blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
+            blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Executioner")
 
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
