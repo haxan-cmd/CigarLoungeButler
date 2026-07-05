@@ -169,6 +169,11 @@ def build_challenge_rules_embeds():
         "• **Map boards** — best takedown game per map/faction (VIP counts here)\n"
         "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF"
     ), inline=False)
+    e.add_field(name="<a:TUFF2:1520779243879927898>  TUFF", value=(
+        "A hard-carry board: you score **TUFF** when your **kills** beat your best "
+        "teammate's **takedowns**. The board tracks the margin (**+N**) \u2014 how far your "
+        "kill count topped the next-highest player on your own team."
+    ), inline=False)
     e.add_field(name="<a:mostlethal:1520490418817601658> Lethality & <:warlord:1520490364039860347> Warlord", value=(
         "Every weapon/map board also ranks two live ratings — <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) "
         "and <:warlord:1520490364039860347> **Warlord** (your share of your team's takedowns). Your rating is your **best 5-game streak ever** with that "
