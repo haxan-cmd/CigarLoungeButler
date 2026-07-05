@@ -174,11 +174,15 @@ def build_challenge_rules_embeds():
         "teammate's **takedowns**. The board tracks the margin (**+N**) \u2014 how far your "
         "kill count topped the next-highest player on your own team."
     ), inline=False)
-    e.add_field(name="<a:mostlethal:1520490418817601658> Lethality  *(weapon & map boards)*", value=(
-        "Every weapon/map board also ranks a live <a:mostlethal:1520490418817601658> **Lethality** rating (kills per takedown) — "
-        "your **best 5-game streak ever** with that weapon/map, so it never drops for a bad game. Min 5 games on weapons; "
-        "rarely-played maps need fewer. Lethality stays weapon-specific on purpose: different weapons have different natural "
-        "kill/takedown ratios, so it only means something compared within the same weapon."
+    e.add_field(name="<a:mostlethal:1520490418817601658> Board ratings", value=(
+        "**Weapon boards** rank <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) and "
+        "<:warlord:1520490364039860347> **Warlord** (your share of your team's takedowns).\n"
+        "**Map boards** rank <a:mostlethal:1520490418817601658> **Executioner** (your share of your team's kills) and "
+        "<:warlord:1520490364039860347> **Warlord** (your takedowns vs your team's total kills).\n"
+        "Each is your **best 5-game streak ever** on that board, so it never drops for a bad game — keep submitting. "
+        "Min 5 games on weapons; rarely-played maps need fewer.\n"
+        "Lethality stays weapon-only on purpose: different weapons have different natural kill/takedown ratios, so it "
+        "only means something within the same weapon."
     ), inline=False)
     embeds.append(e)
 
