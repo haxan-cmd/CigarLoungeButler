@@ -65,7 +65,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     lobby_finishes = {}      # player -> [(rank, size), ...]
     team_score_ratios = {}   # player -> [your_td / avg_teammate_td]
     kill_efficiency = {}     # player -> [(your_kills, total_lobby_kills, lobby_size)]
-    team_kill_shares = {}    # player -> [team kill share %]
+    team_kill_shares = {}    # player -> [team kill share %]   (Executioner: kills / team kills)
+    warlord_ratios = {}      # player -> [takedowns / team total kills %]  (Warlord)
     team_td_shares = {}      # player -> [team TD share %]
     weapon_kill_shares = {}  # weapon -> [kill share %]
     weapon_td_shares = {}    # weapon -> [TD share %]
@@ -121,6 +122,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
                 team_kill_shares.setdefault(player, []).append(tks)
                 if weapon:
                     weapon_kill_shares.setdefault(weapon, []).append(tks)
+                # Warlord = takedowns / team total kills. team_total_kills = kills / kill-share,
+                # so takedowns / team_total_kills reduces to takedowns * tks / kills.
+                if kills > 0 and td > 0:
+                    warlord_ratios.setdefault(player, []).append(td * tks / kills)
         except (ValueError, TypeError):
             pass
         try:
@@ -179,13 +184,13 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         ranked.sort(key=lambda t: (-t[1], t[0]))  # name tiebreak = stable order on ties
         return ranked
 
-    # ── LETHALITY -- volume-adjusted kills ÷ takedowns % (games shown in parens) ──
-    _leth = _shrunk_rank(lethal_ratios)
+    # ── EXECUTIONER -- volume-adjusted kills ÷ team total kills % (games in parens) ──
+    _leth = _shrunk_rank(team_kill_shares)
     lethal_ranked = [p for p, _adj, _n in _leth]
-    most_lethal_top5 = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _leth[:5]]
+    most_lethal_top5 = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _leth[:5]]
 
-    # ── WARLORD -- volume-adjusted team TD share % ──
-    _dom = _shrunk_rank(team_td_shares)
+    # ── WARLORD -- volume-adjusted takedowns ÷ team total kills % ──
+    _dom = _shrunk_rank(warlord_ratios)
     dom_ranked = [p for p, _adj, _n in _dom]
     most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
@@ -441,10 +446,10 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
             embed.add_field(name="⭐ Special Features  *(random this season)*", value=_table(frows), inline=False)
         embed.add_field(name=_RULE, value="​", inline=False)
 
-    embed.add_field(name="<a:mostlethal:1520490418817601658> Most Lethal  *(Lethality Score · recent-weighted)*",
+    embed.add_field(name="<a:mostlethal:1520490418817601658> Executioner  *(kills ÷ team kills · recent-weighted)*",
                     value=_table(_rows(stats.get("high_lethality"), plain=True)) if stats.get("high_lethality") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(Warlord Score · recent-weighted)*",
+    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · recent-weighted)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
 
@@ -483,8 +488,8 @@ async def update_title_roles(guild, stats, include_weekly=True):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Most Lethal',
-         "The kill tallies have been reviewed. {old}, your edge has been lost. {new}, the Most Lethal title is yours. The butler is mildly impressed."),
+        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Executioner',
+         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Executioner title is yours. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]
@@ -559,7 +564,7 @@ async def update_title_roles(guild, stats, include_weekly=True):
 
 
 _SEASON_CATEGORIES = [
-    ("Most Lethal", "high_lethality", True),
+    ("Executioner", "high_lethality", True),
     ("Warlord", "most_dominant", True),
     ("Total Tally", "top_total_tally", False),
     ("Most Kills", "top_kills_list", False),
@@ -956,6 +961,32 @@ class FavouritesCog(commands.Cog):
         await finalize_season(interaction.guild, season)
         label = season.get("label") or f"Season {season['id']}"
         await interaction.followup.send(f"Posted/refreshed the Hall of Fame entry for {label}.", ephemeral=True)
+
+    @app_commands.command(name="refresh_report", description="Rebuild the pinned Butler Monthly report now (mod only).")
+    async def refresh_report(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        try:
+            _now = datetime.now(timezone.utc)
+            _season = await _db.get_current_season()
+            if _season:
+                stats = await calculate_butler_stats(week_start=_season['started_at'].timestamp(), week_end=_now.timestamp())
+                stats['week_label'] = (_season.get('label') or f"Season {_season['id']}") + " — season so far"
+            else:
+                _ws = (_now - timedelta(days=_now.weekday())).replace(hour=12, minute=0, second=0, microsecond=0)
+                if _ws > _now:
+                    _ws -= timedelta(weeks=1)
+                stats = await calculate_butler_stats(week_start=_ws.timestamp(), week_end=_now.timestamp())
+                stats['week_label'] = f"{_ws.strftime('%b %d')} \u2013 {(_ws + timedelta(days=7)).strftime('%b %d')}"
+            embed = await build_favourites_embed(stats, bot_avatar_url=guild.me.display_avatar.url if guild else None)
+            await refresh_favourites_message(guild, embed)
+            await update_title_roles(guild, stats, include_weekly=False)
+            await interaction.followup.send("\u2705 Rebuilt the pinned Butler Monthly report.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Report refresh failed: {e}", ephemeral=True)
 
     @app_commands.command(name="butlers_report", description="Summon the Butler Monthly report")
     async def butlers_report(self, interaction: discord.Interaction):
