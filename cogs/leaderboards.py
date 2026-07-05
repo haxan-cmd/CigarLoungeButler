@@ -1236,13 +1236,21 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
 
 
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
-    """Plain takedown board embeds. Lethality/Warlord ratings have moved to the
-    Monthly Report boards (render_monthly_boards); takedown boards, which are now
-    permanent all-time, no longer carry rating fields."""
-    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title)
+    """Takedown board embeds WITH live rating fields appended: weapon boards show
+    Lethality (kills/TD) + Warlord (share of team takedowns); map boards show
+    Executioner (kills/team kills) + Warlord (takedowns/team kills). All-time best
+    5-game streak, so a rating never drops for a bad game."""
+    lr = wr = None
+    rmin = 5
+    try:
+        lr, wr, rmin = await compute_board_ratings(lb_name, is_map, all_subs)
+    except Exception as e:
+        print(f"[BOARD] rating compute error for {lb_name}: {e}")
+    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
+                                     lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
 
 
-def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False):
     if not embeds or (not lethality_rows and not warlord_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
@@ -1252,24 +1260,30 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min):
             out.append(f"`{i}.` `{p}` \u2014 {fmt(sc)}")
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
+    _le = te.get('Lethality', '🧪')
+    _we = te.get('Warlord', '🛡️')
     if lethality_rows is not None:
-        tail.add_field(
-            name=f"{te.get('Lethality', '🧪')} Lethality",
-            value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=False)
+        if is_map:
+            # Map boards: Executioner (kills / team kills), value already a %.
+            tail.add_field(name=f"{_le} Executioner",
+                           value=_fld(lethality_rows, lambda s: f"{s:.0f}%"), inline=False)
+        else:
+            # Weapon boards: Lethality (kills / TD), value is a 0-1 ratio.
+            tail.add_field(name=f"{_le} Lethality",
+                           value=_fld(lethality_rows, lambda s: f"{s * 100:.0f}%"), inline=False)
     if warlord_rows is not None:
-        tail.add_field(
-            name=f"{te.get('Warlord', '🛡️')} Warlord",
-            value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
+        tail.add_field(name=f"{_we} Warlord",
+                       value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
 
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5):
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
-        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map)
         return [e]
 
     lines = []
@@ -1302,7 +1316,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
-    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map)
     return embeds
 
 
@@ -2203,6 +2217,44 @@ class LeaderboardsCog(commands.Cog):
         summary = f"✅ Refreshed {len(done)} boards."
         if failed:
             summary += f"\n❌ Failed: {', '.join(failed)}"
+        await interaction.edit_original_response(content=summary)
+
+    @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Executioner + Warlord) at once (mod only).")
+    async def refresh_map_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.send_message("Refreshing map boards...", ephemeral=True)
+        all_lb_rows = await _get_lb_records()
+        guild = interaction.guild
+        done, failed = [], []
+        for lb_row in all_lb_rows:
+            lb_name = lb_row.get('Leaderboard Name')
+            thread_id_raw = lb_row.get('Thread ID')
+            msg_id_raw = lb_row.get('Message ID')
+            if not lb_name or not thread_id_raw or not msg_id_raw:
+                continue
+            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            if not is_map:
+                continue
+            try:
+                entries = await get_leaderboard_entries(lb_name)
+                entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                embeds = await _rated_embeds(lb_name, entries, True, None, 0, False, "", False)
+                header_content = _map_header(lb_name)
+                thread_id = int(thread_id_raw)
+                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
+            except Exception as e:
+                nerve_log_error(f"Map board refresh {lb_name}", e)
+                failed.append(lb_name)
+        summary = f"\u2705 Refreshed {len(done)} map boards (Executioner + Warlord)."
+        if failed:
+            summary += f"\n\u274c Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)
 
     @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
