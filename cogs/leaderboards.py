@@ -141,7 +141,7 @@ def _champion_lines(stats, keys=None):
         'campaign_master':    (te.get('Campaign Master', '\U0001f5fa\ufe0f'),  'Campaign Master'),
         'apex':               (te.get('apex_title', '\U0001f480'),              'Apex'),
         'frenzied':           (te.get('frenzied_title', '\U0001fa93'),          'Frenzied'),
-        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Most Lethal'),
+        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Executioner'),
         'warlord_player':     (te.get('Warlord', '\U0001f6e1\ufe0f'),          'Warlord'),
     }
     order = keys or ['grand_marshal', 'weapons_master', 'campaign_master',
@@ -1198,14 +1198,27 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
             td = int(row[7]); kills = int(row[8])
         except (ValueError, IndexError):
             td = kills = 0
-        if td > 0 and kills > 0:
-            leth.setdefault(key, []).append((ts, kills / td))
-        try:
-            tds = float(row[21]) if len(row) > 21 and row[21] else None
-        except (ValueError, TypeError):
-            tds = None
-        if tds and 0 < tds <= 100:
-            warl.setdefault(key, []).append((ts, tds))
+        if is_map:
+            # Map boards: Executioner (kills / team total kills) + Warlord (takedowns / team total kills).
+            # team_total_kills = kills / kill-share, so TD/team_kills reduces to td * tks / kills.
+            try:
+                _tks = float(row[20]) if len(row) > 20 and row[20] else None
+            except (ValueError, TypeError):
+                _tks = None
+            if _tks and 0 < _tks <= 100:
+                leth.setdefault(key, []).append((ts, _tks))                     # Executioner %
+                if kills > 0 and td > 0:
+                    warl.setdefault(key, []).append((ts, td * _tks / kills))    # Warlord % (TD/team kills)
+        else:
+            # Weapon boards (unchanged): Lethality (kills/TD) + Warlord (share of team takedowns).
+            if td > 0 and kills > 0:
+                leth.setdefault(key, []).append((ts, kills / td))
+            try:
+                tds = float(row[21]) if len(row) > 21 and row[21] else None
+            except (ValueError, TypeError):
+                tds = None
+            if tds and 0 < tds <= 100:
+                warl.setdefault(key, []).append((ts, tds))
 
     def _peak(dct):
         out = []
@@ -1637,9 +1650,9 @@ def _monthly_faction_embed(map_name, faction, lr, wr):
     le = te.get('Lethality', '🧪')
     we = te.get('Warlord', '🛡️')
     e = discord.Embed(title=f"{map_name} · {faction} — This Month", colour=_embed_colour(f"{map_name} - {faction}"))
-    e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
+    e.add_field(name=f"{le} Executioner", value=_monthly_rating_lines(lr, lambda s: f"{s:.0f}%"), inline=False)
     e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
-    e.set_footer(text="Monthly · top 5 · resets each month")
+    e.set_footer(text="Monthly · Executioner (kills/team kills) + Warlord (takedowns/team kills) · top 5 · resets each month")
     return e
 
 
@@ -1876,7 +1889,7 @@ async def snapshot_monthly_to_hof(guild):
         for fac in sorted(maps[m]):
             lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
             if lr or wr:
-                lines.append(f"**{m} — {fac}**\n· Lethality: {_top(lr, lambda s: f'{s*100:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
+                lines.append(f"**{m} — {fac}**\n· Executioner: {_top(lr, lambda s: f'{s:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
     if not lines:
         return 0, None
 
