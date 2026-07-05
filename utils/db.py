@@ -22,7 +22,32 @@ async def db_init():
         min_size=2,
         max_size=10,
     )
+    await _ensure_indexes()
     print("[DB] Postgres pool ready.")
+
+
+# Hot-path indexes. These columns are filtered on constantly (per-player and
+# per-board lookups); without them Postgres full-scans the table every time.
+_INDEXES = [
+    ("idx_submissions_discord_id", "submissions",      "(discord_id)"),
+    ("idx_ld_board_discord",       "leaderboard_data", "(board_name, discord_id)"),
+    ("idx_ld_discord_id",          "leaderboard_data", "(discord_id)"),
+    ("idx_ld_message_link",        "leaderboard_data", "(message_link)"),
+    ("idx_bounty_players_title",   "bounty_players",   "(bounty_title)"),
+]
+
+
+async def _ensure_indexes():
+    """Create hot-path indexes if missing. Idempotent (IF NOT EXISTS); each runs
+    in its own statement so a lazily-created table can't block the others. The
+    names/tables are internal constants, not user input, so the f-string is safe."""
+    for name, table, cols in _INDEXES:
+        try:
+            async with _pool.acquire() as conn:
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} {cols}")
+        except Exception as e:
+            print(f"[DB] index {name} on {table} skipped: {e}")
+    print("[DB] indexes ensured.")
 
 
 async def db_close():
