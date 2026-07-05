@@ -1706,9 +1706,9 @@ async def _monthly_index(guild, forum, index_name, units):
     colour = discord.Colour.from_str("#C9A24B")
     embeds = [discord.Embed(
         title="📋 Monthly Report — Index",
-        description="Live Lethality (kills/TD) and Warlord (% of your team's takedowns) ratings for the "
-                    "current month — top 5 per weapon and map. Resets each season; resubmissions don't "
-                    "count. Jump to a board below.",
+        description="Weapon boards rank Lethality (kills/TD) and Warlord (share of your team's takedowns). "
+                    "Map boards rank Executioner (share of your team's kills) and Warlord (takedowns vs your "
+                    "team's kills). Top 5 per board, current season — resubmissions don't count. Jump to a board below.",
         colour=colour,
     )]
     for glabel, gkey in groups:

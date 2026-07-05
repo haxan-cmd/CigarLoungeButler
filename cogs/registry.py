@@ -563,8 +563,10 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
     """Return avg team TD/kill share percentages from submissions with lobby data."""
     subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
-    td_shares = []    # team_td_share values (0–100) — the Warlord metric
-    lethalities = []  # kills / TD as a % — the Most Lethal metric
+    td_shares = []    # team_td_share values (0–100) — legacy
+    lethalities = []  # kills / TD as a % — weapon-board lethality
+    kill_shares = []  # kills / team kills — Executioner
+    warlord_vals = [] # takedowns / team kills — Warlord
     for row in subs:
         if not row or row[2].strip() != discord_id_str:
             continue
@@ -581,12 +583,24 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
                 lethalities.append(kills / td * 100)
         except (ValueError, TypeError):
             pass
-    if not td_shares and not lethalities:
+        try:
+            _tks = float(row[20]) if len(row) > 20 and row[20] else None
+            _ltd = int(row[7]) if len(row) > 7 and row[7] else 0
+            _lk = int(row[8]) if len(row) > 8 and row[8] else 0
+            if _tks and 0 < _tks <= 100:
+                kill_shares.append(_tks)
+                if _lk > 0 and _ltd > 0:
+                    warlord_vals.append(_ltd * _tks / _lk)
+        except (ValueError, TypeError):
+            pass
+    if not td_shares and not lethalities and not kill_shares:
         return None
     return {
         'avg_td_share':   (sum(td_shares) / len(td_shares)) if td_shares else None,
         'avg_lethality':  (sum(lethalities) / len(lethalities)) if lethalities else None,
-        'games':          max(len(td_shares), len(lethalities)),
+        'avg_kill_share': (sum(kill_shares) / len(kill_shares)) if kill_shares else None,
+        'avg_warlord':    (sum(warlord_vals) / len(warlord_vals)) if warlord_vals else None,
+        'games':          max(len(td_shares), len(lethalities), len(kill_shares)),
     }
 
 
@@ -597,6 +611,8 @@ async def get_personal_bests(discord_id, cached_data=None):
     best_kills = 0
     best_td = 0
     best_lethality = 0.0
+    best_executioner = 0.0   # highest single-game kills / team kills %
+    best_warlord = 0.0       # highest single-game takedowns / team kills %
     for row in subs:
         if len(row) < 9 or row[2].strip() != discord_id_str:
             continue
@@ -613,10 +629,23 @@ async def get_personal_bests(discord_id, cached_data=None):
             lethality = round((kills / td) * 100, 1)
             if lethality > best_lethality:
                 best_lethality = lethality
+        try:
+            _tks = float(row[20]) if len(row) > 20 and row[20] else None
+        except (ValueError, TypeError):
+            _tks = None
+        if _tks and 0 < _tks <= 100:
+            if _tks > best_executioner:
+                best_executioner = _tks
+            if kills > 0 and td > 0:
+                _wl = td * _tks / kills
+                if _wl > best_warlord:
+                    best_warlord = _wl
     return {
         'kills': best_kills,
         'td': best_td,
-        'lethality': best_lethality
+        'lethality': best_lethality,
+        'executioner': round(best_executioner, 1),
+        'warlord': round(best_warlord, 1),
     }
 
 
@@ -988,8 +1017,10 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             lines.append(f"• <a:topkill:1360314538364240024> Kills — **{personal_bests['kills']}**")
         if personal_bests['td'] > 0:
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
-        if personal_bests['lethality'] > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Most Lethal — **{personal_bests['lethality']}%**")
+        if personal_bests.get('warlord', 0) > 0:
+            lines.append(f"• {config.TITLE_EMOJIS['Warlord']} Warlord — **{personal_bests['warlord']:.0f}%**")
+        if personal_bests.get('executioner', 0) > 0:
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Executioner — **{personal_bests['executioner']:.0f}%**")
         lines.append("")
 
     lines.append("**Weapon Mastery:**")
@@ -1020,13 +1051,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             emoji = SPECIAL_OPS_EMOJIS.get(w, '')
             lines.append(f"• {emoji} {w} —[Link]({link})" if link else f"• {emoji} {w}")
 
-    # ── Compact ratings (skull emojis, no labels) + recent match history, at the
-    # end of the header card, just before the per-class sections. ──
-    _rating_bits = []
-    if lobby_stats and lobby_stats.get('avg_lethality') is not None:
-        _rating_bits.append(f"{config.TITLE_EMOJIS['Lethality']} {lobby_stats['avg_lethality']:.0f}%")
-    if lobby_stats and lobby_stats.get('avg_td_share') is not None:
-        _rating_bits.append(f"{config.TITLE_EMOJIS['Warlord']} {lobby_stats['avg_td_share']:.0f}%")
+    # ── Recent match history (last 5), at the end of the header card, just
+    # before the per-class sections. ──
     _recent = []
     try:
         _rg_src = (cached_data or {}).get('submissions')
@@ -1048,14 +1074,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 break
     except Exception as _e_rg:
         print(f"[CARD] recent-games error: {_e_rg}")
-    if _rating_bits or _recent:
+    if _recent:
         lines.append("")
         lines.append("**Recent games**")
-        if _rating_bits:
-            lines.append("  ".join(_rating_bits))
-        if _recent:
-            for _g in _recent:
-                lines.append(f"\u2022 {_g}")
+        for _g in _recent:
+            lines.append(f"\u2022 {_g}")
 
     messages.append("\n".join(lines))
 

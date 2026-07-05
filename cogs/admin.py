@@ -174,11 +174,11 @@ def build_challenge_rules_embeds():
         "teammate's **takedowns**. The board tracks the margin (**+N**) \u2014 how far your "
         "kill count topped the next-highest player on your own team."
     ), inline=False)
-    e.add_field(name="<a:mostlethal:1520490418817601658> Lethality & <:warlord:1520490364039860347> Warlord", value=(
-        "Every weapon/map board also ranks two live ratings — <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) "
-        "and <:warlord:1520490364039860347> **Warlord** (your share of your team's takedowns). Your rating is your **best 5-game streak ever** with that "
-        "weapon/map, so it never drops for a bad game — keep submitting. Min 5 games on weapons; "
-        "rarely-played maps need fewer."
+    e.add_field(name="<a:mostlethal:1520490418817601658> Lethality  *(weapon & map boards)*", value=(
+        "Every weapon/map board also ranks a live <a:mostlethal:1520490418817601658> **Lethality** rating (kills per takedown) — "
+        "your **best 5-game streak ever** with that weapon/map, so it never drops for a bad game. Min 5 games on weapons; "
+        "rarely-played maps need fewer. Lethality stays weapon-specific on purpose: different weapons have different natural "
+        "kill/takedown ratios, so it only means something compared within the same weapon."
     ), inline=False)
     embeds.append(e)
 
@@ -196,8 +196,8 @@ def build_challenge_rules_embeds():
     e.add_field(name="This season (reset each bounty)", value=(
         "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
         "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
-        "<a:mostlethal:1520490418817601658> **Most Lethal** — best lethality\n"
-        "<:warlord:1520490364039860347> **Warlord** — highest share of your team's takedowns"
+        "<a:mostlethal:1520490418817601658> **Executioner** — biggest share of your team's kills\n"
+        "<:warlord:1520490364039860347> **Warlord** — your takedowns vs your team's total kills"
     ), inline=False)
     e.add_field(name="🎯 Bounty", value=(
         "You also carry the **bounty role** while you're taking part in the active monthly bounty."
