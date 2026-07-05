@@ -1675,6 +1675,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _all_td = _team_td + _enemy_td
     _all_k  = _team_k  + _enemy_k
 
+    # Team total kills = denominator for Warlord/Executioner. Prefer the faction's
+    # TOTAL kill count read off the top of the scoreboard (robust, and it includes
+    # players who left mid-match); fall back to summing the visible teammate rows.
+    _vd_team_total = vd.get('team_total_kills')
+    if isinstance(_vd_team_total, int) and _vd_team_total > 0:
+        total_team_kills = _vd_team_total
+    elif _team_k and kills:
+        total_team_kills = kills + sum(_team_k)
+    else:
+        total_team_kills = None
+
     blurb_parts = []
 
     # --- Team rank (tracked for storage) ---
@@ -1683,13 +1694,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         team_size = len(_team_td) + 1
 
     # --- Warlord (takedowns / team total kills) + Executioner (kills / team total kills), this game ---
-    if _team_k and kills and takedowns and takedowns > 0:
-        _tk_total = kills + sum(_team_k)
-        if _tk_total > 0:
-            _warlord_g = round(takedowns / _tk_total * 100, 1)
-            _exec_g = round(kills / _tk_total * 100, 1)
-            blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
-            blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Executioner")
+    if total_team_kills and kills and takedowns and takedowns > 0:
+        _warlord_g = round(takedowns / total_team_kills * 100, 1)
+        _exec_g = round(kills / total_team_kills * 100, 1)
+        blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
+        blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Executioner")
 
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
@@ -1719,10 +1728,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _team_td_share = round(takedowns / total_team_td * 100, 1)
     if _all_k:
         _total_lobby_kills = (kills or 0) + sum(_all_k)
-    if _team_k and kills:
-        total_team_kills = kills + sum(_team_k)
-        if total_team_kills > 0:
-            _team_kill_share = round(kills / total_team_kills * 100, 1)
+    if total_team_kills and kills:
+        _team_kill_share = round(kills / total_team_kills * 100, 1)
 
     # TUFF: gap between player kills and 2nd place teammate's takedowns
     _second_place_td = None

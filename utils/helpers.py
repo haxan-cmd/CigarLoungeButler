@@ -80,7 +80,7 @@ Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown - may appear as an icon tooltip or text; null if not visible)
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
 - map (full map name shown at the TOP of the screen above the scoreboard, e.g. "The Siege of Rudhelm", "The Battle of Darkforest" — NOT from the leaderboard rows)
-NOTE: The two large numbers displayed prominently on the LEFT and RIGHT sides of the screen are the total team takedown scores — one per team. These are NOT individual player stats.
+NOTE: The two large numbers at the TOP of the screen, one on each side (one per faction, e.g. "AGATHA 531" on the left and "MASON 678" on the right), are each team's TOTAL KILL count for the whole match. Read them into team_total_kills (the submitting player's OWN faction) and enemy_total_kills (the OTHER faction). These are team totals, NOT individual stats — never use them for the highlighted player's kills or takedowns.
 - faction (Agatha, Mason, or Tenosia - whichever team side the highlighted row is on)
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
@@ -112,7 +112,7 @@ The T column (takedowns) is always a small integer, typically 10–400. The SCOR
 
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[]}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null}"""
 
 
 def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
@@ -126,6 +126,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         'weapon': None, 'subclass': None, 'map': None, 'faction': None, 'name': None,
         'takedowns': None, 'kills': None, 'deaths': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
+        'team_total_kills': None, 'enemy_total_kills': None,
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _gemini_client:
@@ -228,7 +229,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
                 raw = raw[4:].strip()
         data = _json.loads(raw)
         # Coerce numeric fields to int, ignore bad values
-        for field in ('takedowns', 'kills', 'deaths'):
+        for field in ('takedowns', 'kills', 'deaths', 'team_total_kills', 'enemy_total_kills'):
             try:
                 if data.get(field) is not None:
                     data[field] = int(data[field])
