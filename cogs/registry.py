@@ -1050,10 +1050,10 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         print(f"[CARD] recent-games error: {_e_rg}")
     if _rating_bits or _recent:
         lines.append("")
+        lines.append("**Recent games**")
         if _rating_bits:
             lines.append("  ".join(_rating_bits))
         if _recent:
-            lines.append("**Recent games:**")
             for _g in _recent:
                 lines.append(f"\u2022 {_g}")
 
