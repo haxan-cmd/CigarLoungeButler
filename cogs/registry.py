@@ -992,15 +992,6 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
             lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Most Lethal — **{personal_bests['lethality']}%**")
         lines.append("")
 
-    if lobby_stats:
-        lines.append("**Lobby Stats:**")
-        if lobby_stats.get('avg_lethality') is not None:
-            lines.append(f"• Lethality — **{lobby_stats['avg_lethality']:.0f}%**")
-        if lobby_stats.get('avg_td_share') is not None:
-            lines.append(f"• Avg TD share of team — **{lobby_stats['avg_td_share']:.0f}%**")
-        lines.append(f"*({lobby_stats['games']} tracked games)*")
-        lines.append("")
-
     lines.append("**Weapon Mastery:**")
     _MASTER = config.MASTERY_THRESHOLD
     _VIRT = config.VIRTUOSO_THRESHOLD
@@ -1028,6 +1019,43 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         for w, link in special_ops.items():
             emoji = SPECIAL_OPS_EMOJIS.get(w, '')
             lines.append(f"• {emoji} {w} —[Link]({link})" if link else f"• {emoji} {w}")
+
+    # ── Compact ratings (skull emojis, no labels) + recent match history, at the
+    # end of the header card, just before the per-class sections. ──
+    _rating_bits = []
+    if lobby_stats and lobby_stats.get('avg_lethality') is not None:
+        _rating_bits.append(f"{config.TITLE_EMOJIS['Lethality']} {lobby_stats['avg_lethality']:.0f}%")
+    if lobby_stats and lobby_stats.get('avg_td_share') is not None:
+        _rating_bits.append(f"{config.TITLE_EMOJIS['Warlord']} {lobby_stats['avg_td_share']:.0f}%")
+    _recent = []
+    try:
+        _rg_src = (cached_data or {}).get('submissions')
+        if _rg_src:
+            _mine = [r for r in _rg_src if len(r) > 9 and (r[2] or '').strip() == str(discord_id)]
+            _mine = list(reversed(_mine))  # get_all_submissions is oldest-first
+        else:
+            _mine = await _db.get_submissions_by_player(discord_id, limit=15)  # newest-first
+        for _r in _mine:
+            if 'Resubmit' in ((_r[11] or '') if len(_r) > 11 else ''):
+                continue
+            _w = (_r[3] or '').strip()
+            if not _w:
+                continue
+            _c = (_r[4] or '').strip(); _m = (_r[5] or '').strip()
+            _td = (_r[7] or '?').strip(); _k = (_r[8] or '?').strip(); _d = (_r[9] or '?').strip()
+            _recent.append(f"{_c} \u00b7 {_w} \u00b7 {_m} \u2014 {_td}/{_k}/{_d}")
+            if len(_recent) >= 5:
+                break
+    except Exception as _e_rg:
+        print(f"[CARD] recent-games error: {_e_rg}")
+    if _rating_bits or _recent:
+        lines.append("")
+        if _rating_bits:
+            lines.append("  ".join(_rating_bits))
+        if _recent:
+            lines.append("**Recent games:**")
+            for _g in _recent:
+                lines.append(f"\u2022 {_g}")
 
     messages.append("\n".join(lines))
 
