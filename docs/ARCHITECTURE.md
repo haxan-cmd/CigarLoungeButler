@@ -48,11 +48,22 @@ flowchart TD
     B1 --> T1
     B2 --> T3
     M4 --> T5
+
+    classDef node fill:#1e3a5f,stroke:#89b4fa,color:#e8eff8
+    classDef start fill:#2b4f77,stroke:#a9c9f0,color:#eef4fc
+    classDef db fill:#1b4a4a,stroke:#7fd0c4,color:#e7f8f4
+    class M1,M2,M3,M4,S2,S3,S5,B1,B2,B3,S6,R1,R2,R3,MA,FE,T1,T2,T3,T4,T5,T6,BUT,NRV,BKP node
+    class S1 start
+    class S4 db
+    style MACRO fill:#111c2b,stroke:#34527b,color:#9dc0ec
+    style MICRO fill:#111c2b,stroke:#34527b,color:#9dc0ec
+    style BUILD fill:#111c2b,stroke:#34527b,color:#9dc0ec
+    style BG fill:#111c2b,stroke:#34527b,color:#9dc0ec
 ```
 
 ## Where the load is (and why the queries look the way they do)
 
-Not all paths run equally often. The **hot** paths run on *every* submission and *every* chat message; the **warm** paths run periodically; the **cold** paths run occasionally, usually triggered by a mod on purpose.
+Not all paths run equally often. The **hot** paths run on *every* submission and *every* chat message; the **warm** paths run periodically; the **cold** paths run occasionally, usually triggered by a mod on purpose. In the diagram below, deeper blue means a busier path.
 
 Everything ultimately reads and writes Postgres, so the busier a path is, the more it matters that the database does the filtering, sorting, and counting rather than the bot loading whole tables into Python. The hot paths use **index-backed, targeted queries** (e.g. `get_leaderboard_by_board`, `get_submissions_by_player`) and SQL aggregates (`MAX`, `COUNT`). The cold paths still do full-table scans — that's fine, because they run rarely.
 
@@ -79,14 +90,17 @@ flowchart LR
     C1W -->|full scan| DB
     C2W --> DB
 
-    classDef hot fill:#3a1a1a,stroke:#f38ba8,color:#f2cdcd
-    classDef warm fill:#3a2f1a,stroke:#f9e2af,color:#f9e2af
-    classDef cold fill:#232634,stroke:#9399b2,color:#cdd6f4
-    classDef db fill:#1a3a2a,stroke:#a6e3a1,color:#a6e3a1
+    classDef hot fill:#1e3a5f,stroke:#8ab6ee,color:#eaf2fb
+    classDef warm fill:#1b3149,stroke:#6a93c4,color:#dce7f4
+    classDef cold fill:#1a2432,stroke:#5c7092,color:#c6d2e2
+    classDef db fill:#1b4a4a,stroke:#7fd0c4,color:#e7f8f4
     class H1,H1W,H2,H2W hot
     class W1,W1W,W2,W2W warm
     class C1,C1W,C2,C2W cold
     class DB db
+    style HOT fill:#0f1a27,stroke:#34527b,color:#9dc0ec
+    style WARM fill:#0f1722,stroke:#34527b,color:#9dc0ec
+    style COLD fill:#0e131c,stroke:#34527b,color:#9dc0ec
 ```
 
 ## Pure logic and tests
