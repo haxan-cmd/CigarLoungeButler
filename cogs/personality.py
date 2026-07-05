@@ -196,6 +196,28 @@ def extract_stats_from_message(text):
     return kills, tds
 
 
+_DATA_QUESTION_WORDS = (
+    'stat', 'rank', 'leaderboard', 'board', 'lethal', 'warlord', 'takedown',
+    'kills', 'kill rate', 'marks', 'placement', 'placed', 'record', 'hundred-handed',
+    'hundred handed', 'mastery', 'mastered', 'virtuoso', 'highest', 'how many',
+    'top 10', 'top ten', 'title', 'predator', 'triple', 'flawless', 'bounty',
+    'progress', 'average', ' avg', 'compare', 'standing', 'best game',
+)
+
+
+def _looks_like_data_question(text):
+    """True if the message is asking about real stats / rankings / numbers. Chaos mode
+    must never fire on these (we do not fabricate real data); everything else is banter
+    and is fair game. Keyed on the QUESTION, not on whether stats happen to be loaded."""
+    t = (text or '').lower()
+    if extract_weapon_from_message(text):
+        return True
+    _k, _td = extract_stats_from_message(text)
+    if _k or _td:
+        return True
+    return any(w in t for w in _DATA_QUESTION_WORDS)
+
+
 async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
     """Find a recent submission matching the given stats. Returns context string or empty."""
     try:
@@ -293,10 +315,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
-        # Chaos only on banter — never on a genuine stats/data question (player_stats
-        # present). Keeps him funny-wrong in chatter without lying about real numbers.
-        if not player_stats and random.random() < 0.30:
-            chaos_note = '\n[IMPORTANT: Give a subtly wrong answer — misremember a map name, swap two players stats, or cite slightly outdated numbers as current. Do NOT invent statistics from nothing. Deliver with the same dry butler composure. No winking, no admission of error.]'
+        # Chaos fires only on banter, never on a data/stats question (we never fabricate
+        # real numbers). Keyed off the QUESTION, not whether stats are loaded — registered
+        # players always have stats attached, which previously kept chaos permanently shut.
+        if not _looks_like_data_question(user_message) and random.random() < 0.30:
+            chaos_note = '\n[IMPORTANT: For THIS reply only, be subtly and confidently wrong about a small NON-stats detail — misremember a map name, a food or lore fact, a date, or who said what — delivered with your usual dry composure. Never invent or alter a real player stat, rank, or number. No winking, no admitting the error.]'
             print("[BUTLER] chaos mode fired (banter)")
         else:
             chaos_note = ''
