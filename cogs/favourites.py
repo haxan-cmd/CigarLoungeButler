@@ -176,7 +176,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
                 wtot += w
             adj = (wsum + _PRIOR * gmean) / (wtot + _PRIOR)
             ranked.append((p, adj, n))
-        ranked.sort(key=lambda t: -t[1])
+        ranked.sort(key=lambda t: (-t[1], t[0]))  # name tiebreak = stable order on ties
         return ranked
 
     # ── LETHALITY -- volume-adjusted kills ÷ takedowns % (games shown in parens) ──
@@ -375,6 +375,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
         'warlord_player': warlord_player,
         'most_dominant': most_dominant if most_dominant else [],
+        '_lethal_adj': {p: adj for p, adj, _n in _leth},
+        '_warlord_adj': {p: adj for p, adj, _n in _dom},
         'top_weapons_by_kill_share': top_weapons_by_kill_share,
         'top_weapons_by_td_share': top_weapons_by_td_share,
     }
@@ -513,6 +515,27 @@ async def update_title_roles(guild, stats, include_weekly=True):
 
         if current_holders and new_member in current_holders:
             continue
+
+        # Volatile season titles (Most Lethal / Warlord) recompute on every
+        # submission, and the Bayesian league mean shifts whenever ANYONE plays,
+        # which made the role thrash between two near-tied players who had not even
+        # submitted. Require a challenger to clearly beat the incumbent before we
+        # take the title off them, so a hair's-width or mean-shift wobble cannot flip it.
+        _score_key = {'most_lethal_player': '_lethal_adj', 'warlord_player': '_warlord_adj'}.get(stat_key)
+        if _score_key and current_holders:
+            _scores = stats.get(_score_key) or {}
+            def _member_score(mem, _sc=_scores):
+                _nm = (mem.nick or mem.display_name or '').lower()
+                for _p, _v in _sc.items():
+                    if _p.lower() == _nm:
+                        return _v
+                return None
+            _chal = _scores.get(new_holder_name)
+            if _chal is None:
+                _chal = _member_score(new_member)
+            _inc = max((x for x in (_member_score(m) for m in current_holders) if x is not None), default=None)
+            if _inc is not None and _chal is not None and _chal <= _inc * 1.03:
+                continue  # incumbent still within 3% -> keep the title, no thrash
 
         for old_member in current_holders:
             try:
