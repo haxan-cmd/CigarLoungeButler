@@ -52,34 +52,10 @@ WEAPONS_2H             = config.WEAPONS_2H
 WEAPONS_1H             = config.WEAPONS_1H
 CLASS_WEAPON_MAP       = config.CLASS_WEAPON_MAP
 
-def get_weapon_rank(marks):
-    """Return (rank_name, marks_for_current_tier, marks_for_next_tier) for a weapon."""
-    rank = None
-    current_threshold = 0
-    for threshold, name in WEAPON_RANK_THRESHOLDS:
-        if marks >= threshold:
-            rank = name
-            current_threshold = threshold
-        else:
-            next_threshold = threshold
-            return rank or "Unranked", current_threshold, next_threshold
-    return WEAPON_RANK_THRESHOLDS[-1][1], current_threshold, None  # Iridescent
-
-def get_subclass_rank(subclass_marks, num_weapons):
-    """Return (rank_name, level) based on how many times the meter filled."""
-    if num_weapons == 0:
-        return SUBCLASS_RANKS[0], 0
-    level = min(subclass_marks // num_weapons, len(SUBCLASS_RANKS) - 1)
-    return SUBCLASS_RANKS[level], level
-
-def get_class_rank(class_marks):
-    """Class rank advances every 3 subclass level-ups."""
-    level = min(class_marks // 3, len(CLASS_RANKS) - 1)
-    return CLASS_RANKS[level], level
-
-def get_player_title(bounties_completed):
-    idx = min(bounties_completed, len(PLAYER_TITLES) - 1)
-    return PLAYER_TITLES[idx]
+# Rank / title math now lives in utils.ranks (dependency-free + unit-tested).
+from utils.ranks import (
+    get_weapon_rank, get_subclass_rank, get_class_rank, get_player_title,
+)
 
 async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     """

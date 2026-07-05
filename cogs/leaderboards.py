@@ -1074,9 +1074,7 @@ def _embed_colour(lb_name):
     return EMBED_GOLD
 EMBED_DESC_LIMIT = 3800  # leave headroom below Discord's 4096 limit
 
-_HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
-_HH_PRIMARIES = {sc: ws for sc, ws in config._SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER}
-HH_TOTAL = sum(len(v) for v in _HH_PRIMARIES.values())
+from utils.ranks import HH_ARCHER as _HH_ARCHER, HH_PRIMARIES as _HH_PRIMARIES, HH_TOTAL
 _HH_LEGACY_COMPLETERS = [
     "Godfather", "UFO", "Ascension", "UrAMoran", "Kwazievil",
     "Flymolo", "SteezyPilgor", "Bald Female", "Teapho", "Roam",
