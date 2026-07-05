@@ -188,6 +188,18 @@ async def get_submissions_by_player(discord_id, limit: int | None = None) -> lis
     return [_row_to_submission(r) for r in rows]
 
 
+async def get_submission_record_maxes() -> tuple[int, int]:
+    """Highest single-game kills and takedowns across all submissions, via SQL MAX
+    instead of loading every row into Python. Returns (max_kills, max_takedowns),
+    each 0 when there are no rows."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COALESCE(MAX(kills), 0) AS mk, COALESCE(MAX(takedowns), 0) AS mt FROM submissions"
+        )
+    return int(row['mk']), int(row['mt'])
+
+
 async def add_submission(
     timestamp, discord_name, discord_id, weapon, cls, map_name, faction,
     takedowns, kills, deaths, vip, feats, message_link,

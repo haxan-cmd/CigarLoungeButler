@@ -1489,27 +1489,22 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
 
         flags = []
 
-        all_rows = await _db.get_all_submissions()
+        # Server records via SQL MAX instead of scanning every submission.
+        record_kills, record_tds = await _db.get_submission_record_maxes()
 
         # Server record: kills
-        all_kills = [int(r[8]) for r in all_rows if len(r) > 8 and r[8].strip().lstrip('-').isdigit() and int(r[8]) > 0]
-        if all_kills:
-            record_kills = max(all_kills)
-            if kills > record_kills * 2:
-                pct = int(((kills - record_kills) / record_kills) * 100)
-                flags.append(f"**Kills:** {kills} — server record is {record_kills} (+{pct}%)")
+        if record_kills > 0 and kills > record_kills * 2:
+            pct = int(((kills - record_kills) / record_kills) * 100)
+            flags.append(f"**Kills:** {kills} — server record is {record_kills} (+{pct}%)")
 
         # Server record: takedowns
-        all_tds = [int(r[7]) for r in all_rows if len(r) > 7 and r[7].strip().lstrip('-').isdigit() and int(r[7]) > 0]
-        if all_tds:
-            record_tds = max(all_tds)
-            if takedowns > record_tds * 2:
-                pct = int(((takedowns - record_tds) / record_tds) * 100)
-                flags.append(f"**Takedowns:** {takedowns} — server record is {record_tds} (+{pct}%)")
+        if record_tds > 0 and takedowns > record_tds * 2:
+            pct = int(((takedowns - record_tds) / record_tds) * 100)
+            flags.append(f"**Takedowns:** {takedowns} — server record is {record_tds} (+{pct}%)")
 
         # Weapon leaderboard: would this be 1st place by 20%+ gap?
-        ld_rows = await _db.get_all_leaderboard_data()
-        weapon_scores = [int(r[3]) for r in ld_rows if r[0] == selected_weapon and len(r) > 3 and r[3].strip().isdigit()]
+        _wboard = await _db.get_leaderboard_by_board(selected_weapon)
+        weapon_scores = [int(r[3]) for r in _wboard if r[0] == selected_weapon and len(r) > 3 and r[3].strip().isdigit()]
         if weapon_scores:
             current_best = max(weapon_scores)
             if takedowns > current_best * 1.8:
@@ -1517,7 +1512,8 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
                 flags.append(f"**Weapon ({selected_weapon}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
 
         # Map leaderboard: same check
-        map_scores = [int(r[3]) for r in ld_rows if r[0] == selected_map and len(r) > 3 and r[3].strip().isdigit()]
+        _mboard = await _db.get_leaderboard_by_board(selected_map)
+        map_scores = [int(r[3]) for r in _mboard if r[0] == selected_map and len(r) > 3 and r[3].strip().isdigit()]
         if map_scores:
             current_best = max(map_scores)
             if takedowns > current_best * 1.8:
