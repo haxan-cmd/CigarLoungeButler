@@ -11,6 +11,8 @@ A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.c
 ![Claude](https://img.shields.io/badge/AI-Claude_Haiku-D97706)
 ![Gemini](https://img.shields.io/badge/AI-Gemini_Flash-4285F4?logo=google&logoColor=white)
 
+> 📐 System design & data-flow diagrams: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+
 ---
 
 ## Features
