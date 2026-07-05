@@ -1277,7 +1277,9 @@ class PersonalityCog(commands.Cog):
                 mentioned_weapon = extract_weapon_from_message(resolved_message)
                 if mentioned_weapon:
                     try:
-                        ld_ctx = await _db.get_all_leaderboard_data()
+                        # Targeted, index-backed fetch of just this board instead of
+                        # scanning every board's entries (same row shape).
+                        ld_ctx = await _db.get_leaderboard_by_board(mentioned_weapon)
                         weapon_entries = []
                         for r in ld_ctx:
                             if len(r) < 4 or r[0].strip() != mentioned_weapon:
