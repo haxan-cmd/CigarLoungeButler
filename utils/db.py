@@ -725,6 +725,23 @@ async def delete_leaderboard_entry_by_board_and_player(board_name: str, discord_
         """, board_name, str(discord_id))
 
 
+async def delete_leaderboard_entries_by_board_and_discord(board_name: str, discord_id: str) -> int:
+    """Delete a player's rows on one board, matched by discord_id (exact). Returns
+    how many were removed. Used by the submission-edit rollback to reliably clear a
+    pre-edit weapon/map board even when the row's message_link differs."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM leaderboard_data WHERE board_name=$1 AND discord_id=$2",
+            board_name, str(discord_id)
+        )
+    try:
+        return int(str(res).split()[-1])
+    except Exception:
+        return 0
+
+
 async def delete_leaderboard_entries_by_board_and_name(board_name: str, player_name: str) -> int:
     """Delete every row on a board whose player_name matches (case-insensitive),
     regardless of discord_id. Returns how many rows were removed. Used by the

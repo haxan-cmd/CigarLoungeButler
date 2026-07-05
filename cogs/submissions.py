@@ -1342,6 +1342,20 @@ async def _apply_edit(interaction, ev):
         await interaction.response.defer(ephemeral=True)
     except Exception:
         pass
+    # Capture the PRE-EDIT weapon/map before we overwrite the row, so the edit can
+    # clear their now-stale board entries below (an edit that changes weapon must
+    # drop the old weapon's board row + mark, not just add the new one).
+    _old_weapon = None
+    _old_map_board = None
+    try:
+        for _r in await _db.get_all_submissions():
+            if len(_r) > 12 and (_r[12] or '').strip() == ev.message_link:
+                _old_weapon = (_r[3] or '').strip() or None
+                _om = (_r[5] or '').strip(); _of = (_r[6] or '').strip()
+                _old_map_board = f"{_om} - {_of}" if _om and _of else None
+                break
+    except Exception as _e_old:
+        print(f"[EDIT] pre-edit lookup error: {_e_old}")
     try:
         if ev.submission_row:
             feats_str = ", ".join(ev.feats) if ev.feats else "None"
@@ -1365,6 +1379,17 @@ async def _apply_edit(interaction, ev):
         _edit_guild = ev.original_message.guild
         async with _BOARD_LOCK:
             _old_boards = await _db.delete_leaderboard_entries_by_link(ev.message_link)
+            # rebuild_score_boards is additive (never drops a stale row) and delete-by-link
+            # can miss if the row's link differs, so ALSO clear this player's entries on the
+            # pre-edit weapon/map boards explicitly, keyed by discord_id.
+            _extra_old = set()
+            for _ob in ((None if ev.vip else _old_weapon), _old_map_board):
+                if _ob:
+                    try:
+                        await _db.delete_leaderboard_entries_by_board_and_discord(_ob, str(ev.author.id))
+                        _extra_old.add(_ob)
+                    except Exception as _e_clr:
+                        print(f"[EDIT] old-board clear error ({_ob}): {_e_clr}")
             try:
                 await update_leaderboards(
                     interaction, ev.weapon, ev.map_name, ev.faction,
@@ -1375,7 +1400,7 @@ async def _apply_edit(interaction, ev):
                 print(f"[EDIT] update_leaderboards error: {_e_upd}")
             _new_boards = {b for b in (None if ev.vip else ev.weapon,
                                        f"{ev.map_name} - {ev.faction}") if b}
-            _affected = set(_old_boards) | _new_boards
+            _affected = set(_old_boards) | _new_boards | _extra_old
             if _affected:
                 await rebuild_score_boards(
                     _edit_guild, board_names=list(_affected), only_player=str(ev.author.id))
