@@ -1637,6 +1637,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if _rest_reacts:
         await asyncio.gather(*(safe_react(e) for e in _rest_reacts), return_exceptions=True)
 
+    # High-lethality sticker: reply with the configured sticker when kills/TD is exceptional.
+    try:
+        if kills is not None and takedowns and takedowns > 0 and \
+           (kills / takedowns * 100) >= getattr(config, 'LETHALITY_STICKER_THRESHOLD', 60):
+            _sname = getattr(config, 'LETHALITY_STICKER_NAME', '') or ''
+            if _sname:
+                _sg = original_message.guild
+                _stk = discord.utils.get(_sg.stickers, name=_sname)
+                if _stk is None:
+                    try:
+                        _stk = discord.utils.get(await _sg.fetch_stickers(), name=_sname)
+                    except Exception:
+                        _stk = None
+                if _stk:
+                    await original_message.reply(stickers=[_stk], mention_author=False)
+    except Exception as _e_stk:
+        print(f"[STICKER] high-lethality sticker error: {_e_stk}")
+
     # Clear the "Scorecard detected" prompt in the background (never blocks).
     async def _cleanup_prompt():
         try:

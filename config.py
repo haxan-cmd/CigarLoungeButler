@@ -248,6 +248,12 @@ REGISTRY_CLASS_MAP = {
 MASTERY_THRESHOLD  = 100   # qualifying (100+ TD) primary-weapon runs to master a weapon
 VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 
+# High-lethality sticker — the bot replies with this sticker when a run's
+# lethality (kills / takedowns) is at or above the threshold. Set the NAME to the
+# exact sticker name as it appears in the server (Server Settings -> Stickers).
+LETHALITY_STICKER_NAME = "lethality"   # exact sticker name in the server ("" to disable)
+LETHALITY_STICKER_THRESHOLD = 60
+
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji
