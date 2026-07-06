@@ -85,6 +85,7 @@ NOTE: The two large numbers at the TOP of the screen, one on each side (one per 
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
 - deaths (integer from D column of highlighted row)
+- score (integer from the SCORE column of the highlighted row — the large points value in the thousands, e.g. 9029 or 11653; strip any commas; this is the SCORE column, NOT the T/takedowns value)
 
 The scoreboard shows TWO teams side by side. For ALL other rows (excluding the highlighted player), split by team:
 - team_scores: T column integers for players on the SAME team as the highlighted player
@@ -112,7 +113,7 @@ The T column (takedowns) is always a small integer, typically 10–400. The SCOR
 
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null}"""
 
 
 def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
@@ -124,7 +125,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
     """
     empty = {
         'weapon': None, 'subclass': None, 'map': None, 'faction': None, 'name': None,
-        'takedowns': None, 'kills': None, 'deaths': None,
+        'takedowns': None, 'kills': None, 'deaths': None, 'score': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
         'team_total_kills': None, 'enemy_total_kills': None,
     }
@@ -235,6 +236,11 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
                     data[field] = int(data[field])
             except (ValueError, TypeError):
                 data[field] = None
+        try:
+            if data.get('score') is not None:
+                data['score'] = int(str(data['score']).replace(',', '').strip())
+        except (ValueError, TypeError):
+            data['score'] = None
         for list_field in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
             if not isinstance(data.get(list_field), list):
                 data[list_field] = []

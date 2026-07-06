@@ -109,7 +109,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          takedowns, kills, deaths, vip, feats, message_link,
                          lobby_rank=None, lobby_size=None, kills_rank=None,
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
-                         team_kill_share=None, team_td_share=None, second_place_td=None):
+                         team_kill_share=None, team_td_share=None, second_place_td=None, score=None):
     from datetime import datetime as _dt
     now = _dt.utcnow()
 
@@ -140,6 +140,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
         team_kill_share=round(team_kill_share, 1) if team_kill_share is not None else None,
         team_td_share=round(team_td_share, 1) if team_td_share is not None else None,
         second_place_td=second_place_td,
+        score=score,
     )
     return row_id, None
 
@@ -1594,7 +1595,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     from cogs.favourites import calculate_butler_stats, update_title_roles, build_favourites_embed
     feats = []
-    is_triple = takedowns >= 150 and kills >= 100 and score_over_20k
+    _score = (vision_data or {}).get('score')
+    if not isinstance(_score, int):
+        _score = None
+    is_triple = takedowns >= 150 and kills >= 100 and (score_over_20k or (_score is not None and _score >= 20000))
     if is_triple:
         feats.append("Triple")
     else:
@@ -1847,6 +1851,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_score_ratio=_team_score_ratio,
             team_kill_share=_team_kill_share,
             team_td_share=_team_td_share,
+            score=_score,
         )
         # log_submission returns (row_id, dup_weapon): row_id is the exact row index
         # it wrote to, or None if this was a dedup-skipped repeat — in which case
@@ -1973,6 +1978,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         interaction.user.display_name, message_link,
                         bot_user=interaction.client.user,
                         second_place_td=_second_place_td,
+                        score=_score,
                     )
             except Exception as e:
                 print(f"Leaderboard update error: {e}")

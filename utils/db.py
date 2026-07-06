@@ -23,6 +23,7 @@ async def db_init():
         max_size=10,
     )
     await _ensure_indexes()
+    await _ensure_schema()
     print("[DB] Postgres pool ready.")
 
 
@@ -35,6 +36,16 @@ _INDEXES = [
     ("idx_ld_message_link",        "leaderboard_data", "(message_link)"),
     ("idx_bounty_players_title",   "bounty_players",   "(bounty_title)"),
 ]
+
+
+async def _ensure_schema():
+    """Add columns introduced after the tables were first created (idempotent)."""
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS score BIGINT")
+        print("[DB] schema ensured.")
+    except Exception as e:
+        print(f"[DB] schema ensure skipped: {e}")
 
 
 async def _ensure_indexes():
@@ -116,6 +127,7 @@ def _row_to_submission(r) -> list:
         str(r['team_td_share']) if r['team_td_share'] is not None else '',
         str(r['second_place_td']) if r['second_place_td'] is not None else '',
         str(r['id']),  # row index equivalent
+        str(r['score']) if r['score'] is not None else '',
     ]
 
 
@@ -205,7 +217,7 @@ async def add_submission(
     takedowns, kills, deaths, vip, feats, message_link,
     lobby_rank=None, lobby_size=None, kills_rank=None,
     team_rank=None, team_size=None, total_lobby_kills=None,
-    team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None
+    team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None, score=None
 ) -> int:
     """Insert a submission and return its id (replaces sheet row index)."""
     _cache_invalidate('submissions')
@@ -220,14 +232,14 @@ async def add_submission(
             (submitted_at, player_name, discord_id, weapon, subclass, map, faction,
              takedowns, kills, deaths, vip, feats, message_link,
              lobby_rank, lobby_size, kills_rank, team_rank, team_size,
-             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
             RETURNING id
         """,
             timestamp, discord_name, str(discord_id), weapon, cls, map_name, faction,
             takedowns, kills, deaths, vip_bool, feats, message_link,
             lobby_rank, lobby_size, kills_rank, team_rank, team_size,
-            total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td
+            total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score
         )
     return row_id
 

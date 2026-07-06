@@ -637,7 +637,7 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
 
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
-                              player_name, message_link, bot_user=None, second_place_td=None):
+                              player_name, message_link, bot_user=None, second_place_td=None, score=None):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
     any_updated = False  # True only when player beats their own score on a weapon/feat board (not map boards)
@@ -676,6 +676,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         tuff_gap = kills - second_place_td
         if tuff_gap > 0:
             updates.append(("TUFF", tuff_gap, False, False, True))
+
+    # Pacifist: highest scoreboard SCORE with 0 takedowns AND 0 kills (objective / support play).
+    if takedowns == 0 and kills == 0 and score and score > 0:
+        updates.append(("Pacifist", score, False, False, True))
 
     # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
     # inside the loop via the indexed get_leaderboard_by_board — no full-table scan.
@@ -799,7 +803,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 # /backfill_feat_boards, NOT by the weapon/map rebuild below.
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
-    "Flawless", "Mallet", "Knife", "Healing Horn",
+    "Flawless", "Mallet", "Knife", "Healing Horn", "Pacifist",
 }
 
 
@@ -1101,6 +1105,7 @@ def _map_header(lb_name: str) -> str:
 
 _LB_EMOJI = {
     "TUFF":             "<a:TUFF2:1520779243879927898>",
+    "Pacifist":         "\U0001f54a\ufe0f",
     "200 Takedowns":    "<a:200tkd:1363648828414230538>",
     "100 Kills":        "<a:100kill:1361412390339608686>",
     "Triple":           "<a:triple:1365532698260668466>",
@@ -1325,7 +1330,7 @@ async def archive_and_reset_boards(guild):
     thread, then clear those boards. Feat boards, marks, ranks and mastery are
     untouched. Boards are only cleared AFTER a successful archive.
     Returns (weapon_boards, map_boards, rows_cleared, thread_url|None)."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF", "Pacifist"}
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
@@ -1955,7 +1960,7 @@ async def seed_alltime_from_current(guild):
     """Merge the CURRENT seasonal board scores into the all-time top-10 WITHOUT
     clearing anything, then render. Safe to run repeatedly \u2014 keeps each
     player's best score. Used to populate/preview all-time before any reset."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF", "Pacifist"}
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
