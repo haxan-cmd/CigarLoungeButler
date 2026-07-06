@@ -1795,9 +1795,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if caption:
         summary += f"\n│ *{caption}*"
 
-    # Build marks breakdown
-    marks_earned = 1
-    marks_lines = ["*+1 submission*"]
+    # Build marks breakdown. A pacifist run (0 TD / 0 K) earns no weapon mark.
+    _is_pacifist = (takedowns == 0 and kills == 0)
+    marks_earned = 0 if _is_pacifist else 1
+    marks_lines = [] if _is_pacifist else ["*+1 submission*"]
     if '200 Takedowns' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:200tkd:1363648828414230538> +1*")
@@ -1807,7 +1808,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
-    marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+    if _is_pacifist and marks_earned == 0:
+        marks_summary = f"\n🕊️ **Pacifist run** on {selected_weapon} — no weapon marks, but it lands on the Pacifist board."
+    else:
+        marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 

@@ -82,6 +82,15 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         if not weapon or weapon in ('Other', 'Multiple Weapons'):
             continue
         marks = 1
+        # A pacifist run (0 takedowns AND 0 kills) is a scoreboard feat, not a
+        # takedown game — it earns the Pacifist board slot but NO weapon mark.
+        try:
+            _pm_td = int(row[7]) if len(row) > 7 and row[7] else 0
+            _pm_k = int(row[8]) if len(row) > 8 and row[8] else 0
+        except (ValueError, TypeError):
+            _pm_td = _pm_k = 0
+        if _pm_td == 0 and _pm_k == 0:
+            marks = 0
         if '200 Takedowns' in feats:
             marks += 1
         if '100 Kills' in feats:
@@ -100,6 +109,8 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                     subclass_key = (weapon, subclass)
                     break
         key = subclass_key if subclass_key else weapon
+        if marks <= 0:
+            continue
         weapon_marks[key] = weapon_marks.get(key, 0) + marks
 
     # --- Source 2: LeaderboardData (historical entries, 1 mark each) ---
