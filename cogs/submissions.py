@@ -2032,6 +2032,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     print(f"Highscore feat write error: {e}")
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
+        if any(lb == "Pacifist" for lb, _ in placements):
+            await safe_react("☮️")
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
