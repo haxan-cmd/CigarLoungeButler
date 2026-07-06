@@ -81,14 +81,14 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
         if not weapon or weapon in ('Other', 'Multiple Weapons'):
             continue
-        # A pacifist run (0 takedowns AND 0 kills) is a scoreboard feat, not a
+        # A pacifist run (0 kills and <=10 takedowns) is a scoreboard feat, not a
         # takedown game — no weapon marks, and ignore any feats stored on it.
         try:
             _pm_td = int(row[7]) if len(row) > 7 and row[7] else 0
             _pm_k = int(row[8]) if len(row) > 8 and row[8] else 0
         except (ValueError, TypeError):
             _pm_td = _pm_k = 0
-        if _pm_td == 0 and _pm_k == 0:
+        if _pm_k == 0 and _pm_td <= 10:
             marks = 0
         else:
             marks = 1

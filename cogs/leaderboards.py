@@ -645,15 +645,23 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
     updates = []
 
+    # A pacifist run = no kills and at most a handful of takedowns (objective / support
+    # play). These earn NO weapon marks and stay off the weapon/map/takedown boards —
+    # they only land on the Pacifist board (below). Defined independent of score so the
+    # exclusion is consistent even when vision misses the score number.
+    is_pacifist = (kills == 0 and takedowns <= 10)
+
     # Guard against junk boards: never create a board for a missing/None weapon or
     # map (that's what produced "None - Agatha" and blank weapon boards).
     if (not vip and selected_weapon and str(selected_weapon).strip()
-            and str(selected_weapon).strip().lower() != 'none' and takedowns > 0):
+            and str(selected_weapon).strip().lower() != 'none' and takedowns > 0
+            and not is_pacifist):
         updates.append((selected_weapon, takedowns, True, True, False))
 
     map_lb_name = f"{selected_map} - {faction}"
     if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
-            and faction and str(faction).strip() and takedowns > 0):
+            and faction and str(faction).strip() and takedowns > 0
+            and not is_pacifist):
         updates.append((map_lb_name, takedowns, True, True, False))
 
     if "Flawless" in feats:
@@ -677,8 +685,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         if tuff_gap > 0:
             updates.append(("TUFF", tuff_gap, False, False, True))
 
-    # Pacifist: highest scoreboard SCORE with 0 takedowns AND 0 kills (objective / support play).
-    if takedowns == 0 and kills == 0 and score and score > 0:
+    # Pacifist: highest scoreboard SCORE with 0 kills and <=10 takedowns (objective / support play).
+    if is_pacifist and score and score > 0:
         updates.append(("Pacifist", score, False, False, True))
 
     # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
@@ -3079,9 +3087,9 @@ class LeaderboardsCog(commands.Cog):
             weapon     = row[3] or ""
             if not link:
                 continue
-            # Pacifist: 0-takedown, 0-kill run ranked by raw score. Needs a stored
-            # score (older subs from before the score column are NULL -> skip).
-            if takedowns == 0 and kills == 0:
+            # Pacifist: 0-kill run with <=10 takedowns, ranked by raw score. Needs a
+            # stored score (older subs from before the score column are NULL -> skip).
+            if kills == 0 and takedowns <= 10:
                 p_score = 0
                 if len(row) > 24 and row[24]:
                     try:

@@ -1607,7 +1607,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             feats.append("100 Kills")
         if takedowns >= 200:
             feats.append("200 Takedowns")
-    if deaths == 0 and takedowns > 0:
+    if deaths == 0 and takedowns > 0 and not (kills == 0 and takedowns <= 10):
         feats.append("Flawless")
     if takedowns >= 150 and deaths == 0:
         feats.append("Predator")
@@ -1628,7 +1628,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Cigar always lands first; the rest fire concurrently right after.
     await safe_react("<:cigar:1444893851427803298>")
     _rest_reacts = []
-    if deaths == 0 and takedowns > 0:
+    if deaths == 0 and takedowns > 0 and not (kills == 0 and takedowns <= 10):
         _rest_reacts.append("<a:flawless:1360358300834599062>")
     if is_triple:
         _rest_reacts.append("<a:triple:1365532698260668466>")
@@ -1796,7 +1796,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         summary += f"\n│ *{caption}*"
 
     # Build marks breakdown. A pacifist run (0 TD / 0 K) earns no weapon mark.
-    _is_pacifist = (takedowns == 0 and kills == 0)
+    _is_pacifist = (kills == 0 and takedowns <= 10)
     marks_earned = 0 if _is_pacifist else 1
     marks_lines = [] if _is_pacifist else ["*+1 submission*"]
     if '200 Takedowns' in feats:
