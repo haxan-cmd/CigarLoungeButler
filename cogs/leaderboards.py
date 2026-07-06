@@ -648,12 +648,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     # Guard against junk boards: never create a board for a missing/None weapon or
     # map (that's what produced "None - Agatha" and blank weapon boards).
     if (not vip and selected_weapon and str(selected_weapon).strip()
-            and str(selected_weapon).strip().lower() != 'none'):
+            and str(selected_weapon).strip().lower() != 'none' and takedowns > 0):
         updates.append((selected_weapon, takedowns, True, True, False))
 
     map_lb_name = f"{selected_map} - {faction}"
     if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
-            and faction and str(faction).strip()):
+            and faction and str(faction).strip() and takedowns > 0):
         updates.append((map_lb_name, takedowns, True, True, False))
 
     if "Flawless" in feats:
@@ -1105,7 +1105,7 @@ def _map_header(lb_name: str) -> str:
 
 _LB_EMOJI = {
     "TUFF":             "<a:TUFF2:1520779243879927898>",
-    "Pacifist":         "\U0001f54a\ufe0f",
+    "Pacifist":         "\u262e\ufe0f",
     "200 Takedowns":    "<a:200tkd:1363648828414230538>",
     "100 Kills":        "<a:100kill:1361412390339608686>",
     "Triple":           "<a:triple:1365532698260668466>",

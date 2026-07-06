@@ -81,9 +81,8 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
         if not weapon or weapon in ('Other', 'Multiple Weapons'):
             continue
-        marks = 1
         # A pacifist run (0 takedowns AND 0 kills) is a scoreboard feat, not a
-        # takedown game — it earns the Pacifist board slot but NO weapon mark.
+        # takedown game — no weapon marks, and ignore any feats stored on it.
         try:
             _pm_td = int(row[7]) if len(row) > 7 and row[7] else 0
             _pm_k = int(row[8]) if len(row) > 8 and row[8] else 0
@@ -91,14 +90,16 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             _pm_td = _pm_k = 0
         if _pm_td == 0 and _pm_k == 0:
             marks = 0
-        if '200 Takedowns' in feats:
-            marks += 1
-        if '100 Kills' in feats:
-            marks += 1
-        if 'Triple' in feats:
-            marks += 1
-        if 'High Score' in feats:
-            marks += 1
+        else:
+            marks = 1
+            if '200 Takedowns' in feats:
+                marks += 1
+            if '100 Kills' in feats:
+                marks += 1
+            if 'Triple' in feats:
+                marks += 1
+            if 'High Score' in feats:
+                marks += 1
 
         # Use submitted subclass to disambiguate shared weapons (e.g. Messer in Raider vs Crusader)
         # Key: (weapon, subclass) if subclass known, else plain weapon name

@@ -1809,7 +1809,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     if _is_pacifist and marks_earned == 0:
-        marks_summary = f"\n🕊️ **Pacifist run** on {selected_weapon} — no weapon marks, but it lands on the Pacifist board."
+        marks_summary = f"\n☮️ **Pacifist run** on {selected_weapon} — no weapon marks, but it lands on the Pacifist board."
     else:
         marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
