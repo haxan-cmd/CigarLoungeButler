@@ -1703,7 +1703,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Executioner took the red skull) ---
     if kills is not None and takedowns and takedowns > 0:
         _leth_g = round(kills / takedowns * 100, 1)
-        blurb_parts.append(f"\u2694\ufe0f {_leth_g}% Lethality")
+        blurb_parts.append(f"🩸 {_leth_g}% Lethality")
 
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
