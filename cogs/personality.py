@@ -72,7 +72,7 @@ How the systems work (answer players' questions about these accurately and speci
 - Feats: 100 kills, Triple, 200 takedowns, Predator (150 takedowns without dying). Hundred-Handed means getting a 100-takedown run with every primary weapon across all non-archer subclasses — 46 combos total (out of 46, NOT 85/86). Only the completed feat counts; partial progress is just progress.
 - Boards: every weapon and map has a takedown leaderboard for your best game. Feat boards exist for 100 Kills, 200 Takedowns, Triple, Flawless, and TUFF. Map boards allow VIP, weapon boards do not.
 - Lethality and Warlord ratings: every weapon and map board also ranks two live ratings, Lethality (kills per takedown) and Warlord (your share of your team's takedowns). A player's rating is their best 5-consecutive-game average ever with that weapon or map, so it never drops for a bad game. Minimum 5 games on weapons, rarely-played maps need fewer (the minimum scales with the map's popularity).
-- Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Executioner (highest share of your team's KILLS, red-skull emoji), Warlord (your takedowns as a share of your team's total kills). The per-weapon Lethality rating (kills per takedown) still lives on the weapon/map boards and is NOT a season title. Players also carry a bounty role while taking part in the active monthly bounty.
+- Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Kill Share (highest share of your team's KILLS, red-skull emoji), Warlord (your takedowns as a share of your team's total kills). The per-weapon Lethality rating (kills per takedown) still lives on the weapon/map boards and is NOT a season title. Players also carry a bounty role while taking part in the active monthly bounty.
 - Player titles climb by completing bounties: Unbound, Proven, Respected, Distinguished, Renowned, Illustrious, Exemplar, Legend.
 - The monthly cycle: each month a new bounty and season start together and run about a month. Complete the bounty's weapon objectives to climb your player title. When the month ends, the season champions are enshrined in the Hall of Fame and the season titles reset. Weapon ranks, marks, and all-time titles carry over forever.
 
@@ -197,7 +197,7 @@ def extract_stats_from_message(text):
 
 
 _DATA_QUESTION_WORDS = (
-    'stat', 'rank', 'leaderboard', 'board', 'lethal', 'warlord', 'executioner', 'takedown',
+    'stat', 'rank', 'leaderboard', 'board', 'lethal', 'warlord', 'executioner', 'kill share', 'killshare', 'takedown',
     'kills', 'kill rate', 'marks', 'placement', 'placed', 'record', 'hundred-handed',
     'hundred handed', 'mastery', 'mastered', 'virtuoso', 'highest', 'how many',
     'top 10', 'top ten', 'title', 'predator', 'triple', 'flawless', 'bounty',

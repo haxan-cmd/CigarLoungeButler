@@ -141,7 +141,7 @@ def _champion_lines(stats, keys=None):
         'campaign_master':    (te.get('Campaign Master', '\U0001f5fa\ufe0f'),  'Campaign Master'),
         'apex':               (te.get('apex_title', '\U0001f480'),              'Apex'),
         'frenzied':           (te.get('frenzied_title', '\U0001fa93'),          'Frenzied'),
-        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Executioner'),
+        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Kill Share'),
         'warlord_player':     (te.get('Warlord', '\U0001f6e1\ufe0f'),          'Warlord'),
     }
     order = keys or ['grand_marshal', 'weapons_master', 'campaign_master',
@@ -1199,14 +1199,14 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         except (ValueError, IndexError):
             td = kills = 0
         if is_map:
-            # Map boards: Executioner (kills / team total kills) + Warlord (takedowns / team total kills).
+            # Map boards: Kill Share (kills / team total kills) + Warlord (takedowns / team total kills).
             # team_total_kills = kills / kill-share, so TD/team_kills reduces to td * tks / kills.
             try:
                 _tks = float(row[20]) if len(row) > 20 and row[20] else None
             except (ValueError, TypeError):
                 _tks = None
             if _tks and 0 < _tks <= 100:
-                leth.setdefault(key, []).append((ts, _tks))                     # Executioner %
+                leth.setdefault(key, []).append((ts, _tks))                     # Kill Share %
                 if kills > 0 and td > 0:
                     warl.setdefault(key, []).append((ts, td * _tks / kills))    # Warlord % (TD/team kills)
         else:
@@ -1238,7 +1238,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Takedown board embeds WITH live rating fields appended: weapon boards show
     Lethality (kills/TD) + Warlord (share of team takedowns); map boards show
-    Executioner (kills/team kills) + Warlord (takedowns/team kills). All-time best
+    Kill Share (kills/team kills) + Warlord (takedowns/team kills). All-time best
     5-game streak, so a rating never drops for a bad game."""
     lr = wr = None
     rmin = 5
@@ -1264,8 +1264,8 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     _we = te.get('Warlord', '🛡️')
     if lethality_rows is not None:
         if is_map:
-            # Map boards: Executioner (kills / team kills), value already a %.
-            tail.add_field(name=f"{_le} Executioner",
+            # Map boards: Kill Share (kills / team kills), value already a %.
+            tail.add_field(name=f"{_le} Kill Share",
                            value=_fld(lethality_rows, lambda s: f"{s:.0f}%"), inline=False)
         else:
             # Weapon boards: Lethality (kills / TD), value is a 0-1 ratio.
@@ -1664,9 +1664,9 @@ def _monthly_faction_embed(map_name, faction, lr, wr):
     le = te.get('Lethality', '🧪')
     we = te.get('Warlord', '🛡️')
     e = discord.Embed(title=f"{map_name} · {faction} — This Month", colour=_embed_colour(f"{map_name} - {faction}"))
-    e.add_field(name=f"{le} Executioner", value=_monthly_rating_lines(lr, lambda s: f"{s:.0f}%"), inline=False)
+    e.add_field(name=f"{le} Kill Share", value=_monthly_rating_lines(lr, lambda s: f"{s:.0f}%"), inline=False)
     e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
-    e.set_footer(text="Monthly · Executioner (kills/team kills) + Warlord (takedowns/team kills) · top 5 · resets each month")
+    e.set_footer(text="Monthly · Kill Share (kills/team kills) + Warlord (takedowns/team kills) · top 5 · resets each month")
     return e
 
 
@@ -1721,7 +1721,7 @@ async def _monthly_index(guild, forum, index_name, units):
     embeds = [discord.Embed(
         title="📋 Monthly Report — Index",
         description="Weapon boards rank Lethality (kills/TD) and Warlord (share of your team's takedowns). "
-                    "Map boards rank Executioner (share of your team's kills) and Warlord (takedowns vs your "
+                    "Map boards rank Kill Share (share of your team's kills) and Warlord (takedowns vs your "
                     "team's kills). Top 5 per board, current season — resubmissions don't count. Jump to a board below.",
         colour=colour,
     )]
@@ -1903,7 +1903,7 @@ async def snapshot_monthly_to_hof(guild):
         for fac in sorted(maps[m]):
             lr, wr, _ = await compute_board_ratings(f"{m} - {fac}", is_map=True, all_subs=all_subs, window_start=window_start)
             if lr or wr:
-                lines.append(f"**{m} — {fac}**\n· Executioner: {_top(lr, lambda s: f'{s:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
+                lines.append(f"**{m} — {fac}**\n· Kill Share: {_top(lr, lambda s: f'{s:.0f}%')}\n· Warlord: {_top(wr, lambda s: f'{s:.0f}%')}")
     if not lines:
         return 0, None
 
@@ -2219,7 +2219,7 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n❌ Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)
 
-    @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Executioner + Warlord) at once (mod only).")
+    @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Kill Share + Warlord) at once (mod only).")
     async def refresh_map_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -2252,7 +2252,7 @@ class LeaderboardsCog(commands.Cog):
             except Exception as e:
                 nerve_log_error(f"Map board refresh {lb_name}", e)
                 failed.append(lb_name)
-        summary = f"\u2705 Refreshed {len(done)} map boards (Executioner + Warlord)."
+        summary = f"\u2705 Refreshed {len(done)} map boards (Kill Share + Warlord)."
         if failed:
             summary += f"\n\u274c Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)

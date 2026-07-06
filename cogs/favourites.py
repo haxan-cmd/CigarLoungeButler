@@ -65,7 +65,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     lobby_finishes = {}      # player -> [(rank, size), ...]
     team_score_ratios = {}   # player -> [your_td / avg_teammate_td]
     kill_efficiency = {}     # player -> [(your_kills, total_lobby_kills, lobby_size)]
-    team_kill_shares = {}    # player -> [team kill share %]   (Executioner: kills / team kills)
+    team_kill_shares = {}    # player -> [team kill share %]   (Kill Share: kills / team kills)
     warlord_ratios = {}      # player -> [takedowns / team total kills %]  (Warlord)
     team_td_shares = {}      # player -> [team TD share %]
     weapon_kill_shares = {}  # weapon -> [kill share %]
@@ -194,6 +194,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     dom_ranked = [p for p, _adj, _n in _dom]
     most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
+
+    # ── LETHALITY -- weapon-agnostic kills ÷ takedowns % (display-only on the report) ──
+    _true_leth = _shrunk_rank(lethal_ratios)
+    lethality_list = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _true_leth[:5]]
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -380,6 +384,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
         'warlord_player': warlord_player,
         'most_dominant': most_dominant if most_dominant else [],
+        'lethality_list': lethality_list if lethality_list else [],
         '_lethal_adj': {p: adj for p, adj, _n in _leth},
         '_warlord_adj': {p: adj for p, adj, _n in _dom},
         'top_weapons_by_kill_share': top_weapons_by_kill_share,
@@ -446,11 +451,14 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
             embed.add_field(name="⭐ Special Features  *(random this season)*", value=_table(frows), inline=False)
         embed.add_field(name=_RULE, value="​", inline=False)
 
-    embed.add_field(name="<a:mostlethal:1520490418817601658> Executioner  *(kills ÷ team kills · recent-weighted)*",
+    embed.add_field(name="<a:mostlethal:1520490418817601658> Kill Share  *(kills ÷ team kills · recent-weighted)*",
                     value=_table(_rows(stats.get("high_lethality"), plain=True)) if stats.get("high_lethality") else "```\n— not enough data —\n```",
                     inline=False)
     embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · recent-weighted)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
+                    inline=False)
+    embed.add_field(name="🩸 Lethality  *(kills per takedown · recent-weighted)*",
+                    value=_table(_rows(stats.get("lethality_list"), plain=True)) if stats.get("lethality_list") else "```\n— not enough data —\n```",
                     inline=False)
 
     _tt = stats.get("top_total_tally") or []
@@ -488,8 +496,8 @@ async def update_title_roles(guild, stats, include_weekly=True):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Executioner',
-         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Executioner title is yours. The butler is mildly impressed."),
+        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Kill Share',
+         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Kill Share title is yours. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]
@@ -564,7 +572,7 @@ async def update_title_roles(guild, stats, include_weekly=True):
 
 
 _SEASON_CATEGORIES = [
-    ("Executioner", "high_lethality", True),
+    ("Kill Share", "high_lethality", True),
     ("Warlord", "most_dominant", True),
     ("Total Tally", "top_total_tally", False),
     ("Most Kills", "top_kills_list", False),

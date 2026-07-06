@@ -177,7 +177,7 @@ def build_challenge_rules_embeds():
     e.add_field(name="<a:mostlethal:1520490418817601658> Board ratings", value=(
         "**Weapon boards** rank <a:mostlethal:1520490418817601658> **Lethality** (kills per takedown) and "
         "<:warlord:1520490364039860347> **Warlord** (your share of your team's takedowns).\n"
-        "**Map boards** rank <a:mostlethal:1520490418817601658> **Executioner** (your share of your team's kills) and "
+        "**Map boards** rank <a:mostlethal:1520490418817601658> **Kill Share** (your share of your team's kills) and "
         "<:warlord:1520490364039860347> **Warlord** (your takedowns vs your team's total kills).\n"
         "Each is your **best 5-game streak ever** on that board, so it never drops for a bad game — keep submitting. "
         "Min 5 games on weapons; rarely-played maps need fewer.\n"
@@ -200,7 +200,7 @@ def build_challenge_rules_embeds():
     e.add_field(name="This season (reset each bounty)", value=(
         "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
         "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
-        "<a:mostlethal:1520490418817601658> **Executioner** — biggest share of your team's kills\n"
+        "<a:mostlethal:1520490418817601658> **Kill Share** — biggest share of your team's kills\n"
         "<:warlord:1520490364039860347> **Warlord** — your takedowns vs your team's total kills"
     ), inline=False)
     e.add_field(name="🎯 Bounty", value=(

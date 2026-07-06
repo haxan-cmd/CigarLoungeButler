@@ -565,7 +565,7 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
     discord_id_str = str(discord_id)
     td_shares = []    # team_td_share values (0–100) — legacy
     lethalities = []  # kills / TD as a % — weapon-board lethality
-    kill_shares = []  # kills / team kills — Executioner
+    kill_shares = []  # kills / team kills — Kill Share
     warlord_vals = [] # takedowns / team kills — Warlord
     for row in subs:
         if not row or row[2].strip() != discord_id_str:
@@ -1020,7 +1020,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         if personal_bests.get('warlord', 0) > 0:
             lines.append(f"• {config.TITLE_EMOJIS['Warlord']} Warlord — **{personal_bests['warlord']:.0f}%**")
         if personal_bests.get('executioner', 0) > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Executioner — **{personal_bests['executioner']:.0f}%**")
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill Share — **{personal_bests['executioner']:.0f}%**")
         lines.append("")
 
     lines.append("**Weapon Mastery:**")

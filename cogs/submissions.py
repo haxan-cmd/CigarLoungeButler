@@ -1675,7 +1675,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _all_td = _team_td + _enemy_td
     _all_k  = _team_k  + _enemy_k
 
-    # Team total kills = denominator for Warlord/Executioner. Prefer the faction's
+    # Team total kills = denominator for Warlord/Kill Share. Prefer the faction's
     # TOTAL kill count read off the top of the scoreboard (robust, and it includes
     # players who left mid-match); fall back to summing the visible teammate rows.
     _vd_team_total = vd.get('team_total_kills')
@@ -1693,14 +1693,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         team_rank = sum(1 for s in _team_td if s >= takedowns) + 1
         team_size = len(_team_td) + 1
 
-    # --- Warlord (takedowns / team total kills) + Executioner (kills / team total kills), this game ---
+    # --- Warlord (takedowns / team total kills) + Kill Share (kills / team total kills), this game ---
     if total_team_kills and kills and takedowns and takedowns > 0:
         _warlord_g = round(takedowns / total_team_kills * 100, 1)
         _exec_g = round(kills / total_team_kills * 100, 1)
-        blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Executioner")
+        blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Kill Share")
         blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
 
-    # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Executioner took the red skull) ---
+    # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
     if kills is not None and takedowns and takedowns > 0:
         _leth_g = round(kills / takedowns * 100, 1)
         blurb_parts.append(f"🩸 {_leth_g}% Lethality")
