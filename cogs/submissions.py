@@ -1607,7 +1607,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             feats.append("100 Kills")
         if takedowns >= 200:
             feats.append("200 Takedowns")
-    if deaths == 0:
+    if deaths == 0 and takedowns > 0:
         feats.append("Flawless")
     if takedowns >= 150 and deaths == 0:
         feats.append("Predator")
@@ -1628,7 +1628,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Cigar always lands first; the rest fire concurrently right after.
     await safe_react("<:cigar:1444893851427803298>")
     _rest_reacts = []
-    if deaths == 0:
+    if deaths == 0 and takedowns > 0:
         _rest_reacts.append("<a:flawless:1360358300834599062>")
     if is_triple:
         _rest_reacts.append("<a:triple:1365532698260668466>")
