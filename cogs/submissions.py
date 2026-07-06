@@ -1697,8 +1697,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if total_team_kills and kills and takedowns and takedowns > 0:
         _warlord_g = round(takedowns / total_team_kills * 100, 1)
         _exec_g = round(kills / total_team_kills * 100, 1)
-        blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
         blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Executioner")
+        blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
+
+    # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Executioner took the red skull) ---
+    if kills is not None and takedowns and takedowns > 0:
+        _leth_g = round(kills / takedowns * 100, 1)
+        blurb_parts.append(f"\u2694\ufe0f {_leth_g}% Lethality")
 
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
