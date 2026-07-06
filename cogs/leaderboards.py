@@ -3053,7 +3053,7 @@ class LeaderboardsCog(commands.Cog):
             await interaction.edit_original_response(
                 content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
 
-    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns entries (mod only).")
+    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns / Pacifist entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("Not for you.", ephemeral=True)
@@ -3079,6 +3079,21 @@ class LeaderboardsCog(commands.Cog):
             weapon     = row[3] or ""
             if not link:
                 continue
+            # Pacifist: 0-takedown, 0-kill run ranked by raw score. Needs a stored
+            # score (older subs from before the score column are NULL -> skip).
+            if takedowns == 0 and kills == 0:
+                p_score = 0
+                if len(row) > 24 and row[24]:
+                    try:
+                        p_score = int(str(row[24]).replace(',', '').strip())
+                    except (ValueError, TypeError):
+                        p_score = 0
+                if p_score > 0 and ("Pacifist", link) not in existing:
+                    await _db.add_leaderboard_entry("Pacifist", player, discord_id, p_score, link, weapon)
+                    existing.add(("Pacifist", link))
+                    added += 1
+                continue  # a pacifist run qualifies for no other feat board
+
             is_triple_row = 'Triple' in (feats_str or '')
             for board, stat in FEAT_MAP.items():
                 # Qualify by raw stats — catches Triples that didn't get the feat tag
