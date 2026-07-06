@@ -230,11 +230,99 @@ def build_player_bounty_card(bounty, player_progress):
     return "\n".join(lines)
 
 
+def _parse_special(bounty):
+    """(challenge_text_lower, min_takedowns) for the bonus challenge, or (None, None)."""
+    sc = (bounty.get('special_challenge') or '').lower()
+    if not sc:
+        return None, None
+    import re as _re
+    _m = _re.search(r'(\d+)\s*takedown', sc)
+    return sc, (int(_m.group(1)) if _m else 100)
+
+
+def _run_is_special(bounty, weapon, takedowns):
+    """True if THIS run qualifies as the special/bonus challenge (weapon named in the
+    challenge text, TD threshold met)."""
+    sc, min_td = _parse_special(bounty)
+    if not sc or not weapon:
+        return False
+    return weapon.lower() in sc and takedowns >= min_td
+
+
+async def _player_has_special_run(bounty, player_id):
+    """True if ANY of the player's past submissions is a qualifying bonus-challenge run.
+    Lets us credit a katar run done BEFORE the bounty was finished (either-order rule)."""
+    sc, min_td = _parse_special(bounty)
+    if not sc:
+        return False
+    try:
+        subs = await _db.get_submissions_by_player(str(player_id))
+    except Exception:
+        subs = []
+    for r in subs:
+        w = (r[3] or '') if len(r) > 3 else ''
+        try:
+            td = int(r[7]) if len(r) > 7 and r[7] else 0
+        except (ValueError, TypeError):
+            td = 0
+        if w and w.lower() in sc and td >= min_td:
+            return True
+    return False
+
+
+async def _commit_bonus(guild, bounty, player_name, player_id):
+    """Add the player to the bonus completion board (dedup) + ping + refresh the board.
+    Caller guarantees the player has finished the bounty AND done the special run."""
+    bonus = bounty.get('bonus_completions', [])
+    if any(str(e.get('id') if isinstance(e, dict) else '') == str(player_id) for e in bonus):
+        return False
+    bonus.append({'id': str(player_id), 'name': player_name})
+    bounty['bonus_completions'] = bonus
+    bounty['special_done'] = True
+    await _db.update_bounty_field(bounty['id'], 'bonus_completions', json.dumps(bonus))
+    await _db.update_bounty_field(bounty['id'], 'special_done', True)
+    print(f"[BOUNTY] Bonus awarded to {player_name}")
+    bounty_channel = guild.get_channel(bounty['channel_id'])
+    if not bounty_channel and bounty.get('channel_id'):
+        try:
+            bounty_channel = await guild.fetch_channel(bounty['channel_id'])
+        except Exception:
+            bounty_channel = None
+    if bounty_channel:
+        try:
+            role = guild.get_role(bounty.get('role_id')) if bounty.get('role_id') else None
+            mention = role.mention if role else ''
+            await bounty_channel.send(
+                f"{mention} \u2b50 **{player_name}** completed the bonus challenge: "
+                f"**{bounty['special_challenge']}**!"
+            )
+        except Exception as e:
+            print(f"[BOUNTY] Bonus ping error: {e}")
+        if bounty.get('bonus_msg_id'):
+            try:
+                msg = await bounty_channel.fetch_message(bounty['bonus_msg_id'])
+                await msg.edit(content=_build_bonus_board_text(bounty))
+            except Exception as e:
+                print(f"[BOUNTY] Bonus board update error: {e}")
+    return True
+
+
+async def _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player_id):
+    """Run-path: called on every submission. If THIS run is the special challenge and the
+    player has already finished the main bounty, credit the bonus. If they haven't finished
+    yet, do nothing now -- the completion path will credit this run once they do (either
+    order). No-ops unless the run is the special challenge."""
+    if not _run_is_special(bounty, weapon, takedowns):
+        return
+    if not any(str(c.get('id')) == str(player_id) for c in bounty.get('completions', [])):
+        print(f"[BOUNTY] {player_name} did the bonus challenge ({weapon} {takedowns}TD) "
+              f"before finishing the bounty -- will credit when they complete it.")
+        return
+    await _commit_bonus(guild, bounty, player_name, player_id)
+
+
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched."""
-    if takedowns < 100:
-        return False
-
     bounty = await get_active_bounty()
     if not bounty:
         print(f"[BOUNTY] No active bounty found — skipping for {player_name} weapon={weapon}")
@@ -243,36 +331,21 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if not weapon:
         return False
 
+    # Bonus/special challenge (e.g. "Katar 100 Takedowns") is evaluated first: it can
+    # carry its own TD threshold and applies whether or not the weapon is a main bounty
+    # weapon. Strict order: _try_award_bonus only credits players who have ALREADY
+    # completed the main bounty; a bonus run done beforehand is not retro-credited.
+    await _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player_id)
+
+    # Main-bounty progress requires a 100-TD run.
+    if takedowns < 100:
+        return False
+
     weapons = bounty['weapons']
 
     matched_key = next((k for k in weapons if k.lower() == weapon.lower()), None)
     if not matched_key:
         print(f"[BOUNTY] Weapon '{weapon}' not in bounty '{bounty['title']}' — keys: {list(weapons.keys())}")
-        # Still check special challenge even if weapon isn't a bounty weapon
-        if not bounty['special_done'] and bounty.get('special_challenge'):
-            import re as _re
-            sc = bounty['special_challenge'].lower()
-            td_match = _re.search(r'(\d+)\s*takedown', sc)
-            sc_min_td = int(td_match.group(1)) if td_match else 100
-            if weapon and weapon.lower() in sc and takedowns >= sc_min_td:
-                bounty['special_done'] = True
-                print(f"[BOUNTY] Special challenge auto-completed by {player_name} — {weapon} {takedowns}TD")
-                bounty_channel = guild.get_channel(bounty['channel_id'])
-                if not bounty_channel and bounty['channel_id']:
-                    try:
-                        bounty_channel = await guild.fetch_channel(bounty['channel_id'])
-                    except Exception:
-                        bounty_channel = None
-                if bounty_channel:
-                    try:
-                        bounty_role = guild.get_role(bounty.get('role_id')) if bounty.get('role_id') else None
-                        mention = bounty_role.mention if bounty_role else ''
-                        await bounty_channel.send(
-                            f"{mention} ⭐ **{player_name}** has completed the special challenge: **{bounty['special_challenge']}**!"
-                        )
-                    except Exception as e:
-                        print(f"[BOUNTY] Special challenge ping error: {e}")
-                await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
         return False
 
     # Player already completed this bounty — don't re-credit their progress or fire the
@@ -360,33 +433,9 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")
 
-    # ── AUTO-CHECK SPECIAL CHALLENGE ─────────────────────────────────────────
-    if not bounty['special_done'] and bounty.get('special_challenge'):
-        sc = bounty['special_challenge'].lower()
-        # Parse minimum TD threshold from challenge text (e.g. "100 Takedowns")
-        import re as _re
-        td_match = _re.search(r'(\d+)\s*takedown', sc)
-        sc_min_td = int(td_match.group(1)) if td_match else 100
-        # Check if current weapon appears anywhere in the challenge text
-        weapon_in_challenge = weapon and weapon.lower() in sc
-        if weapon_in_challenge and takedowns >= sc_min_td:
-            bounty['special_done'] = True
-            print(f"[BOUNTY] Special challenge auto-completed by {player_name} — {weapon} {takedowns}TD")
-            # Append to bonus_completions list
-            bonus_completions = bounty.get('bonus_completions', [])
-            if not any(str(e.get('id') if isinstance(e, dict) else '') == str(player_id) for e in bonus_completions):
-                bonus_completions.append({'id': str(player_id), 'name': player_name})
-            bounty['bonus_completions'] = bonus_completions
-            await _db.update_bounty_field(bounty['id'], 'bonus_completions', json.dumps(bonus_completions))
-            if bounty_channel:
-                try:
-                    bounty_role = guild.get_role(bounty.get('role_id')) if bounty.get('role_id') else None
-                    mention = bounty_role.mention if bounty_role else ''
-                    await bounty_channel.send(
-                        f"{mention} ⭐ **{player_name}** has completed the special challenge: **{bounty['special_challenge']}**!"
-                    )
-                except Exception as e:
-                    print(f"[BOUNTY] Special challenge ping error: {e}")
+        # Either-order bonus: credit a special run they already did, now the bounty is done.
+        if await _player_has_special_run(bounty, player_id):
+            await _commit_bonus(guild, bounty, player_name, player_id)
 
     # Save updated state
     await save_bounty_state(bounty['id'], weapons, bounty['special_done'], completions)
