@@ -244,7 +244,8 @@ def _looks_like_rules_question(text):
         '?' in t
         or t.startswith(('how ', 'what', 'why ', 'when ', 'does ', 'do i', 'is ', 'explain', 'can i', 'where '))
         or any(ph in t for ph in ('figure out', 'figuring out', 'understand', 'explain',
-                                  'help with', 'help me', 'confused', 'not sure', 'how do', 'how does'))
+                                  'help', 'confused', 'not sure', 'how do', 'how does',
+                                  'hold my hand', 'walk me through', 'teach me', 'cant read', "can't read"))
     )
     return has_kw and has_q
 
@@ -357,11 +358,12 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         if is_rules:
             # Rules/mechanics question: one terse sentence, no Manager escalation, and no
             # self-added link (on_message appends the information-centre link).
-            user_prompt = (f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}\n"
+            user_prompt = (f"{context_str}{channel_note}Player asking: {player_name}{idiot_note}\n"
                            f"Their message: {truncated_msg}\n\n"
-                           "This is a rules or mechanics question. Answer it directly in ONE short, dry "
-                           "sentence, then stop. Do NOT escalate to the Manager, do NOT ask what is wrong, "
-                           "do NOT offer alternatives or follow-up questions, and do NOT add a link yourself.")
+                           "This is a rules or mechanics question. Answer ONLY the rules point they asked "
+                           "about, in ONE short, dry sentence, then stop. Do NOT escalate to the Manager, "
+                           "do NOT recite their stats, marks, or boards, do NOT ask what is wrong, do NOT "
+                           "offer alternatives or follow-up questions, and do NOT add a link yourself.")
         else:
             user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
