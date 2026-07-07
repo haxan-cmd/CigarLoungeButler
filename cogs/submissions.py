@@ -511,6 +511,35 @@ class VisionConfirmView(discord.ui.View):
         )
 
 
+    @discord.ui.button(label='Fix Map', style=discord.ButtonStyle.grey, row=1)
+    async def fix_map(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._owner_check(interaction):
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        self.parsed['map'] = None
+        self.parsed['faction'] = None  # a map change invalidates the faction
+        p = self.parsed
+        view = MapSelectView(self.original_message, self.prompt_msg, p.get('subclass'), p.get('weapon'), vision_data=p)
+        await interaction.response.edit_message(
+            content=f"Class: `{p.get('subclass')}` | Weapon: `{p.get('weapon')}`\nWhich map were you on?", view=view)
+
+    @discord.ui.button(label='Fix Team', style=discord.ButtonStyle.grey, row=1)
+    async def fix_faction(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._owner_check(interaction):
+            await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        self.parsed['faction'] = None
+        p = self.parsed
+        if not p.get('map'):
+            view = MapSelectView(self.original_message, self.prompt_msg, p.get('subclass'), p.get('weapon'), vision_data=p)
+            await interaction.response.edit_message(content="Which map were you on?", view=view)
+            return
+        view = FactionSelectView(self.original_message, self.prompt_msg, p.get('subclass'), p.get('weapon'), p['map'], vision_data=p)
+        await interaction.response.edit_message(
+            content=f"Class: `{p.get('subclass')}` | Weapon: `{p.get('weapon')}` | Map: `{p['map']}`\nWhich team?", view=view)
+
+
+
 class ParseConfirmView(discord.ui.View):
     def __init__(self, original_message, prompt_msg, detected_weapon, detected_subclass):
         super().__init__(timeout=300)
@@ -1986,6 +2015,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     )
             except Exception as e:
                 print(f"Leaderboard update error: {e}")
+
+        # A pacifist run only lands on the Pacifist board (an unlimited feat board),
+        # which flips any_updated True. That must NOT fire the weapon/map High Score
+        # react or mark — pacifist runs never earn a High Score.
+        if _is_pacifist:
+            any_updated = False
 
         # Hundred Handed: track subclass+weapon combos (any submission counts)
         if selected_weapon and selected_class and not selected_class.startswith("Marksman"):

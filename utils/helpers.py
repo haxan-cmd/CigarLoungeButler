@@ -81,7 +81,7 @@ Extract ONLY from that highlighted row:
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
 - map (full map name shown at the TOP of the screen above the scoreboard, e.g. "The Siege of Rudhelm", "The Battle of Darkforest" — NOT from the leaderboard rows)
 NOTE: The two large numbers at the TOP of the screen, one on each side (one per faction, e.g. "AGATHA 531" on the left and "MASON 678" on the right), are each team's TOTAL KILL count for the whole match. Read them into team_total_kills (the submitting player's OWN faction) and enemy_total_kills (the OTHER faction). These are team totals, NOT individual stats — never use them for the highlighted player's kills or takedowns.
-- faction (Agatha, Mason, or Tenosia - whichever team side the highlighted row is on)
+- faction: the highlighted player's team. Determine it from the large faction banner at the TOP of the screen (the same "AGATHA .../ MASON ..." labels noted above — one faction name on the LEFT side, the other on the RIGHT side). The scoreboard is split into two side-by-side halves; work out which half (left or right) the highlighted row sits in, then read the faction from the banner label directly ABOVE that half. That banner name is the source of truth — do NOT guess the faction from row colours or icons. (Agatha, Mason, or Tenosia.)
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
 - deaths (integer from D column of highlighted row)
