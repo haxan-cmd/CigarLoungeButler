@@ -274,8 +274,7 @@ async def _build_ledger_entrance_impl(guild, stats=None):
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
             [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
-            [("🗓️ Monthly Report",           getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0)),
-             ("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
+            [("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
         ]
 
         # Delete all previous entrance messages then resend fresh
@@ -1168,7 +1167,17 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         this_total = map_totals.get(lb_name, 0)
         min_games = max(1, min(5, round(5 * this_total / busiest))) if busiest else 5
     else:
-        min_games = 5
+        # Scale the game minimum by weapon popularity (same idea as maps): the busiest
+        # weapon needs a full 5-game sample; off-hand 1H weapons need as few as 2, so their
+        # Lethality/Warlord ratings actually show instead of being blank.
+        weapon_totals = {}
+        for _r in subs:
+            _w = _r[3].strip() if len(_r) > 3 and _r[3] else ''
+            if _w:
+                weapon_totals[_w] = weapon_totals.get(_w, 0) + 1
+        _busiest_w = max(weapon_totals.values()) if weapon_totals else 1
+        _this_w = weapon_totals.get(lb_name, 0)
+        min_games = max(2, min(5, round(5 * _this_w / _busiest_w))) if _busiest_w else 5
 
     # Resolve discord_id -> current display name (Players sheet is source of truth).
     # One person can submit under several display names; bucket by stable id so they
@@ -1288,7 +1297,7 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     if warlord_rows is not None:
         tail.add_field(name=f"{_we} Warlord",
                        value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
-    _min_txt = "5+ games" if not is_map else "enough games"
+    _min_txt = f"{rating_min}+ games"
     tail.add_field(
         name="\u200b",
         value=(f"*These rank everyone with {_min_txt} — separate from the takedown order "
