@@ -1812,6 +1812,10 @@ async def render_monthly_boards(guild, only_boards=None):
     """Live monthly Lethality/Warlord top-5 boards rendered into the repurposed
     Monthly Report forum (ALLTIME_RECORDS_FORUM_ID). Scoped to the current season
     window; resubmissions excluded. only_boards limits the refresh to given boards."""
+    # Monthly Report RETIRED: the season Lethality / Warlord / Kill Share ratings now live
+    # on the butler-season-board (season-scoped). This per-board forum report is no longer
+    # rendered; kept as a no-op so season_reset + the all-time seed still do their other work.
+    return 0
     fid = getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0
     if not fid:
         print("[MONTHLY] ALLTIME_RECORDS_FORUM_ID not set - skipping render.")
