@@ -160,7 +160,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     # sustained high performance over many games ranks highest.
     #   adjusted = (sum_of_ratios + PRIOR * global_mean) / (games + PRIOR)
     _PRIOR = 5      # pseudo-games at the global mean; higher = rewards volume more
-    _MIN = 2        # ignore truly tiny samples
+    _MIN = 5        # 5+ games to qualify (matches the all-time boards' minimum)
     _HALFLIFE = 30.0  # submissions — recent games weigh most, older ones fade (never fully drop)
 
     def _shrunk_rank(data):
@@ -483,6 +483,9 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
         ("Weapons Master", stats.get("weapons_master") or "—"),
         ("Campaign Master", stats.get("campaign_master") or "—"),
     ]), inline=False)
+    embed.set_footer(text=("Kill Share / Warlord / Lethality here are recency-weighted averages for THIS "
+                           "season (5+ games) -- current form, not an all-time peak. The all-time boards "
+                           "show your best 5-games-in-a-row instead."))
     return embed
 
 
