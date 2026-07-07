@@ -268,8 +268,8 @@ async def _build_ledger_entrance_impl(guild, stats=None):
 
         # Each tuple is one message: list of (label, channel_id) buttons
         message_groups = [
-            [("⚖️ Challenge Rules",         1460713024082935930)],
-            [("🗂️ Members Archive",          REGISTRY_INDEX_THREAD_ID)],
+            [("⚖️ Information Center",         1460713024082935930)],
+            [("🗂️ Member Profiles",          REGISTRY_INDEX_THREAD_ID)],
             [("🏆 Map Records",             idx_maps.id if idx_maps else None),
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
