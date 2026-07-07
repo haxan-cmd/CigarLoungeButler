@@ -228,16 +228,25 @@ _RULES_KEYWORDS = (
     'tuff', 'predator', 'triple', 'hundred handed', 'hundred-handed', 'pacifist',
     'high score', 'apex', 'frenzied', 'title', 'season', 'leaderboard', 'board',
     'qualify', 'takedown', 'grand marshal', 'weapons master', 'campaign master',
+    'rules', 'ruleset', 'the rule',
 )
 
 
 def _looks_like_rules_question(text):
-    """Strict: a real question (contains '?') about a specific rules concept. A bare
-    'help' or a keyword with no question mark does NOT trigger."""
+    """A genuine rules question: mentions a specific rules concept AND reads like a
+    question -- a '?', an interrogative opener, or a 'help with / figure out' phrase.
+    A bare 'help' with no rules keyword never triggers."""
     t = (text or '').lower().strip()
-    if len(t) < 10 or '?' not in t:
+    if len(t) < 8:
         return False
-    return any(k in t for k in _RULES_KEYWORDS)
+    has_kw = any(k in t for k in _RULES_KEYWORDS)
+    has_q = (
+        '?' in t
+        or t.startswith(('how ', 'what', 'why ', 'when ', 'does ', 'do i', 'is ', 'explain', 'can i', 'where '))
+        or any(ph in t for ph in ('figure out', 'figuring out', 'understand', 'explain',
+                                  'help with', 'help me', 'confused', 'not sure', 'how do', 'how does'))
+    )
+    return has_kw and has_q
 
 
 async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
@@ -826,29 +835,6 @@ class PersonalityCog(commands.Cog):
         mentions_bald_female = 'bald female' in content_lower or 'bald woman' in content_lower
         mentions_manager = 'manager' in content_lower
         mentions_stats = 'stats' in content_lower
-
-        # ── Command help redirect — fire in main if someone asks about commands ───
-        _cmd_triggers = [
-            'how do i', 'how to', 'what command', 'what commands', 'slash command',
-            'how do you', 'what is /', 'what does /', '/stats', '/rank', '/bounty',
-            'what can you do', 'what can the bot', 'how does the bot', 'commands',
-            'need help', 'help with', 'help me',
-        ]
-        if is_main and not message.author.bot:
-            _cl = content_lower
-            if any(t in _cl for t in _cmd_triggers):
-                import random as _rand
-                _manual_id  = config.BUTLERS_MANUAL_CHANNEL_ID
-                _responses = [
-                    f"The manual covers everything you need. <#{_manual_id}>",
-                    f"I don't take requests in the main hall. Consult the manual. <#{_manual_id}>",
-                    f"Kindly direct your enquiries to the manual. <#{_manual_id}> — that's what it's there for.",
-                    f"It's all written down. <#{_manual_id}>",
-                    f"The manual is not decorative. <#{_manual_id}>",
-                ]
-                await message.channel.send(_rand.choice(_responses))
-                return
-
         # Proactive rules answering -- NO ping needed. On a strict rules question (a real
         # '?' plus a specific rules keyword; never bare "help"), the Butler ANSWERS it and
         # points to the information centre. Skipped when pinged/named (that path already
