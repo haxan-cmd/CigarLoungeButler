@@ -218,6 +218,28 @@ def _looks_like_data_question(text):
     return any(w in t for w in _DATA_QUESTION_WORDS)
 
 
+# Proactive information-centre pointer: only fires on a genuine question ('?') about a
+# specific rules concept. Bare "help", or a keyword with no question, never triggers.
+_RULES_LINK_COOLDOWN = 900          # sec, per user -- no spamming the link
+_RULES_LINK_COOLDOWNS = {}          # user_id -> last drop ts
+_RULES_KEYWORDS = (
+    'warlord', 'kill share', 'killshare', 'lethality', 'most lethal', 'kill rate',
+    'marks', 'mark ', 'rank', 'mastery', 'mastered', 'virtuoso', 'bounty', 'flawless',
+    'tuff', 'predator', 'triple', 'hundred handed', 'hundred-handed', 'pacifist',
+    'high score', 'apex', 'frenzied', 'title', 'season', 'leaderboard', 'board',
+    'qualify', 'takedown', 'grand marshal', 'weapons master', 'campaign master',
+)
+
+
+def _looks_like_rules_question(text):
+    """Strict: a real question (contains '?') about a specific rules concept. A bare
+    'help' or a keyword with no question mark does NOT trigger."""
+    t = (text or '').lower().strip()
+    if len(t) < 10 or '?' not in t:
+        return False
+    return any(k in t for k in _RULES_KEYWORDS)
+
+
 async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
     """Find a recent submission matching the given stats. Returns context string or empty."""
     try:
@@ -827,11 +849,24 @@ class PersonalityCog(commands.Cog):
                 await message.channel.send(_rand.choice(_responses))
                 return
 
+        # Proactive rules answering -- NO ping needed. On a strict rules question (a real
+        # '?' plus a specific rules keyword; never bare "help"), the Butler ANSWERS it and
+        # points to the information centre. Skipped when pinged/named (that path already
+        # answers). Per-user cooldown so it can't be spammed into answering repeatedly.
+        _is_rules_q = _looks_like_rules_question(content_lower)
+        _proactive_rules = False
+        if (is_main and not message.author.bot and _is_rules_q
+                and not (is_pinged or mentions_butler or mentions_bald_female or mentions_manager)):
+            _rt = time.time()
+            if _rt - _RULES_LINK_COOLDOWNS.get(message.author.id, 0) > _RULES_LINK_COOLDOWN:
+                _RULES_LINK_COOLDOWNS[message.author.id] = _rt
+                _proactive_rules = True
+
         # ── Main only — only respond if pinged or butler/clanker mentioned ────────
         if not is_main:
             return
         should_respond = (is_pinged or mentions_butler or mentions_bald_female
-                          or mentions_manager or mentions_stats)
+                          or mentions_manager or mentions_stats or _proactive_rules)
         if should_respond and _anthropic_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'
@@ -1370,6 +1405,8 @@ class PersonalityCog(commands.Cog):
                 if result:
                     response_text, needs_eyeball = result
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
+                    if _is_rules_q:
+                        response_text = response_text.rstrip() + f"\n\nIt's all on record in the information centre. <#{config.CHALLENGE_RULES_CHANNEL_ID}>"
                     sent_msg = await message.reply(response_text, mention_author=False)
                     _ctx_kind = 'stats' if player_stats_ctx else 'banter'
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
