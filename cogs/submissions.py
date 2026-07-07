@@ -2035,7 +2035,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             except Exception as e:
                 nerve_log_error("Hundred-Handed check", e)
 
-        if any_updated:
+        # "High Score" = a personal best on the WEAPON's OWN board — not map or feat
+        # boards. any_updated is also flipped by those, which produced phantom High
+        # Scores with no weapon placement to show. Gate on the weapon board placing so
+        # the High Score react/mark and the weapon hyperlink/placement always agree.
+        _weapon_hs = bool(selected_weapon) and any(lb == selected_weapon for lb, _ in placements)
+        if _weapon_hs:
             # Immediate visual feedback FIRST — react + bump the blurb before any
             # bookkeeping, so the user sees the High Score right away.
             await safe_react("<a:highscore:1360312918545269057>")

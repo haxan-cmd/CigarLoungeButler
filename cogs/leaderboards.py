@@ -729,14 +729,13 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     board_scores.sort(reverse=True)
                     pos = board_scores.index(score) + 1
                     old_pos = (_all.index(existing_score) + 1) if existing_score in _all else pos + 1
-                    # Beating your own score on a board is a personal best = High Score,
-                    # whether or not you climbed a spot — keeps the weapon_hs reaction and
-                    # the blurb's High Score line consistent (a re-top of your own #1 used
-                    # to react but never register).
-                    any_updated = True
-                    # Show the placement line + weapon hyperlink in the blurb for ANY
-                    # personal best on a board (a top-10 improvement), not just a #1 takeover.
-                    placements.append((lb_name, pos))
+                    # High Score fires only when the run IMPROVES the player's board
+                    # placement (climbs at least one spot) — NOT when they merely beat their
+                    # own score in the same slot. (Making the board for the first time is the
+                    # new-entry branch below, which already registers it.)
+                    if pos < old_pos:
+                        any_updated = True
+                        placements.append((lb_name, pos))
                 else:
                     continue
             else:
