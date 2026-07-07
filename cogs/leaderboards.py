@@ -734,9 +734,9 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     # the blurb's High Score line consistent (a re-top of your own #1 used
                     # to react but never register).
                     any_updated = True
-                    # Placement line only for maps or a #1 takeover.
-                    if ' - ' in lb_name or pos == 1:
-                        placements.append((lb_name, pos))
+                    # Show the placement line + weapon hyperlink in the blurb for ANY
+                    # personal best on a board (a top-10 improvement), not just a #1 takeover.
+                    placements.append((lb_name, pos))
                 else:
                     continue
             else:
