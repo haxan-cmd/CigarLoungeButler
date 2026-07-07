@@ -314,7 +314,7 @@ async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=No
         return ''
 
 
-async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False):
+async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False, is_rules=False):
     """Call Anthropic API for Butler response. Returns response string or None."""
     if not _anthropic_client:
         return None
@@ -349,12 +349,21 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         # Chaos fires only on banter, never on a data/stats question (we never fabricate
         # real numbers). Keyed off the QUESTION, not whether stats are loaded — registered
         # players always have stats attached, which previously kept chaos permanently shut.
-        if not _looks_like_data_question(user_message) and random.random() < 0.30:
+        if not is_rules and not _looks_like_data_question(user_message) and random.random() < 0.30:
             chaos_note = '\n[IMPORTANT: For THIS reply only, be subtly and confidently wrong about a small NON-stats detail — misremember a map name, a food or lore fact, a date, or who said what — delivered with your usual dry composure. Never invent or alter a real player stat, rank, or number. No winking, no admitting the error.]'
             print("[BUTLER] chaos mode fired (banter)")
         else:
             chaos_note = ''
-        user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+        if is_rules:
+            # Rules/mechanics question: one terse sentence, no Manager escalation, and no
+            # self-added link (on_message appends the information-centre link).
+            user_prompt = (f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}\n"
+                           f"Their message: {truncated_msg}\n\n"
+                           "This is a rules or mechanics question. Answer it directly in ONE short, dry "
+                           "sentence, then stop. Do NOT escalate to the Manager, do NOT ask what is wrong, "
+                           "do NOT offer alternatives or follow-up questions, and do NOT add a link yourself.")
+        else:
+            user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = await _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
@@ -1382,7 +1391,7 @@ class PersonalityCog(commands.Cog):
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
 
-                result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot)
+                result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot, is_rules=_is_rules_q)
                 if is_rude:
                     try:
                         await message.add_reaction('<a:idiot_daze:1520130932584223012>')
