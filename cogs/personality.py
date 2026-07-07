@@ -220,7 +220,7 @@ def _looks_like_data_question(text):
 
 # Proactive information-centre pointer: only fires on a genuine question ('?') about a
 # specific rules concept. Bare "help", or a keyword with no question, never triggers.
-_RULES_LINK_COOLDOWN = 900          # sec, per user -- no spamming the link
+_RULES_LINK_COOLDOWN = 60           # sec, per user -- just stops rapid-fire spam
 _RULES_LINK_COOLDOWNS = {}          # user_id -> last drop ts
 _RULES_KEYWORDS = (
     'warlord', 'kill share', 'killshare', 'lethality', 'most lethal', 'kill rate',
