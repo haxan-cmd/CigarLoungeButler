@@ -1135,8 +1135,8 @@ def _lb_title(lb_name, show_title, cont=False):
     return f"{base} (cont.)" if cont else base
 
 async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None):
-    """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (share of your team's
-    takedowns) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
+    """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (takedowns as a share of your team's
+    total kills) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
     window a player has ever posted with that weapon/map. Minimum 5 games for
     weapons; for maps the minimum scales with the map's popularity vs the busiest
     map (rare maps need fewer). Weapon boards exclude VIP; map boards allow it.
@@ -1223,15 +1223,17 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
                 if kills > 0 and td > 0:
                     warl.setdefault(key, []).append((ts, td * _tks / kills))    # Warlord % (TD/team kills)
         else:
-            # Weapon boards (unchanged): Lethality (kills/TD) + Warlord (share of team takedowns).
+            # Weapon boards: Lethality (kills/TD) + Warlord (takedowns / team total kills),
+            # unified with map boards + the season title. team_total_kills = kills / kill-share,
+            # so TD/team_kills reduces to td * tks / kills.
             if td > 0 and kills > 0:
                 leth.setdefault(key, []).append((ts, kills / td))
             try:
-                tds = float(row[21]) if len(row) > 21 and row[21] else None
+                _tks = float(row[20]) if len(row) > 20 and row[20] else None
             except (ValueError, TypeError):
-                tds = None
-            if tds and 0 < tds <= 100:
-                warl.setdefault(key, []).append((ts, tds))
+                _tks = None
+            if _tks and 0 < _tks <= 100 and kills > 0 and td > 0:
+                warl.setdefault(key, []).append((ts, td * _tks / kills))
 
     def _peak(dct):
         out = []
@@ -1250,7 +1252,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
 
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Takedown board embeds WITH live rating fields appended: weapon boards show
-    Lethality (kills/TD) + Warlord (share of team takedowns); map boards show
+    Lethality (kills/TD) + Warlord (takedowns/team kills); map boards show
     Kill Share (kills/team kills) + Warlord (takedowns/team kills). All-time best
     5-game streak, so a rating never drops for a bad game."""
     lr = wr = None
@@ -1667,7 +1669,7 @@ def _monthly_weapon_embed(weapon, lr, wr):
     e = discord.Embed(title=f"{weapon} — This Month", colour=_embed_colour(weapon))
     e.add_field(name=f"{le} Lethality", value=_monthly_rating_lines(lr, lambda s: f"{s * 100:.0f}%"), inline=False)
     e.add_field(name=f"{we} Warlord", value=_monthly_rating_lines(wr, lambda s: f"{s:.0f}%"), inline=False)
-    e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (% of your team's takedowns) · top 5 · resets each month")
+    e.set_footer(text="Monthly · Lethality (kills/TD) + Warlord (takedowns/team kills) · top 5 · resets each month")
     return e
 
 
@@ -1733,7 +1735,7 @@ async def _monthly_index(guild, forum, index_name, units):
     colour = discord.Colour.from_str("#C9A24B")
     embeds = [discord.Embed(
         title="📋 Monthly Report — Index",
-        description="Weapon boards rank Lethality (kills/TD) and Warlord (share of your team's takedowns). "
+        description="Weapon boards rank Lethality (kills/TD) and Warlord (takedowns as a share of your team's total kills). "
                     "Map boards rank Kill Share (share of your team's kills) and Warlord (takedowns vs your "
                     "team's kills). Top 5 per board, current season — resubmissions don't count. Jump to a board below.",
         colour=colour,
