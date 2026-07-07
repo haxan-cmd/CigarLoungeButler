@@ -1288,6 +1288,14 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     if warlord_rows is not None:
         tail.add_field(name=f"{_we} Warlord",
                        value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
+    _min_txt = "5+ games" if not is_map else "enough games"
+    tail.add_field(
+        name="\u200b",
+        value=(f"*These rank everyone with {_min_txt} — separate from the takedown order "
+               "above, so you don't need the takedown top 10. Your score is the best "
+               "5-games-in-a-row average you've posted, and it never drops.*"),
+        inline=False,
+    )
 
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False):
