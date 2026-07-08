@@ -173,11 +173,12 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     return weapon_marks
 
 async def calculate_weapon_shares_for_player(discord_id, cached_data=None):
-    """Return per-weapon avg kill share % and TD share % from submissions (cols 20/21)."""
+    """Return per-weapon avg Kill Share % (kills/team kills) and avg Warlord %
+    (takedowns/team kills) from submissions. Warlord = td * kill-share / kills."""
     discord_id_str = str(discord_id)
     subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
-    kill_shares = {}   # weapon -> [share %]
-    td_shares   = {}   # weapon -> [share %]
+    kill_shares = {}   # weapon -> [kill share %]
+    warlord     = {}   # weapon -> [warlord %]
     for row in subs:
         if len(row) < 4 or row[2].strip() != discord_id_str:
             continue
@@ -186,25 +187,25 @@ async def calculate_weapon_shares_for_player(discord_id, cached_data=None):
             continue
         try:
             ks = float(row[20]) if len(row) > 20 and row[20] else None
-            if ks and 0 < ks <= 100:
-                kill_shares.setdefault(weapon, []).append(ks)
         except (ValueError, TypeError):
-            pass
-        try:
-            ts = float(row[21]) if len(row) > 21 and row[21] else None
-            if ts and 0 < ts <= 100:
-                td_shares.setdefault(weapon, []).append(ts)
-        except (ValueError, TypeError):
-            pass
-    avg_kill = {w: round(sum(v)/len(v), 1) for w, v in kill_shares.items() if len(v) >= 2}
-    avg_td   = {w: round(sum(v)/len(v), 1) for w, v in td_shares.items()   if len(v) >= 2}
-    return avg_kill, avg_td
+            ks = None
+        if ks and 0 < ks <= 100:
+            kill_shares.setdefault(weapon, []).append(ks)
+            try:
+                _td = int(row[7]); _k = int(row[8])
+            except (ValueError, TypeError):
+                _td = _k = 0
+            if _td > 0 and _k > 0:
+                warlord.setdefault(weapon, []).append(_td * ks / _k)  # takedowns / team kills %
+    avg_kill    = {w: round(sum(v)/len(v), 1) for w, v in kill_shares.items() if len(v) >= 2}
+    avg_warlord = {w: round(sum(v)/len(v), 1) for w, v in warlord.items()     if len(v) >= 2}
+    return avg_kill, avg_warlord
 
 
 async def calculate_registry_stats(discord_id, cached_data=None):
     """Calculate all progression stats for a player."""
     weapon_marks = await calculate_weapon_marks_for_player(discord_id, cached_data)
-    avg_kill_shares, avg_td_shares = await calculate_weapon_shares_for_player(discord_id, cached_data)
+    avg_kill_shares, avg_warlords = await calculate_weapon_shares_for_player(discord_id, cached_data)
 
     class_stats = {}
     for cls, subclasses in REGISTRY_CLASS_MAP.items():
@@ -233,7 +234,7 @@ async def calculate_registry_stats(discord_id, cached_data=None):
                     'rank': rank_name,
                     'tiers': tiers_achieved,
                     'avg_kill_share': avg_kill_shares.get(w),
-                    'avg_td_share': avg_td_shares.get(w),
+                    'avg_warlord': avg_warlords.get(w),
                 }
 
             sub_rank, sub_level = get_subclass_rank(subclass_marks, num_weapons)
@@ -1123,10 +1124,10 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                 progress_str = f"{mark_str}/{next_threshold}" if next_threshold else mark_str
                 share_parts = []
                 if wdata.get('avg_kill_share') is not None:
-                    share_parts.append(f"{wdata['avg_kill_share']}% K")
-                if wdata.get('avg_td_share') is not None:
-                    share_parts.append(f"{wdata['avg_td_share']}% TD")
-                share_str = f" `{' · '.join(share_parts)}`" if share_parts else ""
+                    share_parts.append(f"<a:mostlethal:1520490418817601658> {wdata['avg_kill_share']}%")
+                if wdata.get('avg_warlord') is not None:
+                    share_parts.append(f"<:warlord:1520490364039860347> {wdata['avg_warlord']}%")
+                share_str = ("  " + "  ".join(share_parts)) if share_parts else ""
                 return f"• {w_emoji} {w} — {progress_str}{share_str}"
 
             primaries = sorted(
