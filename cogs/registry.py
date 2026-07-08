@@ -472,9 +472,9 @@ async def get_feats_for_player(discord_id, cached_data=None):
         '100 Kills':     FEAT_EMOJIS['100 Kills'],
         'Triple':        FEAT_EMOJIS['Triple'],
         'Flawless':      FEAT_EMOJIS['Flawless'],
+        'Pacifist':      FEAT_EMOJIS['Pacifist'],
     }
     board_counts = {}  # lb_name -> count of entries on that board for this player
-    _counted_feat_links = {}  # lb_name -> set of links already counted (kills dup rows)
     try:
         ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
         for row in ld_rows:
@@ -482,15 +482,8 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 continue
             lb_name = row[0].strip()
             if lb_name in FEAT_BOARD_EMOJIS:
+                board_counts[lb_name] = board_counts.get(lb_name, 0) + 1
                 link = row[4].strip() if len(row) > 4 else ''
-                # Count DISTINCT games toward the feat total: a non-blank link already
-                # counted means a duplicate board row for the same run, so don't double-
-                # count it (blank-link legacy rows still each count once).
-                _cl = _counted_feat_links.setdefault(lb_name, set())
-                if not (link and link in _cl):
-                    board_counts[lb_name] = board_counts.get(lb_name, 0) + 1
-                    if link:
-                        _cl.add(link)
                 if link and link in seen_links:
                     continue
                 emoji = FEAT_BOARD_EMOJIS[lb_name]
@@ -952,6 +945,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
         # Label map: normalized emoji string -> display label
         _e = FEAT_EMOJIS
         FEAT_LABELS = {
+            ''.join(sorted([_e['Pacifist']])):                                               "Pacifist",
             ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
             ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",
             ''.join(sorted([_e['Triple']])):                                                 "Triple",

@@ -1111,7 +1111,7 @@ def _map_header(lb_name: str) -> str:
 
 _LB_EMOJI = {
     "TUFF":             "<a:TUFF2:1520779243879927898>",
-    "Pacifist":         "\u262e\ufe0f",
+    "Pacifist":         "<a:passive:1365531248268673086>",
     "200 Takedowns":    "<a:200tkd:1363648828414230538>",
     "100 Kills":        "<a:100kill:1361412390339608686>",
     "Triple":           "<a:triple:1365532698260668466>",

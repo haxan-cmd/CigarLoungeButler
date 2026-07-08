@@ -1838,7 +1838,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     if _is_pacifist and marks_earned == 0:
-        marks_summary = f"\n☮️ **Pacifist run** on {selected_weapon} — no weapon marks, but it lands on the Pacifist board."
+        marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the Pacifist board."
     else:
         marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
@@ -2073,7 +2073,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if any(lb == "TUFF" for lb, _ in placements):
             await safe_react("<a:TUFF2:1520779243879927898>")
         if any(lb == "Pacifist" for lb, _ in placements):
-            await safe_react("☮️")
+            await safe_react("<a:passive:1365531248268673086>")
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
