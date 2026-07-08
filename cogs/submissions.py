@@ -1536,9 +1536,9 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
 
 
 async def check_submission_anomaly(guild, player_name, message_link, selected_weapon, selected_map, takedowns, kills):
-    """Flag suspicious submissions to butlers-notes if stats exceed 2x any server record."""
+    """Flag suspicious submissions to the nerve centre if stats exceed 2x any server record."""
     try:
-        notes_channel = guild.get_channel(BUTLERS_NOTES_CHANNEL_ID)
+        notes_channel = guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
         if not notes_channel:
             return
 
