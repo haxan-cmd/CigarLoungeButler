@@ -85,14 +85,14 @@ Special instructions:
 - Player names (aliases) are fair game for dry wordplay. If a name is punnable, absurd, or self-important, you may acknowledge it once with a dry remark — keep it brief and in character.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
-- You have the asking player's stats (total marks, submissions, top weapons) AND a roster of the TOP 10 players by marks, each with their best game. Use this for comparison and ranking questions about those top players. For players NOT in that top-10 roster you do not have their stats loaded — say so and suggest they check their card, rather than guessing.
+- You have the asking player's stats (total marks, submissions, top weapons), a roster of the TOP 10 players by marks (each with their best game), AND -- when a message names a specific player -- that player's stats under an 'Asked-about player(s)' section. Use all of it for comparison and ranking. Only if a named player's stats are NOT present in your context should you say you don't have their numbers and point them to their card -- never guess.
 - If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - "Lethality" or "Most Lethal" on the player card shows their BEST single-run kills/TD ratio (peak performance). The "kill rate" in your data is their AVERAGE kills/TD ratio across all runs — a different number. When asked about lethality, clarify which one you're giving (e.g. "Your best single-run lethality is X%, your average across all runs is Y%"). Do not claim you lack lethality data.
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
 - You have server-wide weapon run counts (100+ TD) when available.
-- Best games are provided only for the top-10 roster players. If asked about someone outside it, say you don't have their numbers to hand and point them to their registry card.
+- Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
@@ -1281,6 +1281,26 @@ class PersonalityCog(commands.Cog):
                     ]
                     if summary_lines:
                         player_stats_ctx += f"\n\nTop players (by marks):\n" + "\n".join(summary_lines)
+
+                    # On-demand: if the message names a registered player who isn't the
+                    # asker and isn't already in the top-10 above, surface THEIR stats too --
+                    # people constantly ask "how does <X> compare". Capped to keep it lean.
+                    try:
+                        _shown_top = {n for n, *_ in all_players_summary[:10]}
+                        _ml = resolved_message.lower()
+                        _extra_players = []
+                        for _pn, _pm, _ps, _puw, _pus, _plw in all_players_summary:
+                            if _pn in _shown_top or _pn == player_name or len(_pn) < 3:
+                                continue
+                            if re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
+                                _extra_players.append(
+                                    f"{_pn}: {_pm} marks, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}")
+                                if len(_extra_players) >= 3:
+                                    break
+                        if _extra_players:
+                            player_stats_ctx += "\n\nAsked-about player(s):\n" + "\n".join(_extra_players)
+                    except Exception as _ame:
+                        print(f"[BUTLER] named-player lookup error: {_ame}")
 
                     # Per-player personal bests from LeaderboardData
                     player_pb_td = {}  # name -> best TD score
