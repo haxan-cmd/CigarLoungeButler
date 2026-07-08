@@ -179,6 +179,7 @@ async def calculate_weapon_shares_for_player(discord_id, cached_data=None):
     subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     kill_shares = {}   # weapon -> [kill share %]
     warlord     = {}   # weapon -> [warlord %]
+    lethality   = {}   # weapon -> [kills/td %]
     for row in subs:
         if len(row) < 4 or row[2].strip() != discord_id_str:
             continue
@@ -186,26 +187,29 @@ async def calculate_weapon_shares_for_player(discord_id, cached_data=None):
         if not weapon:
             continue
         try:
+            _td = int(row[7]); _k = int(row[8])
+        except (ValueError, TypeError):
+            _td = _k = 0
+        if _td > 0 and _k > 0:
+            lethality.setdefault(weapon, []).append(_k / _td * 100)  # kills / takedowns %
+        try:
             ks = float(row[20]) if len(row) > 20 and row[20] else None
         except (ValueError, TypeError):
             ks = None
         if ks and 0 < ks <= 100:
             kill_shares.setdefault(weapon, []).append(ks)
-            try:
-                _td = int(row[7]); _k = int(row[8])
-            except (ValueError, TypeError):
-                _td = _k = 0
             if _td > 0 and _k > 0:
                 warlord.setdefault(weapon, []).append(_td * ks / _k)  # takedowns / team kills %
-    avg_kill    = {w: round(sum(v)/len(v), 1) for w, v in kill_shares.items() if len(v) >= 2}
-    avg_warlord = {w: round(sum(v)/len(v), 1) for w, v in warlord.items()     if len(v) >= 2}
-    return avg_kill, avg_warlord
+    avg_kill      = {w: round(sum(v)/len(v), 1) for w, v in kill_shares.items() if len(v) >= 2}
+    avg_warlord   = {w: round(sum(v)/len(v), 1) for w, v in warlord.items()     if len(v) >= 2}
+    avg_lethality = {w: round(sum(v)/len(v), 1) for w, v in lethality.items()   if len(v) >= 2}
+    return avg_kill, avg_warlord, avg_lethality
 
 
 async def calculate_registry_stats(discord_id, cached_data=None):
     """Calculate all progression stats for a player."""
     weapon_marks = await calculate_weapon_marks_for_player(discord_id, cached_data)
-    avg_kill_shares, avg_warlords = await calculate_weapon_shares_for_player(discord_id, cached_data)
+    avg_kill_shares, avg_warlords, avg_leths = await calculate_weapon_shares_for_player(discord_id, cached_data)
 
     class_stats = {}
     for cls, subclasses in REGISTRY_CLASS_MAP.items():
@@ -235,6 +239,7 @@ async def calculate_registry_stats(discord_id, cached_data=None):
                     'tiers': tiers_achieved,
                     'avg_kill_share': avg_kill_shares.get(w),
                     'avg_warlord': avg_warlords.get(w),
+                    'avg_lethality': avg_leths.get(w),
                 }
 
             sub_rank, sub_level = get_subclass_rank(subclass_marks, num_weapons)
@@ -1127,7 +1132,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
                     share_parts.append(f"<a:mostlethal:1520490418817601658> {wdata['avg_kill_share']}%")
                 if wdata.get('avg_warlord') is not None:
                     share_parts.append(f"<:warlord:1520490364039860347> {wdata['avg_warlord']}%")
-                share_str = ("  " + "  ".join(share_parts)) if share_parts else ""
+                if wdata.get('avg_lethality') is not None:
+                    share_parts.append(f"\U0001fa78 {wdata['avg_lethality']}%")
+                share_str = (" " + " ".join(share_parts)) if share_parts else ""
                 return f"• {w_emoji} {w} — {progress_str}{share_str}"
 
             primaries = sorted(
