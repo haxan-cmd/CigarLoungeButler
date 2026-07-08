@@ -3203,7 +3203,7 @@ class LeaderboardsCog(commands.Cog):
             f"{len(unmatched)} names had no registered player and were left untouched. "
             f"Run `/refresh_all` + `/bulk_refresh_cards` to re-render.", ephemeral=True)
 
-    @app_commands.command(name="link_legacy_name", description="Attach a legacy board name to a registered player (stamps its rows + saves it as an alias). Mod only.")
+    @app_commands.command(name="link_legacy_name", description="Link a legacy board name to a registered player + save it as an alias (mod only).")
     @app_commands.describe(legacy_name="The exact legacy name as it shows on the board, e.g. Steezy",
                            player="The registered player it belongs to")
     async def link_legacy_name(self, interaction: discord.Interaction, legacy_name: str, player: discord.Member):
