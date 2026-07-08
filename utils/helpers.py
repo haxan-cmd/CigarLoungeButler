@@ -85,7 +85,7 @@ NOTE: The two large numbers at the TOP of the screen, one on each side (one per 
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
 - deaths (integer from D column of highlighted row)
-- score (integer from the SCORE column of the highlighted row — the large points value in the thousands, e.g. 9029 or 11653; strip any commas; this is the SCORE column, NOT the T/takedowns value)
+- score: the number under the column header literally reading "SCORE" for the highlighted row. It is a 4-5 digit points total, almost always shown WITH a comma (e.g. "9,260", "11,653") -- strip the comma and return it as an integer (9260, 11653). SCORE is the THIRD column (RANK | NAME | SCORE | T | K | D | PING) and is far LARGER than the T/K/D numbers to its right. This column is ALWAYS present and legible for every listed player, so you MUST read the highlighted row's SCORE value; only return null if that row is entirely unreadable. Never confuse SCORE with T (takedowns).
 
 The scoreboard shows TWO teams side by side. For ALL other rows (excluding the highlighted player), split by team:
 - team_scores: T column integers for players on the SAME team as the highlighted player
