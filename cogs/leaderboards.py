@@ -3143,6 +3143,66 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
 
+    @app_commands.command(name="backfill_legacy_ids", description="Attach registered discord_ids to blank-id legacy board rows (mod only). Preview first.")
+    @app_commands.describe(confirm="Leave false to PREVIEW. Set true to actually stamp the ids.")
+    async def backfill_legacy_ids(self, interaction: discord.Interaction, confirm: bool = False):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            name_to_id = await _db.get_name_to_id_map()
+            ld = await _db.get_all_leaderboard_data()
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Read failed: {e}", ephemeral=True)
+            return
+        matched = {}    # name -> [discord_id, row_count]
+        unmatched = {}  # name -> row_count
+        for row in ld:
+            did = (row[2] or '').strip() if len(row) > 2 else ''
+            name = (row[1] or '').strip() if len(row) > 1 else ''
+            if did or not name:
+                continue
+            k = name.lower()
+            if k in name_to_id:
+                matched.setdefault(name, [name_to_id[k], 0])
+                matched[name][1] += 1
+            else:
+                unmatched[name] = unmatched.get(name, 0) + 1
+        if not matched and not unmatched:
+            await interaction.followup.send("\u2705 No blank-id legacy rows found \u2014 nothing to backfill.", ephemeral=True)
+            return
+        if not confirm:
+            lines = ["**Legacy id backfill \u2014 PREVIEW** (nothing written yet)\n"]
+            if matched:
+                _rows = sum(c for _, c in matched.values())
+                lines.append(f"__Will match {len(matched)} names ({_rows} rows):__")
+                for nm in sorted(matched)[:40]:
+                    did, cnt = matched[nm]
+                    lines.append(f"\u2022 `{nm}` \u2192 <@{did}> ({cnt} row{'s' if cnt != 1 else ''})")
+                if len(matched) > 40:
+                    lines.append(f"\u2026and {len(matched) - 40} more.")
+            if unmatched:
+                _urows = sum(unmatched.values())
+                lines.append(f"\n__No registered player for {len(unmatched)} names ({_urows} rows) \u2014 left as-is:__")
+                for nm in sorted(unmatched)[:25]:
+                    lines.append(f"\u2022 `{nm}` ({unmatched[nm]})")
+                if len(unmatched) > 25:
+                    lines.append(f"\u2026and {len(unmatched) - 25} more.")
+            lines.append("\nRun `/backfill_legacy_ids confirm:true` to apply the matches above.")
+            await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
+            return
+        updated_rows = 0
+        for nm, (did, _cnt) in matched.items():
+            try:
+                updated_rows += await _db.set_legacy_discord_id(nm, did)
+            except Exception as e:
+                print(f"[LEGACY_ID] {nm}: {e}")
+        await interaction.followup.send(
+            f"\u2705 Stamped ids on **{updated_rows}** legacy rows across **{len(matched)}** names. "
+            f"{len(unmatched)} names had no registered player and were left untouched. "
+            f"Run `/refresh_all` + `/bulk_refresh_cards` to re-render.", ephemeral=True)
+
     @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
     @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
     async def dedupe_board(self, interaction: discord.Interaction, name: str):

@@ -547,6 +547,43 @@ async def get_leaderboard_position(board_name: str, score: int) -> int:
     return (higher or 0) + 1
 
 
+async def get_name_to_id_map() -> dict:
+    """Lowercased display/in-game name -> discord_id, from players.player_name + igns.
+    Used to attach real ids to legacy (blank-id) leaderboard rows."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'")
+        rows = await conn.fetch("SELECT discord_id, player_name, igns FROM players")
+    m = {}
+    for r in rows:
+        did = (r['discord_id'] or '').strip()
+        if not did:
+            continue
+        if r['player_name'] and r['player_name'].strip():
+            m.setdefault(r['player_name'].strip().lower(), did)
+        for ign in (r['igns'] or []):
+            if ign and str(ign).strip():
+                m.setdefault(str(ign).strip().lower(), did)
+    return m
+
+
+async def set_legacy_discord_id(player_name: str, discord_id: str) -> int:
+    """Stamp discord_id onto every blank-id leaderboard_data row for this name.
+    Returns the number of rows updated."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "UPDATE leaderboard_data SET discord_id=$1 "
+            "WHERE (discord_id IS NULL OR TRIM(discord_id)='') "
+            "AND LOWER(TRIM(player_name))=LOWER(TRIM($2))",
+            str(discord_id), player_name)
+    _cache_invalidate('leaderboard_data')
+    try:
+        return int(str(res).split()[-1])
+    except Exception:
+        return 0
+
+
 async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
     _cache_invalidate('leaderboard_data')
     pool = _pool_check()
