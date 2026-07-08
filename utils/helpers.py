@@ -228,7 +228,20 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             raw = raw.split('```')[1]
             if raw.startswith('json'):
                 raw = raw[4:].strip()
-        data = _json.loads(raw)
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError:
+            # Gemini sometimes trails/wraps the JSON with extra text, which plain json.loads
+            # rejects ("Extra data"). Extract the first complete JSON object and ignore the rest.
+            _start = raw.find('{')
+            if _start == -1:
+                print("[VISION] No JSON object found in response")
+                return empty
+            try:
+                data, _ = _json.JSONDecoder().raw_decode(raw[_start:])
+            except _json.JSONDecodeError as _je:
+                print(f"[VISION] JSON parse failed after extract: {_je}")
+                return empty
         # Coerce numeric fields to int, ignore bad values
         for field in ('takedowns', 'kills', 'deaths', 'team_total_kills', 'enemy_total_kills'):
             try:
