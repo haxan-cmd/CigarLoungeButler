@@ -3203,6 +3203,32 @@ class LeaderboardsCog(commands.Cog):
             f"{len(unmatched)} names had no registered player and were left untouched. "
             f"Run `/refresh_all` + `/bulk_refresh_cards` to re-render.", ephemeral=True)
 
+    @app_commands.command(name="link_legacy_name", description="Attach a legacy board name to a registered player (stamps its rows + saves it as an alias). Mod only.")
+    @app_commands.describe(legacy_name="The exact legacy name as it shows on the board, e.g. Steezy",
+                           player="The registered player it belongs to")
+    async def link_legacy_name(self, interaction: discord.Interaction, legacy_name: str, player: discord.Member):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        legacy_name = legacy_name.strip()
+        if not legacy_name:
+            await interaction.followup.send("Give me a name to link.", ephemeral=True)
+            return
+        try:
+            n = await _db.set_legacy_discord_id(legacy_name, str(player.id))
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Failed to stamp rows: {e}", ephemeral=True)
+            return
+        try:
+            await _db.save_player_ign(str(player.id), legacy_name)
+        except Exception as _ie:
+            print(f"[LINK_LEGACY] ign save for {legacy_name}: {_ie}")
+        await interaction.followup.send(
+            f"\u2705 Linked `{legacy_name}` \u2192 {player.mention} \u2014 stamped **{n}** board row"
+            f"{'s' if n != 1 else ''} and saved it as an alias. Run `/refresh_all` + refresh their card once you've batched them.",
+            ephemeral=True)
+
     @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
     @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
     async def dedupe_board(self, interaction: discord.Interaction, name: str):
