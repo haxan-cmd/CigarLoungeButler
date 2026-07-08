@@ -3263,6 +3263,40 @@ class LeaderboardsCog(commands.Cog):
             embed.add_field(name=f"{m}  \u00b7  {map_totals[m]}", value="\n".join(lines), inline=False)
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="weapon_stats", description="All-time submission counts per weapon, as a bar breakdown (mod only).")
+    async def weapon_stats(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        subs = await _db.get_all_submissions()
+        counts = {}
+        for row in subs:
+            w = (row[3] or '').strip() if len(row) > 3 else ''
+            if not w or w in ('None', 'Other', 'Multiple Weapons'):
+                continue
+            counts[w] = counts.get(w, 0) + 1
+        if not counts:
+            await interaction.followup.send("No weapon submissions found.")
+            return
+        _max = max(counts.values())
+        _grand = sum(counts.values())
+        def _bar(n):
+            return "\u2588" * max(1, round(n / _max * 12))
+        ordered = sorted(counts.items(), key=lambda x: -x[1])
+        header = f"**{_grand}** submissions across **{len(counts)}** weapons \u00b7 all-time"
+        body_lines = [f"`{_bar(c):<12}` {w} \u2014 **{c}**" for w, c in ordered]
+        body = header + "\n\n" + "\n".join(body_lines)
+        if len(body) > 4000:
+            keep, total = [], len(header) + 2
+            for ln in body_lines:
+                if total + len(ln) + 1 > 3900:
+                    break
+                keep.append(ln); total += len(ln) + 1
+            body = header + "\n\n" + "\n".join(keep) + f"\n\u2026and {len(body_lines) - len(keep)} more."
+        embed = discord.Embed(title="\U0001f4ca Submissions by Weapon", description=body, colour=0x8b6914)
+        await interaction.followup.send(embed=embed)
+
     @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
     @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
     async def dedupe_board(self, interaction: discord.Interaction, name: str):
