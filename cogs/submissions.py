@@ -2177,7 +2177,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 _fstr = feats if isinstance(feats, str) else ", ".join(feats or [])
                 if not is_ranged and selected_weapon and "Resubmit" not in _fstr:
                     try:
-                        from cogs.registry import calculate_weapon_marks_for_player
                         _marks = await calculate_weapon_marks_for_player(interaction.user.id)
                         _new = sum(v for k, v in _marks.items()
                                    if (k[0] if isinstance(k, tuple) else k) == selected_weapon)
