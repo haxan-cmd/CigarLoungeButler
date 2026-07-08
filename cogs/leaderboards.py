@@ -3229,6 +3229,40 @@ class LeaderboardsCog(commands.Cog):
             f"{'s' if n != 1 else ''} and saved it as an alias. Run `/refresh_all` + refresh their card once you've batched them.",
             ephemeral=True)
 
+    @app_commands.command(name="map_stats", description="All-time submission counts per map + faction, as a bar breakdown (mod only).")
+    async def map_stats(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        subs = await _db.get_all_submissions()
+        counts = {}       # (map, faction) -> count
+        map_totals = {}   # map -> total
+        for row in subs:
+            m = (row[5] or '').strip() if len(row) > 5 else ''
+            fac = (row[6] or '').strip() if len(row) > 6 else ''
+            if not m or not fac:
+                continue
+            counts[(m, fac)] = counts.get((m, fac), 0) + 1
+            map_totals[m] = map_totals.get(m, 0) + 1
+        if not counts:
+            await interaction.followup.send("No map submissions found.")
+            return
+        _max = max(counts.values())
+        _grand = sum(counts.values())
+        def _bar(n):
+            return "\u2588" * max(1, round(n / _max * 12))
+        embed = discord.Embed(
+            title="\U0001f4ca Submissions by Map & Faction",
+            description=f"**{_grand}** map submissions across **{len(map_totals)}** maps \u00b7 all-time",
+            colour=0x8b6914,
+        )
+        for m in sorted(map_totals, key=lambda x: -map_totals[x]):
+            facs = sorted([(f, c) for (mm, f), c in counts.items() if mm == m], key=lambda x: -x[1])
+            lines = [f"`{_bar(c):<12}` {f} \u2014 **{c}**" for f, c in facs]
+            embed.add_field(name=f"{m}  \u00b7  {map_totals[m]}", value="\n".join(lines), inline=False)
+        await interaction.followup.send(embed=embed)
+
     @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
     @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
     async def dedupe_board(self, interaction: discord.Interaction, name: str):
