@@ -1385,16 +1385,23 @@ class PersonalityCog(commands.Cog):
                 # "How many kills / takedowns submitted today?" -> server-wide daily totals.
                 if 'today' in msg_lower and any(w in msg_lower for w in ('kill', 'takedown', 'total', 'submitted', 'count', 'how many')):
                     try:
-                        _today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                        _cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                         _tsubs = await _db.get_all_submissions()
                         _t_td = _t_k = _t_n = 0
                         for _r in _tsubs:
-                            if len(_r) > 8 and _r[0].strip()[:10] == _today:
-                                try:
-                                    _t_td += int(_r[7]); _t_k += int(_r[8]); _t_n += 1
-                                except (ValueError, TypeError):
-                                    pass
-                        player_stats_ctx += (f"\nToday's server totals ({_today} UTC): {_t_n} submissions, "
+                            if len(_r) < 9 or not _r[0].strip():
+                                continue
+                            try:
+                                _dt = datetime.strptime(_r[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                            except (ValueError, TypeError):
+                                continue
+                            if _dt < _cutoff:
+                                continue
+                            try:
+                                _t_td += int(_r[7]); _t_k += int(_r[8]); _t_n += 1
+                            except (ValueError, TypeError):
+                                pass
+                        player_stats_ctx += (f"\nServer totals over the last 24 hours: {_t_n} submissions, "
                                              f"{_t_td} takedowns, {_t_k} kills.")
                     except Exception as _te:
                         print(f"[BUTLER] today-totals error: {_te}")
