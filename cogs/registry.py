@@ -471,6 +471,14 @@ async def get_feats_for_player(discord_id, cached_data=None):
             if link and link not in seen_links:
                 seen_links.add(link)
             feats.append((feat_emojis, link))
+        # Pacifist Feat of Legend stacks per qualifying run (0 kills, <=10 takedowns),
+        # counted from the Submissions sheet so it reflects total pacifist submissions
+        # (the Pacifist board only keeps top entries, so it undercounts specialists).
+        try:
+            if int(row[8]) == 0 and int(row[7]) <= 10:
+                feats.append((FEAT_EMOJIS['Pacifist'], link))
+        except (ValueError, IndexError):
+            pass
 
     # Also pull legacy feat entries from LeaderboardData
     FEAT_BOARD_EMOJIS = {
