@@ -242,6 +242,51 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             except _json.JSONDecodeError as _je:
                 print(f"[VISION] JSON parse failed after extract: {_je}")
                 return empty
+        # --- Safety net: make sure the model read the SUBMITTER's row, not a
+        # party member's. Gemini sometimes locks onto a green-highlighted friend
+        # row. If the name it returned doesn't match the submitter's known name(s),
+        # re-read the correct row by name in one corrective pass.
+        if player_name:
+            import re as _rex
+            def _n(s):
+                return _rex.sub(r'[^a-z0-9]', '', (s or '').lower())
+            _hints = [h.strip() for h in str(player_name).split(',') if h.strip()]
+            def _match(got):
+                g = _n(got)
+                return bool(g) and any(_n(h) and (_n(h) == g or _n(h) in g or g in _n(h)) for h in _hints)
+            if not _match(data.get('name')):
+                _corr = (
+                    f"\n\nCORRECTION REQUIRED: You returned the row named '{data.get('name')}', which is NOT the "
+                    f"submitting player. The submitter's row is named one of: {player_name} (match case-insensitively, "
+                    f"ignore clan tags/decorators). Find THAT row and return its score, takedowns (T), kills (K), "
+                    f"deaths (D), faction, weapon, subclass and name — ignore highlight colour entirely."
+                )
+                try:
+                    _r2 = _gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=[prompt + _corr, image_part],
+                        config=_gtypes.GenerateContentConfig(
+                            temperature=0, response_mime_type='application/json',
+                            max_output_tokens=2048,
+                            thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
+                        ),
+                    )
+                    _raw2 = (_r2.text or '').strip()
+                    if _raw2.startswith('```'):
+                        _raw2 = _raw2.split('```')[1]
+                        if _raw2.startswith('json'):
+                            _raw2 = _raw2[4:].strip()
+                    _s2 = _raw2.find('{')
+                    if _s2 != -1:
+                        _data2, _ = _json.JSONDecoder().raw_decode(_raw2[_s2:])
+                        if _match(_data2.get('name')):
+                            print(f"[VISION] Corrected wrong-row read: '{data.get('name')}' -> '{_data2.get('name')}'")
+                            data = _data2
+                        else:
+                            print(f"[VISION] Correction pass still no name match (got '{_data2.get('name')}'); keeping original")
+                except Exception as _ce:
+                    print(f"[VISION] Correction pass error: {_ce}")
+
         # Coerce numeric fields to int, ignore bad values
         for field in ('takedowns', 'kills', 'deaths', 'team_total_kills', 'enemy_total_kills'):
             try:
