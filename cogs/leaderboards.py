@@ -2256,6 +2256,10 @@ class LeaderboardsCog(commands.Cog):
         await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
 
         for lb_name in names_to_refresh:
+            if lb_name == "The Hundred Handed":
+                # HH has its own renderer (matched-46 completers) — not the generic score board
+                await refresh_hundred_handed_board(interaction.guild)
+                continue
             lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
             if not lb_row:
                 continue
