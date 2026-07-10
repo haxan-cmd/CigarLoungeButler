@@ -1809,12 +1809,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if _thread_id else f"`{interaction.user.display_name}`"
     )
 
+    _pac_run = (kills == 0 and takedowns <= 10)
+    _score_suffix = f"  ·  {_score:,} score" if (_pac_run and isinstance(_score, int) and _score > 0) else ""
     summary = (
         f"**Run Submitted**\n"
         f"│ {_name_display}\n"
         f"│ {selected_weapon} • {selected_class}\n"
         f"│ {selected_map} / {faction}\n"
-        f"│ {takedowns} TD / {kills} K / {deaths} D\n"
+        f"│ {takedowns} TD / {kills} K / {deaths} D{_score_suffix}\n"
         f"│ VIP: {vip_str}"
     )
     if feats_str:
@@ -1823,6 +1825,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         summary += f"\n│ *{lobby_line}*"
     if caption:
         summary += f"\n│ *{caption}*"
+
+    # Pacifist board thread (for hyperlinking the "lands on the Pacifist board" line)
+    _pac_board_link = None
+    try:
+        from cogs.leaderboards import _get_lb_records as _lb_gr
+        for _r in await _lb_gr():
+            if _r.get('Leaderboard Name') == 'Pacifist' and _r.get('Thread ID'):
+                _pac_board_link = f"https://discord.com/channels/{original_message.guild.id}/{_r['Thread ID']}"
+                break
+    except Exception as _pbe:
+        _pac_board_link = None
 
     # Build marks breakdown. A pacifist run (0 TD / 0 K) earns no weapon mark.
     _is_pacifist = (kills == 0 and takedowns <= 10)
@@ -1838,7 +1851,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     if _is_pacifist and marks_earned == 0:
-        marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the Pacifist board."
+        _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
+        marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
     else:
         marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
