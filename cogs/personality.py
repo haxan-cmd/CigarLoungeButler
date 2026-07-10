@@ -464,6 +464,100 @@ async def _generate_absurd_question():
     return random.choice(_ABSURD_QUESTION_FALLBACKS)
 
 
+_AGG_TRIGGERS = (
+    'average', 'avg ', 'avg.', 'meta', 'most played', 'most-played', 'most used',
+    'most-used', 'popular', 'breakdown', 'which weapon', 'which map', 'which subclass',
+    'best weapon', 'deadliest', 'across weapon', 'across map', 'faction split',
+    'win rate', 'win-rate', 'aggregate', 'overall stat', 'community stat', 'server stat',
+    'most active', 'average takedown', 'average kill', 'per weapon', 'per map', 'per subclass',
+)
+
+
+def _server_aggregates(subs):
+    """Compact server-wide aggregates for the Butler: community totals + records,
+    most-played, per-weapon meta, per-map (with faction split) and per-subclass
+    breakdowns. Resubmissions are excluded so old re-uploads do not double-count."""
+    from collections import defaultdict
+    def _i(x):
+        try:
+            return int(str(x).replace(',', '').strip())
+        except (ValueError, TypeError, AttributeError):
+            return None
+    W = defaultdict(lambda: [0, 0, 0, 0, 0])          # weapon -> [runs, td, k, score, scoreN]
+    M = defaultdict(lambda: [0, 0, 0])                # map -> [runs, td, k]
+    MF = defaultdict(lambda: defaultdict(int))        # map -> faction -> runs
+    S = defaultdict(lambda: [0, 0, defaultdict(int)]) # subclass -> [runs, td, weapon counts]
+    Fac = defaultdict(int); Players = defaultdict(int)
+    tot_n = tot_td = tot_k = 0
+    rec_td = (0, None); rec_k = (0, None); rec_score = (0, None)
+    for r in subs:
+        if len(r) < 10:
+            continue
+        feats = (r[11] if len(r) > 11 else '') or ''
+        if 'resubmit' in feats.lower():
+            continue
+        td = _i(r[7]); k = _i(r[8])
+        if td is None or k is None:
+            continue
+        wpn = (r[3] or '').strip(); sub = (r[4] or '').strip()
+        mp = (r[5] or '').strip(); fac = (r[6] or '').strip(); name = (r[1] or '').strip()
+        sc = _i(r[24]) if len(r) > 24 else None
+        tot_n += 1; tot_td += td; tot_k += k
+        if name:
+            Players[name] += 1
+            if td > rec_td[0]: rec_td = (td, name)
+            if k > rec_k[0]: rec_k = (k, name)
+            if sc and sc > rec_score[0]: rec_score = (sc, name)
+        if fac: Fac[fac] += 1
+        if wpn:
+            e = W[wpn]; e[0] += 1; e[1] += td; e[2] += k
+            if sc: e[3] += sc; e[4] += 1
+        if mp:
+            e = M[mp]; e[0] += 1; e[1] += td; e[2] += k
+            if fac: MF[mp][fac] += 1
+        if sub:
+            e = S[sub]; e[0] += 1; e[1] += td
+            if wpn: e[2][wpn] += 1
+    if tot_n == 0:
+        return "SERVER AGGREGATE STATS: no runs on record yet."
+    def _fs(counts):
+        tot = sum(counts.values())
+        if not tot: return "n/a"
+        return " / ".join(f"{f} {round(c*100/tot)}%" for f, c in sorted(counts.items(), key=lambda x: -x[1]))
+    L = ["=== SERVER AGGREGATE STATS (resubmissions excluded) ==="]
+    L.append(f"Totals: {tot_n} runs, {tot_td} takedowns, {tot_k} kills. Single-run records: "
+             f"{rec_td[0]} TD ({rec_td[1]}), {rec_k[0]} kills ({rec_k[1]}), {rec_score[0]} score ({rec_score[1]}).")
+    _tw = max(W.items(), key=lambda x: x[1][0]) if W else None
+    _ts = max(S.items(), key=lambda x: x[1][0]) if S else None
+    _tm = max(M.items(), key=lambda x: x[1][0]) if M else None
+    L.append("Most played — "
+             + (f"weapon: {_tw[0]} ({_tw[1][0]} runs); " if _tw else "")
+             + (f"subclass: {_ts[0]} ({_ts[1][0]}); " if _ts else "")
+             + (f"map: {_tm[0]} ({_tm[1][0]}); " if _tm else "")
+             + f"faction split: {_fs(Fac)}.")
+    L.append("Most active players: " + ", ".join(f"{n} ({c})" for n, c in sorted(Players.items(), key=lambda x: -x[1])[:5]) + ".")
+    _wl = sorted([(w, e) for w, e in W.items() if e[0] >= 5], key=lambda x: -x[1][0])
+    if _wl:
+        L.append("Weapon meta (avg per run, 5+ runs):")
+        for w, e in _wl[:14]:
+            leth = (e[2]/e[1]*100) if e[1] else 0; avgsc = (e[3]/e[4]) if e[4] else 0
+            L.append(f"  {w}: {e[0]} runs, {e[1]/e[0]:.1f} TD, {e[2]/e[0]:.1f} K, {leth:.0f}% lethality, {avgsc:.0f} score")
+        _dead = max(_wl, key=lambda x: x[1][1]/x[1][0]); _bl = max(_wl, key=lambda x: (x[1][2]/x[1][1] if x[1][1] else 0))
+        L.append(f"Deadliest by avg TD: {_dead[0]} ({_dead[1][1]/_dead[1][0]:.1f}). "
+                 f"Best lethality: {_bl[0]} ({(_bl[1][2]/_bl[1][1]*100) if _bl[1][1] else 0:.0f}%).")
+    _ml = sorted([(m, e) for m, e in M.items() if e[0] >= 5], key=lambda x: -x[1][0])
+    if _ml:
+        L.append("Map breakdown (avg per run, 5+ runs):")
+        for m, e in _ml[:14]:
+            L.append(f"  {m}: {e[0]} runs, {e[1]/e[0]:.1f} TD, {e[2]/e[0]:.1f} K — {_fs(MF[m])}")
+    if S:
+        L.append("Subclass breakdown:")
+        for s, e in sorted(S.items(), key=lambda x: -x[1][0]):
+            _tpw = max(e[2].items(), key=lambda x: x[1])[0] if e[2] else "n/a"
+            L.append(f"  {s}: {e[0]} runs, {e[1]/e[0]:.1f} avg TD, top weapon {_tpw}")
+    return "\n".join(L)
+
+
 class PersonalityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1405,6 +1499,12 @@ class PersonalityCog(commands.Cog):
                                              f"{_t_td} takedowns, {_t_k} kills.")
                     except Exception as _te:
                         print(f"[BUTLER] today-totals error: {_te}")
+                # Aggregate / meta stats across weapons, maps, subclasses + community totals.
+                if any(_kw in msg_lower for _kw in _AGG_TRIGGERS):
+                    try:
+                        player_stats_ctx += "\n\n" + _server_aggregates(await _db.get_all_submissions())
+                    except Exception as _ae:
+                        print(f"[BUTLER] aggregate stats error: {_ae}")
                 mentioned_weapon = extract_weapon_from_message(resolved_message)
                 if mentioned_weapon:
                     try:
