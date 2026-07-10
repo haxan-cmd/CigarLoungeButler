@@ -1467,12 +1467,15 @@ async def _apply_edit(interaction, ev):
         new_summary += f"\n{', '.join(ev.feats)}"
 
     try:
-        await ev._message.edit(content=new_summary, view=None)
+        # Keep the SAME edit view attached so the Edit button stays live — users can
+        # correct more than one field, one per click (previously view=None killed it
+        # after a single edit, so map-then-nothing-else was all you got).
+        await ev._message.edit(content=new_summary, view=ev)
     except Exception:
         pass
 
     try:
-        await interaction.followup.send("✅ Submission updated!", ephemeral=True)
+        await interaction.followup.send("✅ Updated! You can hit **✏️ Edit** again to fix another field.", ephemeral=True)
     except Exception:
         pass
 
