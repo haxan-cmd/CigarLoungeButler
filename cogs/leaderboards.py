@@ -841,6 +841,26 @@ def _safe_int(v, default=0):
         return default
 
 
+async def _sort_board_entries(lb_name, entries):
+    """Sort a board's entry dicts for display. Pacifist ranks fewest-takedowns-then
+    -score (takedowns pulled from each entry's linked submission, stashed on 'td' for
+    display); every other board ranks by score descending. Shared by _render_board
+    and the /refresh commands so the ordering can never drift between them."""
+    if lb_name != "Pacifist":
+        return sorted(entries, key=lambda x: x['score'], reverse=True)
+    subs = await _db.get_all_submissions()
+    tdl = {}
+    for s in subs:
+        if len(s) > 12 and s[12].strip():
+            try:
+                tdl[s[12].strip()] = int(s[7])
+            except (ValueError, TypeError):
+                pass
+    for en in entries:
+        en['td'] = tdl.get((en.get('link') or '').strip())
+    return sorted(entries, key=lambda x: ((x['td'] if x['td'] is not None else 999), -x['score']))
+
+
 async def _prune_pacifist_board():
     """Pacifist board is a per-player top-10: keep each player's 10 best runs,
     ranked fewest-takedowns-first then highest score, delete the rest. Takedowns
@@ -893,20 +913,7 @@ async def _render_board(guild, lb_row, lb_name):
             'link': row[4] if len(row) > 4 else '',
             'weapon': row[5] if len(row) > 5 else '',
         })
-    if lb_name == "Pacifist":
-        _subs = await _db.get_all_submissions()
-        _tdl = {}
-        for _s in _subs:
-            if len(_s) > 12 and _s[12].strip():
-                try:
-                    _tdl[_s[12].strip()] = int(_s[7])
-                except (ValueError, TypeError):
-                    pass
-        for _en in entries:
-            _en['td'] = _tdl.get((_en.get('link') or '').strip())
-        entries = sorted(entries, key=lambda x: ((x['td'] if x['td'] is not None else 999), -x['score']))
-    else:
-        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+    entries = await _sort_board_entries(lb_name, entries)
     show_weapon = lb_name in ("100 Kills", "200 Takedowns")
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
@@ -2245,7 +2252,7 @@ class LeaderboardsCog(commands.Cog):
                 continue
 
             entries = await get_leaderboard_entries(lb_name)
-            entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+            entries = await _sort_board_entries(lb_name, entries)
 
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
@@ -2290,7 +2297,7 @@ class LeaderboardsCog(commands.Cog):
 
             try:
                 entries = await get_leaderboard_entries(lb_name)
-                entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                entries = await _sort_board_entries(lb_name, entries)
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
@@ -2334,7 +2341,7 @@ class LeaderboardsCog(commands.Cog):
                 continue
             try:
                 entries = await get_leaderboard_entries(lb_name)
-                entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+                entries = await _sort_board_entries(lb_name, entries)
                 embeds = await _rated_embeds(lb_name, entries, True, None, 0, False, "", False)
                 header_content = _map_header(lb_name)
                 thread_id = int(thread_id_raw)
