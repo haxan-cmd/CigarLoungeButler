@@ -702,6 +702,17 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 break
         existing_entry = existing_score is not None
 
+        if lb_name == "Pacifist":
+            # Per-player top 10, ranked fewest-takedowns-then-score. Skip if this exact
+            # run is already on the board; add it, then prune everyone to their best 10.
+            if any(r[2] == discord_id and (r[4] if len(r) > 4 else '') == (message_link or '')
+                   for r in board_values):
+                continue
+            await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
+            await _prune_pacifist_board()
+            any_updated = True
+            continue
+
         if unlimited_top50:
             # No cap — but skip if this exact submission link already on the board
             already_exists = any(
@@ -830,6 +841,39 @@ def _safe_int(v, default=0):
         return default
 
 
+async def _prune_pacifist_board():
+    """Pacifist board is a per-player top-10: keep each player's 10 best runs,
+    ranked fewest-takedowns-first then highest score, delete the rest. Takedowns
+    are read from each entry's linked submission (board rows store only score, so
+    ranking is derived on the fly — no schema change / data migration needed)."""
+    rows = await _db.get_leaderboard_by_board("Pacifist")
+    subs = await _db.get_all_submissions()
+    td_by_link = {}
+    for s in subs:
+        if len(s) > 12 and s[12].strip():
+            try:
+                td_by_link[s[12].strip()] = int(s[7])
+            except (ValueError, TypeError):
+                pass
+    def _key(r):
+        lnk = (r[4] if len(r) > 4 else '').strip()
+        td = td_by_link.get(lnk, 999)          # unknown takedowns sink to the bottom
+        sc = int(r[3]) if len(r) > 3 and r[3] else 0
+        return (td, -sc)                        # fewest takedowns, then highest score
+    by_player = {}
+    for r in rows:
+        by_player.setdefault(r[2], []).append(r)
+    deleted = 0
+    for _did, plist in by_player.items():
+        plist.sort(key=_key)
+        for extra in plist[10:]:
+            lnk = (extra[4] if len(extra) > 4 else '').strip()
+            if lnk:
+                await _db.delete_leaderboard_entry_by_link("Pacifist", lnk)
+                deleted += 1
+    return deleted
+
+
 async def _render_board(guild, lb_row, lb_name):
     """Re-render a single board's Discord messages from its current DB rows."""
     # A board with no thread/message ids was never set up in Discord — skip it
@@ -849,7 +893,20 @@ async def _render_board(guild, lb_row, lb_name):
             'link': row[4] if len(row) > 4 else '',
             'weapon': row[5] if len(row) > 5 else '',
         })
-    entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+    if lb_name == "Pacifist":
+        _subs = await _db.get_all_submissions()
+        _tdl = {}
+        for _s in _subs:
+            if len(_s) > 12 and _s[12].strip():
+                try:
+                    _tdl[_s[12].strip()] = int(_s[7])
+                except (ValueError, TypeError):
+                    pass
+        for _en in entries:
+            _en['td'] = _tdl.get((_en.get('link') or '').strip())
+        entries = sorted(entries, key=lambda x: ((x['td'] if x['td'] is not None else 999), -x['score']))
+    else:
+        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
     show_weapon = lb_name in ("100 Kills", "200 Takedowns")
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
@@ -1320,7 +1377,10 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     lines = []
     for idx, e in enumerate(entries, 1):
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
-        score_str = f"{score_prefix}{e['score']}"
+        if lb_name == "Pacifist" and e.get('td') is not None:
+            score_str = f"{e['td']} TD · {e['score']}"
+        else:
+            score_str = f"{score_prefix}{e['score']}"
         if e['link']:
             lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — [{score_str}]({e['link']}){weapon_str}")
         else:
@@ -3141,6 +3201,7 @@ class LeaderboardsCog(commands.Cog):
                 existing.add((board, link))
                 added += 1
 
+        await _prune_pacifist_board()
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
 
     @app_commands.command(name="backfill_legacy_ids", description="Attach registered discord_ids to blank-id legacy board rows (mod only). Preview first.")
