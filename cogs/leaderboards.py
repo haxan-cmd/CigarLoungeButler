@@ -842,10 +842,11 @@ def _safe_int(v, default=0):
 
 
 async def _sort_board_entries(lb_name, entries):
-    """Sort a board's entry dicts for display. Pacifist ranks fewest-takedowns-then
-    -score (takedowns pulled from each entry's linked submission, stashed on 'td' for
-    display); every other board ranks by score descending. Shared by _render_board
-    and the /refresh commands so the ordering can never drift between them."""
+    """Sort a board's entry dicts for display. Pacifist shows ONE row per player
+    (their best run), ranked by score descending — ties broken by fewest takedowns;
+    takedowns are pulled from each entry's linked submission and stashed on 'td' for
+    the '{td} TD · {score}' display. Every other board ranks by score descending.
+    Shared by _render_board and the /refresh commands so ordering can't drift."""
     if lb_name != "Pacifist":
         return sorted(entries, key=lambda x: x['score'], reverse=True)
     subs = await _db.get_all_submissions()
@@ -858,14 +859,21 @@ async def _sort_board_entries(lb_name, entries):
                 pass
     for en in entries:
         en['td'] = tdl.get((en.get('link') or '').strip())
-    return sorted(entries, key=lambda x: ((x['td'] if x['td'] is not None else 999), -x['score']))
+    def _rank(en):
+        return (-en['score'], en['td'] if en['td'] is not None else 999)
+    best = {}
+    for en in entries:
+        pid = (en.get('did') or '').strip() or ('name:' + (en.get('player') or '').strip().lower())
+        if pid not in best or _rank(en) < _rank(best[pid]):
+            best[pid] = en
+    return sorted(best.values(), key=_rank)
 
 
 async def _prune_pacifist_board():
-    """Pacifist board is a per-player top-10: keep each player's 10 best runs,
-    ranked fewest-takedowns-first then highest score, delete the rest. Takedowns
-    are read from each entry's linked submission (board rows store only score, so
-    ranking is derived on the fly — no schema change / data migration needed)."""
+    """Pacifist board keeps ONE row per player — their highest-scoring run (ties
+    broken by fewest takedowns) — so a specialist can't crowd it with duplicates.
+    Takedowns are read from each entry's linked submission (board rows store only
+    score, so ranking is derived on the fly — no schema change / migration needed)."""
     rows = await _db.get_leaderboard_by_board("Pacifist")
     subs = await _db.get_all_submissions()
     td_by_link = {}
@@ -877,16 +885,17 @@ async def _prune_pacifist_board():
                 pass
     def _key(r):
         lnk = (r[4] if len(r) > 4 else '').strip()
-        td = td_by_link.get(lnk, 999)          # unknown takedowns sink to the bottom
+        td = td_by_link.get(lnk, 999)
         sc = int(r[3]) if len(r) > 3 and r[3] else 0
-        return (td, -sc)                        # fewest takedowns, then highest score
+        return (-sc, td)                        # best score first, then fewest takedowns
     by_player = {}
     for r in rows:
-        by_player.setdefault(r[2], []).append(r)
+        pid = (r[2] or '').strip() or ('name:' + (r[1] or '').strip().lower())
+        by_player.setdefault(pid, []).append(r)
     deleted = 0
-    for _did, plist in by_player.items():
+    for _pid, plist in by_player.items():
         plist.sort(key=_key)
-        for extra in plist[10:]:
+        for extra in plist[1:]:
             lnk = (extra[4] if len(extra) > 4 else '').strip()
             if lnk:
                 await _db.delete_leaderboard_entry_by_link("Pacifist", lnk)
