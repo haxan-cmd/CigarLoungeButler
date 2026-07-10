@@ -871,7 +871,7 @@ def format_weapon_marks(marks):
         return str(marks)        # plain for Bronze/Silver
 
 
-async def build_registry_messages(player_name, discord_id, cached_data=None):
+async def build_registry_messages(player_name, discord_id, cached_data=None, guild=None):
     """Build list of message strings for a player's registry card (one per class + header)."""
     class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
 
@@ -883,6 +883,24 @@ async def build_registry_messages(player_name, discord_id, cached_data=None):
     player_title = get_player_title(len(bounties_done))
     mastered = await get_mastered_weapons_for_player(discord_id, cached_data)
     named_feats, feat_submissions, board_counts = await get_feats_for_player(discord_id, cached_data)
+    # Hundred-Handed is authoritative via the ROLE (the curated source of truth): the
+    # card shows it iff the player holds the role, regardless of logged-combo data.
+    if guild is not None:
+        try:
+            _hhrole = guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+            _member = guild.get_member(int(discord_id))
+            if _member is None:
+                try:
+                    _member = await guild.fetch_member(int(discord_id))
+                except Exception:
+                    _member = None
+            if _hhrole is not None and _member is not None:
+                if _hhrole in _member.roles:
+                    named_feats.add('hhanded')
+                else:
+                    named_feats.discard('hhanded')
+        except (ValueError, TypeError):
+            pass
     special_ops = await get_special_ops_for_player(discord_id, cached_data)
     best_placements = await get_best_placements_for_player(discord_id, cached_data=cached_data)
     personal_bests = await get_personal_bests(discord_id, cached_data)
@@ -1478,7 +1496,7 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             print(f"Registry forum channel not found: {REGISTRY_FORUM_CHANNEL_ID}")
             return
 
-        messages = await build_registry_messages(player_name, discord_id, cached_data)
+        messages = await build_registry_messages(player_name, discord_id, cached_data, guild=guild)
         import re as _re2
         # Strip leading "• " bullets — in embed fields they only add indent/width.
         messages = [_re2.sub(r"(?m)^•\s*", "", m or "") for m in messages]
