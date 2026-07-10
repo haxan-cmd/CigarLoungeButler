@@ -55,7 +55,7 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 
 DIGIT ACCURACY (CRITICAL): T/K/D digits are small and easily misread. Read each digit precisely and re-check before answering. Watch especially for 3 vs 8, 8 vs 6, 5 vs 6, 0 vs 8, and 1 vs 7. If a digit is ambiguous, prefer the shape that best matches the pixels rather than guessing.
 
-CRITICAL: The submitting player's row is visually highlighted - it has a noticeably brighter background (often gold/yellow), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE - top, middle, or bottom of the scoreboard.
+CRITICAL: The submitting player's row is visually highlighted - it has a noticeably brighter background (often gold/yellow/tan), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE - top, middle, or bottom of the scoreboard. NOTE: more than one row may look highlighted — the submitter's OWN row is GOLD/YELLOW/TAN, while a GREEN tint or green person-icon marks a friend/party member (NOT the submitter). When a player name hint is provided, the row whose NAME matches the hint wins over any highlight colour.
 
 LARGE LOBBIES: The scoreboard may have up to 32 players per team (64 total). In large lobbies the text is small - read carefully. Do not skip rows.
 
@@ -67,10 +67,10 @@ SCREEN OVERLAYS TO IGNORE - these are NOT scoreboard rows:
 - Any name that appears outside the main two-column scoreboard table
 Only read names and stats from inside the RANK | NAME | SCORE | T | K | D | PING table columns.
 
-FINDING THE PLAYER (use BOTH methods, prefer name match if highlight is ambiguous):
-Method 1 - Visual highlight: scan every row for the one with a distinctly brighter/gold background or a marker icon.
-Method 2 - Name match: if a player name hint is provided, find the row whose NAME column most closely matches it (exact or partial match, case-insensitive, ignoring clan tags or decorators).
-If both methods point to the same row, high confidence. If only one method works, use that. If the highlight is subtle or unclear on this screenshot, rely primarily on the name match.
+FINDING THE PLAYER:
+Method 1 - Name match (USE THIS FIRST whenever a name hint is provided): find the row whose NAME column matches the hint (exact or partial, case-insensitive, ignoring clan tags/decorators). That row is the submitter — trust it over highlight colour.
+Method 2 - Visual highlight (fallback when no name matches): scan for the row with a GOLD/YELLOW/TAN background or a marker icon. A GREEN tint / green person-icon is a friend/party member, NOT the submitter — do not use it unless its name matches the hint.
+If both methods point to the same row, high confidence. If they disagree, trust the NAME match.
 
 Step 1: Using both methods above, identify the submitting player's row.
 Step 2: Read the T, K, D values ONLY from that exact row - do not read from any row above or below it.
@@ -179,13 +179,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
-            f"\n\nPLAYER NAME HINT: The submitting player may appear under any of these names: {player_name}. "
-            f"Their in-game name may differ from their Discord name. "
-            f"NEVER read stats from Discord voice overlay cards on the edges — those are NOT scoreboard rows. "
-            f"PRIMARY method: find the row with the visually highlighted background (gold/bright/tinted) inside the RANK|NAME|SCORE|T|K|D|PING table. "
-            f"SECONDARY method: if a row inside the scoreboard closely matches any of the listed names, use that. "
-            f"If no name matches, rely entirely on the visual highlight. "
-            f"Also extract the exact NAME text from the highlighted row and return it in the 'name' field."
+            f"\n\nPLAYER NAME HINT (AUTHORITATIVE): The submitting player appears under ONE of these names: {player_name}. "
+            f"Their in-game name may differ from their Discord name, so match loosely — case-insensitive, partial matches ok, ignore clan tags/decorators. "
+            f"PRIMARY method — NAME MATCH: find the scoreboard row whose NAME column matches one of those names, and read EVERY stat (SCORE, T, K, D, faction, weapon, subclass) from THAT row. The name-matched row is DEFINITIVELY the submitter, even if some OTHER row looks more brightly highlighted. "
+            f"IMPORTANT — a scoreboard can show more than one highlighted row: the submitter's OWN row is tinted GOLD/YELLOW/TAN, whereas a GREEN tint or a green person-icon marks a FRIEND or party member who is NOT the submitter. Do NOT read the green-highlighted row unless its name matches a hint name. "
+            f"FALLBACK — ONLY if no row name matches any hint name: use the GOLD/YELLOW/TAN highlighted row (never the green one). "
+            f"NEVER read stats from Discord voice-overlay cards on the screen edges — those are not scoreboard rows. "
+            f"Return the exact NAME text you read from the chosen row in the 'name' field."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
 
