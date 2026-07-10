@@ -3485,22 +3485,14 @@ class LeaderboardsCog(commands.Cog):
                             hh_role_assigned.append(member.display_name)
                     except Exception:
                         continue
-                # Revoke from anyone holding the role who is not truly at 46/46.
-                for member in list(getattr(hh_role, 'members', [])):
-                    if str(member.id) not in _qualified:
-                        try:
-                            await member.remove_roles(hh_role, reason="Hundred-Handed: below 46/46 under strict rule")
-                            hh_role_revoked.append(member.display_name)
-                        except Exception:
-                            continue
+                # NOTE: no auto-revoke — the role is a curated source of truth (some
+                # legacy completers were granted it without every combo being logged).
         except Exception as role_e:
             print(f"[HH] Role sync error: {role_e}")
 
         role_msg = ""
         if hh_role_assigned:
             role_msg += f"\n\U0001f396\ufe0f Role granted: {', '.join(hh_role_assigned)}"
-        if hh_role_revoked:
-            role_msg += f"\n\u26a0\ufe0f Role revoked (not 46/46): {', '.join(hh_role_revoked)}"
         await interaction.edit_original_response(content=f"\u2705 Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
 
     @app_commands.command(name="consolidate_hundred_handed", description="Merge duplicate Hundred Handed identities into one per player (mod only).")
@@ -3560,9 +3552,12 @@ async def refresh_hundred_handed_board(guild):
     thread_id = int(lb_row['Thread ID'])
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
-    _mc = _hh_matched_counts(await _db.get_all_hundred_handed())
     _hh_emoji = "<:hhanded:1430199468246044772>"
-    completers = sorted([nm for _k, (nm, m, _p) in _mc.items() if m >= HH_TOTAL],
+    # Board mirrors the Hundred-Handed ROLE holders (the curated source of truth for
+    # who has completed it) — not the raw combo count, which can lag behind for
+    # players whose historical combos were never fully logged.
+    _hh_role = guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+    completers = sorted([m.display_name for m in (_hh_role.members if _hh_role else [])],
                         key=lambda n: n.lower())
     if not completers:
         desc = "*No completions yet.*"
