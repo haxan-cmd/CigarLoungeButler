@@ -3396,6 +3396,18 @@ class LeaderboardsCog(commands.Cog):
         await interaction.edit_original_response(content=f"\u2705 Removed **{removed}** duplicate entries from **{name}**. Run `/refresh` to update the board.")
 
 
+    @app_commands.command(name="refresh_hundred_handed", description="Redraw the Hundred Handed board only — no data or role changes (mod only).")
+    async def refresh_hundred_handed(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await refresh_hundred_handed_board(interaction.guild)
+            await interaction.followup.send("\u2705 Hundred Handed board redrawn (nothing else touched \u2014 no seeding, no roles).", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Refresh failed: {e}", ephemeral=True)
+
     @app_commands.command(name="backfill_hundred_handed", description="Seed Hundred Handed from submissions + legacy list (mod only).")
     async def backfill_hundred_handed(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -3522,14 +3534,15 @@ def _hh_matched_counts(all_pairs):
     _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
     _by = {}
     for did, name, sc, w in all_pairs:
-        did = (did or '').strip()
-        if not did:
+        did = (did or '').strip(); name = (name or '').strip()
+        key = did or ('name:' + name.lower())   # legacy rows have blank id -> group by name
+        if not key:
             continue
-        ent = _by.setdefault(did, ['', set()])
+        ent = _by.setdefault(key, ['', set()])
         ent[1].add((sc, w))
         if name:
             ent[0] = name
-    return {did: (nm, len(pairs & _req), pairs) for did, (nm, pairs) in _by.items()}
+    return {key: (nm, len(pairs & _req), pairs) for key, (nm, pairs) in _by.items()}
 
 
 async def refresh_hundred_handed_board(guild):
@@ -3544,24 +3557,14 @@ async def refresh_hundred_handed_board(guild):
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
     _mc = _hh_matched_counts(await _db.get_all_hundred_handed())
-    rows = sorted(((did, nm, m) for did, (nm, m, _p) in _mc.items()),
-                  key=lambda r: (-r[2], (r[1] or '').lower()))
     _hh_emoji = "<:hhanded:1430199468246044772>"
-    if not rows:
-        desc = "*No entries yet.*"
+    completers = sorted([nm for _k, (nm, m, _p) in _mc.items() if m >= HH_TOTAL],
+                        key=lambda n: n.lower())
+    if not completers:
+        desc = "*No completions yet.*"
     else:
-        lines = []
-        completers = [(did, name, cnt) for did, name, cnt in rows if cnt >= HH_TOTAL]
-        in_progress = [(did, name, cnt) for did, name, cnt in rows if cnt < HH_TOTAL]
-        for idx, (discord_id, player_name, count) in enumerate(completers, 1):
-            lines.append(f"│ {idx}. `{player_name}` — {_hh_emoji} {count}/{HH_TOTAL} ✓")
-        if in_progress:
-            if completers:
-                lines.append("")
-                lines.append("*In Progress*")
-            for discord_id, player_name, count in in_progress:
-                lines.append(f"│ `{player_name}` — {count}/{HH_TOTAL}")
-        desc = "\n".join(lines)
+        desc = "\n".join(f"│ {i}. `{nm}` — {_hh_emoji} {HH_TOTAL}/{HH_TOTAL} \u2713"
+                         for i, nm in enumerate(completers, 1))
 
     embed = discord.Embed(title=_hh_emoji, description=desc, colour=EMBED_GOLD)
     embed.set_footer(text="Last updated")
