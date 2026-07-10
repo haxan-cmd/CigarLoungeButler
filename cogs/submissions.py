@@ -2347,8 +2347,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _vision_name = (vision_data or {}).get('name')
         if _vision_name and _vision_name.strip().lower() != _user_name.strip().lower():
             try:
-                await _db.save_player_ign(_user_id, _vision_name.strip())
-                print(f"[IGN] Saved alias for {_user_name}: '{_vision_name}'")
+                # Guard: never learn a name that already belongs to a DIFFERENT player.
+                # That is the signature of a wrong-row read (e.g. reading a friend's
+                # green-highlighted row) — learning it would poison this player's name
+                # hints and make the misread stick.
+                _n2id = await _db.get_name_to_id_map()
+                _owner = _n2id.get(_vision_name.strip().lower())
+                if _owner and str(_owner) != str(_user_id):
+                    print(f"[IGN] Skipped '{_vision_name}' for {_user_name} — that name belongs to another player ({_owner}); likely a wrong-row read")
+                else:
+                    await _db.save_player_ign(_user_id, _vision_name.strip())
+                    print(f"[IGN] Saved alias for {_user_name}: '{_vision_name}'")
             except Exception as e:
                 print(f"[IGN] Save error: {e}")
 
