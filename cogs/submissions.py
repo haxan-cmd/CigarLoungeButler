@@ -2046,6 +2046,18 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if is_new:
                     print(f"[HUNDRED_HANDED] New combo: {interaction.user.display_name} — {selected_class} / {selected_weapon}")
                     await _refresh_hundred_handed_board(interaction.guild)
+                    # Auto-grant the Hundred-Handed role the moment all 46 required combos are done
+                    try:
+                        from cogs.leaderboards import _hh_matched_counts, HH_TOTAL as _HHT
+                        _mine = _hh_matched_counts(await _db.get_all_hundred_handed()).get(str(interaction.user.id))
+                        if _mine and _mine[1] >= _HHT:
+                            _hhrole = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
+                            _mem = interaction.guild.get_member(interaction.user.id)
+                            if _hhrole and _mem and _hhrole not in _mem.roles:
+                                await _mem.add_roles(_hhrole, reason="Hundred-Handed complete (46/46)")
+                                print(f"[HUNDRED_HANDED] Granted role to {interaction.user.display_name} (46/46)")
+                    except Exception as _hhre:
+                        print(f"[HUNDRED_HANDED] auto-role error: {_hhre}")
             except Exception as e:
                 nerve_log_error("Hundred-Handed check", e)
 

@@ -1116,6 +1116,20 @@ async def get_hundred_handed_progress(discord_id: str) -> list:
     return [(r['subclass'], r['weapon']) for r in rows]
 
 
+async def get_all_hundred_handed() -> list:
+    """Return all (discord_id, player_name, subclass, weapon) rows across every player."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS hundred_handed ("
+            "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
+            "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
+            "UNIQUE(discord_id, subclass, weapon))"
+        )
+        rows = await conn.fetch("SELECT discord_id, player_name, subclass, weapon FROM hundred_handed")
+    return [(r['discord_id'], r['player_name'], r['subclass'], r['weapon']) for r in rows]
+
+
 async def get_hundred_handed_leaderboard() -> list:
     """Return [(discord_id, player_name, count)]. Completers first (earliest
     completion), then in-progress by count desc.

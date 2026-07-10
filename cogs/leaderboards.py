@@ -3454,29 +3454,37 @@ class LeaderboardsCog(commands.Cog):
 
         # Assign Hundred-Handed role to anyone who qualifies
         hh_role_assigned = []
+        hh_role_revoked = []
         try:
             hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
             if hh_role:
-                _all_primaries = {w for sc, ws in _HH_PRIMARIES.items() for w in ws}
-                all_subs_for_role = await _db.get_all_submissions()
-                player_weapons: dict[str, set] = {}
-                for r in all_subs_for_role:
-                    if len(r) > 3 and r[2].strip() and r[3].strip():
-                        player_weapons.setdefault(r[2].strip(), set()).add(r[3].strip())
-                for discord_id_str, weapons in player_weapons.items():
-                    if not _all_primaries.issubset(weapons):
-                        continue
+                # STRICT: role requires all 46 required (subclass, weapon) primary combos.
+                _mc = _hh_matched_counts(await _db.get_all_hundred_handed())
+                _qualified = {did for did, (nm, m, _p) in _mc.items() if m >= HH_TOTAL}
+                for did in _qualified:
                     try:
-                        member = interaction.guild.get_member(int(discord_id_str)) or await interaction.guild.fetch_member(int(discord_id_str))
-                        if hh_role not in member.roles:
-                            await member.add_roles(hh_role, reason="Backfill: Hundred-Handed role")
+                        member = interaction.guild.get_member(int(did)) or await interaction.guild.fetch_member(int(did))
+                        if member and hh_role not in member.roles:
+                            await member.add_roles(hh_role, reason="Hundred-Handed: all 46 combos complete")
                             hh_role_assigned.append(member.display_name)
                     except Exception:
                         continue
+                # Revoke from anyone holding the role who is not truly at 46/46.
+                for member in list(getattr(hh_role, 'members', [])):
+                    if str(member.id) not in _qualified:
+                        try:
+                            await member.remove_roles(hh_role, reason="Hundred-Handed: below 46/46 under strict rule")
+                            hh_role_revoked.append(member.display_name)
+                        except Exception:
+                            continue
         except Exception as role_e:
-            print(f"[HH] Role backfill error: {role_e}")
+            print(f"[HH] Role sync error: {role_e}")
 
-        role_msg = f"\n\U0001f396\ufe0f Role assigned to: {', '.join(hh_role_assigned)}" if hh_role_assigned else ""
+        role_msg = ""
+        if hh_role_assigned:
+            role_msg += f"\n\U0001f396\ufe0f Role granted: {', '.join(hh_role_assigned)}"
+        if hh_role_revoked:
+            role_msg += f"\n\u26a0\ufe0f Role revoked (not 46/46): {', '.join(hh_role_revoked)}"
         await interaction.edit_original_response(content=f"\u2705 Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
 
     @app_commands.command(name="consolidate_hundred_handed", description="Merge duplicate Hundred Handed identities into one per player (mod only).")
@@ -3507,6 +3515,23 @@ class LeaderboardsCog(commands.Cog):
                 ephemeral=True)
 
 
+def _hh_matched_counts(all_pairs):
+    """discord_id -> (player_name, matched_count, done_pairs). matched_count counts
+    ONLY the 46 required (subclass, weapon) primary combos — secondary/extra combos in
+    the table are ignored, so board, role and card all agree on true completion."""
+    _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+    _by = {}
+    for did, name, sc, w in all_pairs:
+        did = (did or '').strip()
+        if not did:
+            continue
+        ent = _by.setdefault(did, ['', set()])
+        ent[1].add((sc, w))
+        if name:
+            ent[0] = name
+    return {did: (nm, len(pairs & _req), pairs) for did, (nm, pairs) in _by.items()}
+
+
 async def refresh_hundred_handed_board(guild):
     """Rebuild The Hundred Handed embed in its thread."""
     all_lb_rows = await _get_lb_records()
@@ -3518,7 +3543,9 @@ async def refresh_hundred_handed_board(guild):
     thread_id = int(lb_row['Thread ID'])
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
-    rows = await _db.get_hundred_handed_leaderboard()
+    _mc = _hh_matched_counts(await _db.get_all_hundred_handed())
+    rows = sorted(((did, nm, m) for did, (nm, m, _p) in _mc.items()),
+                  key=lambda r: (-r[2], (r[1] or '').lower()))
     _hh_emoji = "<:hhanded:1430199468246044772>"
     if not rows:
         desc = "*No entries yet.*"
