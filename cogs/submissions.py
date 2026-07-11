@@ -1947,7 +1947,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Build marks breakdown. A pacifist run (0 TD / 0 K) earns no weapon mark.
     _is_pacifist = (kills == 0 and takedowns <= 10)
     marks_earned = 0 if _is_pacifist else 1
-    marks_lines = [] if _is_pacifist else ["*+1 submission*"]
+    marks_lines = [] if _is_pacifist else ["<:cigar:1444893851427803298> *+1 Submission*"]
     if '200 Takedowns' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:200tkd:1363648828414230538> +1*")
@@ -1961,7 +1961,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
         marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
     else:
-        marks_summary = f"\n<:cigar:1444893851427803298> **{marks_earned} mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+        marks_summary = f"\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
@@ -2182,8 +2182,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 def increment_marks(content):
                     def replacer(m):
                         n = int(m.group(1)) + 1
-                        return f"**{n} mark{'s' if n != 1 else ''}**"
-                    return _re.sub(r'\*\*(\d+) marks?\*\*', replacer, content)
+                        return f"**{n} Mark{'s' if n != 1 else ''}**"
+                    return _re.sub(r'\*\*(\d+) [Mm]arks?\*\*', replacer, content)
                 new_content = increment_marks(summary_reply.content) + "\n<a:highscore:1360312918545269057> +1 High Score"
                 await summary_reply.edit(content=new_content)
             except Exception as e:
