@@ -2279,15 +2279,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         nerve_log_error("Unbound role assign", ub_e)
 
                 # New #1 on any leaderboard
+                # New #1 on any leaderboard — plain factual update (no Butler flavour)
                 new_firsts = [lb for lb, pos in placements if pos == 1]
                 if new_firsts:
                     boards = ", ".join(new_firsts)
-                    line = await butler_quip(
-                        f"{player} just took the top spot on the {boards} leaderboard. "
-                        "React as the Butler — acknowledge it but add doubt or dry skepticism about how long it lasts. One sentence.",
-                        fallback="On top. But for how long."
-                    )
-                    await main_channel.send(f"*{line}*")
+                    await main_channel.send(f"**{player}** took #1 on **{boards}**.")
 
                 # Bounty completion
                 if newly_completed:
