@@ -110,6 +110,7 @@ BUTLER_AI_COOLDOWN_SECONDS = 15
 
 # Idiot role — occasionally dismiss them with a curt line (not every message).
 BUTLER_IDIOT_REPLY_CHANCE = 0.10       # ~1 in 10 of their eligible messages
+BUTLER_ORGANIC_POSTS_ENABLED = False   # unprompted idle one-liners (were too spammy) — set True to re-enable
 BUTLER_IDIOT_REPLY_COOLDOWN = 1800     # sec, per user — keeps it occasional
 BUTLER_IDIOT_REPLY_COOLDOWNS = {}      # user_id -> last reply ts
 BUTLER_IDIOT_REPLIES = [
@@ -647,7 +648,7 @@ class PersonalityCog(commands.Cog):
     async def butler_organic_post(self):
         """Occasionally post an unprompted Butler one-liner in main."""
         import random
-        if not _anthropic_client:
+        if not _anthropic_client or not BUTLER_ORGANIC_POSTS_ENABLED:
             return
         # ~15% chance each 3-hour window — roughly once a day, still random
         if random.random() > 0.15:
