@@ -425,6 +425,17 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if newly_completed:
         date_str = datetime.now(timezone.utc).strftime('%b %d')
         completions.append({"id": str(player_id), "name": player_name, "date": date_str})
+        # Season championship: +5 GP for completing the bounty. Awarded HERE — the moment
+        # completion is recorded — because the caller's later check_bounty_completion() now
+        # returns False (this player was just appended to `completions` above), so the
+        # award attempt in finalise_submission never fired. Idempotent per season/player/reason.
+        try:
+            _bseason = await _db.get_current_season()
+            if _bseason:
+                await _db.award_season_bonus(_bseason['id'], player_name,
+                                             config.BOUNTY_COMPLETION_BONUS, "Bounty completion")
+        except Exception as _sbe:
+            print(f"[SEASON] bounty bonus error: {_sbe}")
         if bounty_channel and bounty_role:
             try:
                 await bounty_channel.send(
