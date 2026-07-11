@@ -1631,6 +1631,55 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if not isinstance(_score, int):
         _score = None
     is_triple = takedowns >= 150 and kills >= 100 and (score_over_20k or (_score is not None and _score >= 20000))
+    # Flag to nerve centre when a Triple was self-confirmed (manual "20k+?" -> yes) but the
+    # scorecard vision read a score UNDER 20k — a possible inflated claim worth a look.
+    if is_triple and score_over_20k and _score is not None and _score < 20000:
+        try:
+            _nc = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                  or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if _nc:
+                _mlink = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+                await _nc.send(
+                    f"\u26a0\ufe0f **Triple score mismatch \u2014 {interaction.user.display_name}**\n"
+                    f"Confirmed 20k+ manually, but the scorecard vision read **{_score:,}** "
+                    f"({selected_weapon}, {takedowns} TD / {kills} K). Worth a look.\n{_mlink}"
+                )
+        except Exception as _e_tm:
+            print(f"[TRIPLE] score-mismatch flag error: {_e_tm}")
+
+    # Vision-correction feedback: log to nerve centre every field the submitter changed
+    # away from what vision originally read. Shows where vision misfires (recurring field
+    # misreads) and possible fakery (suspicious number bumps). Only fields vision actually
+    # read are compared, so routine manual-fills of blanks don't spam.
+    try:
+        _vd = vision_data or {}
+        _corr = []
+        def _txt(label, vis, final):
+            if vis is None:
+                return
+            vs = str(vis).strip()
+            if vs and vs.lower() != str(final).strip().lower():
+                _corr.append(f"{label} {vs}\u2192{final}")
+        _txt("weapon", _vd.get('weapon'), selected_weapon)
+        _txt("class", _vd.get('subclass'), selected_class)
+        _txt("faction", _vd.get('faction'), faction)
+        _txt("TD", _vd.get('takedowns'), takedowns)
+        _txt("K", _vd.get('kills'), kills)
+        _txt("D", _vd.get('deaths'), deaths)
+        _vmap = (_vd.get('map') or '').strip()
+        if _vmap:
+            _vmap_norm = config.MAP_ALIASES.get(_vmap.lower(), _vmap)
+            if selected_map and selected_map.lower() not in _vmap.lower() and _vmap_norm.lower() != selected_map.lower():
+                _corr.append(f"map {_vmap}\u2192{selected_map}")
+        if _corr:
+            _ncc = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                   or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if _ncc:
+                _mlc = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+                await _ncc.send(f"\u270f\ufe0f **Vision corrections \u2014 {interaction.user.display_name}**: "
+                                + ", ".join(_corr) + f"\n{_mlc}")
+    except Exception as _e_corr:
+        print(f"[CORRECTIONS] feedback log error: {_e_corr}")
     if is_triple:
         feats.append("Triple")
     else:
@@ -1690,6 +1739,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     await original_message.reply(stickers=[_stk], mention_author=False)
     except Exception as _e_stk:
         print(f"[STICKER] high-lethality sticker error: {_e_stk}")
+
+    # "Died a lot" sticker: reply when a run's deaths reach the configured threshold.
+    try:
+        if deaths is not None and deaths >= getattr(config, 'DEATHS_STICKER_THRESHOLD', 30):
+            _dname = getattr(config, 'DEATHS_STICKER_NAME', '') or ''
+            if _dname:
+                _dg = original_message.guild
+                _dstk = discord.utils.get(_dg.stickers, name=_dname)
+                if _dstk is None:
+                    try:
+                        _dstk = discord.utils.get(await _dg.fetch_stickers(), name=_dname)
+                    except Exception:
+                        _dstk = None
+                if _dstk:
+                    await original_message.reply(stickers=[_dstk], mention_author=False)
+    except Exception as _e_dstk:
+        print(f"[STICKER] high-deaths sticker error: {_e_dstk}")
 
     # Clear the "Scorecard detected" prompt in the background (never blocks).
     async def _cleanup_prompt():
