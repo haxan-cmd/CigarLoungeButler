@@ -1256,6 +1256,7 @@ class EditFieldSelect(discord.ui.Select):
             discord.SelectOption(label="Faction", value="faction"),
             discord.SelectOption(label="Stats (TD/K/D)", value="stats"),
             discord.SelectOption(label="VIP", value="vip"),
+            discord.SelectOption(label="Triple (score 20k+)", value="triple"),
         ]
         super().__init__(placeholder="Choose a field to edit...", options=options)
 
@@ -1288,6 +1289,12 @@ class EditFieldSelect(discord.ui.Select):
             view = EditVIPView(ev)
             await interaction.response.edit_message(
                 content="**Edit VIP:** Were you a VIP?",
+                view=view
+            )
+        elif field == "triple":
+            view = EditTripleView(ev)
+            await interaction.response.edit_message(
+                content="**Edit Triple:** Was your score over 20,000? (only counts with 150+ TD & 100+ kills)",
                 view=view
             )
 
@@ -1359,6 +1366,37 @@ class EditVIPView(discord.ui.View):
     @discord.ui.button(label='No', style=discord.ButtonStyle.red)
     async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.edit_view.vip = False
+        await _apply_edit(interaction, self.edit_view)
+
+
+def _recompute_triple_feats(ev, score_over_20k):
+    """Re-derive Triple / 100 Kills / 200 Takedowns on ev.feats using the SAME rule as a
+    fresh submission (Triple = 150+ TD, 100+ kills, and score over 20k). All other feats
+    (Predator, Flawless, Pacifist, …) are left untouched."""
+    feats = [f for f in (ev.feats or []) if f not in ("Triple", "100 Kills", "200 Takedowns")]
+    if ev.takedowns >= 150 and ev.kills >= 100 and score_over_20k:
+        feats.append("Triple")
+    else:
+        if ev.kills >= 100:
+            feats.append("100 Kills")
+        if ev.takedowns >= 200:
+            feats.append("200 Takedowns")
+    ev.feats = feats
+
+
+class EditTripleView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.edit_view = edit_view
+
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        _recompute_triple_feats(self.edit_view, True)
+        await _apply_edit(interaction, self.edit_view)
+
+    @discord.ui.button(label='No', style=discord.ButtonStyle.red)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        _recompute_triple_feats(self.edit_view, False)
         await _apply_edit(interaction, self.edit_view)
 
 
