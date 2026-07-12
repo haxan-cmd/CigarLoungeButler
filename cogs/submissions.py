@@ -1827,6 +1827,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     lobby_line = None
 
     _team_td = [s for s in vd.get('team_scores', []) if isinstance(s, int) and s > 0]
+    # Vision sometimes folds the submitter's OWN row into team_scores. Drop one instance
+    # of the submitter's own takedowns so a self-value can't skew team rank, teammate
+    # averages, or the TUFF gap (kills - best teammate TD).
+    if isinstance(takedowns, int) and takedowns in _team_td:
+        _team_td.remove(takedowns)
     _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and k > 0]
     _enemy_td = [s for s in vd.get('enemy_scores', []) if isinstance(s, int) and s > 0]
     _enemy_k  = [k for k in vd.get('enemy_kills',  []) if isinstance(k, int) and k > 0]
