@@ -1010,7 +1010,11 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 existing_by_id[ekey] = esc
         for key, (score, pname, link, wpn) in best.items():
             ex = existing_by_id.get(key)
-            if ex is not None and score <= ex:
+            # On an EDIT rebuild (only_player set) the player's submission is authoritative —
+            # replace their board entry even if lower, so an edited-DOWN score corrects the
+            # board. Otherwise keep-higher would strand the old, higher, pre-edit value
+            # (e.g. a 130 corrected from a mis-read 180 kept showing 180).
+            if ex is not None and score <= ex and only_player is None:
                 continue
             # For name-keyed legacy entries, clear any stale blank-id row for that
             # name first so the synthetic-id upsert doesn't leave a duplicate.
