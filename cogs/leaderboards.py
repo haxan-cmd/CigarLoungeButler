@@ -3344,17 +3344,84 @@ class LeaderboardsCog(commands.Cog):
             embed.add_field(name=f"{m}  \u00b7  {map_totals[m]}", value="\n".join(lines), inline=False)
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="weapon_stats", description="All-time submission counts per weapon, as a bar breakdown (mod only).")
-    async def weapon_stats(self, interaction: discord.Interaction):
+    @app_commands.command(name="weapon_stats", description="Per-weapon breakdown: count, lethality, kill share or warlord (mod only).")
+    @app_commands.describe(metric="What to rank weapons by (default: submission count).")
+    @app_commands.choices(metric=[
+        app_commands.Choice(name="Submission count", value="count"),
+        app_commands.Choice(name="Lethality (kills/TD)", value="lethality"),
+        app_commands.Choice(name="Kill Share", value="kill_share"),
+        app_commands.Choice(name="Warlord", value="warlord"),
+    ])
+    async def weapon_stats(self, interaction: discord.Interaction, metric: app_commands.Choice[str] = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer()
+        _metric_sel = metric.value if metric else "count"
         subs = await _db.get_all_submissions()
+        if _metric_sel in ("lethality", "kill_share", "warlord"):
+            def _pnum(x):
+                try:
+                    return float(str(x).replace(",", "").strip())
+                except (ValueError, TypeError, AttributeError):
+                    return None
+            _agg = {}
+            for _row in subs:
+                _w = (_row[3] or "").strip() if len(_row) > 3 else ""
+                if not _w or _w in ("None", "Other", "Multiple Weapons"):
+                    continue
+                _ff = (_row[11] if len(_row) > 11 else "") or ""
+                if "resubmit" in _ff.lower():
+                    continue
+                _tdv = _pnum(_row[7]) if len(_row) > 7 else None
+                _kv = _pnum(_row[8]) if len(_row) > 8 else None
+                _ksv = _pnum(_row[20]) if len(_row) > 20 else None
+                if _tdv is None or _kv is None:
+                    continue
+                if _metric_sel == "lethality":
+                    if _tdv <= 0:
+                        continue
+                    _val = _kv / _tdv * 100
+                elif _metric_sel == "kill_share":
+                    if _ksv is None:
+                        continue
+                    _val = _ksv
+                else:
+                    if _ksv is None or _kv <= 0:
+                        continue
+                    _val = _tdv * _ksv / _kv
+                _e = _agg.setdefault(_w, [0.0, 0]); _e[0] += _val; _e[1] += 1
+            _rows2 = [(_w, _e[0] / _e[1], _e[1]) for _w, _e in _agg.items() if _e[1] >= 5]
+            if not _rows2:
+                await interaction.followup.send("Not enough weapon data for that metric (need 5+ submissions).")
+                return
+            _maxr = max(_v for _, _v, _ in _rows2) or 1
+            def _barr(x):
+                return "█" * max(1, round(x / _maxr * 12))
+            _ord = sorted(_rows2, key=lambda tpl: -tpl[1])
+            _labels = {
+                "lethality": ("🩸 Lethality by Weapon", "avg lethality (kills ÷ takedowns)"),
+                "kill_share": ("💀 Kill Share by Weapon", "avg kill share (kills ÷ team kills)"),
+                "warlord": ("🗡️ Warlord by Weapon", "avg warlord (takedowns ÷ team kills)"),
+            }
+            _title, _desc = _labels[_metric_sel]
+            _hdr = f"{_desc} · weapons with 5+ submissions · all-time"
+            _lns = [f"`{_barr(v):<12}` {w} — **{v:.0f}%** ({n})" for w, v, n in _ord]
+            _bdy = _hdr + "\n\n" + "\n".join(_lns)
+            if len(_bdy) > 4000:
+                _keep, _tot = [], len(_hdr) + 2
+                for _ln in _lns:
+                    if _tot + len(_ln) + 1 > 3900:
+                        break
+                    _keep.append(_ln); _tot += len(_ln) + 1
+                _bdy = _hdr + "\n\n" + "\n".join(_keep) + f"\n…and {len(_lns) - len(_keep)} more."
+            await interaction.followup.send(embed=discord.Embed(title=_title, description=_bdy, colour=0x8b6914))
+            return
+        subs = subs
         counts = {}
         for row in subs:
-            w = (row[3] or '').strip() if len(row) > 3 else ''
-            if not w or w in ('None', 'Other', 'Multiple Weapons'):
+            w = (row[3] or "").strip() if len(row) > 3 else ""
+            if not w or w in ("None", "Other", "Multiple Weapons"):
                 continue
             counts[w] = counts.get(w, 0) + 1
         if not counts:
