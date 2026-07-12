@@ -3395,9 +3395,9 @@ class LeaderboardsCog(commands.Cog):
             if not _rows2:
                 await interaction.followup.send("Not enough weapon data for that metric (need 5+ submissions).")
                 return
-            _maxr = max(_v for _, _v, _ in _rows2) or 1
             def _barr(x):
-                return "█" * max(1, round(x / _maxr * 12))
+                # bar is the value out of 100% (12 blocks = 100%), not scaled to the top weapon
+                return "█" * min(12, max(0, round(x / 100 * 12)))
             _ord = sorted(_rows2, key=lambda tpl: -tpl[1])
             _labels = {
                 "lethality": ("🩸 Lethality by Weapon", "avg lethality (kills ÷ takedowns)"),
