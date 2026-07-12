@@ -254,6 +254,12 @@ VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 LETHALITY_STICKER_NAME = "lethality"   # exact sticker name in the server ("" to disable)
 LETHALITY_STICKER_THRESHOLD = 60
 
+# "Died a lot" sticker — the bot replies with this sticker when a run's DEATHS are at or
+# above the threshold. Set NAME to the exact sticker name as it appears in the server
+# (Server Settings -> Stickers). Leave "" to disable.
+DEATHS_STICKER_NAME = "certifiedlounger"   # 30+ deaths -> reply with the Certified Lounger sticker
+DEATHS_STICKER_THRESHOLD = 30
+
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji
