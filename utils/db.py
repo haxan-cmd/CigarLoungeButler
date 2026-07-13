@@ -31,6 +31,7 @@ async def db_init():
 # per-board lookups); without them Postgres full-scans the table every time.
 _INDEXES = [
     ("idx_submissions_discord_id", "submissions",      "(discord_id)"),
+    ("idx_submissions_link",       "submissions",      "(message_link)"),
     ("idx_ld_board_discord",       "leaderboard_data", "(board_name, discord_id)"),
     ("idx_ld_discord_id",          "leaderboard_data", "(discord_id)"),
     ("idx_ld_message_link",        "leaderboard_data", "(message_link)"),
@@ -263,6 +264,17 @@ async def add_submission(
             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score
         )
     return row_id
+
+
+async def get_submission_by_link(message_link: str):
+    """Targeted (weapon, map, faction) lookup by message_link — indexed, replaces
+    the full-table scan the edit flow used to do. Returns a tuple or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT weapon, map, faction FROM submissions WHERE message_link=$1 LIMIT 1",
+            message_link)
+    return (r['weapon'] or '', r['map'] or '', r['faction'] or '') if r else None
 
 
 async def get_submission_feats(submission_id: int) -> str:

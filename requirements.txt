@@ -1,29 +1,32 @@
-aiohappyeyeballs==2.6.2
+# Discord bot core
+discord.py==2.7.1
+audioop-lts==0.2.2
+
+# aiohttp stack (discord.py / healthcheck server)
 aiohttp==3.14.1
+aiohappyeyeballs==2.6.2
 aiosignal==1.4.0
 attrs==26.1.0
-audioop-lts==0.2.2
-certifi==2026.6.17
-cffi==2.0.0
-charset-normalizer==3.4.7
-cryptography==49.0.0
-discord.py==2.7.1
 frozenlist==1.8.0
-google-auth==2.55.0
-google-auth-oauthlib==1.4.0
-idna==3.18
 multidict==6.7.1
-oauthlib==3.3.1
 propcache==0.5.2
-pyasn1==0.6.3
-pyasn1_modules==0.4.2
-pycparser==3.0
-python-dotenv==1.2.2
-requests==2.34.2
-requests-oauthlib==2.0.0
-urllib3==2.7.0
 yarl==1.24.2
-anthropic
-Pillow
-google-genai
-asyncpg
+idna==3.18
+certifi==2026.6.17
+
+# Config
+python-dotenv==1.2.2
+
+# Database
+asyncpg>=0.29
+
+# AI (Butler quips + scorecard vision)
+anthropic>=0.40
+google-genai>=1.0
+
+# Image pre-processing for vision
+Pillow>=10
+
+# Removed 2026-07-13 (dead Google-Sheets/OAuth-era deps, nothing imports them):
+# requests, requests-oauthlib, oauthlib, google-auth, google-auth-oauthlib,
+# pyasn1, pyasn1_modules, cryptography, cffi, pycparser, charset-normalizer, urllib3

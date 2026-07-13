@@ -20,8 +20,16 @@ _web_app = web.Application()
 
 
 async def run_healthcheck():
-    """Minimal HTTP server so Railway's healthcheck passes."""
+    """HTTP server for Railway's healthcheck. Answers 503 when the gateway is
+    actually dead so Railway restarts the container — a zombied process would
+    otherwise answer "ok" forever and never self-heal. Gated on the first
+    on_ready (bot._synced) so the pre-login boot window still passes."""
     async def handle(request):
+        try:
+            if getattr(bot, "_synced", False) and (bot.is_closed() or bot.latency > 60):
+                return web.Response(text="unhealthy: gateway down", status=503)
+        except Exception:
+            pass
         return web.Response(text="ok")
     app = _web_app
     app.router.add_get("/", handle)

@@ -1,6 +1,6 @@
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 
 import config
 
@@ -507,7 +507,7 @@ _nerve_events = {
 
 
 def nerve_log_submission(player, weapon):
-    _nerve_events['submissions'].append((datetime.utcnow().strftime('%H:%M'), player, weapon))
+    _nerve_events['submissions'].append((datetime.now(timezone.utc).strftime('%H:%M'), player, weapon))
 
 
 def nerve_log_butler(trigger, response):
@@ -515,7 +515,7 @@ def nerve_log_butler(trigger, response):
 
 
 def nerve_log_error(context, error):
-    _nerve_events['errors'].append((datetime.utcnow().strftime('%H:%M'), f"{context}: {str(error)[:80]}"))
+    _nerve_events['errors'].append((datetime.now(timezone.utc).strftime('%H:%M'), f"{context}: {str(error)[:80]}"))
 
 
 def nerve_log_milestone(player, weapon, rank):

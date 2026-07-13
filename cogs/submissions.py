@@ -111,8 +111,9 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          lobby_rank=None, lobby_size=None, kills_rank=None,
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
                          team_kill_share=None, team_td_share=None, second_place_td=None, score=None):
-    from datetime import datetime as _dt
-    now = _dt.utcnow()
+    from datetime import datetime as _dt, timezone as _tz
+    # Naive UTC — submitted_at is TIMESTAMP (without tz), asyncpg rejects aware values
+    now = _dt.now(_tz.utc).replace(tzinfo=None)
 
     # Deduplicate: skip if identical run logged in the last 5 minutes
     try:
@@ -1433,12 +1434,11 @@ async def _apply_edit(interaction, ev):
     _old_map_board = None
     _edit_placements = []
     try:
-        for _r in await _db.get_all_submissions():
-            if len(_r) > 12 and (_r[12] or '').strip() == ev.message_link:
-                _old_weapon = (_r[3] or '').strip() or None
-                _om = (_r[5] or '').strip(); _of = (_r[6] or '').strip()
-                _old_map_board = f"{_om} - {_of}" if _om and _of else None
-                break
+        _row = await _db.get_submission_by_link(ev.message_link)
+        if _row:
+            _old_weapon = (_row[0] or '').strip() or None
+            _om = (_row[1] or '').strip(); _of = (_row[2] or '').strip()
+            _old_map_board = f"{_om} - {_of}" if _om and _of else None
     except Exception as _e_old:
         print(f"[EDIT] pre-edit lookup error: {_e_old}")
     try:
@@ -2105,20 +2105,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if '200 Takedowns' in feats:
                 await _db.increment_manual_feat_count(discord_id_str, '200 takedowns')
 
-        # Assign Hundred-Handed role if player now has a submission on every primary non-archer weapon
-        try:
-            hh_role = interaction.guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
-            if hh_role and hh_role not in interaction.user.roles:
-                from config import _SUBCLASS_PRIMARIES
-                _HH_ARCHER = {'Longbowman', 'Crossbowman', 'Skirmisher'}
-                _hh_primaries = {w for sc, ws in _SUBCLASS_PRIMARIES.items() if sc not in _HH_ARCHER for w in ws}
-                all_subs = await _db.get_all_submissions()
-                _player_weapons = {r[3].strip() for r in all_subs if len(r) > 3 and r[2].strip() == discord_id_str and r[3].strip()}
-                if _hh_primaries and _hh_primaries.issubset(_player_weapons):
-                    await interaction.user.add_roles(hh_role, reason="Hundred-Handed — submitted on every primary weapon")
-                    print(f"[HH] Assigned Hundred-Handed role to {interaction.user.display_name}")
-        except Exception as hh_e:
-            nerve_log_error("HH role assign", hh_e)
+        # NOTE: the Hundred-Handed ROLE is granted only by the 46-combo check in
+        # _bg_tasks (subclass+weapon combos, matching the HH board). A legacy
+        # weaker grant used to live here — "every primary weapon regardless of
+        # subclass" — which fired first and made the real 46-combo journey moot
+        # (and cost a full-table scan per submission). Removed.
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")
