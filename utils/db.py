@@ -38,14 +38,35 @@ _INDEXES = [
 ]
 
 
+# All post-creation DDL lives here and runs ONCE at startup. Previously several
+# hot-path functions (get_player_igns, save_player_ign, get_name_to_id_map,
+# get_all_bounties, add_hundred_handed, ...) ran ALTER TABLE / CREATE TABLE on
+# EVERY call — each takes a brief ACCESS EXCLUSIVE lock, several times per
+# submission, for schema that already existed.
+_SCHEMA_STATEMENTS = [
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS score BIGINT",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS kills_100_count INTEGER",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS takedowns_200_count INTEGER",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS triple_count INTEGER",
+    "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS bonus_completions TEXT DEFAULT '[]'",
+    "CREATE TABLE IF NOT EXISTS hundred_handed ("
+    "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
+    "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
+    "UNIQUE(discord_id, subclass, weapon))",
+]
+
+
 async def _ensure_schema():
-    """Add columns introduced after the tables were first created (idempotent)."""
-    try:
-        async with _pool.acquire() as conn:
-            await conn.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS score BIGINT")
-        print("[DB] schema ensured.")
-    except Exception as e:
-        print(f"[DB] schema ensure skipped: {e}")
+    """Add columns/tables introduced after first creation (idempotent). Each
+    statement runs in its own try so one missing table can't block the rest."""
+    for stmt in _SCHEMA_STATEMENTS:
+        try:
+            async with _pool.acquire() as conn:
+                await conn.execute(stmt)
+        except Exception as e:
+            print(f"[DB] schema statement skipped ({stmt[:60]}...): {e}")
+    print("[DB] schema ensured.")
 
 
 async def _ensure_indexes():
@@ -364,9 +385,6 @@ async def get_player_igns(discord_id: str) -> list[str]:
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
-            await conn.execute(
-                "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'"
-            )
             val = await conn.fetchval(
                 "SELECT igns FROM players WHERE discord_id=$1", str(discord_id)
             )
@@ -381,9 +399,6 @@ async def save_player_ign(discord_id: str, ign: str):
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
-            await conn.execute(
-                "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'"
-            )
             # Append only if not already in the array
             await conn.execute(
                 """UPDATE players SET igns = array_append(igns, $1)
@@ -429,15 +444,6 @@ async def set_manual_feat_count(discord_id: str, feat: str, count: int):
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
-            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS kills_100_count INTEGER"
-        )
-        await conn.execute(
-            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS takedowns_200_count INTEGER"
-        )
-        await conn.execute(
-            f"ALTER TABLE players ADD COLUMN IF NOT EXISTS triple_count INTEGER"
-        )
-        await conn.execute(
             f"UPDATE players SET {col}=$1 WHERE discord_id=$2",
             count, str(discord_id)
         )
@@ -456,24 +462,30 @@ async def update_player_thread(discord_id: str, thread_id: str):
 # ── Leaderboards ──────────────────────────────────────────────────────────────
 
 async def get_all_leaderboards() -> list[list]:
+    # Cached: this near-static setup table (board -> thread/message ids) is read
+    # several times per submission (blurb links, update loop, edit flow).
+    cached = _cache_get('leaderboards')
+    if cached is not None:
+        return cached
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM leaderboards ORDER BY id")
-    return [[r['board_name'], r['thread_id'] or '', r['message_ids'] or '', r['board_type'] or ''] for r in rows]
+    data = [[r['board_name'], r['thread_id'] or '', r['message_ids'] or '', r['board_type'] or ''] for r in rows]
+    _cache_set('leaderboards', data)
+    return data
 
 
 async def upsert_leaderboard(board_name, thread_id, message_ids, board_type):
+    _cache_invalidate('leaderboards')
     pool = _pool_check()
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM leaderboards WHERE board_name=$1", board_name
+        # UPDATE-first, INSERT on zero rows — one round-trip in the common case
+        # (row exists) instead of SELECT + write.
+        res = await conn.execute(
+            "UPDATE leaderboards SET thread_id=$1, message_ids=$2, board_type=$3 WHERE board_name=$4",
+            thread_id, message_ids, board_type, board_name
         )
-        if existing:
-            await conn.execute(
-                "UPDATE leaderboards SET thread_id=$1, message_ids=$2, board_type=$3 WHERE board_name=$4",
-                thread_id, message_ids, board_type, board_name
-            )
-        else:
+        if res.split()[-1] == '0':
             await conn.execute(
                 "INSERT INTO leaderboards (board_name, thread_id, message_ids, board_type) VALUES ($1,$2,$3,$4)",
                 board_name, thread_id, message_ids, board_type
@@ -481,6 +493,7 @@ async def upsert_leaderboard(board_name, thread_id, message_ids, board_type):
 
 
 async def update_leaderboard_messages(board_name: str, message_ids: str):
+    _cache_invalidate('leaderboards')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -552,7 +565,6 @@ async def get_name_to_id_map() -> dict:
     Used to attach real ids to legacy (blank-id) leaderboard rows."""
     pool = _pool_check()
     async with pool.acquire() as conn:
-        await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'")
         rows = await conn.fetch("SELECT discord_id, player_name, igns FROM players")
     m = {}
     for r in rows:
@@ -588,17 +600,15 @@ async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, m
     _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM leaderboard_data WHERE board_name=$1 AND discord_id=$2",
-            board_name, str(discord_id)
-        )
-        if existing:
-            await conn.execute("""
-                UPDATE leaderboard_data
-                SET player_name=$1, score=$2, message_link=$3, weapon=$4
-                WHERE board_name=$5 AND discord_id=$6
-            """, player_name, score, message_link, weapon, board_name, str(discord_id))
-        else:
+        # UPDATE-first, INSERT on zero rows — same semantics as the old
+        # SELECT-then-write (updates every matching row) in one round-trip,
+        # with no window between the existence check and the write.
+        res = await conn.execute("""
+            UPDATE leaderboard_data
+            SET player_name=$1, score=$2, message_link=$3, weapon=$4
+            WHERE board_name=$5 AND discord_id=$6
+        """, player_name, score, message_link, weapon, board_name, str(discord_id))
+        if res.split()[-1] == '0':
             await conn.execute("""
                 INSERT INTO leaderboard_data (board_name, player_name, discord_id, score, message_link, weapon)
                 VALUES ($1,$2,$3,$4,$5,$6)
@@ -617,9 +627,6 @@ async def delete_leaderboard_entry(entry_id: int):
 async def get_all_bounties() -> list[list]:
     pool = _pool_check()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS bonus_completions TEXT DEFAULT '[]'"
-        )
         rows = await conn.fetch("SELECT * FROM bounties ORDER BY id")
     return [
         [r['title'], r['channel_id'] or '', r['message_id'] or '', r['theme_emoji'] or '',
@@ -679,16 +686,12 @@ async def get_all_bounty_progress(bounty_title: str) -> list:
 async def upsert_bounty_player(bounty_title, discord_id, player_name, forum_post_id, progress):
     pool = _pool_check()
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM bounty_players WHERE bounty_title=$1 AND discord_id=$2",
-            bounty_title, str(discord_id)
-        )
-        if existing:
-            await conn.execute("""
-                UPDATE bounty_players SET player_name=$1, forum_post_id=$2, progress=$3
-                WHERE bounty_title=$4 AND discord_id=$5
-            """, player_name, forum_post_id, progress, bounty_title, str(discord_id))
-        else:
+        # UPDATE-first, INSERT on zero rows — one round-trip in the common case.
+        res = await conn.execute("""
+            UPDATE bounty_players SET player_name=$1, forum_post_id=$2, progress=$3
+            WHERE bounty_title=$4 AND discord_id=$5
+        """, player_name, forum_post_id, progress, bounty_title, str(discord_id))
+        if res.split()[-1] == '0':
             await conn.execute("""
                 INSERT INTO bounty_players (bounty_title, discord_id, player_name, forum_post_id, progress)
                 VALUES ($1,$2,$3,$4,$5)
@@ -1086,12 +1089,6 @@ async def add_hundred_handed(discord_id: str, player_name: str, subclass: str, w
     """Insert a subclass+weapon completion. Returns True if it was new."""
     pool = _pool_check()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS hundred_handed ("
-            "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
-            "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
-            "UNIQUE(discord_id, subclass, weapon))"
-        )
         existing = await conn.fetchval(
             "SELECT COUNT(*) FROM hundred_handed WHERE discord_id=$1 AND subclass=$2 AND weapon=$3",
             str(discord_id), subclass, weapon
@@ -1120,12 +1117,6 @@ async def get_all_hundred_handed() -> list:
     """Return all (discord_id, player_name, subclass, weapon) rows across every player."""
     pool = _pool_check()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS hundred_handed ("
-            "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
-            "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
-            "UNIQUE(discord_id, subclass, weapon))"
-        )
         rows = await conn.fetch("SELECT discord_id, player_name, subclass, weapon FROM hundred_handed")
     return [(r['discord_id'], r['player_name'], r['subclass'], r['weapon']) for r in rows]
 
@@ -1296,16 +1287,15 @@ async def kofi_init():
 async def add_kofi_donation(transaction_id: str, donor_name: str, amount: float, currency: str) -> bool:
     pool = _pool_check()
     async with pool.acquire() as conn:
-        existing = await conn.fetchval(
-            "SELECT id FROM kofi_donations WHERE kofi_transaction_id=$1", transaction_id
-        )
-        if existing:
-            return False
-        await conn.execute(
-            "INSERT INTO kofi_donations (kofi_transaction_id, donor_name, amount, currency) VALUES ($1,$2,$3,$4)",
+        # The UNIQUE constraint on kofi_transaction_id does the dedup atomically —
+        # the old SELECT-then-INSERT could double-record a webhook retry that
+        # landed between the two statements.
+        row_id = await conn.fetchval(
+            "INSERT INTO kofi_donations (kofi_transaction_id, donor_name, amount, currency) "
+            "VALUES ($1,$2,$3,$4) ON CONFLICT (kofi_transaction_id) DO NOTHING RETURNING id",
             transaction_id, donor_name, amount, currency
         )
-        return True
+        return row_id is not None
 
 
 async def get_kofi_total() -> float:

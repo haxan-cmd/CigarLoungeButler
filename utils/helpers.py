@@ -469,6 +469,33 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
 # Using a dict so both modules mutate the same object after import.
 submission_state = {'last_submission_time': None, 'dry_spell_posted': False}
 
+# ── Graceful-shutdown shared state ───────────────────────────────────────────
+# Lives here (not in bot.py) because bot.py runs as __main__ — a cog doing
+# `import bot` would execute the file a second time and get its OWN copy of
+# these counters, so the signal handler and the cogs would never see each
+# other's state. Everything already imports utils.helpers, so it's the one
+# safe shared home.
+_shutting_down = False
+_active_submissions = 0
+
+def set_shutting_down():
+    global _shutting_down
+    _shutting_down = True
+
+def is_shutting_down() -> bool:
+    return _shutting_down
+
+def submission_start():
+    global _active_submissions
+    _active_submissions += 1
+
+def submission_end():
+    global _active_submissions
+    _active_submissions = max(0, _active_submissions - 1)
+
+def active_submissions() -> int:
+    return _active_submissions
+
 # In-memory log for the hourly digest posted to nerve center.
 # Nothing persists across restarts - intentional, digest is ephemeral.
 _nerve_events = {

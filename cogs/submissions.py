@@ -27,6 +27,7 @@ from utils.helpers import (
     detect_weapon_milestones, build_milestone_message,
     nerve_log_submission, nerve_log_error, nerve_log_milestone,
     submission_state, butler_quip, vision_parse_scorecard,
+    submission_start, submission_end,
 )
 
 def _ordinal(n):
@@ -175,6 +176,10 @@ class SubmitView(discord.ui.View):
             await interaction.response.send_message("Already processing your submission — please wait.", ephemeral=True)
             return
         _active_vision.add(msg_id)
+        # Count this as an in-flight submission so a SIGTERM redeploy drains it
+        # instead of killing the process mid-flow (paired with submission_end()
+        # on both the no-image early exit and the vision path's finally).
+        submission_start()
 
         # Check for image before deferring — no image = instant response, no loading state
         def _has_image(msg):
@@ -190,7 +195,7 @@ class SubmitView(discord.ui.View):
         if not has_image:
             # No image — skip vision entirely, go straight to class select instantly
             _active_vision.discard(msg_id)
-            _bot_module.submission_end()
+            submission_end()
             caption = self.original_message.content.strip()
             detected_weapon, detected_subclass = parse_submission_text(caption) if caption else (None, None)
             if detected_weapon or detected_subclass:
@@ -369,7 +374,7 @@ class SubmitView(discord.ui.View):
             except Exception:
                 pass
             _active_vision.discard(msg_id)
-            _bot_module.submission_end()
+            submission_end()
 
     @discord.ui.button(label='Dismiss', style=discord.ButtonStyle.grey, emoji='✖️')
     async def dismiss_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1252,6 +1257,7 @@ class EditSubmissionView(discord.ui.View):
         )
 
 
+
 class EditFieldSelectView(discord.ui.View):
     def __init__(self, edit_view):
         super().__init__(timeout=300)
@@ -1334,12 +1340,10 @@ class EditFactionSelectView(discord.ui.View):
 class EditFactionSelect(discord.ui.Select):
     def __init__(self, edit_view):
         self.edit_view = edit_view
-        factions = MAP_FACTIONS.get(edit_view.map_name, {})
-        options = [discord.SelectOption(label=f) for f in factions.keys()] if factions else [
-            discord.SelectOption(label="Agatha"),
-            discord.SelectOption(label="Mason"),
-            discord.SelectOption(label="Tenosia"),
-        ]
+        # MAP_FACTIONS values are LISTS — the old .keys() call crashed this
+        # select for every valid map, so Edit → Faction never worked.
+        factions = MAP_FACTIONS.get(edit_view.map_name) or ["Agatha", "Mason", "Tenosia"]
+        options = [discord.SelectOption(label=f) for f in factions]
         super().__init__(placeholder="Choose faction...", options=options)
     async def callback(self, interaction: discord.Interaction):
         ev = self.edit_view
@@ -1643,7 +1647,7 @@ async def finalise_submission(interaction, original_message, prompt_msg, selecte
 
 
 
-async def check_submission_anomaly(guild, player_name, message_link, selected_weapon, selected_map, takedowns, kills):
+async def check_submission_anomaly(guild, player_name, message_link, selected_weapon, selected_map, faction, takedowns, kills):
     """Flag suspicious submissions to the nerve centre if stats exceed 2x any server record."""
     try:
         notes_channel = guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) or await guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
@@ -1674,14 +1678,16 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
                 pct = int(((takedowns - current_best) / current_best) * 100)
                 flags.append(f"**Weapon ({selected_weapon}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
 
-        # Map leaderboard: same check
-        _mboard = await _db.get_leaderboard_by_board(selected_map)
-        map_scores = [int(r[3]) for r in _mboard if r[0] == selected_map and len(r) > 3 and r[3].strip().isdigit()]
+        # Map leaderboard: same check. Map boards are stored as "{map} - {faction}",
+        # so a bare map-name lookup always returned nothing and this check never fired.
+        _map_board = f"{selected_map} - {faction}"
+        _mboard = await _db.get_leaderboard_by_board(_map_board)
+        map_scores = [int(r[3]) for r in _mboard if len(r) > 3 and r[3].strip().isdigit()]
         if map_scores:
             current_best = max(map_scores)
             if takedowns > current_best * 1.8:
                 pct = int(((takedowns - current_best) / current_best) * 100)
-                flags.append(f"**Map ({selected_map}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
+                flags.append(f"**Map ({_map_board}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
 
         if flags:
             alert = (
@@ -2148,6 +2154,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             message_link,
             selected_weapon,
             selected_map,
+            faction,
             takedowns,
             kills
         )

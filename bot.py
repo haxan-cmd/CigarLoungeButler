@@ -9,21 +9,11 @@ from discord.ext import commands
 import config
 
 # ---------------------------------------------------------------------------
-# Graceful shutdown — shared state imported by cogs via `import bot`
+# Graceful shutdown — shared state lives in utils.helpers (importing bot.py
+# from a cog would re-execute this file under a second module name, giving the
+# cogs their own copy of the counters — so helpers is the one shared home).
 # ---------------------------------------------------------------------------
-_shutting_down = False
-_active_submissions = 0
-
-def is_shutting_down():
-    return _shutting_down
-
-def submission_start():
-    global _active_submissions
-    _active_submissions += 1
-
-def submission_end():
-    global _active_submissions
-    _active_submissions = max(0, _active_submissions - 1)
+from utils import helpers as _shared
 
 
 _web_app = web.Application()
@@ -64,6 +54,12 @@ COGS = [
 @bot.event
 async def on_ready():
     from datetime import datetime, timezone
+    # on_ready also fires on reconnects — only sync commands (rate-limited API)
+    # and stamp session_start on the FIRST ready of the process.
+    if getattr(bot, "_synced", False):
+        print("↻ Reconnected — skipping command re-sync.")
+        return
+    bot._synced = True
     bot.session_start = datetime.now(timezone.utc)
     print(f"✅ Session started at {bot.session_start.isoformat()}")
     try:
@@ -128,23 +124,26 @@ async def on_app_command_error(
 
 
 async def _graceful_shutdown():
-    global _shutting_down
-    _shutting_down = True
+    _shared.set_shutting_down()
     print("[SHUTDOWN] SIGTERM received — draining active submissions...")
     for _ in range(60):
-        if _active_submissions == 0:
+        if _shared.active_submissions() == 0:
             break
         await asyncio.sleep(0.5)
-    print(f"[SHUTDOWN] Drained ({_active_submissions} remaining). Closing bot.")
+    print(f"[SHUTDOWN] Drained ({_shared.active_submissions()} remaining). Closing bot.")
     await bot.close()
 
 
 async def main():
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(
-        signal.SIGTERM,
-        lambda: asyncio.ensure_future(_graceful_shutdown())
-    )
+    try:
+        loop.add_signal_handler(
+            signal.SIGTERM,
+            lambda: asyncio.ensure_future(_graceful_shutdown())
+        )
+    except NotImplementedError:
+        # Windows (local dev) has no loop signal handlers — Railway/Linux does.
+        print("⚠️  SIGTERM handler unavailable on this platform — skipping graceful drain.")
     await run_healthcheck()
     # Initialise Postgres pool if DATABASE_URL is configured
     if os.environ.get('DATABASE_URL'):

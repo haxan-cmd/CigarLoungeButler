@@ -853,22 +853,9 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
     except Exception:
         return []
 
-def format_weapon_marks(marks):
-    """Format mark count with emphasis based on rank tier, ×N prestige past Iridescent."""
-    # Check prestige level past Iridescent
-    if marks >= 150:
-        prestige = 0
-        for threshold in PRESTIGE_THRESHOLDS:
-            if marks >= threshold:
-                prestige += 1
-        prestige_str = f" ×**{prestige}**" if prestige > 0 else ""
-        return f"***{marks}***{prestige_str}"
-    elif marks >= 60:
-        return f"***{marks}***"  # bold italic for Crimson+
-    elif marks >= 12:
-        return f"**{marks}**"    # bold for Gold+
-    else:
-        return str(marks)        # plain for Bronze/Silver
+# format_weapon_marks: imported from utils.helpers (top of file). A local,
+# behaviourally-identical copy used to live here and shadow the import — one
+# source of truth now so the two can't drift.
 
 
 async def build_registry_messages(player_name, discord_id, cached_data=None, guild=None):
@@ -1221,47 +1208,10 @@ async def update_butlers_archive_row(discord_id, player_name, thread_id, total_m
 
 
 # ---------------------------------------------------------------------------
-# Milestone detection
+# Milestone detection lives in utils.helpers (detect_weapon_milestones /
+# build_milestone_message) — dead duplicates were removed from here; the
+# submission flow already used the helpers versions.
 # ---------------------------------------------------------------------------
-_MILESTONE_THRESHOLDS = {1, 60, 80, 150}
-
-def detect_weapon_milestones(old_flat, new_flat):
-    """Return list of (weapon, threshold, rank_name) for significant rank crossings.
-    old_flat / new_flat: dict of weapon_name -> int marks (plain weapon keys, not tuples).
-    """
-    milestones = []
-    for weapon in set(old_flat) | set(new_flat):
-        old = old_flat.get(weapon, 0)
-        new = new_flat.get(weapon, 0)
-        if new <= old:
-            continue
-        for threshold, rank_name in WEAPON_RANK_THRESHOLDS:
-            if threshold in _MILESTONE_THRESHOLDS and old < threshold <= new:
-                milestones.append((weapon, threshold, rank_name))
-        # Iridescent ×N — each prestige tier past 150
-        if old >= 150:
-            old_x = sum(1 for t in PRESTIGE_THRESHOLDS if old >= t)
-            new_x = sum(1 for t in PRESTIGE_THRESHOLDS if new >= t)
-            if new_x > old_x:
-                milestones.append((weapon, new, f"Iridescent ×{new_x}"))
-    return milestones
-
-
-def build_milestone_message(player_name, weapon, threshold, rank_name):
-    """Return a Butler-voiced announcement string for this milestone, or None."""
-    if rank_name.startswith("Iridescent ×"):
-        n = int(rank_name.split("×")[1].strip())
-        mark_count = PRESTIGE_THRESHOLDS[n - 1] if n <= len(PRESTIGE_THRESHOLDS) else PRESTIGE_THRESHOLDS[-1]
-        return f"**{player_name}** — **{weapon}** ×{n}. {mark_count} marks. The bald woman would be proud."
-    messages = {
-        1:   f"*Noted.* **{player_name}** has drawn first blood with the **{weapon}**.",
-        60:  f"**{player_name}** has reached Crimson rank on the **{weapon}**. 60 marks. I approve. Quietly.",
-        80:  f"**{player_name}** has entered Prestige with the **{weapon}**. 80 marks. I'll say nothing. That is the compliment.",
-        150: f"**{player_name}** has gone Iridescent on the **{weapon}**. 150 marks. I'm pouring a drink.",
-    }
-    return messages.get(threshold)
-
-
 
 
 async def update_archive_index(guild):
