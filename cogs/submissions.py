@@ -1203,7 +1203,8 @@ class TripleCheckView(discord.ui.View):
 
 class EditSubmissionView(discord.ui.View):
     def __init__(self, original_message, author, submission_row,
-                 weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link):
+                 weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link,
+                 second_place_td=None, score=None):
         super().__init__(timeout=300)
         self.original_message = original_message
         self.author = author
@@ -1218,6 +1219,8 @@ class EditSubmissionView(discord.ui.View):
         self.vip = vip
         self.feats = feats
         self.message_link = message_link
+        self.second_place_td = second_place_td
+        self.score = score
 
     async def on_timeout(self):
         try:
@@ -1415,6 +1418,7 @@ async def _apply_edit(interaction, ev):
     # drop the old weapon's board row + mark, not just add the new one).
     _old_weapon = None
     _old_map_board = None
+    _edit_placements = []
     try:
         for _r in await _db.get_all_submissions():
             if len(_r) > 12 and (_r[12] or '').strip() == ev.message_link:
@@ -1459,10 +1463,11 @@ async def _apply_edit(interaction, ev):
                     except Exception as _e_clr:
                         print(f"[EDIT] old-board clear error ({_ob}): {_e_clr}")
             try:
-                await update_leaderboards(
+                _edit_any, _edit_placements = await update_leaderboards(
                     interaction, ev.weapon, ev.map_name, ev.faction,
                     ev.takedowns, ev.kills, ev.deaths, ev.vip, (ev.feats or []),
                     ev.author.display_name, ev.message_link,
+                    second_place_td=ev.second_place_td, score=ev.score,
                 )
             except Exception as _e_upd:
                 print(f"[EDIT] update_leaderboards error: {_e_upd}")
@@ -1493,16 +1498,69 @@ async def _apply_edit(interaction, ev):
         f"[{ev.author.display_name}](https://discord.com/channels/{_edit_guild_id}/{_edit_thread_id})"
         if _edit_thread_id else ev.author.display_name
     )
+    _feats = ev.feats if isinstance(ev.feats, list) else ([f.strip() for f in str(ev.feats).split(',')] if ev.feats and str(ev.feats) != 'None' else [])
+    # --- Full blurb rebuild: identical to a fresh submission (fields + marks + TUFF + trailer). ---
+    _FEAT_EMOJI = {
+        "100 Kills": "<a:100kill:1361412390339608686>", "200 Takedowns": "<a:200tkd:1363648828414230538>",
+        "Triple": "<a:triple:1365532698260668466>", "TUFF": "<a:TUFF2:1520779243879927898>",
+        "Flawless": "<a:flawless:1360358300834599062>", "Mallet": "🔨", "Knife": "🗡️",
+    }
+    _lb_tmap = {}
+    try:
+        from cogs.leaderboards import _get_lb_records as _lb_gr
+        _lb_tmap = {r['Leaderboard Name']: r['Thread ID'] for r in await _lb_gr() if r.get('Thread ID')}
+    except Exception:
+        pass
+    _gid = ev.original_message.guild.id
+    _placed = {lb for lb, _ in _edit_placements}
+    def _blink(board, text):
+        _tid = _lb_tmap.get(board)
+        return f"[{text}](https://discord.com/channels/{_gid}/{_tid})" if _tid else text
+    def _rlink(board, pos):
+        _tid = _lb_tmap.get(board)
+        return f"[#{pos}](https://discord.com/channels/{_gid}/{_tid})" if _tid else f"#{pos}"
+    _wpn_disp = _blink(ev.weapon, ev.weapon) if ev.weapon in _placed else ev.weapon
+    _mapboard = f"{ev.map_name} - {ev.faction}"
+    _mapfac = _blink(_mapboard, f"{ev.map_name} / {ev.faction}") if _mapboard in _placed else f"{ev.map_name} / {ev.faction}"
     new_summary = (
         f"**Run Submitted** *(edited)*\n"
-        f"{_edit_name}\n"
-        f"{ev.weapon} • {ev.cls}\n"
-        f"{ev.map_name} / {ev.faction}\n"
-        f"{ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
-        f"VIP: {'Yes' if ev.vip else 'No'}"
+        f"│ {_edit_name}\n"
+        f"│ {_wpn_disp} • {ev.cls}\n"
+        f"│ {_mapfac}\n"
+        f"│ {ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
+        f"│ VIP: {'Yes' if ev.vip else 'No'}"
     )
-    if ev.feats:
-        new_summary += f"\n{', '.join(ev.feats)}"
+    _is_pac = (ev.kills == 0 and ev.takedowns <= 10)
+    _me = 0 if _is_pac else 1
+    _ml = [] if _is_pac else ["<:cigar:1444893851427803298> *+1 Submission*"]
+    if '200 Takedowns' in _feats:
+        _me += 1
+        _tp = next((p for lb, p in _edit_placements if lb == "200 Takedowns"), None)
+        _ml.append(f"*<a:200tkd:1363648828414230538> +1{(' — ' + _rlink('200 Takedowns', _tp)) if _tp else ''}*")
+    if '100 Kills' in _feats:
+        _me += 1
+        _kp = next((p for lb, p in _edit_placements if lb == "100 Kills"), None)
+        _ml.append(f"*<a:100kill:1361412390339608686> +1{(' — ' + _rlink('100 Kills', _kp)) if _kp else ''}*")
+    if 'Triple' in _feats: _me += 1; _ml.append("*<a:triple:1365532698260668466> +1 Triple*")
+    if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
+    if _is_pac:
+        new_summary += f"\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
+    else:
+        new_summary += f"\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
+    if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
+        new_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{ev.kills - ev.second_place_td}"
+    def _pline(lb, pos):
+        _nm = _blink(lb, lb)
+        if ' - ' in lb:
+            return f"🏆 {_nm} — #{pos}"
+        if lb == "TUFF":
+            return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
+        if lb in _FEAT_EMOJI:
+            return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
+        return f"<:weapon_hs:1350656128635375698> {_nm} — #{pos}"
+    _shown = [(lb, pos) for lb, pos in _edit_placements if lb not in _FEAT_EMOJI]
+    if _shown:
+        new_summary += "\n" + "\n".join(_pline(lb, pos) for lb, pos in _shown)
 
     try:
         # Keep the SAME edit view attached so the Edit button stays live — users can
@@ -2090,7 +2148,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     edit_view = EditSubmissionView(
         original_message, interaction.user,
         submission_row, selected_weapon, selected_class,
-        selected_map, faction, takedowns, kills, deaths, vip, feats, message_link
+        selected_map, faction, takedowns, kills, deaths, vip, feats, message_link,
+        _second_place_td, _score
     )
     summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
     edit_view._message = summary_reply
