@@ -12,6 +12,9 @@ A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.c
 ![Gemini](https://img.shields.io/badge/AI-Gemini_Flash-4285F4?logo=google&logoColor=white)
 
 > 📐 System design & data-flow diagrams: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+> 🧭 Codebase map & conventions (start here if you're new): **[CLAUDE.md](CLAUDE.md)**
+> 🔧 Symptom → fix cheat sheet: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
+> 🛡️ Mod command reference: **[ADMIN_COMMANDS.md](ADMIN_COMMANDS.md)**
 
 ---
 
@@ -103,7 +106,7 @@ A master index channel linking to every forum section in sidebar order: challeng
 Hourly summary posted to a private channel covering submissions, milestones, Butler interactions, and keyword mentions. Cross-container dedup prevents double-posts on rolling deploys. Silent when there is nothing to report.
 
 ### ⚠️ Anomaly Detection
-Flags suspicious runs to a private notes channel when stats exceed 2x the server record or a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries.
+Flags suspicious runs to a private notes channel when stats exceed 2x the server record or a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries; `/unlist_submission` toggles a legit-but-unfair run (lopsided lobby, farm game) off all boards and records while keeping its marks and bounty progress.
 
 ### 🃏 Butler Personality
 Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, and Hundred Handed progress using live database context. Powered by Claude Haiku.
@@ -124,6 +127,36 @@ Dry, sardonic responses to pings and unprompted one-liners in the main channel e
 
 ---
 
+## Running It / Development
+
+```bash
+git clone <this repo>
+cd CigarLoungeButler
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python bot.py
+```
+
+Environment variables (via `.env` locally, Railway variables in production):
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DISCORD_TOKEN` | ✅ | Bot token |
+| `DATABASE_URL` | for real use | Postgres connection string — the bot boots without it, but nearly everything needs it. Apply `schema.sql` once; later migrations run automatically at startup. |
+| `ANTHROPIC_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
+| `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
+| `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
+| `PORT` | optional | Healthcheck server port (default 8080) |
+
+All server-specific IDs (guild, channels, roles, emojis) live in `config.py` — a
+fork pointed at a different server needs those replaced. Tests are pure-logic
+and need no Discord or DB: `pytest -q`.
+
+Before writing code, read **[CLAUDE.md](CLAUDE.md)** — it documents the row
+shapes, the hot-path query rules, and the gotchas that have already been paid for.
+
+---
+
 ## Architecture Notes
 
 - **Submission queue** serialises concurrent submissions per guild to prevent race conditions
@@ -136,4 +169,4 @@ Dry, sardonic responses to pings and unprompted one-liners in the main channel e
 
 ---
 
-*Private repository. Not open for contributions.*
+*Private repository. Contributions by invitation — if that's you, start with [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).*

@@ -106,3 +106,25 @@ flowchart LR
 ## Pure logic and tests
 
 Rank / title / Hundred-Handed math lives in `utils/ranks.py` (no Discord or DB dependencies) so it can be imported and unit-tested in isolation. `tests/test_ranks.py` locks the tier boundaries, the Apex/Ascended/Legend caps, mastery vs virtuoso thresholds, and `HH_TOTAL == 46`. Run the suite with `pytest -q`.
+
+## Module ownership
+
+One sentence per file — the full map with row shapes and conventions is in [CLAUDE.md](../CLAUDE.md).
+
+- `bot.py` — startup, the aiohttp server (healthcheck `/` + Ko-fi `/kofi`), command sync, graceful shutdown. Runs as `__main__`.
+- `config.py` — every constant and ID; imports nothing from the project.
+- `utils/db.py` — the only Postgres surface: pool, 5-second TTL read cache, targeted queries, and ALL schema/index DDL (startup-only).
+- `utils/helpers.py` — AI clients, the Gemini scorecard parser, nerve-centre alerting, and cross-module shared state (shutdown drain counter).
+- `cogs/submissions.py` — the per-run pipeline and edit flow; owns `_BOARD_LOCK`, which serialises every board read-modify-write.
+- `cogs/leaderboards.py` — board rendering and mutation, indexes, ledger entrance, monthly/all-time boards.
+- `cogs/registry.py` — registry cards and mark math; owns the registry-card lock.
+- `cogs/bounty.py`, `cogs/favourites.py`, `cogs/personality.py`, `cogs/admin.py`, `cogs/kofi.py` — bounty cycle, season board + title roles, Butler AI + task loops, mod tooling, donations.
+
+## Structural rules (violating these has caused real outages)
+
+1. **Never `import bot` from a cog.** bot.py runs as `__main__`; importing it re-executes the file as a second module with its own globals (this silently killed the Ko-fi webhook for months). Shared state belongs in `utils/helpers.py`.
+2. **Web routes are registered in bot.py before the server starts.** aiohttp freezes the router at startup, and cogs load after that — a cog can expose a handler, but bot.py must own the route.
+3. **DDL runs once at startup** (`_ensure_schema` / `_ensure_indexes` in db.py) — never inside per-call query functions.
+4. **DB timestamps are naive UTC** (`TIMESTAMP` columns; asyncpg rejects tz-aware values).
+5. **The `feats` column doubles as a tag bag**: `Resubmit` (excluded from weekly stats/bounty/ratings) and `Unlisted` (excluded from every board, record, rebuild, and rating — marks and bounty still count). Any new "exclude this run from X" behaviour should be a tag here, checked in the same four places those two are.
+6. **The healthcheck is load-bearing**: `GET /` returns 503 once the gateway is dead (after first ready), which is what lets Railway auto-restart a zombied process. Don't make it unconditionally return 200.
