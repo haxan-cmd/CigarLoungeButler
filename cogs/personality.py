@@ -1579,10 +1579,16 @@ class PersonalityCog(commands.Cog):
                 for att in message.attachments
             )
             if has_image and not bounty['completions_msg_id'] and not bounty['bonus_msg_id']:
+                # NOTE two past bugs here: the {{...}} double braces rendered the
+                # literal text "{bounty['theme_emoji']}" in the placeholders, and the
+                # msg ids were saved as ints into TEXT columns — asyncpg rejected the
+                # write, so the ids never persisted and every image post in the bounty
+                # channel spawned three MORE placeholder boards nothing could edit.
+                _emoji = bounty['theme_emoji']
                 completions_placeholder = (
                     f"```\n"
                     f"╭──────────────────────────────╮\n"
-                    f"  {{bounty['theme_emoji']}} COMPLETIONS {{bounty['theme_emoji']}}\n"
+                    f"  {_emoji} COMPLETIONS {_emoji}\n"
                     f"╰──────────────────────────────╯\n"
                     f"No completions yet.\n"
                     f"```"
@@ -1590,7 +1596,7 @@ class PersonalityCog(commands.Cog):
                 bonus_placeholder = (
                     f"```\n"
                     f"╭──────────────────────────────╮\n"
-                    f"  {{bounty['theme_emoji']}} BONUS COMPLETIONS {{bounty['theme_emoji']}}\n"
+                    f"  {_emoji} BONUS COMPLETIONS {_emoji}\n"
                     f"╰──────────────────────────────╯\n"
                     f"No bonus completions yet.\n"
                     f"```"
@@ -1601,15 +1607,15 @@ class PersonalityCog(commands.Cog):
                     progress_placeholder = (
                         f"```\n"
                         f"╭──────────────────────────────╮\n"
-                        f"  {{bounty['theme_emoji']}} TOP HUNTERS {{bounty['theme_emoji']}}\n"
+                        f"  {_emoji} TOP HUNTERS {_emoji}\n"
                         f"╰──────────────────────────────╯\n"
                         f"No submissions yet.\n"
                         f"```"
                     )
                     progress_msg = await message.channel.send(progress_placeholder)
-                    await _db.update_bounty_field(bounty['id'], 'completions_msg_id', comp_msg.id)
-                    await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', bonus_msg.id)
-                    await _db.update_bounty_field(bounty['id'], 'progress_msg_id', progress_msg.id)
+                    await _db.update_bounty_field(bounty['id'], 'completions_msg_id', str(comp_msg.id))
+                    await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', str(bonus_msg.id))
+                    await _db.update_bounty_field(bounty['id'], 'progress_msg_id', str(progress_msg.id))
                 except Exception as e:
                     print(f"Bounty placeholder post error: {e}")
             return

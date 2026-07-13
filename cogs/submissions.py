@@ -16,7 +16,7 @@ import utils.db as _db
 # ── Submission queue / lock (was in utils.sheets, now local) ──────────────────
 _submission_queues: dict  = {}
 _submission_workers: dict = {}
-_registry_lock            = asyncio.Lock()
+# (the registry-card lock lives in cogs/registry.py — a dead duplicate here was removed)
 
 def get_submission_queue(guild_id):
     if guild_id not in _submission_queues:
