@@ -648,6 +648,125 @@ class AdminCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"❌ Error during removal: {e}", ephemeral=True)
 
+    @app_commands.command(name="unlist_submission", description="Toggle a run off/on all boards & records — still counts for marks and bounty (mod only).")
+    @app_commands.describe(message_link="Discord message link to the original scorecard post")
+    async def unlist_submission(self, interaction: discord.Interaction, message_link: str):
+        """Adds/removes an 'Unlisted' tag on the submission's feats. Unlisted runs are
+        excluded from board placement, rebuilds, feat-board backfills, and weekly/monthly
+        ratings — but keep their marks and bounty progress (those paths ignore the tag).
+        For runs that were technically real but outside the spirit of the challenge
+        (lopsided lobbies, farm games, etc.)."""
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        link = message_link.strip()
+
+        sub = None
+        for row in await _db.get_all_submissions():
+            if len(row) >= 13 and (row[12] or '').strip() == link:
+                sub = row
+                break
+        if not sub:
+            await interaction.followup.send("❌ No submission found with that message link.", ephemeral=True)
+            return
+
+        player_name = (sub[1] or '').strip()
+        discord_id  = (sub[2] or '').strip()
+        weapon      = (sub[3] or '').strip()
+        map_name    = (sub[5] or '').strip()
+        faction     = (sub[6] or '').strip()
+        vip         = (sub[10] or '').strip().lower() == 'yes'
+        feats_str   = (sub[11] or '').strip()
+        feats = [f.strip() for f in feats_str.split(',') if f.strip() and f.strip() != 'None']
+        currently_unlisted = 'Unlisted' in feats
+
+        def _i(v):
+            try:
+                return int(str(v).replace(',', '').strip())
+            except (ValueError, TypeError):
+                return 0
+        takedowns = _i(sub[7])
+        kills     = _i(sub[8])
+        second_td = _i(sub[22]) if len(sub) > 22 and sub[22] else 0
+        p_score   = _i(sub[24]) if len(sub) > 24 and sub[24] else 0
+        is_pac    = (kills == 0 and takedowns <= 10)
+        map_board = f"{map_name} - {faction}" if map_name and faction else None
+
+        from cogs.leaderboards import rebuild_score_boards, _get_lb_records, _render_board, _prune_pacifist_board
+        from cogs.submissions import _BOARD_LOCK
+
+        async def _render(boards):
+            recs = await _get_lb_records()
+            for b in boards:
+                rec = next((r for r in recs if r['Leaderboard Name'] == b), None)
+                if rec:
+                    try:
+                        await _render_board(interaction.guild, rec, b)
+                    except Exception as e:
+                        print(f"[UNLIST] render error ({b}): {e}")
+
+        if not currently_unlisted:
+            # ── Unlist: tag it, strip its board rows, rebuild so next-best runs reclaim slots
+            feats.append('Unlisted')
+            await _db.update_submission_feats_by_link(link, ', '.join(feats))
+            async with _BOARD_LOCK:
+                affected = set(await _db.delete_leaderboard_entries_by_link(link))
+                score_boards = set()
+                for b in ((None if vip else weapon), map_board):
+                    if b:
+                        await _db.delete_leaderboard_entries_by_board_and_discord(b, discord_id)
+                        score_boards.add(b)
+                affected |= score_boards
+                if score_boards:
+                    await rebuild_score_boards(
+                        interaction.guild, board_names=list(score_boards), only_player=discord_id)
+            # rebuild renders weapon/map itself; re-render any feat boards that lost a row
+            await _render(affected - score_boards)
+            await interaction.followup.send(
+                f"✅ **Unlisted** — {player_name}'s run ({weapon}, {takedowns} TD / {kills} K) is off "
+                f"the boards and records. Cleared: {', '.join(sorted(affected)) or 'none'}.\n"
+                f"Marks and bounty progress still count. Run the command again to re-list it.",
+                ephemeral=True)
+        else:
+            # ── Re-list: remove the tag, restore feat-board rows from stored stats,
+            # rebuild weapon/map so the run competes again.
+            feats = [f for f in feats if f != 'Unlisted']
+            await _db.update_submission_feats_by_link(link, ', '.join(feats) if feats else 'None')
+            async with _BOARD_LOCK:
+                readd = []
+                if is_pac:
+                    if p_score > 0:
+                        readd.append(("Pacifist", p_score))
+                else:
+                    if kills >= 100:
+                        readd.append(("100 Kills", kills))
+                    if takedowns >= 200:
+                        readd.append(("200 Takedowns", takedowns))
+                    if 'Triple' in feats:
+                        readd.append(("Triple", takedowns))
+                    if second_td and kills > second_td:
+                        readd.append(("TUFF", kills - second_td))
+                existing = {(r[0], (r[4] or '').strip())
+                            for r in await _db.get_all_leaderboard_data() if len(r) > 4}
+                for b, sc in readd:
+                    if (b, link) not in existing:
+                        await _db.add_leaderboard_entry(b, player_name, discord_id, sc, link, weapon)
+                if is_pac:
+                    await _prune_pacifist_board()
+                score_boards = {b for b in ((None if vip else weapon), map_board) if b}
+                if score_boards:
+                    await rebuild_score_boards(
+                        interaction.guild, board_names=list(score_boards), only_player=discord_id)
+            await _render({b for b, _ in readd})
+            _restored = sorted({b for b, _ in readd} | score_boards)
+            await interaction.followup.send(
+                f"✅ **Re-listed** — {player_name}'s run is back in contention "
+                f"({', '.join(_restored) or 'no qualifying boards'}).\n"
+                f"Note: personal-best feat boards (Flawless / Mallet / Knife / Healing Horn) "
+                f"aren't auto-restored — they'll re-place on the player's next qualifying run.",
+                ephemeral=True)
+
     @app_commands.command(name="rules", description="Show the Cigar Lounge challenge rules.")
     async def rules_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

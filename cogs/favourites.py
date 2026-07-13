@@ -41,9 +41,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             try:
                 ts = datetime.strptime(row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
                 if week_start <= ts < week_end:
-                    # Skip resubmissions — old runs, not new weekly activity
+                    # Skip resubmissions (old runs, not new weekly activity) and
+                    # unlisted runs (mod-excluded from boards/records by /unlist_submission)
                     feats_col = row[11].strip() if len(row) > 11 else ""
-                    if "Resubmit" in feats_col:
+                    if "Resubmit" in feats_col or "Unlisted" in feats_col:
                         continue
                     filtered.append(row)
             except Exception:

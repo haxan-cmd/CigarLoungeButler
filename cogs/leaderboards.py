@@ -642,6 +642,11 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     any_updated = False  # True only when player beats their own score on a weapon/feat board (not map boards)
     placements = []
 
+    # Unlisted runs (mod toggle: /unlist_submission) never place on any board —
+    # they still count for marks and bounty progress, which don't run through here.
+    if any('Unlisted' in str(f) for f in (feats or [])):
+        return False, []
+
     updates = []
 
     # A pacifist run = no kills and at most a handful of takedowns (objective / support
@@ -970,6 +975,8 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
         for s in all_subs:
             if len(s) < 13:
                 continue
+            if len(s) > 11 and s[11] and 'Unlisted' in str(s[11]):
+                continue  # unlisted runs stay off boards on rebuilds too
             did = s[2] or ''
             if only_player is not None and did != str(only_player):
                 continue
@@ -1221,7 +1228,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     # Monthly ratings only: drop resubmissions (feats contains "Resubmit") and,
     # when window_start (a UTC timestamp) is given, anything before that instant.
     def _rk(r):
-        if len(r) > 11 and r[11] and 'Resubmit' in str(r[11]):
+        if len(r) > 11 and r[11] and ('Resubmit' in str(r[11]) or 'Unlisted' in str(r[11])):
             return False
         if window_start is not None:
             try:
@@ -1800,7 +1807,7 @@ async def _current_window_start():
 def _boards_in_window(all_subs, window_start):
     weapons, maps = set(), {}
     for r in all_subs:
-        if len(r) > 11 and r[11] and 'Resubmit' in str(r[11]):
+        if len(r) > 11 and r[11] and ('Resubmit' in str(r[11]) or 'Unlisted' in str(r[11])):
             continue
         try:
             _t = datetime.strptime(str(r[0]).strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
@@ -3199,6 +3206,8 @@ class LeaderboardsCog(commands.Cog):
             if len(row) < 13:
                 continue
             feats_str  = row[11] or ""
+            if 'Unlisted' in feats_str:
+                continue  # unlisted runs stay off feat boards too
             link       = (row[12] or "").strip()
             player     = row[1] or ""
             discord_id = row[2] or ""
