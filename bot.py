@@ -31,8 +31,22 @@ async def run_healthcheck():
         except Exception:
             pass
         return web.Response(text="ok")
+
+    async def kofi_webhook(request):
+        # Registered HERE, not in the kofi cog: aiohttp freezes the router the
+        # moment the site starts (which happens before cogs load), so the cog
+        # can't add routes later. Dispatches to the cog at request time. The old
+        # in-cog registration also did `import bot`, which re-executed this file
+        # under a second module name and attached /kofi to a web app that was
+        # never served — Ko-fi's POSTs 404'd and donations were silently missed.
+        cog = bot.get_cog("KofiCog")
+        if cog is None:
+            return web.Response(status=503, text="kofi cog not loaded")
+        return await cog.handle_webhook(request)
+
     app = _web_app
     app.router.add_get("/", handle)
+    app.router.add_post("/kofi", kofi_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))

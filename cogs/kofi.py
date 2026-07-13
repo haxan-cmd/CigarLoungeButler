@@ -142,10 +142,9 @@ class KofiCog(commands.Cog, name="KofiCog"):
 async def setup(bot: commands.Bot):
     cog = KofiCog(bot)
     await bot.add_cog(cog)
-    # Register the webhook route on the existing aiohttp app
-    import bot as bot_module
-    if hasattr(bot_module, '_web_app'):
-        bot_module._web_app.router.add_post("/kofi", cog.handle_webhook)
-        log.info("[KOFI] Webhook route registered at /kofi")
-    else:
-        log.warning("[KOFI] No _web_app found — webhook route not registered")
+    # The /kofi route is registered by bot.py's healthcheck server and
+    # dispatches here at request time. (It can't be registered from this cog:
+    # aiohttp freezes the router when the site starts, before cogs load — and
+    # the old `import bot` trick re-executed bot.py under a second module name,
+    # attaching the route to a web app that was never served.)
+    log.info("[KOFI] Cog loaded — /kofi webhook dispatches via bot.py")
