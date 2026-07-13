@@ -1967,6 +1967,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
     else:
         marks_summary = f"\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+    # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
+    if kills is not None and _second_place_td is not None and kills > _second_place_td:
+        marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{kills - _second_place_td}"
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 
