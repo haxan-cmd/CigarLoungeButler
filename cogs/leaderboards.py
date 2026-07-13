@@ -3125,9 +3125,10 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="remove_board_score", description="Remove a player's entry from a board (mod only).")
     @app_commands.describe(board="Exact board name (e.g. Battle Axe)",
-                           player="Player name exactly as shown on the board (or an @mention)")
+                           player="Player name exactly as shown on the board (or an @mention)",
+                           message_link="Optional: link to the specific run — removes ONLY that entry (for boards where a player has several, e.g. TUFF)")
     @app_commands.autocomplete(board=_rank_name_ac)
-    async def remove_board_score_cmd(self, interaction: discord.Interaction, board: str, player: str):
+    async def remove_board_score_cmd(self, interaction: discord.Interaction, board: str, player: str, message_link: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -3135,27 +3136,40 @@ class LeaderboardsCog(commands.Cog):
         board = board.strip()
         player = player.strip()
 
-        # Match by the visible name; if they passed an @mention, also resolve it to
-        # the player's canonical name so either form works, and keep the raw "<@id>"
-        # string too (in case a bad add stored the mention as the name).
-        names = {player}
-        _m = _re.match(r'^<@!?(\d+)>$', player)
-        if _m:
-            mid = _m.group(1)
-            try:
-                for p in await _db.get_all_players():
-                    if p and (p[0] or '').strip() == mid and (p[1] or '').strip():
-                        names.add((p[1] or '').strip())
-                        break
-            except Exception:
-                pass
-
         removed = 0
-        for nm in names:
+        if message_link and message_link.strip():
+            # Surgical mode: remove only the entry tied to this exact run, leaving
+            # the player's other entries on the board intact (unlimited boards like
+            # TUFF / 100 Kills store one row per qualifying run).
+            link = message_link.strip()
             try:
-                removed += await _db.delete_leaderboard_entries_by_board_and_name(board, nm)
+                rows = await _db.get_leaderboard_by_board(board)
+                if any(len(r) > 4 and (r[4] or '').strip() == link for r in rows):
+                    await _db.delete_leaderboard_entry_by_link(board, link)
+                    removed = 1
             except Exception as e:
-                print(f"[REMOVE_BOARD] delete error for {nm}: {e}")
+                print(f"[REMOVE_BOARD] link delete error: {e}")
+        else:
+            # Match by the visible name; if they passed an @mention, also resolve it to
+            # the player's canonical name so either form works, and keep the raw "<@id>"
+            # string too (in case a bad add stored the mention as the name).
+            names = {player}
+            _m = _re.match(r'^<@!?(\d+)>$', player)
+            if _m:
+                mid = _m.group(1)
+                try:
+                    for p in await _db.get_all_players():
+                        if p and (p[0] or '').strip() == mid and (p[1] or '').strip():
+                            names.add((p[1] or '').strip())
+                            break
+                except Exception:
+                    pass
+
+            for nm in names:
+                try:
+                    removed += await _db.delete_leaderboard_entries_by_board_and_name(board, nm)
+                except Exception as e:
+                    print(f"[REMOVE_BOARD] delete error for {nm}: {e}")
 
         if removed:
             rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
