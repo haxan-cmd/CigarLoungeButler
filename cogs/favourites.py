@@ -318,42 +318,8 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     apex = best_score_title(kills_scores)
     frenzied = best_score_title(td_scores)
 
-    # Fastest Learner — most personal-best runs set THIS WEEK (a run beating the
-    # player's prior best kills or takedowns). Debut runs don't count. Rewards
-    # improvement, so newer players can compete for it, not just the veterans.
-    _pb_history = {}
-    for _row in all_subs:
-        if not _row or len(_row) < 9 or not _row[0].strip():
-            continue
-        try:
-            _ts = datetime.strptime(_row[0].strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
-            _k = int(_row[8]); _t = int(_row[7])
-        except (ValueError, IndexError):
-            continue
-        # Resubmits/unlisted still raise the baseline (they're real past games) but
-        # must never COUNT as a new PB — a resubmitted old run gets a fresh
-        # timestamp, so without this flag re-uploads farmed Fastest Learner.
-        _fc = (_row[11] or '') if len(_row) > 11 else ''
-        _countable = 'Resubmit' not in _fc and 'Unlisted' not in _fc
-        _pb_history.setdefault(_row[1].strip(), []).append((_ts, _k, _t, _countable))
-
-    pb_counts = {}
-    for _pname, _runs in _pb_history.items():
-        _runs.sort(key=lambda x: x[0])
-        _best_k = _best_t = None
-        _cnt = 0
-        for _ts, _k, _t, _countable in _runs:
-            if _best_k is None:
-                _best_k, _best_t = _k, _t
-                continue
-            _is_pb = _k > _best_k or _t > _best_t
-            if _k > _best_k: _best_k = _k
-            if _t > _best_t: _best_t = _t
-            if _is_pb and _countable and week_start is not None and week_start <= _ts < week_end:
-                _cnt += 1
-        if _cnt > 0:
-            pb_counts[_pname] = _cnt
-    top_fastest_learner = sorted(pb_counts.items(), key=lambda x: (-x[1], x[0]))[:3]
+    # Fastest Learner removed from the report — the full PB-history pass that
+    # computed it was dead work (nothing consumed 'top_fastest_learner').
 
     # Total Tally — most total takedowns accumulated this week (the grind race).
     _tally = {}
@@ -384,7 +350,6 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         '_combined_placements': combined,
         'apex': apex or "N/A",
         'frenzied': frenzied or "N/A",
-        'top_fastest_learner': top_fastest_learner,
         'top_total_tally': top_total_tally,
         'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
         'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
