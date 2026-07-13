@@ -116,7 +116,7 @@ Your response must be ONLY the JSON object below - no explanation, no preamble, 
 {"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null}"""
 
 
-def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
+def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None) -> dict:
     """
     Pass a Discord image URL to Gemini vision and extract scorecard fields.
     player_name: Discord display name of the submitting player - used as a hint to find their row.
@@ -255,7 +255,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
             def _match(got):
                 g = _n(got)
                 return bool(g) and any(_n(h) and (_n(h) == g or _n(h) in g or g in _n(h)) for h in _hints)
-            if not _match(data.get('name')):
+            # Only correct a GENUINE wrong-row: the read name matches a DIFFERENT registered
+            # player. A name matching nobody is just an unregistered in-game name on the
+            # (usually correct) gold self-highlighted row — leave it alone rather than risk
+            # a hallucinated corrective re-read.
+            _other_norm = {_n(o) for o in (other_names or []) if _n(o)}
+            _nr = _n(data.get('name'))
+            if (bool(_nr) and _nr in _other_norm) and not _match(data.get('name')):
                 _corr = (
                     f"\n\nCORRECTION REQUIRED: You returned the row named '{data.get('name')}', which is NOT the "
                     f"submitting player. The submitter's row is named one of: {player_name} (match case-insensitively, "

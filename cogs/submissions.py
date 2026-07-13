@@ -226,15 +226,24 @@ class SubmitView(discord.ui.View):
                     vision_name_hint = player_display_name
             except Exception:
                 vision_name_hint = player_display_name
+            # Roster of OTHER players' names — lets the vision safety net fire its corrective
+            # re-read ONLY on a genuine wrong-row (read name belongs to someone else), not on
+            # an unregistered in-game name.
+            try:
+                _n2id = await _db.get_name_to_id_map()
+                _uid = str(self.original_message.author.id)
+                vision_other_names = [nm for nm, _i in _n2id.items() if str(_i) != _uid]
+            except Exception:
+                vision_other_names = []
             for att in self.original_message.attachments:
                 if att.content_type and att.content_type.startswith('image/'):
-                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint)
+                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint, vision_other_names)
                     print(f"[VISION] Raw parsed result: {parsed}")
                     break
                 elif not att.content_type:
                     # content_type can be None — fall back to filename extension check
                     if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint)
+                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint, vision_other_names)
                         print(f"[VISION] Raw parsed result (ext check): {parsed}")
                         break
     
@@ -1768,6 +1777,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if selected_map and selected_map.lower() not in _vmap.lower() and _vmap_norm.lower() != selected_map.lower():
                 _corr.append(f"map {_vmap}\u2192{selected_map}")
         if _corr:
+            print(f"[VISION] correction: {interaction.user.display_name}: " + ", ".join(_corr))
             _ncc = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
                    or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
             if _ncc:
