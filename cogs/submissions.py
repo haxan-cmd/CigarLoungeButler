@@ -16,7 +16,7 @@ import utils.db as _db
 # ── Submission queue / lock (was in utils.sheets, now local) ──────────────────
 _submission_queues: dict  = {}
 _submission_workers: dict = {}
-# (the registry-card lock lives in cogs/registry.py — a dead duplicate here was removed)
+# registry-card lock lives in cogs/registry.py
 
 def get_submission_queue(guild_id):
     if guild_id not in _submission_queues:
@@ -112,7 +112,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
                          team_kill_share=None, team_td_share=None, second_place_td=None, score=None):
     from datetime import datetime as _dt, timezone as _tz
-    # Naive UTC — submitted_at is TIMESTAMP (without tz), asyncpg rejects aware values
+    # Naive UTC: submitted_at is TIMESTAMP (no tz), asyncpg rejects aware values
     now = _dt.now(_tz.utc).replace(tzinfo=None)
 
     # Deduplicate: skip if identical run logged in the last 5 minutes
@@ -177,9 +177,8 @@ class SubmitView(discord.ui.View):
             await interaction.response.send_message("Already processing your submission — please wait.", ephemeral=True)
             return
         _active_vision.add(msg_id)
-        # Count this as an in-flight submission so a SIGTERM redeploy drains it
-        # instead of killing the process mid-flow (paired with submission_end()
-        # on both the no-image early exit and the vision path's finally).
+        # In-flight counter for the SIGTERM drain. Every exit path below must
+        # hit submission_end() (no-image early return + the vision finally).
         submission_start()
 
         # Check for image before deferring — no image = instant response, no loading state
@@ -1341,8 +1340,7 @@ class EditFactionSelectView(discord.ui.View):
 class EditFactionSelect(discord.ui.Select):
     def __init__(self, edit_view):
         self.edit_view = edit_view
-        # MAP_FACTIONS values are LISTS — the old .keys() call crashed this
-        # select for every valid map, so Edit → Faction never worked.
+        # MAP_FACTIONS values are lists
         factions = MAP_FACTIONS.get(edit_view.map_name) or ["Agatha", "Mason", "Tenosia"]
         options = [discord.SelectOption(label=f) for f in factions]
         super().__init__(placeholder="Choose faction...", options=options)
@@ -1678,8 +1676,7 @@ async def check_submission_anomaly(guild, player_name, message_link, selected_we
                 pct = int(((takedowns - current_best) / current_best) * 100)
                 flags.append(f"**Weapon ({selected_weapon}):** {takedowns} TDs — current #1 is {current_best} (+{pct}%)")
 
-        # Map leaderboard: same check. Map boards are stored as "{map} - {faction}",
-        # so a bare map-name lookup always returned nothing and this check never fired.
+        # Map leaderboard: same check (map boards are named "{map} - {faction}")
         _map_board = f"{selected_map} - {faction}"
         _mboard = await _db.get_leaderboard_by_board(_map_board)
         map_scores = [int(r[3]) for r in _mboard if len(r) > 3 and r[3].strip().isdigit()]
@@ -2105,11 +2102,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if '200 Takedowns' in feats:
                 await _db.increment_manual_feat_count(discord_id_str, '200 takedowns')
 
-        # NOTE: the Hundred-Handed ROLE is granted only by the 46-combo check in
-        # _bg_tasks (subclass+weapon combos, matching the HH board). A legacy
-        # weaker grant used to live here — "every primary weapon regardless of
-        # subclass" — which fired first and made the real 46-combo journey moot
-        # (and cost a full-table scan per submission). Removed.
+        # Hundred-Handed role is granted only by the 46-combo check in _bg_tasks
+        # (subclass+weapon combos, same rule as the HH board).
     except Exception as e:
         is_new_player = False
         print(f"Sheet logging error: {e}")

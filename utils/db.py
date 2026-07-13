@@ -39,11 +39,8 @@ _INDEXES = [
 ]
 
 
-# All post-creation DDL lives here and runs ONCE at startup. Previously several
-# hot-path functions (get_player_igns, save_player_ign, get_name_to_id_map,
-# get_all_bounties, add_hundred_handed, ...) ran ALTER TABLE / CREATE TABLE on
-# EVERY call — each takes a brief ACCESS EXCLUSIVE lock, several times per
-# submission, for schema that already existed.
+# All post-creation DDL. Runs once at startup. Never put ALTER/CREATE inside
+# per-call query functions (each takes a brief ACCESS EXCLUSIVE lock).
 _SCHEMA_STATEMENTS = [
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS score BIGINT",
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS igns TEXT[] DEFAULT '{}'",
@@ -267,8 +264,7 @@ async def add_submission(
 
 
 async def get_submission_by_link(message_link: str):
-    """Targeted (weapon, map, faction) lookup by message_link — indexed, replaces
-    the full-table scan the edit flow used to do. Returns a tuple or None."""
+    """Indexed (weapon, map, faction) lookup by message_link. None if not found."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         r = await conn.fetchrow(
@@ -491,8 +487,7 @@ async def upsert_leaderboard(board_name, thread_id, message_ids, board_type):
     _cache_invalidate('leaderboards')
     pool = _pool_check()
     async with pool.acquire() as conn:
-        # UPDATE-first, INSERT on zero rows — one round-trip in the common case
-        # (row exists) instead of SELECT + write.
+        # UPDATE-first, INSERT on zero rows
         res = await conn.execute(
             "UPDATE leaderboards SET thread_id=$1, message_ids=$2, board_type=$3 WHERE board_name=$4",
             thread_id, message_ids, board_type, board_name
@@ -612,9 +607,7 @@ async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, m
     _cache_invalidate('leaderboard_data')
     pool = _pool_check()
     async with pool.acquire() as conn:
-        # UPDATE-first, INSERT on zero rows — same semantics as the old
-        # SELECT-then-write (updates every matching row) in one round-trip,
-        # with no window between the existence check and the write.
+        # UPDATE-first, INSERT on zero rows (updates every matching row)
         res = await conn.execute("""
             UPDATE leaderboard_data
             SET player_name=$1, score=$2, message_link=$3, weapon=$4
@@ -698,7 +691,7 @@ async def get_all_bounty_progress(bounty_title: str) -> list:
 async def upsert_bounty_player(bounty_title, discord_id, player_name, forum_post_id, progress):
     pool = _pool_check()
     async with pool.acquire() as conn:
-        # UPDATE-first, INSERT on zero rows — one round-trip in the common case.
+        # UPDATE-first, INSERT on zero rows
         res = await conn.execute("""
             UPDATE bounty_players SET player_name=$1, forum_post_id=$2, progress=$3
             WHERE bounty_title=$4 AND discord_id=$5
@@ -1299,9 +1292,7 @@ async def kofi_init():
 async def add_kofi_donation(transaction_id: str, donor_name: str, amount: float, currency: str) -> bool:
     pool = _pool_check()
     async with pool.acquire() as conn:
-        # The UNIQUE constraint on kofi_transaction_id does the dedup atomically —
-        # the old SELECT-then-INSERT could double-record a webhook retry that
-        # landed between the two statements.
+        # UNIQUE(kofi_transaction_id) dedups webhook retries atomically
         row_id = await conn.fetchval(
             "INSERT INTO kofi_donations (kofi_transaction_id, donor_name, amount, currency) "
             "VALUES ($1,$2,$3,$4) ON CONFLICT (kofi_transaction_id) DO NOTHING RETURNING id",

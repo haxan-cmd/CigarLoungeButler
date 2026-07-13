@@ -1579,11 +1579,8 @@ class PersonalityCog(commands.Cog):
                 for att in message.attachments
             )
             if has_image and not bounty['completions_msg_id'] and not bounty['bonus_msg_id']:
-                # NOTE two past bugs here: the {{...}} double braces rendered the
-                # literal text "{bounty['theme_emoji']}" in the placeholders, and the
-                # msg ids were saved as ints into TEXT columns — asyncpg rejected the
-                # write, so the ids never persisted and every image post in the bounty
-                # channel spawned three MORE placeholder boards nothing could edit.
+                # msg ids must be saved as str (TEXT columns) or the write fails
+                # and these placeholders re-post on every image (2026-07-13)
                 _emoji = bounty['theme_emoji']
                 completions_placeholder = (
                     f"```\n"

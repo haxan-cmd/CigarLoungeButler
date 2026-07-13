@@ -642,8 +642,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     any_updated = False  # True only when player beats their own score on a weapon/feat board (not map boards)
     placements = []
 
-    # Unlisted runs (mod toggle: /unlist_submission) never place on any board —
-    # they still count for marks and bounty progress, which don't run through here.
+    # Unlisted runs (mod toggle: /unlist_submission) never place on any board.
+    # They still count for marks and bounty progress, which don't run through here.
     if any('Unlisted' in str(f) for f in (feats or [])):
         return False, []
 
@@ -3145,9 +3145,8 @@ class LeaderboardsCog(commands.Cog):
 
         removed = 0
         if message_link and message_link.strip():
-            # Surgical mode: remove only the entry tied to this exact run, leaving
-            # the player's other entries on the board intact (unlimited boards like
-            # TUFF / 100 Kills store one row per qualifying run).
+            # Remove only this run's entry. Unlimited boards (TUFF, 100 Kills...)
+            # hold one row per qualifying run, and the player may have several.
             link = message_link.strip()
             try:
                 rows = await _db.get_leaderboard_by_board(board)

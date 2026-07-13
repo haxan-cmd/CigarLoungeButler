@@ -142,18 +142,18 @@ Environment variables (via `.env` locally, Railway variables in production):
 | Variable | Required | Purpose |
 |---|---|---|
 | `DISCORD_TOKEN` | ✅ | Bot token |
-| `DATABASE_URL` | for real use | Postgres connection string — the bot boots without it, but nearly everything needs it. Apply `schema.sql` once; later migrations run automatically at startup. |
+| `DATABASE_URL` | for real use | Postgres connection string. The bot boots without it, but nearly everything needs it. Apply `schema.sql` once; later migrations run automatically at startup. |
 | `ANTHROPIC_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
 | `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
 | `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
 | `PORT` | optional | Healthcheck server port (default 8080) |
 
-All server-specific IDs (guild, channels, roles, emojis) live in `config.py` — a
+All server-specific IDs (guild, channels, roles, emojis) live in `config.py`; a
 fork pointed at a different server needs those replaced. Tests are pure-logic
 and need no Discord or DB: `pytest -q`.
 
-Before writing code, read **[CLAUDE.md](CLAUDE.md)** — it documents the row
-shapes, the hot-path query rules, and the gotchas that have already been paid for.
+Before writing code, read **[CLAUDE.md](CLAUDE.md)**. It covers the row
+shapes, the hot-path query rules, and known gotchas.
 
 ---
 
@@ -169,4 +169,4 @@ shapes, the hot-path query rules, and the gotchas that have already been paid fo
 
 ---
 
-*Private repository. Contributions by invitation — if that's you, start with [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).*
+*Private repository. Contributions by invitation. If that's you, start with [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).*

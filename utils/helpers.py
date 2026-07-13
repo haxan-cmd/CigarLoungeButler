@@ -470,11 +470,8 @@ def build_milestone_message(player_name, weapon, threshold, rank_name):
 submission_state = {'last_submission_time': None, 'dry_spell_posted': False}
 
 # ── Graceful-shutdown shared state ───────────────────────────────────────────
-# Lives here (not in bot.py) because bot.py runs as __main__ — a cog doing
-# `import bot` would execute the file a second time and get its OWN copy of
-# these counters, so the signal handler and the cogs would never see each
-# other's state. Everything already imports utils.helpers, so it's the one
-# safe shared home.
+# Lives here, not bot.py: bot.py runs as __main__, so a cog importing it gets
+# a second module instance with its own copy of these counters.
 _shutting_down = False
 _active_submissions = 0
 

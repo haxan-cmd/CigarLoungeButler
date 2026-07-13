@@ -653,7 +653,7 @@ class AdminCog(commands.Cog):
     async def unlist_submission(self, interaction: discord.Interaction, message_link: str):
         """Adds/removes an 'Unlisted' tag on the submission's feats. Unlisted runs are
         excluded from board placement, rebuilds, feat-board backfills, and weekly/monthly
-        ratings — but keep their marks and bounty progress (those paths ignore the tag).
+        ratings, but keep their marks and bounty progress (those paths ignore the tag).
         For runs that were technically real but outside the spirit of the challenge
         (lopsided lobbies, farm games, etc.)."""
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
@@ -724,7 +724,7 @@ class AdminCog(commands.Cog):
             # rebuild renders weapon/map itself; re-render any feat boards that lost a row
             await _render(affected - score_boards)
             await interaction.followup.send(
-                f"✅ **Unlisted** — {player_name}'s run ({weapon}, {takedowns} TD / {kills} K) is off "
+                f"✅ **Unlisted**: {player_name}'s run ({weapon}, {takedowns} TD / {kills} K) is off "
                 f"the boards and records. Cleared: {', '.join(sorted(affected)) or 'none'}.\n"
                 f"Marks and bounty progress still count. Run the command again to re-list it.",
                 ephemeral=True)
@@ -761,10 +761,10 @@ class AdminCog(commands.Cog):
             await _render({b for b, _ in readd})
             _restored = sorted({b for b, _ in readd} | score_boards)
             await interaction.followup.send(
-                f"✅ **Re-listed** — {player_name}'s run is back in contention "
+                f"✅ **Re-listed**: {player_name}'s run is back in contention "
                 f"({', '.join(_restored) or 'no qualifying boards'}).\n"
                 f"Note: personal-best feat boards (Flawless / Mallet / Knife / Healing Horn) "
-                f"aren't auto-restored — they'll re-place on the player's next qualifying run.",
+                f"aren't auto-restored; they'll re-place on the player's next qualifying run.",
                 ephemeral=True)
 
     @app_commands.command(name="rules", description="Show the Cigar Lounge challenge rules.")

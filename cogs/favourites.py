@@ -318,8 +318,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     apex = best_score_title(kills_scores)
     frenzied = best_score_title(td_scores)
 
-    # Fastest Learner removed from the report — the full PB-history pass that
-    # computed it was dead work (nothing consumed 'top_fastest_learner').
+    # (Fastest Learner was retired from the report; its PB-history pass is gone too.)
 
     # Total Tally — most total takedowns accumulated this week (the grind race).
     _tally = {}

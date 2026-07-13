@@ -8,11 +8,9 @@ from discord.ext import commands
 
 import config
 
-# ---------------------------------------------------------------------------
-# Graceful shutdown — shared state lives in utils.helpers (importing bot.py
-# from a cog would re-execute this file under a second module name, giving the
-# cogs their own copy of the counters — so helpers is the one shared home).
-# ---------------------------------------------------------------------------
+# Graceful-shutdown state lives in utils.helpers. Don't move it here: cogs
+# can't `import bot` (this file runs as __main__, so importing it re-executes
+# everything under a second module name with separate globals).
 from utils import helpers as _shared
 
 
@@ -20,10 +18,8 @@ _web_app = web.Application()
 
 
 async def run_healthcheck():
-    """HTTP server for Railway's healthcheck. Answers 503 when the gateway is
-    actually dead so Railway restarts the container — a zombied process would
-    otherwise answer "ok" forever and never self-heal. Gated on the first
-    on_ready (bot._synced) so the pre-login boot window still passes."""
+    """Healthcheck server. Returns 503 when the gateway is dead so Railway
+    restarts the container. Gated on first on_ready so boot still passes."""
     async def handle(request):
         try:
             if getattr(bot, "_synced", False) and (bot.is_closed() or bot.latency > 60):
@@ -33,12 +29,8 @@ async def run_healthcheck():
         return web.Response(text="ok")
 
     async def kofi_webhook(request):
-        # Registered HERE, not in the kofi cog: aiohttp freezes the router the
-        # moment the site starts (which happens before cogs load), so the cog
-        # can't add routes later. Dispatches to the cog at request time. The old
-        # in-cog registration also did `import bot`, which re-executed this file
-        # under a second module name and attached /kofi to a web app that was
-        # never served — Ko-fi's POSTs 404'd and donations were silently missed.
+        # Must be registered here: aiohttp freezes the router when the site
+        # starts, and cogs load after that. Dispatches to the cog per request.
         cog = bot.get_cog("KofiCog")
         if cog is None:
             return web.Response(status=503, text="kofi cog not loaded")
@@ -76,7 +68,7 @@ COGS = [
 @bot.event
 async def on_ready():
     from datetime import datetime, timezone
-    # on_ready also fires on reconnects — only sync commands (rate-limited API)
+    # on_ready also fires on reconnects. Only sync commands (rate-limited API)
     # and stamp session_start on the FIRST ready of the process.
     if getattr(bot, "_synced", False):
         print("↻ Reconnected — skipping command re-sync.")
