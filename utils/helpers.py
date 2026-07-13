@@ -68,9 +68,9 @@ SCREEN OVERLAYS TO IGNORE - these are NOT scoreboard rows:
 Only read names and stats from inside the RANK | NAME | SCORE | T | K | D | PING table columns.
 
 FINDING THE PLAYER:
-Method 1 - Name match (USE THIS FIRST whenever a name hint is provided): find the row whose NAME column matches the hint (exact or partial, case-insensitive, ignoring clan tags/decorators). That row is the submitter — trust it over highlight colour.
-Method 2 - Visual highlight (fallback when no name matches): scan for the row with a GOLD/YELLOW/TAN background or a marker icon. A GREEN tint / green person-icon is a friend/party member, NOT the submitter — do not use it unless its name matches the hint.
-If both methods point to the same row, high confidence. If they disagree, trust the NAME match.
+Method 1 (PRIMARY) — the submitter's OWN row is highlighted GOLD/YELLOW/TAN (brighter background, sometimes a crown/marker icon). This is the MOST reliable signal: the submitter is always their own gold-highlighted row. A GREEN tint or green person-icon marks a FRIEND / party member — that is NOT the submitter; never read the green row.
+Method 2 (DISAMBIGUATE + CONFIRM) — a name hint may be provided. Use it ONLY to (a) pick the correct row when more than one row looks highlighted (gold vs green), and (b) sanity-check the gold row. Match loosely: case-insensitive, ignore clan tags/decorators.
+CRITICAL: a player's in-game name OFTEN does NOT match the hint. If no row's name matches the hint, DO NOT force it onto another row — just use the GOLD/YELLOW/TAN self-highlighted row. Never invent, bend, or combine names to fit the hint; read the name EXACTLY as printed on the chosen row.
 
 Step 1: Using both methods above, identify the submitting player's row.
 Step 2: Read the T, K, D values ONLY from that exact row - do not read from any row above or below it.
@@ -179,12 +179,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None) -> dict:
         from google.genai import types as _gtypes
         image_part = _gtypes.Part.from_bytes(data=image_bytes, mime_type=content_type)
         name_hint = (
-            f"\n\nPLAYER NAME HINT (AUTHORITATIVE): The submitting player appears under ONE of these names: {player_name}. "
-            f"Their in-game name may differ from their Discord name, so match loosely — case-insensitive, partial matches ok, ignore clan tags/decorators. "
-            f"PRIMARY method — NAME MATCH: find the scoreboard row whose NAME column matches one of those names, and read EVERY stat (SCORE, T, K, D, faction, weapon, subclass) from THAT row. The name-matched row is DEFINITIVELY the submitter, even if some OTHER row looks more brightly highlighted. "
-            f"IMPORTANT — a scoreboard can show more than one highlighted row: the submitter's OWN row is tinted GOLD/YELLOW/TAN, whereas a GREEN tint or a green person-icon marks a FRIEND or party member who is NOT the submitter. Do NOT read the green-highlighted row unless its name matches a hint name. "
-            f"FALLBACK — ONLY if no row name matches any hint name: use the GOLD/YELLOW/TAN highlighted row (never the green one). "
-            f"NEVER read stats from Discord voice-overlay cards on the screen edges — those are not scoreboard rows. "
+            f"\n\nPLAYER NAME HINT: The submitting player may appear as one of these names: {player_name}. "
+            f"Their in-game name OFTEN differs from these, so treat this as a SOFT hint, not a target to force. "
+            f"PRIMARY: read every stat (SCORE, T, K, D, faction, weapon, subclass) from the submitter's OWN row — the one tinted GOLD/YELLOW/TAN (their self-highlight). "
+            f"A GREEN tint or green person-icon is a FRIEND/party member, NOT the submitter — never read the green row. "
+            f"Use the hint ONLY to disambiguate when more than one row looks highlighted (gold vs green). "
+            f"If NO row's name matches the hint, do NOT force a match — the player's in-game name simply differs; use the GOLD/YELLOW/TAN self-highlighted row and read its REAL printed name. "
+            f"Never invent, bend, or combine names to fit the hint. NEVER read stats from Discord voice-overlay cards on the screen edges. "
             f"Return the exact NAME text you read from the chosen row in the 'name' field."
         ) if player_name else ""
         prompt = _SCORECARD_PROMPT + name_hint
