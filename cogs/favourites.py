@@ -822,7 +822,7 @@ def _macro_collect(subs):
     lead changes replayed from the submission log (boards keep no history,
     so #1 handovers are reconstructed chronologically). Resubmit/Unlisted
     runs are skipped; pacifist runs are skipped for the averages."""
-    weekly = {}    # date of week's Monday -> [sum_td, sum_kills, runs]
+    period = {}    # 3-day bucket start date -> [sum_td, sum_kills, runs]
     lead = {}      # board -> (leader_key, top_score)
     changes = {}   # board -> times #1 changed hands
     for r in subs:
@@ -839,8 +839,9 @@ def _macro_collect(subs):
             continue
         try:
             d = datetime.strptime((r[0] or '').strip()[:10], '%Y-%m-%d').date()
-            ws = d - timedelta(days=d.weekday())
-            w = weekly.setdefault(ws, [0, 0, 0])
+            po = d.toordinal()
+            ps = d.fromordinal(po - po % 3)
+            w = period.setdefault(ps, [0, 0, 0])
             w[0] += td; w[1] += k; w[2] += 1
         except (ValueError, TypeError):
             pass
@@ -863,10 +864,33 @@ def _macro_collect(subs):
                 if pkey != cur[0]:
                     changes[b] = changes.get(b, 0) + 1
                 lead[b] = (pkey, td)
-    return weekly, changes
+    return period, changes
 
 
-def _render_macro_png(weekly, changes, hh_counts, hh_total):
+def _spline(ys, samples=14):
+    """Catmull-Rom spline through the points (pure numpy, no scipy).
+    Returns (x_float_positions, y_values) for a smooth curve."""
+    import numpy as np
+    pts = [float(y) for y in ys]
+    if len(pts) < 3:
+        return list(range(len(pts))), pts
+    ext = [pts[0]] + pts + [pts[-1]]
+    xs_out, ys_out = [], []
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+        for t in np.linspace(0, 1, samples, endpoint=False):
+            t2 = t * t; t3 = t2 * t
+            y = 0.5 * ((2 * p1) + (-p0 + p2) * t
+                       + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                       + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+            xs_out.append(i + t)
+            ys_out.append(y)
+    xs_out.append(len(pts) - 1)
+    ys_out.append(pts[-1])
+    return xs_out, ys_out
+
+
+def _render_macro_png(period, changes, hh_counts, hh_total):
     """Blocking matplotlib render, call via asyncio.to_thread. Returns PNG bytes."""
     import io
     import matplotlib
@@ -874,9 +898,17 @@ def _render_macro_png(weekly, changes, hh_counts, hh_total):
     import matplotlib.pyplot as plt
 
     BG = '#2b2d31'; FG = '#dcddde'; MUT = '#8e9297'; GRID = '#3f4147'
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 13))
+    GOLD = '#e0a84c'; CORAL = '#d85a30'; BLUE = '#5b8dd9'; PURPLE = '#7a89c2'; TEAL = '#4fb3a1'
+    fig = plt.figure(figsize=(12, 13))
     fig.patch.set_facecolor(BG)
-    for ax in (ax1, ax2, ax3):
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.15, 1, 1], hspace=0.55, wspace=0.32,
+                          top=0.93, bottom=0.06, left=0.10, right=0.97)
+    ax1 = fig.add_subplot(gs[0, :])
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax3 = fig.add_subplot(gs[1, 1])
+    ax4 = fig.add_subplot(gs[2, 0])
+    ax5 = fig.add_subplot(gs[2, 1])
+    for ax in (ax1, ax2, ax3, ax4, ax5):
         ax.set_facecolor(BG)
         for s in ax.spines.values():
             s.set_color(GRID)
@@ -884,53 +916,84 @@ def _render_macro_png(weekly, changes, hh_counts, hh_total):
         ax.yaxis.grid(True, color=GRID, linewidth=0.7)
         ax.set_axisbelow(True)
 
-    # 1. Power creep: weekly averages (weeks with 10+ runs, last 20 weeks)
-    weeks = sorted(w for w, v in weekly.items() if v[2] >= 10)[-20:]
-    labels_w = [w.strftime('%b %d') for w in weeks]
-    avg_td = [weekly[w][0] / weekly[w][2] for w in weeks]
-    avg_k = [weekly[w][1] / weekly[w][2] for w in weeks]
-    ns = [weekly[w][2] for w in weeks]
-    ax1.plot(labels_w, avg_td, color='#e0a84c', linewidth=2, marker='o', markersize=4, label='avg takedowns')
-    ax1.plot(labels_w, avg_k, color='#d85a30', linewidth=2, marker='o', markersize=4, label='avg kills')
-    for x, y, n in zip(labels_w, avg_td, ns):
-        ax1.annotate(str(n), (x, y), textcoords='offset points', xytext=(0, 8),
-                     color=MUT, fontsize=7, ha='center')
+    # Shared time series: 3-day buckets with 8+ runs, last 30 buckets (~90 days)
+    keys = sorted(w for w, v in period.items() if v[2] >= 8)[-30:]
+    labels_t = [w.strftime('%b %d') for w in keys]
+    xs = list(range(len(keys)))
+    avg_td = [period[w][0] / period[w][2] for w in keys]
+    avg_k = [period[w][1] / period[w][2] for w in keys]
+    runs = [period[w][2] for w in keys]
+    leth = [period[w][1] / period[w][0] * 100 if period[w][0] else 0 for w in keys]
+
+    def _timeaxis(ax):
+        ax.set_xticks(xs)
+        step = 2 if len(xs) > 15 else 1
+        ax.set_xticklabels([l if i % step == 0 else '' for i, l in enumerate(labels_t)],
+                           rotation=45, ha='right')
+        ax.xaxis.grid(False)
+
+    # 1. Power creep (full width): smooth curves + point markers
+    sx, sy = _spline(avg_td)
+    ax1.plot(sx, sy, color=GOLD, linewidth=2.2, label='avg takedowns')
+    ax1.plot(xs, avg_td, 'o', color=GOLD, markersize=4)
+    sx, sy = _spline(avg_k)
+    ax1.plot(sx, sy, color=CORAL, linewidth=2.2, label='avg kills')
+    ax1.plot(xs, avg_k, 'o', color=CORAL, markersize=4)
     if avg_td:
-        ax1.set_ylim(0, max(avg_td) * 1.2)
-    ax1.set_title('Power creep: average stats per run by week (label = runs)',
+        ax1.set_ylim(0, max(avg_td) * 1.18)
+    _timeaxis(ax1)
+    ax1.set_title('Power creep: average stats per run (3-day periods)',
                   color=FG, fontsize=12, pad=10)
-    ax1.legend(facecolor=BG, edgecolor=GRID, labelcolor=FG, fontsize=9)
-    ax1.tick_params(axis='x', rotation=45)
+    ax1.legend(facecolor=BG, edgecolor=GRID, labelcolor=FG, fontsize=9, loc='lower right')
 
     # 2. Board churn: most contested boards by #1 handovers
     top = sorted(changes.items(), key=lambda kv: -kv[1])[:10][::-1]
     names = [b for b, _ in top]; vals = [c for _, c in top]
-    ax2.barh(names, vals, color='#5b8dd9', height=0.6)
-    ax2.set_title('Most contested boards: times #1 changed hands (all time)',
+    ax2.barh(names, vals, color=BLUE, height=0.6)
+    ax2.set_title('Most contested boards (#1 handovers, all time)',
                   color=FG, fontsize=12, pad=10)
     ax2.xaxis.grid(True, color=GRID, linewidth=0.7)
     ax2.yaxis.grid(False)
-    ax2.tick_params(axis='y', labelcolor=FG)
+    ax2.tick_params(axis='y', labelcolor=FG, labelsize=8)
     for i, v in enumerate(vals):
-        ax2.annotate(str(v), (v, i), textcoords='offset points', xytext=(5, -3),
-                     color=MUT, fontsize=9)
+        ax2.annotate(str(v), (v, i), textcoords='offset points', xytext=(4, -3),
+                     color=MUT, fontsize=8)
 
     # 3. Hundred-Handed histogram: players per progress bucket
     bins = [(1, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30),
             (31, 35), (36, 40), (41, hh_total - 1), (hh_total, hh_total)]
-    labels = [f"{a}-{b}" if a != b else f"{hh_total} done" for a, b in bins]
+    labels_h = [f"{a}-{b}" if a != b else "done" for a, b in bins]
     counts = [sum(1 for c in hh_counts if a <= c <= b) for a, b in bins]
-    colors = ['#7a89c2'] * (len(bins) - 1) + ['#e0a84c']
-    ax3.bar(labels, counts, color=colors, width=0.7)
-    ax3.set_title(f'Hundred-Handed: players by combos completed (of {hh_total})',
+    colors = [PURPLE] * (len(bins) - 1) + [GOLD]
+    ax3.bar(labels_h, counts, color=colors, width=0.7)
+    from matplotlib.ticker import MaxNLocator
+    ax3.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax2.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax3.tick_params(axis='x', labelsize=8)
+    ax3.set_title(f'Hundred-Handed progress (of {hh_total} combos)',
                   color=FG, fontsize=12, pad=10)
     for i, v in enumerate(counts):
         if v:
-            ax3.annotate(str(v), (i, v), textcoords='offset points', xytext=(0, 4),
-                         color=FG, fontsize=9, ha='center')
+            ax3.annotate(str(v), (i, v), textcoords='offset points', xytext=(0, 3),
+                         color=FG, fontsize=8, ha='center')
 
-    fig.suptitle('State of the Lounge', color=FG, fontsize=15, y=0.995)
-    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    # 4. Activity: runs per period
+    ax4.bar(xs, runs, color=TEAL, width=0.7)
+    _timeaxis(ax4)
+    ax4.set_title('Activity: runs per 3-day period', color=FG, fontsize=12, pad=10)
+
+    # 5. Lounge lethality: kill conversion % over time
+    sx, sy = _spline(leth)
+    ax5.plot(sx, sy, color=CORAL, linewidth=2.2)
+    ax5.plot(xs, leth, 'o', color=CORAL, markersize=4)
+    if leth:
+        lo, hi = min(leth), max(leth)
+        pad = max((hi - lo) * 0.4, 2)
+        ax5.set_ylim(max(0, lo - pad), hi + pad)
+    _timeaxis(ax5)
+    ax5.set_title('Lounge lethality: kills per takedown %', color=FG, fontsize=12, pad=10)
+
+    fig.suptitle('State of the Lounge', color=FG, fontsize=15, y=0.975)
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=110, facecolor=BG, bbox_inches='tight')
     plt.close(fig)
