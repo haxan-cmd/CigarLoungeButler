@@ -27,6 +27,9 @@ google-genai>=1.0
 # Image pre-processing for vision
 Pillow>=10
 
+# Macro graphs (/lounge_graphs)
+matplotlib>=3.8
+
 # Removed 2026-07-13 (dead Google-Sheets/OAuth-era deps, nothing imports them):
 # requests, requests-oauthlib, oauthlib, google-auth, google-auth-oauthlib,
 # pyasn1, pyasn1_modules, cryptography, cffi, pycparser, charset-normalizer, urllib3

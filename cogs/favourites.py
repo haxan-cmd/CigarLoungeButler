@@ -815,6 +815,123 @@ async def refresh_favourites_message(guild, embed):
         print(f"Favourites refresh error: {e}")
 
 
+# ── Macro graphs (/lounge_graphs) ─────────────────────────────────────────────
+
+def _macro_collect(subs):
+    """Data prep for the macro graphs: monthly stat averages, and per-board
+    lead changes replayed from the submission log (boards keep no history,
+    so #1 handovers are reconstructed chronologically). Resubmit/Unlisted
+    runs are skipped; pacifist runs are skipped for the averages."""
+    monthly = {}   # 'YYYY-MM' -> [sum_td, sum_kills, runs]
+    lead = {}      # board -> (leader_key, top_score)
+    changes = {}   # board -> times #1 changed hands
+    for r in subs:
+        if len(r) < 13 or not (r[0] or '').strip():
+            continue
+        feats = (r[11] or '') if len(r) > 11 else ''
+        if 'Resubmit' in feats or 'Unlisted' in feats:
+            continue
+        try:
+            td = int(r[7]); k = int(r[8])
+        except (ValueError, TypeError):
+            continue
+        if k == 0 and td <= 10:
+            continue
+        month = (r[0] or '').strip()[:7]
+        if len(month) == 7:
+            m = monthly.setdefault(month, [0, 0, 0])
+            m[0] += td; m[1] += k; m[2] += 1
+        if td <= 0:
+            continue
+        pkey = (r[2] or '').strip() or (r[1] or '').strip().lower()
+        boards = []
+        weapon = (r[3] or '').strip()
+        vip = (r[10] or '').strip().lower() == 'yes'
+        if weapon and not vip:
+            boards.append(weapon)
+        mp = (r[5] or '').strip(); fc = (r[6] or '').strip()
+        if mp and fc:
+            boards.append(f"{mp} - {fc}")
+        for b in boards:
+            cur = lead.get(b)
+            if cur is None:
+                lead[b] = (pkey, td)
+            elif td > cur[1]:
+                if pkey != cur[0]:
+                    changes[b] = changes.get(b, 0) + 1
+                lead[b] = (pkey, td)
+    return monthly, changes
+
+
+def _render_macro_png(monthly, changes, hh_counts, hh_total):
+    """Blocking matplotlib render, call via asyncio.to_thread. Returns PNG bytes."""
+    import io
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    BG = '#2b2d31'; FG = '#dcddde'; MUT = '#8e9297'; GRID = '#3f4147'
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 13))
+    fig.patch.set_facecolor(BG)
+    for ax in (ax1, ax2, ax3):
+        ax.set_facecolor(BG)
+        for s in ax.spines.values():
+            s.set_color(GRID)
+        ax.tick_params(colors=MUT, labelsize=9)
+        ax.yaxis.grid(True, color=GRID, linewidth=0.7)
+        ax.set_axisbelow(True)
+
+    # 1. Power creep: monthly averages (months with 5+ runs, last 12)
+    months = sorted(m for m, v in monthly.items() if v[2] >= 5)[-12:]
+    avg_td = [monthly[m][0] / monthly[m][2] for m in months]
+    avg_k = [monthly[m][1] / monthly[m][2] for m in months]
+    ns = [monthly[m][2] for m in months]
+    ax1.plot(months, avg_td, color='#e0a84c', linewidth=2, marker='o', markersize=4, label='avg takedowns')
+    ax1.plot(months, avg_k, color='#d85a30', linewidth=2, marker='o', markersize=4, label='avg kills')
+    for x, y, n in zip(months, avg_td, ns):
+        ax1.annotate(str(n), (x, y), textcoords='offset points', xytext=(0, 8),
+                     color=MUT, fontsize=7, ha='center')
+    ax1.set_title('Power creep: average stats per run by month (label = runs)',
+                  color=FG, fontsize=12, pad=10)
+    ax1.legend(facecolor=BG, edgecolor=GRID, labelcolor=FG, fontsize=9)
+    ax1.tick_params(axis='x', rotation=45)
+
+    # 2. Board churn: most contested boards by #1 handovers
+    top = sorted(changes.items(), key=lambda kv: -kv[1])[:10][::-1]
+    names = [b for b, _ in top]; vals = [c for _, c in top]
+    ax2.barh(names, vals, color='#5b8dd9', height=0.6)
+    ax2.set_title('Most contested boards: times #1 changed hands (all time)',
+                  color=FG, fontsize=12, pad=10)
+    ax2.xaxis.grid(True, color=GRID, linewidth=0.7)
+    ax2.yaxis.grid(False)
+    ax2.tick_params(axis='y', labelcolor=FG)
+    for i, v in enumerate(vals):
+        ax2.annotate(str(v), (v, i), textcoords='offset points', xytext=(5, -3),
+                     color=MUT, fontsize=9)
+
+    # 3. Hundred-Handed histogram: players per progress bucket
+    bins = [(1, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30),
+            (31, 35), (36, 40), (41, hh_total - 1), (hh_total, hh_total)]
+    labels = [f"{a}-{b}" if a != b else f"{hh_total} done" for a, b in bins]
+    counts = [sum(1 for c in hh_counts if a <= c <= b) for a, b in bins]
+    colors = ['#7a89c2'] * (len(bins) - 1) + ['#e0a84c']
+    ax3.bar(labels, counts, color=colors, width=0.7)
+    ax3.set_title(f'Hundred-Handed: players by combos completed (of {hh_total})',
+                  color=FG, fontsize=12, pad=10)
+    for i, v in enumerate(counts):
+        if v:
+            ax3.annotate(str(v), (i, v), textcoords='offset points', xytext=(0, 4),
+                         color=FG, fontsize=9, ha='center')
+
+    fig.suptitle('State of the Lounge', color=FG, fontsize=15, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=110, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 class FavouritesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -942,6 +1059,30 @@ class FavouritesCog(commands.Cog):
         await finalize_season(interaction.guild, season)
         label = season.get("label") or f"Season {season['id']}"
         await interaction.followup.send(f"Posted/refreshed the Hall of Fame entry for {label}.", ephemeral=True)
+
+    @app_commands.command(name="lounge_graphs", description="Post the macro graphs: power creep, contested boards, Hundred-Handed histogram (mod only).")
+    async def lounge_graphs(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        try:
+            import asyncio as _aio
+            subs = await _db.get_all_submissions()
+            monthly, changes = _macro_collect(subs)
+            from cogs.leaderboards import _hh_matched_counts, HH_TOTAL
+            _mc = _hh_matched_counts(await _db.get_all_hundred_handed())
+            hh_counts = [m for _did, (_nm, m, _p) in _mc.items() if m > 0]
+            png = await _aio.to_thread(_render_macro_png, monthly, changes, hh_counts, HH_TOTAL)
+        except ModuleNotFoundError:
+            await interaction.followup.send(
+                "matplotlib isn't installed on this deploy. Add it to requirements.txt and redeploy.")
+            return
+        except Exception as e:
+            await interaction.followup.send(f"Graph render failed: {e}")
+            return
+        import io as _io
+        await interaction.followup.send(file=discord.File(_io.BytesIO(png), filename="state_of_the_lounge.png"))
 
     @app_commands.command(name="refresh_report", description="Rebuild the pinned Butler Monthly report now (mod only).")
     async def refresh_report(self, interaction: discord.Interaction):
