@@ -331,7 +331,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
             continue
         _pn = _row[1].strip()
         _tally[_pn] = _tally.get(_pn, 0) + _t
-    top_total_tally = sorted(_tally.items(), key=lambda x: (-x[1], x[0]))[:3]
+    top_total_tally = sorted(_tally.items(), key=lambda x: (-x[1], x[0]))[:5]
 
     return {
         'top_busiest': top_busiest,
@@ -551,14 +551,14 @@ _SEASON_CATEGORIES = [
     ("Most Kills", "top_kills_list", False),
     ("Highest Takedowns", "top_td_list", False),
 ]
-# 5/3/2 (was 3/2/1): a category win must at least match the flat bounty bonus (5),
-# so excelling at something outranks the wall of bounty-completion points.
-_GP_POINTS = [5, 3, 2]
+# Top-5 pay 5/4/3/2/1 (was top-3 at 3/2/1): a category win matches the best
+# bounty-race payout, and mid-table players hold real points worth defending.
+_GP_POINTS = [5, 4, 3, 2, 1]
 
 
 def _cat_names(items, plain=False):
     out = []
-    for it in (items or [])[:3]:
+    for it in (items or [])[:len(_GP_POINTS)]:
         if plain and isinstance(it, str):
             out.append(it.split(" -- ", 1)[0].strip())
         elif isinstance(it, (list, tuple)) and it and it[0]:
@@ -577,8 +577,8 @@ def _cat_top(items, plain=False):
 
 
 async def compute_season_standings(started_at, ended_at, bonuses):
-    """Grand Prix points over the season window: top-3 per category = 5/3/2,
-    summed per player, plus bounty-completion bonuses. Returns (standings, stats)."""
+    """Grand Prix points over the season window: top-5 per category = 5/4/3/2/1,
+    summed per player, plus bounty-race bonuses. Returns (standings, stats)."""
     from datetime import datetime, timezone
     start_ts = started_at.timestamp() if hasattr(started_at, "timestamp") else float(started_at)
     if ended_at:

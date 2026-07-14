@@ -425,21 +425,27 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     if newly_completed:
         date_str = datetime.now(timezone.utc).strftime('%b %d')
         completions.append({"id": str(player_id), "name": player_name, "date": date_str})
-        # Season championship: +5 GP for completing the bounty. Awarded HERE — the moment
-        # completion is recorded — because the caller's later check_bounty_completion() now
-        # returns False (this player was just appended to `completions` above), so the
-        # award attempt in finalise_submission never fired. Idempotent per season/player/reason.
+        # Season championship GP: completion is a RACE. First to finish gets the
+        # full bonus, second 4, third 3, everyone after 2 — placement is this
+        # player's position in the completions list (they were just appended).
+        # Awarded HERE, the moment completion is recorded, because the caller's
+        # later check_bounty_completion() returns False for this player now.
+        # Idempotent per season/player/reason.
+        placement = len(completions)
+        race_points = {1: config.BOUNTY_COMPLETION_BONUS, 2: 4, 3: 3}.get(placement, 2)
         try:
             _bseason = await _db.get_current_season()
             if _bseason:
                 await _db.award_season_bonus(_bseason['id'], player_name,
-                                             config.BOUNTY_COMPLETION_BONUS, "Bounty completion")
+                                             race_points, "Bounty completion")
         except Exception as _sbe:
             print(f"[SEASON] bounty bonus error: {_sbe}")
         if bounty_channel and bounty_role:
+            _ord = {1: '1st', 2: '2nd', 3: '3rd'}.get(placement, f'{placement}th')
             try:
                 await bounty_channel.send(
-                    f"{bounty_role.mention} 🏆 **{player_name}** has completed the **{bounty['title']}**!"
+                    f"{bounty_role.mention} 🏆 **{player_name}** has completed the "
+                    f"**{bounty['title']}**! ({_ord} to finish — +{race_points} GP)"
                 )
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")

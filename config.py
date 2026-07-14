@@ -33,7 +33,7 @@ ALLTIME_RECORDS_FORUM_ID    = 0   # retired (Monthly Report removed; season stat
 LEDGER_BANNER_URL = ""
 # Banner atop the archive-entrance (The Ledger) header embed.
 LEDGER_ENTRANCE_BANNER_URL = ""
-BOUNTY_COMPLETION_BONUS     = 5   # season GP points awarded for completing the bounty
+BOUNTY_COMPLETION_BONUS     = 5   # season GP for FIRST bounty completion (race: 5/4/3, then 2 for later finishers)
 BOUNTY_FORUM_CHANNEL_ID     = 1456640264004435978   # Ledger forum for bounty cards
 BULLETIN_BOARD_CATEGORY_ID  = 1359537379039252550
 LEDGER_CATEGORY_ID          = 1456640264004435978
