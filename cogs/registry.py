@@ -1545,8 +1545,10 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
             if thread:
                 try:
                     _meid = guild.me.id if guild.me else None
+                    # Skip system messages (pin notices etc.) — editing/deleting them
+                    # 403s (50021) and aborted the whole card update for the player
                     existing = [m async for m in thread.history(limit=50, oldest_first=True)
-                                if _meid is None or m.author.id == _meid]
+                                if (_meid is None or m.author.id == _meid) and not m.is_system()]
                     for i, group in enumerate(_groups):
                         _content = _subtitle if i == 0 else None
                         if i < len(existing):

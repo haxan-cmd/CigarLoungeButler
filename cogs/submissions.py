@@ -1897,15 +1897,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     kills_rank = None
     lobby_line = None
 
-    _team_td = [s for s in vd.get('team_scores', []) if isinstance(s, int) and s > 0]
+    # Upper bound 600: vision sometimes reads the SCORE column (4-5 digit values)
+    # into these arrays; no single-game TD or kill count gets near 600, so bigger
+    # values are column bleed and would poison team rank and the TUFF gap.
+    _TDMAX = 600
+    _team_td = [s for s in vd.get('team_scores', []) if isinstance(s, int) and 0 < s <= _TDMAX]
     # Vision sometimes folds the submitter's OWN row into team_scores. Drop one instance
     # of the submitter's own takedowns so a self-value can't skew team rank, teammate
     # averages, or the TUFF gap (kills - best teammate TD).
     if isinstance(takedowns, int) and takedowns in _team_td:
         _team_td.remove(takedowns)
-    _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and k > 0]
-    _enemy_td = [s for s in vd.get('enemy_scores', []) if isinstance(s, int) and s > 0]
-    _enemy_k  = [k for k in vd.get('enemy_kills',  []) if isinstance(k, int) and k > 0]
+    _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and 0 < k <= _TDMAX]
+    _enemy_td = [s for s in vd.get('enemy_scores', []) if isinstance(s, int) and 0 < s <= _TDMAX]
+    _enemy_k  = [k for k in vd.get('enemy_kills',  []) if isinstance(k, int) and 0 < k <= _TDMAX]
     _all_td = _team_td + _enemy_td
     _all_k  = _team_k  + _enemy_k
 

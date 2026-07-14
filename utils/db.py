@@ -1485,7 +1485,9 @@ async def award_season_bonus(season_id: int, player_name: str, points: int, reas
     pool = _pool_check()
     async with pool.acquire() as conn:
         res = await conn.execute(
-            "INSERT INTO season_bonus (season_id, player_name, reason, points) VALUES ($1,$2,$3,$4) "
+            # Column order must match the arg order: (points, reason) swapped here
+            # once put the int in the TEXT column and every bonus failed (2026-07-14)
+            "INSERT INTO season_bonus (season_id, player_name, points, reason) VALUES ($1,$2,$3,$4) "
             "ON CONFLICT (season_id, player_name, reason) DO NOTHING", season_id, player_name, points, reason)
     return res.split()[-1] == '1'
 
