@@ -551,7 +551,9 @@ _SEASON_CATEGORIES = [
     ("Most Kills", "top_kills_list", False),
     ("Highest Takedowns", "top_td_list", False),
 ]
-_GP_POINTS = [3, 2, 1]
+# 5/3/2 (was 3/2/1): a category win must at least match the flat bounty bonus (5),
+# so excelling at something outranks the wall of bounty-completion points.
+_GP_POINTS = [5, 3, 2]
 
 
 def _cat_names(items, plain=False):
@@ -575,7 +577,7 @@ def _cat_top(items, plain=False):
 
 
 async def compute_season_standings(started_at, ended_at, bonuses):
-    """Grand Prix points over the season window: top-3 per category = 3/2/1,
+    """Grand Prix points over the season window: top-3 per category = 5/3/2,
     summed per player, plus bounty-completion bonuses. Returns (standings, stats)."""
     from datetime import datetime, timezone
     start_ts = started_at.timestamp() if hasattr(started_at, "timestamp") else float(started_at)
@@ -631,7 +633,7 @@ async def roll_featured(season_id):
     return {"weapon_1h": f1h, "weapon_2h": f2h, "map_1": m1, "map_2": m2}
 
 
-_FEATURED_POINTS = [2, 1]
+_FEATURED_POINTS = [3, 1]
 _FEATURED_SLOTS = [
     ("weapon_1h", "weapon", "1H Weapon"),
     ("weapon_2h", "weapon", "2H Weapon"),
@@ -642,7 +644,7 @@ _FEATURED_SLOTS = [
 
 async def compute_featured(season):
     """(boards, points): best single-game takedowns on each featured weapon/map
-    this season; top 2 earn 2/1 championship GP."""
+    this season; top 2 earn 3/1 championship GP."""
     from datetime import datetime, timezone
     feats = await _db.get_season_features(season["id"])
     if not feats:
