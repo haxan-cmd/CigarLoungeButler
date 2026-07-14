@@ -822,7 +822,7 @@ def _macro_collect(subs):
     lead changes replayed from the submission log (boards keep no history,
     so #1 handovers are reconstructed chronologically). Resubmit/Unlisted
     runs are skipped; pacifist runs are skipped for the averages."""
-    monthly = {}   # 'YYYY-MM' -> [sum_td, sum_kills, runs]
+    weekly = {}    # date of week's Monday -> [sum_td, sum_kills, runs]
     lead = {}      # board -> (leader_key, top_score)
     changes = {}   # board -> times #1 changed hands
     for r in subs:
@@ -837,10 +837,13 @@ def _macro_collect(subs):
             continue
         if k == 0 and td <= 10:
             continue
-        month = (r[0] or '').strip()[:7]
-        if len(month) == 7:
-            m = monthly.setdefault(month, [0, 0, 0])
-            m[0] += td; m[1] += k; m[2] += 1
+        try:
+            d = datetime.strptime((r[0] or '').strip()[:10], '%Y-%m-%d').date()
+            ws = d - timedelta(days=d.weekday())
+            w = weekly.setdefault(ws, [0, 0, 0])
+            w[0] += td; w[1] += k; w[2] += 1
+        except (ValueError, TypeError):
+            pass
         if td <= 0:
             continue
         pkey = (r[2] or '').strip() or (r[1] or '').strip().lower()
@@ -860,10 +863,10 @@ def _macro_collect(subs):
                 if pkey != cur[0]:
                     changes[b] = changes.get(b, 0) + 1
                 lead[b] = (pkey, td)
-    return monthly, changes
+    return weekly, changes
 
 
-def _render_macro_png(monthly, changes, hh_counts, hh_total):
+def _render_macro_png(weekly, changes, hh_counts, hh_total):
     """Blocking matplotlib render, call via asyncio.to_thread. Returns PNG bytes."""
     import io
     import matplotlib
@@ -881,17 +884,20 @@ def _render_macro_png(monthly, changes, hh_counts, hh_total):
         ax.yaxis.grid(True, color=GRID, linewidth=0.7)
         ax.set_axisbelow(True)
 
-    # 1. Power creep: monthly averages (months with 5+ runs, last 12)
-    months = sorted(m for m, v in monthly.items() if v[2] >= 5)[-12:]
-    avg_td = [monthly[m][0] / monthly[m][2] for m in months]
-    avg_k = [monthly[m][1] / monthly[m][2] for m in months]
-    ns = [monthly[m][2] for m in months]
-    ax1.plot(months, avg_td, color='#e0a84c', linewidth=2, marker='o', markersize=4, label='avg takedowns')
-    ax1.plot(months, avg_k, color='#d85a30', linewidth=2, marker='o', markersize=4, label='avg kills')
-    for x, y, n in zip(months, avg_td, ns):
+    # 1. Power creep: weekly averages (weeks with 10+ runs, last 20 weeks)
+    weeks = sorted(w for w, v in weekly.items() if v[2] >= 10)[-20:]
+    labels_w = [w.strftime('%b %d') for w in weeks]
+    avg_td = [weekly[w][0] / weekly[w][2] for w in weeks]
+    avg_k = [weekly[w][1] / weekly[w][2] for w in weeks]
+    ns = [weekly[w][2] for w in weeks]
+    ax1.plot(labels_w, avg_td, color='#e0a84c', linewidth=2, marker='o', markersize=4, label='avg takedowns')
+    ax1.plot(labels_w, avg_k, color='#d85a30', linewidth=2, marker='o', markersize=4, label='avg kills')
+    for x, y, n in zip(labels_w, avg_td, ns):
         ax1.annotate(str(n), (x, y), textcoords='offset points', xytext=(0, 8),
                      color=MUT, fontsize=7, ha='center')
-    ax1.set_title('Power creep: average stats per run by month (label = runs)',
+    if avg_td:
+        ax1.set_ylim(0, max(avg_td) * 1.2)
+    ax1.set_title('Power creep: average stats per run by week (label = runs)',
                   color=FG, fontsize=12, pad=10)
     ax1.legend(facecolor=BG, edgecolor=GRID, labelcolor=FG, fontsize=9)
     ax1.tick_params(axis='x', rotation=45)
