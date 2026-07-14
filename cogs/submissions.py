@@ -1987,6 +1987,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if _team_td:
         _second_place_td = sorted(_team_td, reverse=True)[0]
 
+    # Visibility: vision read the faction banners but returned no roster rows,
+    # so team rank and TUFF can't be computed for this run. Flag it so a mod can
+    # check the scoreboard and add a missed TUFF with /add_board_score.
+    # (Brittany's +6 TUFF was silently skipped this way, 2026-07-13.)
+    if not _team_td and isinstance(vd.get('team_total_kills'), int):
+        try:
+            _ncr = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                   or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if _ncr:
+                _mlr = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+                await _ncr.send(
+                    f"👓 **Vision skipped the roster rows** on {interaction.user.display_name}'s run "
+                    f"({takedowns} TD / {kills} K). Team rank and TUFF not computed — check the "
+                    f"scorecard for a missed TUFF (kills vs best teammate TD).\n{_mlr}")
+        except Exception as _e_nr:
+            print(f"[TEAMSTATS] roster-skip flag error: {_e_nr}")
+
     if blurb_parts:
         lobby_line = " · ".join(blurb_parts)
 
