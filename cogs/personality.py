@@ -1141,7 +1141,14 @@ class PersonalityCog(commands.Cog):
                                 pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
                             pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                             logged_runs = len(player_subs_pb)
-                            player_stats_ctx = f"Player stats — Total marks (= total career runs, including legacy): {total_marks}, Logged runs in database: {logged_runs}, Top weapons by marks: {top_weapons}{pb_str}"
+                            # Lead with runs and performance; marks demoted to a
+                            # mention-only footnote — the Butler was crediting
+                            # everything in marks because they headlined this sheet.
+                            player_stats_ctx = (
+                                f"Player stats — Logged runs: {logged_runs}{pb_str}\n"
+                                f"(Career marks: {total_marks}; top weapons by marks: {top_weapons}. "
+                                f"Only bring up marks if the player asks about marks or weapon ranks — "
+                                f"otherwise talk in runs, stats, and season form.)")
                             # True best single-run lethality (highest kills/TD ratio of ANY run) plus
                             # the average kill rate, matching the registry card. The Butler used to
                             # DERIVE "best lethality" from the best-TD game, which is a different, wrong
@@ -1351,7 +1358,9 @@ class PersonalityCog(commands.Cog):
                             sub_count = player_sub_counts.get(pname, 0)
                             all_players_summary.append((pname, marks, sub_count, unique_weapons, unique_subclasses, lb_weapons))
 
-                    all_players_summary.sort(key=lambda x: -x[1])
+                    # Rank the roster by logged runs (activity), not career marks —
+                    # legacy mark piles were making inactive players headline the sheet.
+                    all_players_summary.sort(key=lambda x: (-x[2], -x[1]))
                     def _lethality_str(pname):
                         tds = player_td_totals.get(pname, [])
                         kills = player_kill_totals.get(pname, [])
@@ -1371,11 +1380,45 @@ class PersonalityCog(commands.Cog):
                                 return ""
                         return ""
                     summary_lines = [
-                        f"{n}: {m} marks, {lw} on boards{_bestgame(n)}{_lethality_str(n)}"
+                        f"{n}: {s} runs, {lw} on boards{_bestgame(n)}{_lethality_str(n)}, {m} career marks"
                         for n, m, s, uw, us, lw in all_players_summary[:10]
                     ]
                     if summary_lines:
-                        player_stats_ctx += f"\n\nTop players (by marks):\n" + "\n".join(summary_lines)
+                        player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
+
+                    # Season board — championship standings + category form. This is
+                    # what the Butler should lean on when talking performance.
+                    try:
+                        from cogs.favourites import season_total
+                        _season = await _db.get_current_season()
+                        if _season:
+                            _standings, _sstats, _ = await season_total(_season)
+                            _lbl = _season.get('label') or f"Season {_season['id']}"
+                            _top8 = ", ".join(f"{i}. {nm} {pts} GP"
+                                              for i, (nm, pts) in enumerate(_standings[:8], 1))
+                            player_stats_ctx += f"\n\nSeason championship ({_lbl}): {_top8}"
+                            if player_name not in [nm for nm, _ in _standings[:8]]:
+                                _mine = next((f"{player_name} is {i}. with {pts} GP"
+                                              for i, (nm, pts) in enumerate(_standings, 1)
+                                              if nm == player_name), None)
+                                if _mine:
+                                    player_stats_ctx += f" … {_mine}"
+
+                            def _lead(key):
+                                v = _sstats.get(key) or []
+                                if not v:
+                                    return "—"
+                                it = v[0]
+                                if isinstance(it, str):
+                                    return it.split(" -- ")[0].strip()
+                                return f"{it[0]} ({it[1]})"
+                            player_stats_ctx += (
+                                "\nSeason category leaders: "
+                                f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
+                                f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
+                                f"Highest TD {_lead('top_td_list')}")
+                    except Exception as _sce:
+                        print(f"[BUTLER] season ctx error: {_sce}")
 
                     # On-demand: if the message names a registered player who isn't the
                     # asker and isn't already in the top-10 above, surface THEIR stats too --
@@ -1389,7 +1432,7 @@ class PersonalityCog(commands.Cog):
                                 continue
                             if re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
                                 _extra_players.append(
-                                    f"{_pn}: {_pm} marks, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}")
+                                    f"{_pn}: {_ps} runs, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}, {_pm} career marks")
                                 if len(_extra_players) >= 3:
                                     break
                         if _extra_players:
