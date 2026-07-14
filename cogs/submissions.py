@@ -1919,6 +1919,18 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         total_team_kills = kills + sum(_team_k)
     else:
         total_team_kills = None
+    # Sanity guard: a player's kills and takedowns are both subsets of their
+    # team's total kills, so a total below either means the faction banner was
+    # cropped or misread (this produced a 171% Kill Share / 368% Warlord blurb).
+    # Try the visible-row sum instead; if that's also below the floor, drop the
+    # team-share stats for this run rather than post impossible numbers.
+    _stat_floor = max(kills or 0, takedowns or 0)
+    if total_team_kills is not None and total_team_kills < _stat_floor:
+        _row_sum = (kills + sum(_team_k)) if (_team_k and kills) else None
+        total_team_kills = _row_sum if (_row_sum and _row_sum >= _stat_floor) else None
+        print(f"[TEAMSTATS] banner total below player stats — "
+              f"{'using row sum' if total_team_kills else 'dropping team shares'} "
+              f"(kills={kills}, td={takedowns})")
 
     blurb_parts = []
 
