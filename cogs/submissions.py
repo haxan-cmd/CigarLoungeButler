@@ -2092,6 +2092,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception:
             pass
 
+    # Ensure a players row exists BEFORE anything writes to it. The archive-stats
+    # write and IGN learning are plain UPDATEs (silent no-ops without a row), and
+    # the Butler's "registered" check reads this table — players who joined after
+    # the last /seed_players run were invisible to all three despite submitting.
+    try:
+        await upsert_player(interaction.user.id, interaction.user.display_name)
+    except Exception as _e_up:
+        print(f"[PLAYERS] ensure-row error: {_e_up}")
+
     # Log to Postgres first so we get the row id
     submission_row = None
     try:
