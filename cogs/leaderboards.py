@@ -1436,8 +1436,8 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     _min_txt = f"{rating_min}+ games"
     tail.add_field(
         name="\u200b",
-        value=(f"*These rank everyone with {_min_txt} — separate from the takedown order "
-               "above, so you don't need the takedown top 10. Your score is the best "
+        value=(f"*These rank everyone with {_min_txt} — separate from the board "
+               "above, so you don't need to be in its top 10. Your score is the best "
                "5-games-in-a-row average you've posted, and it never drops.*"),
         inline=False,
     )
@@ -3222,28 +3222,54 @@ class LeaderboardsCog(commands.Cog):
             except Exception as e:
                 print(f"[KILLS SETUP] thread fetch error ({nm}): {e}")
                 continue
+            def _is_spacer(m):
+                return (m.author.id == interaction.client.user.id and m.attachments
+                        and not m.embeds and not (m.content or '').strip())
             if msg_raw:
                 await _render_board(interaction.guild, rec, nm)
                 rendered += 1
-                # Close the frame ON the board message itself: attach the bottom
-                # spacer to the last kills-board message (renders below the embed,
-                # no extra post). Also remove any stray standalone spacer messages
-                # a previous run posted after the board. Safe to re-run.
+                # Converge the thread on: TOP -> TD board -> Kills board -> ONE
+                # closing spacer. Fix-ups (all idempotent): strip any spacer
+                # attached to the kills message (attachments render ABOVE the
+                # embed), delete the old spacer sitting BETWEEN the boards, and
+                # keep exactly one standalone spacer after the kills board.
                 try:
                     _ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
-                    _board_msg = await thread.fetch_message(_ids[-1])
-                    if not _board_msg.attachments:
-                        await _board_msg.edit(attachments=[discord.File(DECORATION_BOTTOM)])
+                    _first_msg = await thread.fetch_message(_ids[0])
+                    _board_msg = (_first_msg if len(_ids) == 1
+                                  else await thread.fetch_message(_ids[-1]))
+                    if _board_msg.attachments:
+                        await _board_msg.edit(attachments=[])
                         await asyncio.sleep(0.3)
-                    async for _m in thread.history(limit=3, after=_board_msg):
-                        if (_m.author.id == interaction.client.user.id and _m.attachments
-                                and not _m.embeds and not (_m.content or '').strip()):
+                    async for _m in thread.history(limit=4, before=_first_msg):
+                        if _is_spacer(_m):
                             await _m.delete()
                             await asyncio.sleep(0.3)
+                        break  # only the message directly above the kills board
+                    _tail = [m async for m in thread.history(limit=4, after=_board_msg)]
+                    _spacers = [m for m in _tail if _is_spacer(m)]
+                    for _extra in _spacers[1:]:
+                        await _extra.delete()
+                        await asyncio.sleep(0.3)
+                    if not _spacers:
+                        await thread.send(file=discord.File(DECORATION_BOTTOM))
+                        await asyncio.sleep(0.3)
                 except Exception as e:
                     print(f"[KILLS SETUP] frame fix error ({nm}): {e}")
                 continue
             try:
+                # Fresh setup: remove the thread's trailing spacer first (it would
+                # otherwise sit between the boards), post the kills board, close
+                # with one spacer at the very bottom.
+                try:
+                    _tail = [m async for m in thread.history(limit=2)]
+                    for _m in _tail:
+                        if _is_spacer(_m):
+                            await _m.delete()
+                            await asyncio.sleep(0.3)
+                        break
+                except Exception:
+                    pass
                 board_rows = await _db.get_leaderboard_by_board(nm)
                 entries = [{'player': r[1], 'did': r[2], 'score': _safe_int(r[3]),
                             'link': r[4] if len(r) > 4 else '', 'weapon': r[5] if len(r) > 5 else ''}
@@ -3251,15 +3277,12 @@ class LeaderboardsCog(commands.Cog):
                 entries.sort(key=lambda x: -x['score'])
                 embeds = await _rated_embeds(nm, entries, False)
                 ids = []
-                for _k, emb in enumerate(embeds):
-                    if _k == len(embeds) - 1:
-                        # closing spacer attached to the final board message
-                        msg = await thread.send(embed=emb, file=discord.File(DECORATION_BOTTOM))
-                    else:
-                        msg = await thread.send(embed=emb)
+                for emb in embeds:
+                    msg = await thread.send(embed=emb)
                     ids.append(str(msg.id))
                     await asyncio.sleep(0.4)
                 await _db.update_leaderboard_messages(nm, '|'.join(ids))
+                await thread.send(file=discord.File(DECORATION_BOTTOM))
                 rendered += 1
             except Exception as e:
                 print(f"[KILLS SETUP] render error ({nm}): {e}")
