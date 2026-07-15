@@ -3225,17 +3225,23 @@ class LeaderboardsCog(commands.Cog):
             if msg_raw:
                 await _render_board(interaction.guild, rec, nm)
                 rendered += 1
-                # Close the frame: the TD board's old bottom spacer now acts as the
-                # separator ABOVE the kills board — if the kills board is the newest
-                # message in the thread, the closing spacer is missing. Append it.
-                # (Makes re-running this command repair already-created threads.)
+                # Close the frame ON the board message itself: attach the bottom
+                # spacer to the last kills-board message (renders below the embed,
+                # no extra post). Also remove any stray standalone spacer messages
+                # a previous run posted after the board. Safe to re-run.
                 try:
-                    _last = [m async for m in thread.history(limit=1)]
-                    if _last and str(_last[0].id) in msg_raw:
-                        await thread.send(file=discord.File(DECORATION_BOTTOM))
+                    _ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
+                    _board_msg = await thread.fetch_message(_ids[-1])
+                    if not _board_msg.attachments:
+                        await _board_msg.edit(attachments=[discord.File(DECORATION_BOTTOM)])
                         await asyncio.sleep(0.3)
+                    async for _m in thread.history(limit=3, after=_board_msg):
+                        if (_m.author.id == interaction.client.user.id and _m.attachments
+                                and not _m.embeds and not (_m.content or '').strip()):
+                            await _m.delete()
+                            await asyncio.sleep(0.3)
                 except Exception as e:
-                    print(f"[KILLS SETUP] frame close error ({nm}): {e}")
+                    print(f"[KILLS SETUP] frame fix error ({nm}): {e}")
                 continue
             try:
                 board_rows = await _db.get_leaderboard_by_board(nm)
@@ -3245,12 +3251,15 @@ class LeaderboardsCog(commands.Cog):
                 entries.sort(key=lambda x: -x['score'])
                 embeds = await _rated_embeds(nm, entries, False)
                 ids = []
-                for emb in embeds:
-                    msg = await thread.send(embed=emb)
+                for _k, emb in enumerate(embeds):
+                    if _k == len(embeds) - 1:
+                        # closing spacer attached to the final board message
+                        msg = await thread.send(embed=emb, file=discord.File(DECORATION_BOTTOM))
+                    else:
+                        msg = await thread.send(embed=emb)
                     ids.append(str(msg.id))
                     await asyncio.sleep(0.4)
                 await _db.update_leaderboard_messages(nm, '|'.join(ids))
-                await thread.send(file=discord.File(DECORATION_BOTTOM))
                 rendered += 1
             except Exception as e:
                 print(f"[KILLS SETUP] render error ({nm}): {e}")
