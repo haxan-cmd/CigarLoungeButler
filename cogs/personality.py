@@ -23,6 +23,7 @@ from cogs.favourites import calculate_butler_stats, build_favourites_embed, upda
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
 COUNTING_CHANNEL_ID         = config.COUNTING_CHANNEL_ID
+COUNTING_BOT_ID             = getattr(config, 'COUNTING_BOT_ID', 0)
 CLOWN_TARGET_USER_ID        = config.CLOWN_TARGET_USER_ID
 REACT_BLOCKED_USER_ID       = config.REACT_BLOCKED_USER_ID
 CLOWN_REACT_CHANCE          = 0.4  # roll per eligible message
@@ -906,42 +907,37 @@ class PersonalityCog(commands.Cog):
         if message.channel.id == SUBMISSIONS_CHANNEL_ID:
             print(f"[DELETE] Message deleted in submissions channel — author: {message.author} (bot={message.author.bot}) | content: {message.content[:80]!r} | attachments: {[a.filename for a in message.attachments]}")
 
-    @staticmethod
-    def _count_transition(state, uid, n):
-        """Pure counting-rules step. state = (current, last_user); returns
-        (new_current, new_last_user, valid, broke). Standard rules: next number
-        must be current+1 and not from the same person twice in a row."""
-        cur, last = state
-        if n == cur + 1 and uid != (last or ''):
-            return n, uid, True, False
-        if n == 1 and cur == 0:
-            return 1, uid, True, False
-        return 0, None, False, True
+    # The counting BOT is the referee — we parse its signals instead of
+    # simulating rules (which mis-booked breaks against whoever restarted at 1):
+    # a ✅-style react from it = valid count; its "RUINED IT AT n" message = a
+    # break, attributed to the player it names.
+    _RUIN_RE = re.compile(r'RUINED IT AT\s*\**([\d,]+)', re.IGNORECASE)
 
-    async def _track_count(self, message):
-        """Silently track the counting channel: current run, record, and
-        per-player counts/breaks. Mirrors the counting bot's standard rules;
-        /counting_backfill replays history if drift creeps in."""
-        m = re.match(r'^(\d[\d,]*)', message.content.strip())
+    async def _track_count_ruin(self, message):
+        m = self._RUIN_RE.search(message.content or '')
         if not m:
             return
         try:
             n = int(m.group(1).replace(',', ''))
-        except ValueError:
-            return
+            st = await _db.counting_state()
+            await _db.counting_save_state(0, None, max(st['record'], n), st['total_counts'])
+            if message.mentions:
+                u = message.mentions[0]
+                await _db.counting_add(str(u.id), getattr(u, 'display_name', str(u)), breaks=1)
+        except Exception as e:
+            print(f"[COUNTING] ruin track error: {e}")
+
+    async def _track_count_valid(self, message, n):
         try:
             st = await _db.counting_state()
             uid = str(message.author.id)
-            cur, last, valid, broke = self._count_transition(
-                (st['current'], st['last_user']), uid, n)
-            record = max(st['record'], cur)
-            total = st['total_counts'] + (1 if valid else 0)
-            await _db.counting_save_state(cur, last, record, total)
-            await _db.counting_add(uid, message.author.display_name,
-                                   counts=1 if valid else 0,
-                                   breaks=0 if valid else 1)
+            # dedupe: the bot sometimes adds a second react (milestones)
+            if n == st['current'] and uid == (st['last_user'] or ''):
+                return
+            await _db.counting_save_state(n, uid, max(st['record'], n), st['total_counts'] + 1)
+            await _db.counting_add(uid, message.author.display_name, counts=1)
         except Exception as e:
-            print(f"[COUNTING] track error: {e}")
+            print(f"[COUNTING] valid track error: {e}")
 
     @app_commands.command(name="counting_backfill", description="Replay the counting channel's full history to rebuild counting stats (mod only).")
     async def counting_backfill(self, interaction: discord.Interaction):
@@ -961,25 +957,42 @@ class PersonalityCog(commands.Cog):
         scanned = 0
         async for msg in channel.history(limit=None, oldest_first=True):
             scanned += 1
+            # The counting bot's RUINED announcements are the break record
+            if msg.author.id == COUNTING_BOT_ID:
+                m = self._RUIN_RE.search(msg.content or '')
+                if m:
+                    try:
+                        record = max(record, int(m.group(1).replace(',', '')))
+                    except ValueError:
+                        pass
+                    cur, last = 0, None
+                    if msg.mentions:
+                        u = msg.mentions[0]
+                        e = users.setdefault(str(u.id), [getattr(u, 'display_name', str(u)), 0, 0])
+                        e[2] += 1
+                continue
             if msg.author.bot:
                 continue
-            m = re.match(r'^(\d[\d,]*)', msg.content.strip())
+            m = re.match(r'^(\d[\d,]*)', (msg.content or '').strip())
             if not m:
                 continue
             try:
                 n = int(m.group(1).replace(',', ''))
             except ValueError:
                 continue
-            uid = str(msg.author.id)
-            cur, last, valid, broke = self._count_transition((cur, last), uid, n)
-            record = max(record, cur)
-            u = users.setdefault(uid, [msg.author.display_name, 0, 0])
-            u[0] = msg.author.display_name
-            if valid:
-                u[1] += 1
-                total += 1
-            else:
-                u[2] += 1
+            _emjs = {str(r.emoji) for r in msg.reactions}
+            if '❌' in _emjs:
+                continue  # wrong count — the break is booked by the RUINED message
+            # bot's react proves validity; sequence continuation covers any
+            # message where the react didn't survive
+            if not _emjs and n != cur + 1:
+                continue
+            cur, last = n, str(msg.author.id)
+            record = max(record, n)
+            total += 1
+            e = users.setdefault(str(msg.author.id), [msg.author.display_name, 0, 0])
+            e[0] = msg.author.display_name
+            e[1] += 1
         await _db.counting_save_state(cur, last, record, total)
         for uid, (name, counts, breaks) in users.items():
             await _db.counting_add(uid, name, counts=counts, breaks=breaks)
@@ -990,12 +1003,15 @@ class PersonalityCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.author.bot:
+        # Counting channel FIRST — the counting bot's own messages carry the
+        # break announcements, so this must run before the generic bot-ignore.
+        # Player numbers aren't judged here; the bot's react validates them.
+        if COUNTING_CHANNEL_ID and message.channel.id == COUNTING_CHANNEL_ID:
+            if message.author.id == COUNTING_BOT_ID:
+                await self._track_count_ruin(message)
             return
 
-        # Counting channel: track silently, never reply here
-        if COUNTING_CHANNEL_ID and message.channel.id == COUNTING_CHANNEL_ID:
-            await self._track_count(message)
+        if message.author.bot:
             return
 
         # Clown a designated person — occasional and spaced out, never every message
@@ -1783,7 +1799,19 @@ class PersonalityCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
-        """Track reactions on Butler responses for feedback analysis."""
+        """Track reactions on Butler responses for feedback analysis. Also the
+        counting handshake: the counting bot's non-❌ react on a number is the
+        validity signal (breaks are booked from its RUINED message instead)."""
+        if (COUNTING_CHANNEL_ID and user.id == COUNTING_BOT_ID
+                and reaction.message.channel.id == COUNTING_CHANNEL_ID):
+            if str(reaction.emoji) != '❌':
+                m = re.match(r'^(\d[\d,]*)', (reaction.message.content or '').strip())
+                if m:
+                    try:
+                        await self._track_count_valid(reaction.message, int(m.group(1).replace(',', '')))
+                    except ValueError:
+                        pass
+            return
         if user.bot:
             return
         msg_id = reaction.message.id
