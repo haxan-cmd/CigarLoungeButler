@@ -1963,12 +1963,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if (isinstance(_vd_team_total, int) and isinstance(_ett, int)
             and 0 < _vd_team_total <= 3000 and 0 < _ett <= 3000):
         _tilt = _vd_team_total - _ett
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 400)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 250)
+        _L = getattr(config, 'LOBBY_TILT_LEAN', 100)
         if _tilt >= _T:
             _tm = ('🍼', 'Training Grounds')
-        elif _tilt >= 150:
+        elif _tilt >= _L:
             _tm = ('🟢', 'Favoured')
-        elif _tilt > -150:
+        elif _tilt > -_L:
             _tm = ('🟡', 'Even')
         elif _tilt > -_T:
             _tm = ('🟠', 'Uphill')
@@ -1979,7 +1980,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
     # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
     try:
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 400)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 250)
         _tilt_sticker = None
         if _tilt is not None and _tilt >= _T:
             await safe_react('🍼')

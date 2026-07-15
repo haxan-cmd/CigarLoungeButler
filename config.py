@@ -264,8 +264,12 @@ DEATHS_STICKER_THRESHOLD = 30
 # scoreboard, from the submitter's side (positive = your team led). Drives the
 # red-to-green difficulty marker on the blurb, plus a 🍼 react (+ optional
 # sticker) when your team led by LOBBY_TILT_STOMP or more.
+# Calibrated from 94 logged games (Jul 13-15 2026): median tilt +90, |tilt|
+# p50=106 p90=209, max seen 292. LEAN puts ~46% of games at Even; STOMP makes
+# the playpen/brutal tiers a top-5% event. Retune as more data accumulates.
 # Sticker name as it appears in Server Settings -> Stickers; "" disables.
-LOBBY_TILT_STOMP        = 400
+LOBBY_TILT_STOMP        = 250
+LOBBY_TILT_LEAN         = 100
 STOMP_STICKER_NAME      = ""
 
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
