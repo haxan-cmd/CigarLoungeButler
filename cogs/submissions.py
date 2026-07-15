@@ -33,6 +33,32 @@ from utils.helpers import (
 def _ordinal(n):
     return {1:'st',2:'nd',3:'rd'}.get(n if n < 20 else n % 10, 'th')
 
+# ── Submission blurb embed ────────────────────────────────────────────────────
+# The blurb is a gold embed (same gold as the boards/cards). The "⚔️" plain
+# content line above it covers users with embeds disabled and notification
+# previews. All post-hoc edits go through _blurb_desc/_blurb_edit so the string
+# surgery keeps working on the embed description.
+_BLURB_GOLD = 0xC9A24B
+_BLURB_MARKER = "⚔️"
+
+def _blurb_embed(desc, edited=False):
+    return discord.Embed(title="Run Submitted" + (" (edited)" if edited else ""),
+                         description=desc, colour=_BLURB_GOLD)
+
+def _blurb_desc(msg):
+    """Blurb text of a summary message: embed description, or plain content for
+    pre-embed-era blurbs (an edit upgrades those to the embed format)."""
+    if msg.embeds and msg.embeds[0].description:
+        return msg.embeds[0].description
+    return msg.content or ''
+
+async def _blurb_edit(msg, desc, edited=False, view=None):
+    kwargs = {'content': _BLURB_MARKER, 'embed': _blurb_embed(desc, edited=edited)}
+    if view is not None:
+        kwargs['view'] = view
+    await msg.edit(**kwargs)
+
+
 def _link_weapon(weapon, guild_id, lb_thread_map):
     """Hyperlink a weapon name to its leaderboard thread, if one exists."""
     tid = lb_thread_map.get(weapon)
@@ -1535,8 +1561,8 @@ async def _apply_edit(interaction, ev):
     _wpn_disp = _blink(ev.weapon, ev.weapon) if ev.weapon in _placed else ev.weapon
     _mapboard = f"{ev.map_name} - {ev.faction}"
     _mapfac = _blink(_mapboard, f"{ev.map_name} / {ev.faction}") if _mapboard in _placed else f"{ev.map_name} / {ev.faction}"
+    # "(edited)" lives in the embed title, not the description
     new_summary = (
-        f"**Run Submitted** *(edited)*\n"
         f"│ {_edit_name}\n"
         f"│ {_wpn_disp} • {ev.cls}\n"
         f"│ {_mapfac}\n"
@@ -1557,9 +1583,9 @@ async def _apply_edit(interaction, ev):
     if 'Triple' in _feats: _me += 1; _ml.append("*<a:triple:1365532698260668466> +1 Triple*")
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
     if _is_pac:
-        new_summary += f"\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
+        new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
     else:
-        new_summary += f"\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
+        new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
     if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
         new_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{ev.kills - ev.second_place_td}"
     def _pline(lb, pos):
@@ -1579,7 +1605,7 @@ async def _apply_edit(interaction, ev):
         # Keep the SAME edit view attached so the Edit button stays live — users can
         # correct more than one field, one per click (previously view=None killed it
         # after a single edit, so map-then-nothing-else was all you got).
-        await ev._message.edit(content=new_summary, view=ev)
+        await _blurb_edit(ev._message, new_summary, edited=True, view=ev)
     except Exception:
         pass
 
@@ -2054,7 +2080,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[TEAMSTATS] roster-skip flag error: {_e_nr}")
 
     if blurb_parts:
-        lobby_line = " · ".join(blurb_parts)
+        # One stat per line (Kill Share / Warlord / Lethality / lobby marker) —
+        # the old dot-joined single line crowded once the tilt marker landed
+        lobby_line = "\n".join(f"*{p}*" for p in blurb_parts)
 
     from cogs.registry import get_registry_thread_id as _grt
     _player_row = await _db.get_player(str(interaction.user.id))
@@ -2072,8 +2100,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     _pac_run = (kills == 0 and takedowns <= 10)
     _score_suffix = f"  ·  {_score:,} score" if (_pac_run and isinstance(_score, int) and _score > 0) else ""
+    # "Run Submitted" header lives in the embed TITLE now, not the description
     summary = (
-        f"**Run Submitted**\n"
         f"│ {_name_display}\n"
         f"│ {selected_weapon} • {selected_class}\n"
         f"│ {selected_map} / {faction}\n"
@@ -2082,10 +2110,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     )
     if feats_str:
         summary += f"\n│ {feats_str}"
-    if lobby_line:
-        summary += f"\n│ *{lobby_line}*"
     if caption:
         summary += f"\n│ *{caption}*"
+    if lobby_line:
+        summary += f"\n\n{lobby_line}"
 
     # Pacifist board thread (for hyperlinking the "lands on the Pacifist board" line)
     _pac_board_link = None
@@ -2113,9 +2141,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     if _is_pacifist and marks_earned == 0:
         _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
-        marks_summary = f"\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
+        marks_summary = f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
     else:
-        marks_summary = f"\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+        marks_summary = f"\n\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
     # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
     if kills is not None and _second_place_td is not None and kills > _second_place_td:
         marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{kills - _second_place_td}"
@@ -2240,7 +2268,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         selected_map, faction, takedowns, kills, deaths, vip, feats, message_link,
         _second_place_td, _score
     )
-    summary_reply = await original_message.reply(summary + marks_summary, mention_author=False, view=edit_view)
+    summary_reply = await original_message.reply(
+        content=_BLURB_MARKER, embed=_blurb_embed(summary + marks_summary),
+        mention_author=False, view=edit_view)
     edit_view._message = summary_reply
 
     # Background tasks — run after confirmation is posted
@@ -2345,8 +2375,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         n = int(m.group(1)) + 1
                         return f"**{n} Mark{'s' if n != 1 else ''}**"
                     return _re.sub(r'\*\*(\d+) [Mm]arks?\*\*', replacer, content)
-                new_content = increment_marks(summary_reply.content) + "\n<a:highscore:1360312918545269057> +1 High Score"
-                await summary_reply.edit(content=new_content)
+                new_content = increment_marks(_blurb_desc(summary_reply)) + "\n<a:highscore:1360312918545269057> +1 High Score"
+                await _blurb_edit(summary_reply, new_content)
             except Exception as e:
                 print(f"Highscore mark edit error: {e}")
             # Bookkeeping (lower priority): record the High Score feat so mark totals
@@ -2483,8 +2513,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         if _badge:
                             try:
                                 _vfresh = await summary_reply.channel.fetch_message(summary_reply.id)
-                                if _badge[1] not in _vfresh.content:
-                                    await summary_reply.edit(content=_vfresh.content + f"\n{_badge[0]} **{_badge[1]}**")
+                                _vdesc = _blurb_desc(_vfresh)
+                                if _badge[1] not in _vdesc:
+                                    await _blurb_edit(summary_reply, _vdesc + f"\n{_badge[0]} **{_badge[1]}**")
                             except Exception as _vbe:
                                 print(f"[BADGE] error: {_vbe}")
                         _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)
@@ -2575,7 +2606,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _fresh_reply = await summary_reply.channel.fetch_message(summary_reply.id)
                 except Exception:
                     _fresh_reply = summary_reply
-                new_content = _fresh_reply.content
+                new_content = _blurb_desc(_fresh_reply)
                 # 100 Kills board rank onto the "+1" line (hyperlinked to the board).
                 _kills_pos = next((p for lb, p in placements if lb == "100 Kills"), None)
                 if _kills_pos is not None:
@@ -2615,7 +2646,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             _mark_anchor, f"{bounty_line}\n{_mark_anchor}", 1)
                     else:
                         new_content = f"{new_content}\n{bounty_line}"
-                await summary_reply.edit(content=new_content + (f"\n{trailer}" if trailer else ""))
+                await _blurb_edit(summary_reply, new_content + (f"\n{trailer}" if trailer else ""))
             except Exception as e:
                 print(f"Placement edit error: {e}")
 
@@ -2665,8 +2696,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 _plain = f"`{_user_name}`"
                 _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"
                 _fresh = await summary_reply.channel.fetch_message(summary_reply.id)
-                if _plain in (_fresh.content or ""):
-                    await summary_reply.edit(content=_fresh.content.replace(_plain, _link, 1))
+                _fdesc = _blurb_desc(_fresh)
+                if _plain in _fdesc:
+                    await _blurb_edit(summary_reply, _fdesc.replace(_plain, _link, 1))
         except Exception as _nle:
             print(f"[NAME LINK] blurb update error: {_nle}")
         await asyncio.sleep(1)
