@@ -2586,12 +2586,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     except Exception as ub_e:
                         nerve_log_error("Unbound role assign", ub_e)
 
-                # New #1 on any leaderboard
-                # New #1 on any leaderboard — plain factual update (no Butler flavour)
+                # New #1 on any leaderboard — plain factual update (no Butler flavour).
+                # "#1" links to the run itself; board and player names get linkified.
                 new_firsts = [lb for lb, pos in placements if pos == 1]
                 if new_firsts:
-                    boards = ", ".join(new_firsts)
-                    await main_channel.send(f"**{player}** took #1 on **{boards}**.")
+                    from cogs.personality import _linkify_reply as _lky
+                    boards = ", ".join(f"**{b}**" for b in new_firsts)
+                    _first_msg = f"**{player}** took [#1]({message_link}) on {boards}."
+                    await main_channel.send(await _lky(_first_msg, _guild))
 
                 # Bounty completion
                 if newly_completed:
@@ -2640,11 +2642,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         if "High Score" in _fstr: _rm += 1
                         _old = _new - _rm
                         if _old < config.VIRTUOSO_THRESHOLD <= _new:
-                            await main_channel.send(
-                                f"\U0001f48e **{player}** has reached **Virtuoso** on the {selected_weapon} \u2014 {_new} marks across all classes. Exceptional.")
+                            from cogs.personality import _linkify_reply as _lky2
+                            await main_channel.send(await _lky2(
+                                f"\U0001f48e **{player}** has reached **Virtuoso** on the {selected_weapon} \u2014 {_new} marks across all classes. Exceptional. [The run.]({message_link})", _guild))
                         elif _old < config.MASTERY_THRESHOLD <= _new:
-                            await main_channel.send(
-                                f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {_new} marks. The Butler tips his hat.")
+                            from cogs.personality import _linkify_reply as _lky2
+                            await main_channel.send(await _lky2(
+                                f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {_new} marks. The Butler tips his hat. [The run.]({message_link})", _guild))
                     except Exception as _me:
                         print(f"[MASTERY] announce error: {_me}")
 
@@ -2927,10 +2931,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if milestones:
                     main_ch = _guild.get_channel(MAIN_CHANNEL_ID) or await _guild.fetch_channel(MAIN_CHANNEL_ID)
                     if main_ch:
+                        from cogs.personality import _linkify_reply as _lky3
                         for weapon, threshold, rank_name in milestones:
                             msg = build_milestone_message(_user_name, weapon, threshold, rank_name)
                             if msg:
                                 nerve_log_milestone(_user_name, weapon, rank_name)
+                                # board/card links + the run that did it
+                                msg = await _lky3(msg, _guild) + f" [The run.]({message_link})"
                                 await main_ch.send(msg)
                                 await asyncio.sleep(0.5)
             except Exception as e:
