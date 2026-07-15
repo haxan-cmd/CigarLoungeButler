@@ -63,6 +63,7 @@ Your server knowledge:
 - /refresh_card updates a registry card
 - /bounty status shows the active bounty card and your personal progress
 - The Manager handles all administrative matters and will follow up on feedback
+- The lounge has a counting channel. You track its stats: current run, the record, lifetime counts, who counts most, and who breaks it (the Idiot role goes to breakers). When counting stats appear in your context, use the real numbers — the record of shame is prime roasting material.
 
 How the systems work (answer players' questions about these accurately and specifically):
 - Weapon marks: 1 mark per valid 100-takedown submission. Bonus marks: +1 for 200 takedowns, +1 for 100 kills, +1 for a Triple (150 TD, 100 kills, and 20,000 points), +1 for a leaderboard High Score (beating your own best on any board).
@@ -896,9 +897,96 @@ class PersonalityCog(commands.Cog):
         if message.channel.id == SUBMISSIONS_CHANNEL_ID:
             print(f"[DELETE] Message deleted in submissions channel — author: {message.author} (bot={message.author.bot}) | content: {message.content[:80]!r} | attachments: {[a.filename for a in message.attachments]}")
 
+    @staticmethod
+    def _count_transition(state, uid, n):
+        """Pure counting-rules step. state = (current, last_user); returns
+        (new_current, new_last_user, valid, broke). Standard rules: next number
+        must be current+1 and not from the same person twice in a row."""
+        cur, last = state
+        if n == cur + 1 and uid != (last or ''):
+            return n, uid, True, False
+        if n == 1 and cur == 0:
+            return 1, uid, True, False
+        return 0, None, False, True
+
+    async def _track_count(self, message):
+        """Silently track the counting channel: current run, record, and
+        per-player counts/breaks. Mirrors the counting bot's standard rules;
+        /counting_backfill replays history if drift creeps in."""
+        m = re.match(r'^(\d[\d,]*)', message.content.strip())
+        if not m:
+            return
+        try:
+            n = int(m.group(1).replace(',', ''))
+        except ValueError:
+            return
+        try:
+            st = await _db.counting_state()
+            uid = str(message.author.id)
+            cur, last, valid, broke = self._count_transition(
+                (st['current'], st['last_user']), uid, n)
+            record = max(st['record'], cur)
+            total = st['total_counts'] + (1 if valid else 0)
+            await _db.counting_save_state(cur, last, record, total)
+            await _db.counting_add(uid, message.author.display_name,
+                                   counts=1 if valid else 0,
+                                   breaks=0 if valid else 1)
+        except Exception as e:
+            print(f"[COUNTING] track error: {e}")
+
+    @app_commands.command(name="counting_backfill", description="Replay the counting channel's full history to rebuild counting stats (mod only).")
+    async def counting_backfill(self, interaction: discord.Interaction):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        if not COUNTING_CHANNEL_ID:
+            await interaction.response.send_message(
+                "COUNTING_CHANNEL_ID isn't set in config.py.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        channel = (interaction.guild.get_channel(COUNTING_CHANNEL_ID)
+                   or await interaction.guild.fetch_channel(COUNTING_CHANNEL_ID))
+        await _db.counting_reset_all()
+        cur, last, record, total = 0, None, 0, 0
+        users = {}  # uid -> [name, counts, breaks]
+        scanned = 0
+        async for msg in channel.history(limit=None, oldest_first=True):
+            scanned += 1
+            if msg.author.bot:
+                continue
+            m = re.match(r'^(\d[\d,]*)', msg.content.strip())
+            if not m:
+                continue
+            try:
+                n = int(m.group(1).replace(',', ''))
+            except ValueError:
+                continue
+            uid = str(msg.author.id)
+            cur, last, valid, broke = self._count_transition((cur, last), uid, n)
+            record = max(record, cur)
+            u = users.setdefault(uid, [msg.author.display_name, 0, 0])
+            u[0] = msg.author.display_name
+            if valid:
+                u[1] += 1
+                total += 1
+            else:
+                u[2] += 1
+        await _db.counting_save_state(cur, last, record, total)
+        for uid, (name, counts, breaks) in users.items():
+            await _db.counting_add(uid, name, counts=counts, breaks=breaks)
+        await interaction.followup.send(
+            f"✅ Counting stats rebuilt from {scanned} messages: current {cur}, "
+            f"record {record}, {total} valid counts, {len(users)} counters.",
+            ephemeral=True)
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot:
+            return
+
+        # Counting channel: track silently, never reply here
+        if COUNTING_CHANNEL_ID and message.channel.id == COUNTING_CHANNEL_ID:
+            await self._track_count(message)
             return
 
         # Clown a designated person — occasional and spaced out, never every message
@@ -1558,6 +1646,21 @@ class PersonalityCog(commands.Cog):
                         player_stats_ctx += "\n\n" + _server_aggregates(await _db.get_all_submissions())
                     except Exception as _ae:
                         print(f"[BUTLER] aggregate stats error: {_ae}")
+                # Counting-channel stats, surfaced when someone talks counting
+                if 'count' in msg_lower:
+                    try:
+                        _cst = await _db.counting_state()
+                        if _cst['record'] or _cst['current']:
+                            _tc = await _db.counting_top('counts', 3)
+                            _tb = await _db.counting_top('breaks', 3)
+                            _tcs = ", ".join(f"{n} ({v})" for n, v in _tc) or "nobody yet"
+                            _tbs = ", ".join(f"{n} ({v})" for n, v in _tb) or "nobody yet"
+                            player_stats_ctx += (
+                                f"\n\nCounting channel: current run {_cst['current']}, record {_cst['record']}, "
+                                f"{_cst['total_counts']} lifetime valid counts. Top counters: {_tcs}. "
+                                f"Most breaks (the record of shame): {_tbs}.")
+                    except Exception as _cse:
+                        print(f"[BUTLER] counting ctx error: {_cse}")
                 mentioned_weapon = extract_weapon_from_message(resolved_message)
                 if mentioned_weapon:
                     try:

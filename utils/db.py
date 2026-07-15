@@ -52,6 +52,11 @@ _SCHEMA_STATEMENTS = [
     "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
     "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
     "UNIQUE(discord_id, subclass, weapon))",
+    "CREATE TABLE IF NOT EXISTS counting_state ("
+    "id INT PRIMARY KEY DEFAULT 1, current INT DEFAULT 0, last_user TEXT, "
+    "record INT DEFAULT 0, total_counts BIGINT DEFAULT 0)",
+    "CREATE TABLE IF NOT EXISTS counting_users ("
+    "discord_id TEXT PRIMARY KEY, name TEXT, counts INT DEFAULT 0, breaks INT DEFAULT 0)",
 ]
 
 
@@ -1263,6 +1268,57 @@ async def get_snapshots(limit: int = 52) -> list[dict]:
             "SELECT * FROM snapshots ORDER BY snapshot_date DESC LIMIT $1", limit
         )
     return [dict(r) for r in rows]
+
+
+# ── Counting channel ──────────────────────────────────────────────────────────
+
+async def counting_state() -> dict:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT current, last_user, record, total_counts FROM counting_state WHERE id=1")
+    if not r:
+        return {'current': 0, 'last_user': None, 'record': 0, 'total_counts': 0}
+    return dict(r)
+
+
+async def counting_save_state(current: int, last_user, record: int, total_counts: int):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO counting_state (id, current, last_user, record, total_counts) "
+            "VALUES (1,$1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET "
+            "current=EXCLUDED.current, last_user=EXCLUDED.last_user, "
+            "record=EXCLUDED.record, total_counts=EXCLUDED.total_counts",
+            current, last_user, record, total_counts)
+
+
+async def counting_add(discord_id: str, name: str, counts: int = 0, breaks: int = 0):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO counting_users (discord_id, name, counts, breaks) VALUES ($1,$2,$3,$4) "
+            "ON CONFLICT (discord_id) DO UPDATE SET name=EXCLUDED.name, "
+            "counts=counting_users.counts+EXCLUDED.counts, breaks=counting_users.breaks+EXCLUDED.breaks",
+            str(discord_id), name, counts, breaks)
+
+
+async def counting_top(kind: str = 'counts', limit: int = 5) -> list:
+    col = 'breaks' if kind == 'breaks' else 'counts'
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT name, {col} AS v FROM counting_users WHERE {col} > 0 ORDER BY {col} DESC LIMIT $1",
+            limit)
+    return [(r['name'], int(r['v'])) for r in rows]
+
+
+async def counting_reset_all():
+    """Wipe counting stats (used by /counting_backfill before a full replay)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM counting_users")
+        await conn.execute("DELETE FROM counting_state")
 
 
 # -- Ko-fi --------------------------------------------------------------------
