@@ -1381,26 +1381,30 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     5-game streak, so a rating never drops for a bad game."""
     lr = wr = None
     rmin = 5
-    # Ratings placement: the thread reads Takedowns board, then Kills board, then
-    # ratings. So a weapon's Lethality/Warlord ride the KILLS board embed when one
-    # exists, and the TD board stays clean top-10. Weapons without a kills board
-    # (pre-/setup_kills_boards) and map boards keep ratings on their own embed.
-    _ratings_on_this_board = True
+    # Ratings placement, themed to the board: WARLORD (takedown share) sits under
+    # the Takedowns board, LETHALITY (kill conversion) under the Kills board.
+    # Weapons without a kills board (pre-/setup_kills_boards) and map boards keep
+    # both ratings on their own embed, as before.
+    _want_leth = _want_war = True
     _ratings_source = lb_name
     if not is_map:
         try:
             _names = {r['Leaderboard Name'] for r in await _get_lb_records()}
             if _is_kills_board(lb_name):
                 _ratings_source = lb_name[:-6]   # ratings computed for the weapon itself
+                _want_war = False                # Warlord lives on the TD board above
             elif _kills_board_name(lb_name) in _names:
-                _ratings_on_this_board = False   # kills board below will carry them
+                _want_leth = False               # Lethality lives on the Kills board below
         except Exception as e:
             print(f"[BOARD] ratings-placement check error for {lb_name}: {e}")
-    if _ratings_on_this_board:
-        try:
-            lr, wr, rmin = await compute_board_ratings(_ratings_source, is_map, all_subs)
-        except Exception as e:
-            print(f"[BOARD] rating compute error for {lb_name}: {e}")
+    try:
+        lr, wr, rmin = await compute_board_ratings(_ratings_source, is_map, all_subs)
+    except Exception as e:
+        print(f"[BOARD] rating compute error for {lb_name}: {e}")
+    if not _want_leth:
+        lr = None
+    if not _want_war:
+        wr = None
     return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                      lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
 
