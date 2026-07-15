@@ -399,6 +399,50 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         return None
 
 
+async def _linkify_reply(text, guild):
+    """Post-process a Butler reply: wrap known board names and player names in
+    masked links to their threads (bots may use masked links in plain content).
+    Deterministic — the model never writes URLs. First occurrence per name,
+    longest names first so 'Messer Kills' wins over 'Messer', capped so an
+    answer doesn't turn into blue soup."""
+    try:
+        out = text
+        linked = 0
+        gid = guild.id
+        # Board threads (case-insensitive match, original casing kept as label)
+        from cogs.leaderboards import _get_lb_records
+        targets = []
+        for r in await _get_lb_records():
+            nm, tid = r['Leaderboard Name'], str(r.get('Thread ID') or '').strip()
+            if tid and len(nm) >= 3:
+                targets.append((nm, tid, re.IGNORECASE))
+        # Player registry cards (case-sensitive to avoid false hits on short names)
+        for p in await _db.get_all_players():
+            nm = (p[1] or '').strip()
+            tid = (p[2] or '').strip()
+            if nm and tid and len(nm) >= 3:
+                targets.append((nm, tid, 0))
+        targets.sort(key=lambda t: -len(t[0]))
+        for nm, tid, flags in targets:
+            if linked >= 5:
+                break
+            pat = re.compile(r'(?<![\[\w`])' + re.escape(nm) + r'(?![\w\]`])', flags)
+            m = pat.search(out)
+            if not m:
+                continue
+            # don't relink inside an existing masked link
+            if out.rfind('](', 0, m.start()) > out.rfind(')', 0, m.start()):
+                continue
+            out = (out[:m.start()]
+                   + f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
+                   + out[m.end():])
+            linked += 1
+        return out
+    except Exception as e:
+        print(f"[BUTLER] linkify error: {e}")
+        return text
+
+
 _POLL_STATS_CATEGORIES = ("map", "weapon", "faction", "subclass")
 
 
@@ -1728,6 +1772,9 @@ class PersonalityCog(commands.Cog):
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     if _is_rules_q:
                         response_text = response_text.rstrip() + f"\n\nIt's all on record in the information centre. <#{config.CHALLENGE_RULES_CHANNEL_ID}>"
+                    # Linkify board/player mentions to their threads (deterministic,
+                    # post-hoc — the model never writes URLs itself)
+                    response_text = await _linkify_reply(response_text, message.guild)
                     sent_msg = await message.reply(response_text, mention_author=False)
                     _ctx_kind = 'stats' if player_stats_ctx else 'banter'
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
