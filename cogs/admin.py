@@ -713,7 +713,8 @@ class AdminCog(commands.Cog):
             async with _BOARD_LOCK:
                 affected = set(await _db.delete_leaderboard_entries_by_link(link))
                 score_boards = set()
-                for b in ((None if vip else weapon), map_board):
+                _kills_board = f"{weapon} Kills" if (weapon and not vip) else None
+                for b in ((None if vip else weapon), _kills_board, map_board):
                     if b:
                         await _db.delete_leaderboard_entries_by_board_and_discord(b, discord_id)
                         score_boards.add(b)
@@ -754,7 +755,9 @@ class AdminCog(commands.Cog):
                         await _db.add_leaderboard_entry(b, player_name, discord_id, sc, link, weapon)
                 if is_pac:
                     await _prune_pacifist_board()
-                score_boards = {b for b in ((None if vip else weapon), map_board) if b}
+                score_boards = {b for b in ((None if vip else weapon),
+                                            None if vip else f"{weapon} Kills",
+                                            map_board) if b}
                 if score_boards:
                     await rebuild_score_boards(
                         interaction.guild, board_names=list(score_boards), only_player=discord_id)

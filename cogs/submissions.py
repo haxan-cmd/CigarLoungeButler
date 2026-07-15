@@ -1466,7 +1466,8 @@ async def _apply_edit(interaction, ev):
             # can miss if the row's link differs, so ALSO clear this player's entries on the
             # pre-edit weapon/map boards explicitly, keyed by discord_id.
             _extra_old = set()
-            for _ob in ((None if ev.vip else _old_weapon), _old_map_board):
+            _old_kills = f"{_old_weapon} Kills" if (_old_weapon and not ev.vip) else None
+            for _ob in ((None if ev.vip else _old_weapon), _old_kills, _old_map_board):
                 if _ob:
                     try:
                         await _db.delete_leaderboard_entries_by_board_and_discord(_ob, str(ev.author.id))
@@ -1483,6 +1484,7 @@ async def _apply_edit(interaction, ev):
             except Exception as _e_upd:
                 print(f"[EDIT] update_leaderboards error: {_e_upd}")
             _new_boards = {b for b in (None if ev.vip else ev.weapon,
+                                       None if ev.vip else f"{ev.weapon} Kills",
                                        f"{ev.map_name} - {ev.faction}") if b}
             _affected = set(_old_boards) | _new_boards | _extra_old
             if _affected:
@@ -2286,7 +2288,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # High Score = a personal-best placement on the run's WEAPON board or MAP
         # board. The only special rule: VIP runs are barred from weapon boards
         # (inflated kill feed), so a VIP run can only high-score on its map board.
-        _weapon_hs = bool(selected_weapon) and any(lb == selected_weapon for lb, _ in placements)
+        _weapon_hs = bool(selected_weapon) and any(
+            lb in (selected_weapon, f"{selected_weapon} Kills") for lb, _ in placements)
         _map_hs = any(lb == f"{selected_map} - {faction}" for lb, _ in placements)
         if _weapon_hs or _map_hs:
             # Immediate visual feedback FIRST — react + bump the blurb before any

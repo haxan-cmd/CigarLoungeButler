@@ -661,6 +661,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             and str(selected_weapon).strip().lower() != 'none' and takedowns > 0
             and not is_pacifist):
         updates.append((selected_weapon, takedowns, True, True, False))
+        # Companion Highest Kills board, rendered below the TD board in the same
+        # thread. Only exists once /setup_kills_boards has created its row.
+        if kills and kills > 0:
+            updates.append((_kills_board_name(selected_weapon), kills, True, True, False))
 
     map_lb_name = f"{selected_map} - {faction}"
     if (selected_map and str(selected_map).strip() and str(selected_map).strip().lower() != 'none'
@@ -829,13 +833,25 @@ _FEAT_BOARD_NAMES = {
 }
 
 
+def _kills_board_name(weapon):
+    """Per-weapon Highest Kills board, shares the weapon's thread."""
+    return f"{weapon} Kills"
+
+
+def _is_kills_board(name):
+    # "Messer Kills" yes; "100 Kills" is a feat board, not a weapon kills board
+    return name.endswith(' Kills') and name not in _FEAT_BOARD_NAMES
+
+
 def _classify_board(name, board_type):
-    """Return 'map', 'feat', or 'weapon' for a board."""
+    """Return 'map', 'feat', 'weapon', or 'weapon_kills' for a board."""
     t = (board_type or '').strip().lower()
     if t == 'map' or (' - ' in name and name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE):
         return 'map'
     if name in _FEAT_BOARD_NAMES:
         return 'feat'
+    if _is_kills_board(name):
+        return 'weapon_kills'
     return 'weapon'
 
 
@@ -965,7 +981,7 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
     for rec in all_lb_records:
         nm = rec['Leaderboard Name']
         kind = _classify_board(nm, rec.get('Type', ''))
-        if kind not in ('weapon', 'map'):
+        if kind not in ('weapon', 'map', 'weapon_kills'):
             continue
         if board_names is not None and nm not in board_names:
             continue
@@ -995,6 +1011,15 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 if (s[10] or '').strip().lower() == 'yes':  # VIP excluded from weapon boards
                     continue
                 score = td
+            elif kind == 'weapon_kills':
+                if s[3] != nm[:-6]:  # strip " Kills" to get the weapon name
+                    continue
+                if (s[10] or '').strip().lower() == 'yes':  # VIP excluded, same as TD boards
+                    continue
+                try:
+                    score = int(s[8]) if s[8] else 0
+                except (ValueError, TypeError):
+                    score = 0
             else:  # map board: "{map} - {faction}"
                 if f"{s[5]} - {s[6]}" != nm:
                     continue
@@ -1213,7 +1238,14 @@ def _lb_title(lb_name, show_title, cont=False):
     if not show_title:
         return None
     emoji = _LB_EMOJI.get(lb_name)
-    base = emoji if emoji else lb_name
+    if emoji:
+        base = emoji
+    elif _is_kills_board(lb_name):
+        base = f"{lb_name[:-6]} - Kills"      # "Messer Kills" renders as "Messer - Kills"
+    elif lb_name not in _FEAT_BOARD_NAMES and ' - ' not in lb_name:
+        base = f"{lb_name} - Takedowns"       # weapon TD board, paired with the Kills board below it
+    else:
+        base = lb_name
     return f"{base} (cont.)" if cont else base
 
 async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None):
@@ -1349,10 +1381,26 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     5-game streak, so a rating never drops for a bad game."""
     lr = wr = None
     rmin = 5
-    try:
-        lr, wr, rmin = await compute_board_ratings(lb_name, is_map, all_subs)
-    except Exception as e:
-        print(f"[BOARD] rating compute error for {lb_name}: {e}")
+    # Ratings placement: the thread reads Takedowns board, then Kills board, then
+    # ratings. So a weapon's Lethality/Warlord ride the KILLS board embed when one
+    # exists, and the TD board stays clean top-10. Weapons without a kills board
+    # (pre-/setup_kills_boards) and map boards keep ratings on their own embed.
+    _ratings_on_this_board = True
+    _ratings_source = lb_name
+    if not is_map:
+        try:
+            _names = {r['Leaderboard Name'] for r in await _get_lb_records()}
+            if _is_kills_board(lb_name):
+                _ratings_source = lb_name[:-6]   # ratings computed for the weapon itself
+            elif _kills_board_name(lb_name) in _names:
+                _ratings_on_this_board = False   # kills board below will carry them
+        except Exception as e:
+            print(f"[BOARD] ratings-placement check error for {lb_name}: {e}")
+    if _ratings_on_this_board:
+        try:
+            lr, wr, rmin = await compute_board_ratings(_ratings_source, is_map, all_subs)
+        except Exception as e:
+            print(f"[BOARD] rating compute error for {lb_name}: {e}")
     return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                      lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
 
@@ -2995,7 +3043,7 @@ class LeaderboardsCog(commands.Cog):
         for rec in all_lb:
             nm = rec["Leaderboard Name"]
             kind = _classify_board(nm, rec.get("Type", ""))
-            if kind not in ("weapon", "map"):
+            if kind not in ("weapon", "map", "weapon_kills"):
                 continue
             if name and nm != name:
                 continue
@@ -3014,6 +3062,12 @@ class LeaderboardsCog(commands.Cog):
                     if (s[10] or "").strip().lower() == "yes":
                         continue
                     score = td
+                elif kind == "weapon_kills":
+                    if s[3] != nm[:-6]:
+                        continue
+                    if (s[10] or "").strip().lower() == "yes":
+                        continue
+                    score = _safe_int(s[8])
                 else:
                     if (str(s[5]) + " - " + str(s[6])) != nm:
                         continue
@@ -3097,7 +3151,7 @@ class LeaderboardsCog(commands.Cog):
         key = discord_id if discord_id else f"legacy:{player.lower()}"
 
         kind = _classify_board(board, '')
-        weapon = board if kind == 'weapon' else ''
+        weapon = board if kind == 'weapon' else (board[:-6] if kind == 'weapon_kills' else '')
         # Purge stale rows for this person: blank-id legacy rows by name, plus any
         # junk mention-keyed rows from a bad add.
         try:
@@ -3129,6 +3183,61 @@ class LeaderboardsCog(commands.Cog):
         note = "" if survived else " ⚠️ (ranked below top-10, stored but not shown)"
         await interaction.edit_original_response(
             content=f"✅ Set **{player}** = {score} on **{board}**.{note}")
+
+    @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
+    async def setup_kills_boards(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        recs = await _get_lb_records()
+        weapon_recs = [r for r in recs
+                       if _classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'weapon'
+                       and str(r.get('Thread ID') or '').strip()]
+        existing = {r['Leaderboard Name'] for r in recs}
+        created, rendered = [], 0
+        # 1. Ensure a board row per weapon, sharing the weapon's thread
+        for rec in weapon_recs:
+            kname = _kills_board_name(rec['Leaderboard Name'])
+            if kname not in existing:
+                await _db.upsert_leaderboard(kname, rec['Thread ID'], '', 'weapon_kills')
+                created.append(kname)
+        # 2. Backfill entries from full submission history (no render yet)
+        knames = [_kills_board_name(r['Leaderboard Name']) for r in weapon_recs]
+        await rebuild_score_boards(interaction.guild, board_names=knames, render=False)
+        # 3. Render: edit in place where messages exist, else post fresh below the TD board
+        recs = await _get_lb_records()
+        for rec in recs:
+            nm = rec['Leaderboard Name']
+            if nm not in knames:
+                continue
+            msg_raw = str(rec.get('Message ID') or '').strip()
+            if msg_raw:
+                await _render_board(interaction.guild, rec, nm)
+                rendered += 1
+                continue
+            try:
+                board_rows = await _db.get_leaderboard_by_board(nm)
+                entries = [{'player': r[1], 'did': r[2], 'score': _safe_int(r[3]),
+                            'link': r[4] if len(r) > 4 else '', 'weapon': r[5] if len(r) > 5 else ''}
+                           for r in board_rows]
+                entries.sort(key=lambda x: -x['score'])
+                embeds = await _rated_embeds(nm, entries, False)
+                thread = (interaction.guild.get_channel(int(rec['Thread ID']))
+                          or await interaction.guild.fetch_channel(int(rec['Thread ID'])))
+                ids = []
+                for emb in embeds:
+                    msg = await thread.send(embed=emb)
+                    ids.append(str(msg.id))
+                    await asyncio.sleep(0.4)
+                await _db.update_leaderboard_messages(nm, '|'.join(ids))
+                rendered += 1
+            except Exception as e:
+                print(f"[KILLS SETUP] render error ({nm}): {e}")
+        await interaction.followup.send(
+            f"✅ Kills boards: {len(created)} created, {rendered} rendered "
+            f"({len(knames)} weapon threads). New submissions update them automatically.",
+            ephemeral=True)
 
     @app_commands.command(name="remove_board_score", description="Remove a player's entry from a board (mod only).")
     @app_commands.describe(board="Exact board name (e.g. Battle Axe)",
