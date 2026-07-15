@@ -1637,8 +1637,8 @@ async def _apply_edit(interaction, ev):
     }
     _lb_tmap = {}
     try:
-        from cogs.leaderboards import _get_lb_records as _lb_gr
-        _lb_tmap = {r['Leaderboard Name']: r['Thread ID'] for r in await _lb_gr() if r.get('Thread ID')}
+        from cogs.leaderboards import _get_lb_records as _lb_gr, _board_jump_path as _bjp2
+        _lb_tmap = {r['Leaderboard Name']: _bjp2(r) for r in await _lb_gr() if r.get('Thread ID')}
     except Exception:
         pass
     _gid = ev.original_message.guild.id
@@ -2235,10 +2235,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Pacifist board thread (for hyperlinking the "lands on the Pacifist board" line)
     _pac_board_link = None
     try:
-        from cogs.leaderboards import _get_lb_records as _lb_gr
+        from cogs.leaderboards import _get_lb_records as _lb_gr, _board_jump_path as _bjp3
         for _r in await _lb_gr():
             if _r.get('Leaderboard Name') == 'Pacifist' and _r.get('Thread ID'):
-                _pac_board_link = f"https://discord.com/channels/{original_message.guild.id}/{_r['Thread ID']}"
+                _pac_board_link = f"https://discord.com/channels/{original_message.guild.id}/{_bjp3(_r)}"
                 break
     except Exception as _pbe:
         _pac_board_link = None
@@ -2694,9 +2694,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             # Board thread map — used to hyperlink the board-record line to its board.
             _lb_thread_map = {}
             try:
-                from cogs.leaderboards import _get_lb_records as _lb_get_records
+                from cogs.leaderboards import _get_lb_records as _lb_get_records, _board_jump_path as _bjp
                 _lb_rows_for_links = await _lb_get_records()
-                _lb_thread_map = {r['Leaderboard Name']: r['Thread ID'] for r in _lb_rows_for_links if r.get('Thread ID')}
+                # values are "thread/first_message" paths — links land ON the board
+                _lb_thread_map = {r['Leaderboard Name']: _bjp(r) for r in _lb_rows_for_links if r.get('Thread ID')}
             except Exception as _tme:
                 print(f"[LINK] thread map error: {_tme}")
             def _placement_line(lb, pos):

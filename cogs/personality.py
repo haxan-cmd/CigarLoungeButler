@@ -409,13 +409,14 @@ async def _linkify_reply(text, guild):
         out = text
         linked = 0
         gid = guild.id
-        # Board threads (case-insensitive match, original casing kept as label)
-        from cogs.leaderboards import _get_lb_records
+        # Board threads (case-insensitive match, original casing kept as label).
+        # Paths are "thread/first_message" so the link lands ON the board embed.
+        from cogs.leaderboards import _get_lb_records, _board_jump_path
         targets = []
         for r in await _get_lb_records():
             nm, tid = r['Leaderboard Name'], str(r.get('Thread ID') or '').strip()
             if tid and len(nm) >= 3:
-                targets.append((nm, tid, re.IGNORECASE))
+                targets.append((nm, _board_jump_path(r), re.IGNORECASE))
         # Player registry cards (case-sensitive to avoid false hits on short names)
         for p in await _db.get_all_players():
             nm = (p[1] or '').strip()

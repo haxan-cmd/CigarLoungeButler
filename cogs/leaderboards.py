@@ -599,13 +599,17 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
 
     for i, emb in enumerate(embeds):
         _deco = _baked_deco(emb)
+        # The deco-marked message is the thread's bottom — it also carries the
+        # nav row (stateless link buttons, safe to reattach on every edit)
+        _nav = _nav_view(thread.guild.id) if _deco else None
         if i < len(message_ids):
             edited = False
             try:
                 msg = await thread.fetch_message(message_ids[i])
                 if _deco:
                     await msg.edit(content=msg_content, embed=emb,
-                                   attachments=[discord.File(DECORATION_BOTTOM)])
+                                   attachments=[discord.File(DECORATION_BOTTOM)],
+                                   view=_nav)
                 else:
                     await msg.edit(content=msg_content, embed=emb)
                 new_ids.append(message_ids[i])
@@ -619,19 +623,21 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
                 except Exception:
                     pass
                 msg = await thread.send(content=msg_content, embed=emb,
-                                        file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING)
+                                        file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
+                                        view=_nav if _deco else discord.utils.MISSING)
                 new_ids.append(msg.id)
                 recreated = True
         else:
             msg = await thread.send(content=msg_content, embed=emb,
-                                    file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING)
+                                    file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
+                                    view=_nav if _deco else discord.utils.MISSING)
             new_ids.append(msg.id)
             recreated = True
 
     # Boards with a baked-in border never need the standalone spacer repost.
     if recreated and not any(_baked_deco(e) for e in embeds):
         try:
-            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
         except Exception as deco_err:
             print(f"Decoration repost failed in #{thread.id}: {deco_err}")
 
@@ -848,6 +854,28 @@ _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
     "Flawless", "Mallet", "Knife", "Healing Horn", "Pacifist",
 }
+
+
+def _board_jump_path(rec):
+    """'thread_id/first_message_id' path for deep links that land ON the board
+    embed instead of wherever the thread happens to open. Falls back to the
+    bare thread id when no message id is recorded yet."""
+    tid = str(rec.get('Thread ID') or '').strip()
+    mm = _re.search(r'\d{17,20}', str(rec.get('Message ID') or ''))
+    return f"{tid}/{mm.group(0)}" if (tid and mm) else tid
+
+
+def _nav_view(guild_id):
+    """Stateless link-button nav row for the bottom of a board thread — the way
+    back out after a deep link drops someone in. Link buttons never expire."""
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Main', emoji='🏠',
+                                 url=f'https://discord.com/channels/{guild_id}/{config.MAIN_CHANNEL_ID}'))
+    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Ledger', emoji='🗂️',
+                                 url=f'https://discord.com/channels/{guild_id}/{config.LEDGER_ENTRANCE_CHANNEL_ID}'))
+    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Submit a run', emoji='📋',
+                                 url=f'https://discord.com/channels/{guild_id}/{config.SUBMISSIONS_CHANNEL_ID}'))
+    return v
 
 
 def _kills_board_name(weapon):
@@ -2294,7 +2322,7 @@ class LeaderboardsCog(commands.Cog):
             for emb in defense_embeds:
                 m = await thread.send(content=defense_header, embed=emb)
                 defense_ids.append(str(m.id))
-            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
 
             await _db.upsert_leaderboard(attack_name, str(thread.id), '|'.join(attack_ids), "map")
             await _db.upsert_leaderboard(defense_name, str(thread.id), '|'.join(defense_ids), "map")
@@ -2311,7 +2339,7 @@ class LeaderboardsCog(commands.Cog):
             for emb in embeds:
                 m = await thread.send(embed=emb)
                 msg_ids.append(str(m.id))
-            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
 
             await _db.upsert_leaderboard(name, str(thread.id), '|'.join(msg_ids), type)
 
@@ -2627,7 +2655,7 @@ class LeaderboardsCog(commands.Cog):
                 for chunk in chunks:
                     lb_msg = await thread.send(chunk)
                     msg_ids.append(str(lb_msg.id))
-                await thread.send(file=discord.File(DECORATION_BOTTOM))
+                await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
 
                 await _db.upsert_leaderboard(weapon, str(thread.id), "|".join(msg_ids), "weapon")
                 created.append(weapon)
@@ -2920,7 +2948,7 @@ class LeaderboardsCog(commands.Cog):
             for emb in embeds:
                 m = await thread.send(embed=emb)
                 new_ids.append(str(m.id))
-            await thread.send(file=discord.File(DECORATION_BOTTOM))
+            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
             await _db.update_leaderboard_messages(name, '|'.join(new_ids))
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Re-post failed: {e}")
@@ -3299,7 +3327,8 @@ class LeaderboardsCog(commands.Cog):
                     _has_deco = bool(emb.image and str(emb.image.url or '').startswith('attachment://'))
                     msg = await thread.send(
                         embed=emb,
-                        file=discord.File(DECORATION_BOTTOM) if _has_deco else discord.utils.MISSING)
+                        file=discord.File(DECORATION_BOTTOM) if _has_deco else discord.utils.MISSING,
+                        view=_nav_view(interaction.guild.id) if _has_deco else discord.utils.MISSING)
                     ids.append(str(msg.id))
                     await asyncio.sleep(0.4)
                 await _db.update_leaderboard_messages(nm, '|'.join(ids))
