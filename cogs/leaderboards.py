@@ -588,12 +588,26 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
     """
     new_ids = []
     recreated = False
+
+    def _baked_deco(e):
+        # Kills-board embeds bake the bottom spacer in via set_image with an
+        # attachment:// url — those messages must (re)upload the file each write.
+        try:
+            return bool(e.image and str(e.image.url or '').startswith('attachment://'))
+        except Exception:
+            return False
+
     for i, emb in enumerate(embeds):
+        _deco = _baked_deco(emb)
         if i < len(message_ids):
             edited = False
             try:
                 msg = await thread.fetch_message(message_ids[i])
-                await msg.edit(content=msg_content, embed=emb)
+                if _deco:
+                    await msg.edit(content=msg_content, embed=emb,
+                                   attachments=[discord.File(DECORATION_BOTTOM)])
+                else:
+                    await msg.edit(content=msg_content, embed=emb)
                 new_ids.append(message_ids[i])
                 edited = True
             except Exception as edit_err:
@@ -604,15 +618,18 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
                     await old_msg.delete()
                 except Exception:
                     pass
-                msg = await thread.send(content=msg_content, embed=emb)
+                msg = await thread.send(content=msg_content, embed=emb,
+                                        file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING)
                 new_ids.append(msg.id)
                 recreated = True
         else:
-            msg = await thread.send(content=msg_content, embed=emb)
+            msg = await thread.send(content=msg_content, embed=emb,
+                                    file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING)
             new_ids.append(msg.id)
             recreated = True
 
-    if recreated:
+    # Boards with a baked-in border never need the standalone spacer repost.
+    if recreated and not any(_baked_deco(e) for e in embeds):
         try:
             await thread.send(file=discord.File(DECORATION_BOTTOM))
         except Exception as deco_err:
@@ -1405,8 +1422,15 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
         lr = None
     if not _want_war:
         wr = None
-    return format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
-                                     lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
+    _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
+                                      lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
+    # Kills boards close the thread's decorative frame themselves: the bottom
+    # spacer is baked into the last embed (set_image renders at the embed's
+    # bottom; the referenced attachment is consumed, not shown separately).
+    # _sync_board_messages sees the attachment:// marker and uploads the file.
+    if _embs and _is_kills_board(lb_name):
+        _embs[-1].set_image(url=f"attachment://{os.path.basename(DECORATION_BOTTOM)}")
+    return _embs
 
 
 def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False):
@@ -3226,41 +3250,34 @@ class LeaderboardsCog(commands.Cog):
                 return (m.author.id == interaction.client.user.id and m.attachments
                         and not m.embeds and not (m.content or '').strip())
             if msg_raw:
+                # Re-render first: bakes the bottom spacer INTO the kills embed
+                # (set_image + attachment upload via _sync_board_messages), so the
+                # border is the last thing in the thread with no standalone post.
                 await _render_board(interaction.guild, rec, nm)
                 rendered += 1
-                # Converge the thread on: TOP -> TD board -> Kills board -> ONE
-                # closing spacer. Fix-ups (all idempotent): strip any spacer
-                # attached to the kills message (attachments render ABOVE the
-                # embed), delete the old spacer sitting BETWEEN the boards, and
-                # keep exactly one standalone spacer after the kills board.
+                # Then converge the thread: delete every standalone spacer between
+                # the TD board and the end of the thread (the old separator and
+                # any previously posted closing spacers). Idempotent.
                 try:
                     _ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
                     _first_msg = await thread.fetch_message(_ids[0])
-                    _board_msg = (_first_msg if len(_ids) == 1
-                                  else await thread.fetch_message(_ids[-1]))
-                    if _board_msg.attachments:
-                        await _board_msg.edit(attachments=[])
-                        await asyncio.sleep(0.3)
                     async for _m in thread.history(limit=4, before=_first_msg):
                         if _is_spacer(_m):
                             await _m.delete()
                             await asyncio.sleep(0.3)
                         break  # only the message directly above the kills board
-                    _tail = [m async for m in thread.history(limit=4, after=_board_msg)]
-                    _spacers = [m for m in _tail if _is_spacer(m)]
-                    for _extra in _spacers[1:]:
-                        await _extra.delete()
-                        await asyncio.sleep(0.3)
-                    if not _spacers:
-                        await thread.send(file=discord.File(DECORATION_BOTTOM))
-                        await asyncio.sleep(0.3)
+                    _after = _first_msg
+                    async for _m in thread.history(limit=6, after=_after):
+                        if _is_spacer(_m):
+                            await _m.delete()
+                            await asyncio.sleep(0.3)
                 except Exception as e:
                     print(f"[KILLS SETUP] frame fix error ({nm}): {e}")
                 continue
             try:
-                # Fresh setup: remove the thread's trailing spacer first (it would
-                # otherwise sit between the boards), post the kills board, close
-                # with one spacer at the very bottom.
+                # Fresh setup: remove the thread's trailing spacer (it would sit
+                # between the boards), then post the kills board — its last embed
+                # carries the baked-in bottom border, nothing else follows it.
                 try:
                     _tail = [m async for m in thread.history(limit=2)]
                     for _m in _tail:
@@ -3276,13 +3293,16 @@ class LeaderboardsCog(commands.Cog):
                            for r in board_rows]
                 entries.sort(key=lambda x: -x['score'])
                 embeds = await _rated_embeds(nm, entries, False)
+                _deco_name = os.path.basename(DECORATION_BOTTOM)
                 ids = []
                 for emb in embeds:
-                    msg = await thread.send(embed=emb)
+                    _has_deco = bool(emb.image and str(emb.image.url or '').startswith('attachment://'))
+                    msg = await thread.send(
+                        embed=emb,
+                        file=discord.File(DECORATION_BOTTOM) if _has_deco else discord.utils.MISSING)
                     ids.append(str(msg.id))
                     await asyncio.sleep(0.4)
                 await _db.update_leaderboard_messages(nm, '|'.join(ids))
-                await thread.send(file=discord.File(DECORATION_BOTTOM))
                 rendered += 1
             except Exception as e:
                 print(f"[KILLS SETUP] render error ({nm}): {e}")
