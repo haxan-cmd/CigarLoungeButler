@@ -34,12 +34,11 @@ def _ordinal(n):
     return {1:'st',2:'nd',3:'rd'}.get(n if n < 20 else n % 10, 'th')
 
 # ── Submission blurb embed ────────────────────────────────────────────────────
-# The blurb is a gold embed (same gold as the boards/cards). The "⚔️" plain
-# content line above it covers users with embeds disabled and notification
-# previews. All post-hoc edits go through _blurb_desc/_blurb_edit so the string
-# surgery keeps working on the embed description.
+# The blurb is a gold embed (same gold as the boards/cards), embed-only — no
+# plain-content line (an emoji-only content renders as a giant jumbo emoji).
+# All post-hoc edits go through _blurb_desc/_blurb_edit so the string surgery
+# keeps working on the embed description.
 _BLURB_GOLD = 0xC9A24B
-_BLURB_MARKER = "⚔️"
 
 def _blurb_embed(desc, edited=False):
     return discord.Embed(title="Run Submitted" + (" (edited)" if edited else ""),
@@ -53,7 +52,9 @@ def _blurb_desc(msg):
     return msg.content or ''
 
 async def _blurb_edit(msg, desc, edited=False, view=None):
-    kwargs = {'content': _BLURB_MARKER, 'embed': _blurb_embed(desc, edited=edited)}
+    # content='' clears the plain text (also wipes the old-format blurb text
+    # when an edit upgrades a pre-embed message)
+    kwargs = {'content': '', 'embed': _blurb_embed(desc, edited=edited)}
     if view is not None:
         kwargs['view'] = view
     await msg.edit(**kwargs)
@@ -2269,7 +2270,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _second_place_td, _score
     )
     summary_reply = await original_message.reply(
-        content=_BLURB_MARKER, embed=_blurb_embed(summary + marks_summary),
+        embed=_blurb_embed(summary + marks_summary),
         mention_author=False, view=edit_view)
     edit_view._message = summary_reply
 
