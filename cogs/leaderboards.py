@@ -3216,9 +3216,26 @@ class LeaderboardsCog(commands.Cog):
             if nm not in knames:
                 continue
             msg_raw = str(rec.get('Message ID') or '').strip()
+            try:
+                thread = (interaction.guild.get_channel(int(rec['Thread ID']))
+                          or await interaction.guild.fetch_channel(int(rec['Thread ID'])))
+            except Exception as e:
+                print(f"[KILLS SETUP] thread fetch error ({nm}): {e}")
+                continue
             if msg_raw:
                 await _render_board(interaction.guild, rec, nm)
                 rendered += 1
+                # Close the frame: the TD board's old bottom spacer now acts as the
+                # separator ABOVE the kills board — if the kills board is the newest
+                # message in the thread, the closing spacer is missing. Append it.
+                # (Makes re-running this command repair already-created threads.)
+                try:
+                    _last = [m async for m in thread.history(limit=1)]
+                    if _last and str(_last[0].id) in msg_raw:
+                        await thread.send(file=discord.File(DECORATION_BOTTOM))
+                        await asyncio.sleep(0.3)
+                except Exception as e:
+                    print(f"[KILLS SETUP] frame close error ({nm}): {e}")
                 continue
             try:
                 board_rows = await _db.get_leaderboard_by_board(nm)
@@ -3227,14 +3244,13 @@ class LeaderboardsCog(commands.Cog):
                            for r in board_rows]
                 entries.sort(key=lambda x: -x['score'])
                 embeds = await _rated_embeds(nm, entries, False)
-                thread = (interaction.guild.get_channel(int(rec['Thread ID']))
-                          or await interaction.guild.fetch_channel(int(rec['Thread ID'])))
                 ids = []
                 for emb in embeds:
                     msg = await thread.send(embed=emb)
                     ids.append(str(msg.id))
                     await asyncio.sleep(0.4)
                 await _db.update_leaderboard_messages(nm, '|'.join(ids))
+                await thread.send(file=discord.File(DECORATION_BOTTOM))
                 rendered += 1
             except Exception as e:
                 print(f"[KILLS SETUP] render error ({nm}): {e}")
