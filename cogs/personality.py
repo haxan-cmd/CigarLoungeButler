@@ -47,7 +47,7 @@ BUTLER_SYSTEM_PROMPT = """You are the Butler — the AI attendant of the Cigar L
 
 Your personality:
 - Dry, understated, first-person. You are the Butler.
-- Minimal. One or two sentences maximum. Never ramble.
+- Minimal. One or two sentences maximum. Never ramble. (One exception: when a data question genuinely calls for a ranking or several stats, a short dash-list is permitted — see the per-message note when it applies.)
 - Sharp-tongued and openly sarcastic, with a rude streak you make no effort to hide. You find the players faintly ridiculous and let it show.
 - Nearly every reply carries a small barb, a backhanded remark, or a dry insult at the player's expense. Contempt delivered with impeccable composure.
 - You do care, somewhere underneath, but you bury it under condescension and would sooner be dismissed than admit it.
@@ -351,10 +351,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         truncated_msg = sanitized[:300]
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
+        _is_data = _looks_like_data_question(user_message)
         # Chaos fires only on banter, never on a data/stats question (we never fabricate
         # real numbers). Keyed off the QUESTION, not whether stats are loaded — registered
         # players always have stats attached, which previously kept chaos permanently shut.
-        if not is_rules and not _looks_like_data_question(user_message) and random.random() < 0.30:
+        if not is_rules and not _is_data and random.random() < 0.30:
             chaos_note = '\n[IMPORTANT: For THIS reply only, be subtly and confidently wrong about a small NON-stats detail — misremember a map name, a food or lore fact, a date, or who said what — delivered with your usual dry composure. Never invent or alter a real player stat, rank, or number. No winking, no admitting the error.]'
             print("[BUTLER] chaos mode fired (banter)")
         else:
@@ -369,11 +370,18 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                            "do NOT recite their stats, marks, or boards, do NOT ask what is wrong, do NOT "
                            "offer alternatives or follow-up questions, and do NOT add a link yourself.")
         else:
-            user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+            list_note = ''
+            if _is_data:
+                list_note = ('\n[FORMAT: if the answer is naturally a list — a top-N, a ranking, several stats — '
+                             'give it as a short dash-list, one item per line, max 8 lines, exact numbers from your data. '
+                             'At most one dry framing line before or after. If the answer is a single fact, '
+                             'stay to one or two sentences as usual.]')
+            user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         response = await _anthropic_client.messages.create(
             model='claude-haiku-4-5-20251001',
-            max_tokens=150,
+            # Data questions get headroom for a short list; banter stays terse
+            max_tokens=350 if _is_data else 150,
             system=BUTLER_SYSTEM_PROMPT,
             messages=[{'role': 'user', 'content': user_prompt}]
         )
