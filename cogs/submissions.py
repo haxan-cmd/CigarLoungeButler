@@ -2274,8 +2274,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # boards. any_updated is also flipped by those, which produced phantom High
         # Scores with no weapon placement to show. Gate on the weapon board placing so
         # the High Score react/mark and the weapon hyperlink/placement always agree.
+        # High Score = a personal-best placement on the run's WEAPON board or MAP
+        # board. The only special rule: VIP runs are barred from weapon boards
+        # (inflated kill feed), so a VIP run can only high-score on its map board.
         _weapon_hs = bool(selected_weapon) and any(lb == selected_weapon for lb, _ in placements)
-        if _weapon_hs:
+        _map_hs = any(lb == f"{selected_map} - {faction}" for lb, _ in placements)
+        if _weapon_hs or _map_hs:
             # Immediate visual feedback FIRST — react + bump the blurb before any
             # bookkeeping, so the user sees the High Score right away.
             await safe_react("<a:highscore:1360312918545269057>")
