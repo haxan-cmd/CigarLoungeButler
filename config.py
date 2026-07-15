@@ -260,6 +260,14 @@ LETHALITY_STICKER_THRESHOLD = 60
 DEATHS_STICKER_NAME = "certifiedlounger"   # 30+ deaths -> reply with the Certified Lounger sticker
 DEATHS_STICKER_THRESHOLD = 30
 
+# Lobby tilt — difference between the two faction banner kill totals on the
+# scoreboard, from the submitter's side (positive = your team led). Drives the
+# red-to-green difficulty marker on the blurb, plus a 🍼 react (+ optional
+# sticker) when your team led by LOBBY_TILT_STOMP or more.
+# Sticker name as it appears in Server Settings -> Stickers; "" disables.
+LOBBY_TILT_STOMP        = 400
+STOMP_STICKER_NAME      = ""
+
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji

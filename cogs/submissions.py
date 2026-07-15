@@ -1957,6 +1957,46 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _leth_g = round(kills / takedowns * 100, 1)
         blurb_parts.append(f"🩸 {_leth_g}% Lethality")
 
+    # --- Lobby tilt: red→green difficulty marker from the faction banner totals ---
+    _tilt = None
+    _ett = vd.get('enemy_total_kills')
+    if (isinstance(_vd_team_total, int) and isinstance(_ett, int)
+            and 0 < _vd_team_total <= 3000 and 0 < _ett <= 3000):
+        _tilt = _vd_team_total - _ett
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 400)
+        if _tilt >= _T:
+            _tm = ('🍼', 'Training Grounds')
+        elif _tilt >= 150:
+            _tm = ('🟢', 'Favoured')
+        elif _tilt > -150:
+            _tm = ('🟡', 'Even')
+        elif _tilt > -_T:
+            _tm = ('🟠', 'Uphill')
+        else:
+            _tm = ('🔴', 'Brutal')
+        blurb_parts.append(f"{_tm[0]} {_tm[1]} lobby ({_tilt:+})")
+
+    # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
+    # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
+    try:
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 400)
+        _tilt_sticker = None
+        if _tilt is not None and _tilt >= _T:
+            await safe_react('🍼')
+            _tilt_sticker = getattr(config, 'STOMP_STICKER_NAME', '') or ''
+        if _tilt_sticker:
+            _tg = original_message.guild
+            _tstk = discord.utils.get(_tg.stickers, name=_tilt_sticker)
+            if _tstk is None:
+                try:
+                    _tstk = discord.utils.get(await _tg.fetch_stickers(), name=_tilt_sticker)
+                except Exception:
+                    _tstk = None
+            if _tstk:
+                await original_message.reply(stickers=[_tstk], mention_author=False)
+    except Exception as _e_tilt:
+        print(f"[TILT] lobby-tilt react/sticker error: {_e_tilt}")
+
 
     # --- Lobby TD rank (tracked for stats, not shown in blurb) ---
     if _all_td:
