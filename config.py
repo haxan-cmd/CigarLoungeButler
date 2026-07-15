@@ -270,7 +270,7 @@ DEATHS_STICKER_THRESHOLD = 30
 # Sticker name as it appears in Server Settings -> Stickers; "" disables.
 LOBBY_TILT_STOMP        = 50    # percent
 LOBBY_TILT_LEAN         = 25    # percent
-STOMP_STICKER_NAME      = ""
+STOMP_STICKER_NAME      = "traininggrounds"
 
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
