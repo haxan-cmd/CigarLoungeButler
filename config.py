@@ -260,16 +260,16 @@ LETHALITY_STICKER_THRESHOLD = 60
 DEATHS_STICKER_NAME = "certifiedlounger"   # 30+ deaths -> reply with the Certified Lounger sticker
 DEATHS_STICKER_THRESHOLD = 30
 
-# Lobby tilt — difference between the two faction banner kill totals on the
-# scoreboard, from the submitter's side (positive = your team led). Drives the
-# red-to-green difficulty marker on the blurb, plus a 🍼 react (+ optional
-# sticker) when your team led by LOBBY_TILT_STOMP or more.
-# Calibrated from 94 logged games (Jul 13-15 2026): median tilt +90, |tilt|
-# p50=106 p90=209, max seen 292. LEAN puts ~46% of games at Even; STOMP makes
-# the playpen/brutal tiers a top-5% event. Retune as more data accumulates.
+# Lobby tilt — PERCENTAGE gap between the two faction banner kill totals,
+# relative to the smaller team (so +50% and -50% mean the same imbalance).
+# Positive = your team led. Percentage instead of raw diff so long games and
+# big lobbies don't read as stomps (Sylveon's suggestion, 2026-07-15). Drives
+# the red-to-green marker on the blurb + a 🍼 react/sticker at STOMP or more.
+# Calibrated from 94 logged games: ~69% land Even at LEAN=25, playpen is the
+# top ~9% of wins at STOMP=50 (max observed +104%). Retune with more data.
 # Sticker name as it appears in Server Settings -> Stickers; "" disables.
-LOBBY_TILT_STOMP        = 250
-LOBBY_TILT_LEAN         = 100
+LOBBY_TILT_STOMP        = 50    # percent
+LOBBY_TILT_LEAN         = 25    # percent
 STOMP_STICKER_NAME      = ""
 
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).

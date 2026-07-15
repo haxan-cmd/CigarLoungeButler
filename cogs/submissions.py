@@ -1962,9 +1962,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _ett = vd.get('enemy_total_kills')
     if (isinstance(_vd_team_total, int) and isinstance(_ett, int)
             and 0 < _vd_team_total <= 3000 and 0 < _ett <= 3000):
-        _tilt = _vd_team_total - _ett
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 250)
-        _L = getattr(config, 'LOBBY_TILT_LEAN', 100)
+        # Percentage gap relative to the SMALLER team: +50% and -50% describe the
+        # same imbalance from opposite sides (raw diff misread long games as stomps)
+        _tilt = round((_vd_team_total - _ett) / min(_vd_team_total, _ett) * 100)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 50)
+        _L = getattr(config, 'LOBBY_TILT_LEAN', 25)
         if _tilt >= _T:
             _tm = ('🍼', 'Training Grounds')
         elif _tilt >= _L:
@@ -1975,12 +1977,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _tm = ('🟠', 'Uphill')
         else:
             _tm = ('🔴', 'Brutal')
-        blurb_parts.append(f"{_tm[0]} {_tm[1]} lobby ({_tilt:+})")
+        blurb_parts.append(f"{_tm[0]} {_tm[1]} lobby ({_tilt:+d}%)")
 
     # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
     # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
     try:
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 250)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 50)
         _tilt_sticker = None
         if _tilt is not None and _tilt >= _T:
             await safe_react('🍼')
