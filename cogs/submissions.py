@@ -1452,27 +1452,71 @@ async def _apply_edit(interaction, ev):
         await interaction.response.defer(ephemeral=True)
     except Exception:
         pass
+
+    # Recompute stat-derived feats from the EDITED numbers. Stats edits used to
+    # leave ev.feats frozen at submit-time values, so a corrected 200/100 run
+    # kept no feat lines, wrong marks, and a stale DB feats column. Non-stat
+    # tags survive; a prior confirmed Triple survives while stats still qualify.
+    try:
+        _old_f = ev.feats if isinstance(ev.feats, list) else \
+            [f.strip() for f in str(ev.feats or '').split(',') if f.strip() and f.strip() != 'None']
+        _KEEP = {'Resubmit', 'Unlisted', 'High Score'}
+        _nf = [f for f in _old_f if f in _KEEP]
+        _was_triple = 'Triple' in _old_f
+        _sc = ev.score if isinstance(ev.score, int) else None
+        _is_triple = (ev.takedowns >= 150 and ev.kills >= 100
+                      and (_was_triple or (_sc is not None and _sc >= 20000)))
+        if _is_triple:
+            _nf.append('Triple')
+        else:
+            if ev.kills >= 100:
+                _nf.append('100 Kills')
+            if ev.takedowns >= 200:
+                _nf.append('200 Takedowns')
+        if ev.deaths == 0 and ev.takedowns > 0 and not (ev.kills == 0 and ev.takedowns <= 10):
+            _nf.append('Flawless')
+        if ev.takedowns >= 150 and ev.deaths == 0:
+            _nf.append('Predator')
+        if ev.weapon in FEAT_WEAPONS and ev.kills >= 100:
+            _nf.append(ev.weapon)
+        ev.feats = _nf
+    except Exception as _e_rf:
+        print(f"[EDIT] feat recompute error: {_e_rf}")
+
     # Capture the PRE-EDIT weapon/map before we overwrite the row, so the edit can
     # clear their now-stale board entries below (an edit that changes weapon must
     # drop the old weapon's board row + mark, not just add the new one).
     _old_weapon = None
     _old_map_board = None
     _edit_placements = []
+    _team_total = None   # lobby constant, re-derived from old kills / old kill-share
     try:
         _row = await _db.get_submission_by_link(ev.message_link)
         if _row:
             _old_weapon = (_row[0] or '').strip() or None
             _om = (_row[1] or '').strip(); _of = (_row[2] or '').strip()
             _old_map_board = f"{_om} - {_of}" if _om and _of else None
+            try:
+                _ok, _oks = _row[3], _row[4]
+                if _ok and _oks and _oks > 0:
+                    _team_total = round(int(_ok) / (_oks / 100.0))
+            except (ValueError, TypeError):
+                pass
     except Exception as _e_old:
         print(f"[EDIT] pre-edit lookup error: {_e_old}")
     try:
         if ev.submission_row:
             feats_str = ", ".join(ev.feats) if ev.feats else "None"
+            _new_tks = None
+            if _team_total and ev.kills:
+                _tks_candidate = round(ev.kills / _team_total * 100, 1)
+                if 0 < _tks_candidate <= 100:
+                    _new_tks = _tks_candidate
             await _db.update_submission_fields(
                 ev.submission_row,
                 ev.weapon, ev.cls, ev.map_name, ev.faction,
                 ev.takedowns, ev.kills, ev.deaths, ev.vip, feats_str,
+                team_kill_share=_new_tks,
             )
     except Exception as e:
         print(f"Edit DB update error: {e}")
@@ -1616,6 +1660,32 @@ async def _apply_edit(interaction, ev):
         f"│ {ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
         f"│ VIP: {'Yes' if ev.vip else 'No'}"
     )
+    # Rebuild the stats block (it used to vanish on every edit): Kill Share and
+    # Warlord recomputed from the re-derived team total, Lethality from the new
+    # stats, and the lobby tilt line carried over verbatim from the old blurb
+    # (the lobby's kill totals are constants no stat edit can change).
+    _stat_lines = []
+    try:
+        if _team_total and ev.kills and ev.takedowns:
+            _ks = round(ev.kills / _team_total * 100, 1)
+            _wl = round(ev.takedowns / _team_total * 100, 1)
+            if _ks <= 100 and _wl <= 100:
+                _stat_lines.append(f"<a:mostlethal:1520490418817601658> {_ks}% Kill Share")
+                _stat_lines.append(f"<:warlord:1520490364039860347> {_wl}% Warlord")
+        if ev.kills is not None and ev.takedowns:
+            _stat_lines.append(f"🩸 {round(ev.kills / ev.takedowns * 100, 1)}% Lethality")
+        try:
+            _cur_msg = await ev._message.channel.fetch_message(ev._message.id)
+            _cur_desc = _blurb_desc(_cur_msg)
+        except Exception:
+            _cur_desc = _blurb_desc(ev._message)
+        _tl = re.search(r'\*((?:🍼|🟢|🟡|🟠|🔴)[^*\n]*lobby[^*\n]*)\*', _cur_desc or '')
+        if _tl:
+            _stat_lines.append(_tl.group(1))
+    except Exception as _e_sb:
+        print(f"[EDIT] stats block rebuild error: {_e_sb}")
+    if _stat_lines:
+        new_summary += "\n\n" + "\n".join(f"*{s}*" for s in _stat_lines)
     _is_pac = (ev.kills == 0 and ev.takedowns <= 10)
     _me = 0 if _is_pac else 1
     _ml = [] if _is_pac else ["<:cigar:1444893851427803298> *+1 Submission*"]

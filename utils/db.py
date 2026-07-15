@@ -269,13 +269,19 @@ async def add_submission(
 
 
 async def get_submission_by_link(message_link: str):
-    """Indexed (weapon, map, faction) lookup by message_link. None if not found."""
+    """Indexed lookup by message_link: (weapon, map, faction, kills,
+    team_kill_share). None if not found. kills + share let the edit flow
+    re-derive the lobby's team kill total (a lobby constant)."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         r = await conn.fetchrow(
-            "SELECT weapon, map, faction FROM submissions WHERE message_link=$1 LIMIT 1",
+            "SELECT weapon, map, faction, kills, team_kill_share "
+            "FROM submissions WHERE message_link=$1 LIMIT 1",
             message_link)
-    return (r['weapon'] or '', r['map'] or '', r['faction'] or '') if r else None
+    if not r:
+        return None
+    return (r['weapon'] or '', r['map'] or '', r['faction'] or '',
+            r['kills'], float(r['team_kill_share']) if r['team_kill_share'] is not None else None)
 
 
 async def get_submission_feats(submission_id: int) -> str:
@@ -297,8 +303,11 @@ async def update_submission_feats(submission_id: int, feats: str):
 
 async def update_submission_fields(submission_id: int, weapon: str, cls: str,
                                    map_name: str, faction: str, takedowns: int,
-                                   kills: int, deaths: int, vip: bool, feats: str):
-    """Update all editable fields on a submission row (used by edit flow)."""
+                                   kills: int, deaths: int, vip: bool, feats: str,
+                                   team_kill_share=None):
+    """Update all editable fields on a submission row (used by edit flow).
+    team_kill_share: pass a recomputed value when a stats edit changes kills
+    (it feeds the weekly ratings and used to stay frozen at submit-time)."""
     _cache_invalidate('submissions')
     pool = _pool_check()
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
@@ -309,6 +318,10 @@ async def update_submission_fields(submission_id: int, weapon: str, cls: str,
                 takedowns=$5, kills=$6, deaths=$7, vip=$8, feats=$9
             WHERE id=$10
         """, weapon, cls, map_name, faction, takedowns, kills, deaths, vip_bool, feats, submission_id)
+        if team_kill_share is not None:
+            await conn.execute(
+                "UPDATE submissions SET team_kill_share=$1 WHERE id=$2",
+                team_kill_share, submission_id)
 
 
 async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int,
