@@ -1520,6 +1520,52 @@ async def _apply_edit(interaction, ev):
     except Exception as e:
         print(f"[EDIT] board propagation error: {e}")
 
+    # Reconcile the scorecard's reactions with the EDITED stats. They only ever
+    # fired at submit time, so a corrected run kept the old stats' reactions and
+    # never gained the ones the new stats earn.
+    try:
+        _msg = ev.original_message
+        _pac = (ev.kills == 0 and ev.takedowns <= 10)
+        _feats_l = ev.feats if isinstance(ev.feats, list) else []
+        _want = {"<:cigar:1444893851427803298>"}
+        if ev.deaths == 0 and ev.takedowns > 0 and not _pac:
+            _want.add("<a:flawless:1360358300834599062>")
+        if "Triple" in _feats_l:
+            _want.add("<a:triple:1365532698260668466>")
+        if ev.kills >= 100:
+            _want.add("<a:100kill:1361412390339608686>")
+        if ev.takedowns >= 200:
+            _want.add("<a:200tkd:1363648828414230538>")
+        if ev.takedowns >= 150 and ev.deaths == 0:
+            _want.add("<a:predator:1366794896081555567>")
+        if any(lb == "TUFF" for lb, _ in _edit_placements):
+            _want.add("<a:TUFF2:1520779243879927898>")
+        if any(lb in (ev.weapon, f"{ev.weapon} Kills", f"{ev.map_name} - {ev.faction}")
+               for lb, _ in _edit_placements):
+            _want.add("<a:highscore:1360312918545269057>")
+        if any(lb == "Pacifist" for lb, _ in _edit_placements):
+            _want.add("<a:passive:1365531248268673086>")
+        # Only stat-driven reacts are ever REMOVED; cigar/bounty/others are safe.
+        _removable = {"<a:flawless:1360358300834599062>", "<a:triple:1365532698260668466>",
+                      "<a:100kill:1361412390339608686>", "<a:200tkd:1363648828414230538>",
+                      "<a:predator:1366794896081555567>"}
+        _fresh_msg = await _msg.channel.fetch_message(_msg.id)
+        _have = {str(r.emoji) for r in _fresh_msg.reactions if r.me}
+        for _e in _want - _have:
+            try:
+                await _msg.add_reaction(_e)
+                await asyncio.sleep(0.25)
+            except Exception:
+                pass
+        for _e in (_have & _removable) - _want:
+            try:
+                await _msg.remove_reaction(_e, interaction.client.user)
+                await asyncio.sleep(0.25)
+            except Exception:
+                pass
+    except Exception as _e_rx:
+        print(f"[EDIT] reaction reconcile error: {_e_rx}")
+
     # Recompute marks + refresh the registry card so the edit actually propagates.
     # Previously the edit only rewrote the summary message, leaving the card and
     # cached mark totals stale (e.g. a class edit didn't move the mark).
