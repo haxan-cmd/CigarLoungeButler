@@ -371,9 +371,19 @@ class SubmitView(discord.ui.View):
                     lines.append(f"\n⚠️ {parsed['_name_warn']}")
                 if parsed.get('_stat_warn'):
                     lines.append(f"\n⚠️ {parsed['_stat_warn']}")
-                missing = [f for f in ('subclass', 'weapon', 'map', 'faction', 'takedowns', 'kills', 'deaths') if parsed.get(f) is None]
-                if missing:
-                    lines.append(f"\n*Could not read: {', '.join(missing)} \u2014 you'll be asked for those next.*")
+                # Weapon/class are never printed on the scoreboard \u2014 asking for
+                # them is the NORMAL next step, not a vision miss. "Could not
+                # read" is reserved for fields vision genuinely should have got.
+                _real_missing = [f for f in ('map', 'faction', 'takedowns', 'kills', 'deaths')
+                                 if parsed.get(f) is None]
+                _need_pick = [('class' if f == 'subclass' else f)
+                              for f in ('subclass', 'weapon') if parsed.get(f) is None]
+                if _real_missing:
+                    _suffix = f", along with your {' and '.join(_need_pick)}" if _need_pick else ""
+                    lines.append(f"\n*Could not read: {', '.join(_real_missing)} \u2014 "
+                                 f"you'll be asked for {'those' if len(_real_missing) > 1 else 'that'} next{_suffix}.*")
+                elif _need_pick:
+                    lines.append(f"\n*Next: pick your {' and '.join(_need_pick)}.*")
                 await interaction.followup.send(content="\n".join(lines), view=view, ephemeral=True)
             else:
                 # Vision got nothing useful \u2014 caption parse then full form
