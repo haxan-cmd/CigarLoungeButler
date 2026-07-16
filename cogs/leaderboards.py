@@ -853,6 +853,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
     "Flawless", "Mallet", "Knife", "Healing Horn", "Pacifist",
+    "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
 
 
@@ -3283,8 +3284,12 @@ class LeaderboardsCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         recs = await _get_lb_records()
+        # Belt and braces: only REAL config weapons get a kills twin — a stray
+        # special board classified as 'weapon' must not (The Hundred Handed did)
+        _real_weapons = set(config.WEAPONS_1H) | set(config.WEAPONS_2H) | set(config.FEAT_WEAPONS)
         weapon_recs = [r for r in recs
                        if _classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'weapon'
+                       and r['Leaderboard Name'] in _real_weapons
                        and str(r.get('Thread ID') or '').strip()]
         existing = {r['Leaderboard Name'] for r in recs}
         created, rendered = [], 0
