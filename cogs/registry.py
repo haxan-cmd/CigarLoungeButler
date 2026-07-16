@@ -100,6 +100,8 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                 marks += 1
             if 'High Score' in feats:
                 marks += 1
+            if 'Brutal' in feats:
+                marks += 1
 
         # Use submitted subclass to disambiguate shared weapons (e.g. Messer in Raider vs Crusader)
         # Key: (weapon, subclass) if subclass known, else plain weapon name

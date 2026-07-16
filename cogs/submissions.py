@@ -1460,7 +1460,8 @@ async def _apply_edit(interaction, ev):
     try:
         _old_f = ev.feats if isinstance(ev.feats, list) else \
             [f.strip() for f in str(ev.feats or '').split(',') if f.strip() and f.strip() != 'None']
-        _KEEP = {'Resubmit', 'Unlisted', 'High Score'}
+        # 'Brutal' is a lobby constant (banner totals), not stat-derived — survives edits
+        _KEEP = {'Resubmit', 'Unlisted', 'High Score', 'Brutal'}
         _nf = [f for f in _old_f if f in _KEEP]
         _was_triple = 'Triple' in _old_f
         _sc = ev.score if isinstance(ev.score, int) else None
@@ -1698,6 +1699,7 @@ async def _apply_edit(interaction, ev):
         _kp = next((p for lb, p in _edit_placements if lb == "100 Kills"), None)
         _ml.append(f"*<a:100kill:1361412390339608686> +1{(' — ' + _rlink('100 Kills', _kp)) if _kp else ''}*")
     if 'Triple' in _feats: _me += 1; _ml.append("*<a:triple:1365532698260668466> +1 Triple*")
+    if 'Brutal' in _feats: _me += 1; _ml.append("*🔴 +1 Brutal lobby*")
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
     if _is_pac:
         new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
@@ -2122,6 +2124,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         else:
             _tm = ('🔴', 'Brutal')
         blurb_parts.append(f"{_tm[0]} {_tm[1]} lobby ({_tilt:+d}%)")
+        # Brutal-lobby valor: surviving a 75%+ enemy kill lead earns +1 mark.
+        # Tagged on the feats column so the mark math and edits see it.
+        if _tilt <= -_T and not (kills == 0 and takedowns <= 10):
+            feats.append('Brutal')
+            feats_str = ", ".join(feats) if feats else None
 
     # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
     # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
@@ -2257,6 +2264,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
+    if 'Brutal' in feats:
+        marks_earned += 1
+        marks_lines.append("*🔴 +1 Brutal lobby*")
     if _is_pacifist and marks_earned == 0:
         _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
         marks_summary = f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
