@@ -266,10 +266,11 @@ DEATHS_STICKER_THRESHOLD = 30
 # Positive = your team led. Percentage instead of raw diff so long games and
 # big lobbies don't read as stomps (Sylveon's suggestion, 2026-07-15). Drives
 # the red-to-green marker on the blurb + a 🍼 react/sticker at STOMP or more.
-# Calibrated from 94 logged games: ~69% land Even at LEAN=25, playpen is the
-# top ~9% of wins at STOMP=50 (max observed +104%). Retune with more data.
+# Calibrated from 94 logged games: ~69% land Even at LEAN=25. STOMP=75 keeps
+# the baby bottle for true massacres only (top ~5%; a 600-400 game at +50% is
+# a solid win, not a playpen — raised from 50 on 2026-07-16). Max seen: +104%.
 # Sticker name as it appears in Server Settings -> Stickers; "" disables.
-LOBBY_TILT_STOMP        = 50    # percent
+LOBBY_TILT_STOMP        = 75    # percent
 LOBBY_TILT_LEAN         = 25    # percent
 STOMP_STICKER_NAME      = "traininggrounds"
 

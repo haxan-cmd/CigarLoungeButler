@@ -2108,7 +2108,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # Percentage gap relative to the SMALLER team: +50% and -50% describe the
         # same imbalance from opposite sides (raw diff misread long games as stomps)
         _tilt = round((_vd_team_total - _ett) / min(_vd_team_total, _ett) * 100)
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 50)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 75)
         _L = getattr(config, 'LOBBY_TILT_LEAN', 25)
         # Result-agnostic by design: the kill gap is the story, win or lose
         if _tilt >= _T:
@@ -2126,7 +2126,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
     # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
     try:
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 50)
+        _T = getattr(config, 'LOBBY_TILT_STOMP', 75)
         _tilt_sticker = None
         if _tilt is not None and _tilt >= _T:
             await safe_react('🍼')
