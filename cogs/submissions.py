@@ -2835,6 +2835,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if not _tid:
                 _pr = await _db.get_player(str(_user_id))
                 _tid = _pr[2] if _pr and len(_pr) > 2 and _pr[2] else None
+            # Only link a thread that actually exists — a stale id from a
+            # skipped/purged card produced "you don't have access" popups
+            if _tid:
+                try:
+                    _th_ok = _guild.get_thread(int(_tid)) or await _guild.fetch_channel(int(_tid))
+                except Exception:
+                    _th_ok = None
+                if not _th_ok:
+                    _tid = None
             if _tid:
                 _plain = f"`{_user_name}`"
                 _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"

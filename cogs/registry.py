@@ -1435,6 +1435,12 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                         pass
         except Exception:
             pass
+        # Clear the stored thread id too — leaving it made blurbs link the
+        # player's name to a deleted/never-created thread ("no access" popup)
+        try:
+            await _db.clear_registry_thread(str(discord_id))
+        except Exception as _e_clr:
+            print(f"[CARD] stale thread-id clear error: {_e_clr}")
         print(f"Skipping registry card for {player_name} — no marks")
         return
     try:

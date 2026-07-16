@@ -475,6 +475,19 @@ async def set_manual_feat_count(discord_id: str, feat: str, count: int):
         )
 
 
+async def clear_registry_thread(discord_id: str):
+    """Null the stored card-thread id in BOTH tables. Used when a no-marks
+    card is skipped/deleted — a stale id here turns every blurb name-link
+    into Discord's 'you don't have access' popup."""
+    _cache_invalidate('players')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE registry_cards SET forum_thread_id=NULL WHERE discord_id=$1", str(discord_id))
+        await conn.execute(
+            "UPDATE players SET forum_thread_id=NULL WHERE discord_id=$1", str(discord_id))
+
+
 async def update_player_thread(discord_id: str, thread_id: str):
     _cache_invalidate('players')
     pool = _pool_check()
