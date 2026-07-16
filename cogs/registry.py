@@ -1549,14 +1549,31 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     # 403s (50021) and aborted the whole card update for the player
                     existing = [m async for m in thread.history(limit=50, oldest_first=True)
                                 if (_meid is None or m.author.id == _meid) and not m.is_system()]
+                    from cogs.leaderboards import _nav_view as _card_nav
                     for i, group in enumerate(_groups):
                         _content = _subtitle if i == 0 else None
+                        _is_last = (i == len(_groups) - 1)
                         if i < len(existing):
-                            if _sig(existing[i].embeds) != _sig(group) or (existing[i].content or None) != (_content or None):
-                                await existing[i].edit(content=_content, embeds=group, attachments=[])
+                            _changed = (_sig(existing[i].embeds) != _sig(group)
+                                        or (existing[i].content or None) != (_content or None))
+                            # last card message carries the nav row; add it even
+                            # when the card content itself is unchanged
+                            _needs_nav = _is_last and not existing[i].components
+                            _stale_nav = (not _is_last) and bool(existing[i].components)
+                            if _changed or _needs_nav or _stale_nav:
+                                _kw = {'content': _content, 'embeds': group, 'attachments': []}
+                                if _is_last:
+                                    _kw['view'] = _card_nav(guild.id, context='card')
+                                elif _stale_nav:
+                                    _kw['view'] = None
+                                await existing[i].edit(**_kw)
                         else:
                             await asyncio.sleep(0.4)
-                            await thread.send(content=_content, embeds=group)
+                            if _is_last:
+                                await thread.send(content=_content, embeds=group,
+                                                  view=_card_nav(guild.id, context='card'))
+                            else:
+                                await thread.send(content=_content, embeds=group)
                     for extra in existing[len(_groups):]:
                         try:
                             if extra.id == thread.id:
@@ -1576,11 +1593,21 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     print(f"Registry thread edit error for {player_name}: {e}")
                     return
 
-        thread_with_msg = await forum.create_thread(name=player_name, content=_subtitle, embeds=_groups[0])
-        thread = thread_with_msg.thread
-        for group in _groups[1:]:
-            await asyncio.sleep(0.4)
-            await thread.send(embeds=group)
+        from cogs.leaderboards import _nav_view as _card_nav2
+        if len(_groups) == 1:
+            thread_with_msg = await forum.create_thread(
+                name=player_name, content=_subtitle, embeds=_groups[0],
+                view=_card_nav2(guild.id, context='card'))
+            thread = thread_with_msg.thread
+        else:
+            thread_with_msg = await forum.create_thread(name=player_name, content=_subtitle, embeds=_groups[0])
+            thread = thread_with_msg.thread
+            for _gi, group in enumerate(_groups[1:], 1):
+                await asyncio.sleep(0.4)
+                if _gi == len(_groups) - 1:
+                    await thread.send(embeds=group, view=_card_nav2(guild.id, context='card'))
+                else:
+                    await thread.send(embeds=group)
         await save_registry_thread_id(discord_id, player_name, thread.id)
         print(f"Registry card created for {player_name}")
         if not skip_index:

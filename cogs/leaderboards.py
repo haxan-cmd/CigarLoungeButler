@@ -865,16 +865,22 @@ def _board_jump_path(rec):
     return f"{tid}/{mm.group(0)}" if (tid and mm) else tid
 
 
-def _nav_view(guild_id):
-    """Stateless link-button nav row for the bottom of a board thread — the way
-    back out after a deep link drops someone in. Link buttons never expire."""
+def _nav_view(guild_id, context='board'):
+    """Stateless link-button nav row for the bottom of a thread — the way back
+    out after a deep link drops someone in. Context-aware: the first button
+    relates to where you ARE (Ledger for boards, Archive Index for player
+    cards), then Main and the 💯 submissions channel everywhere. Link buttons
+    never expire."""
+    def _btn(label, emoji, channel_id):
+        return discord.ui.Button(style=discord.ButtonStyle.link, label=label, emoji=emoji,
+                                 url=f'https://discord.com/channels/{guild_id}/{channel_id}')
     v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Main', emoji='🏠',
-                                 url=f'https://discord.com/channels/{guild_id}/{config.MAIN_CHANNEL_ID}'))
-    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Ledger', emoji='🗂️',
-                                 url=f'https://discord.com/channels/{guild_id}/{config.LEDGER_ENTRANCE_CHANNEL_ID}'))
-    v.add_item(discord.ui.Button(style=discord.ButtonStyle.link, label='Submit a run', emoji='📋',
-                                 url=f'https://discord.com/channels/{guild_id}/{config.SUBMISSIONS_CHANNEL_ID}'))
+    if context == 'card':
+        v.add_item(_btn('Archive Index', '📇', config.REGISTRY_INDEX_THREAD_ID))
+    else:
+        v.add_item(_btn('Ledger', '🗂️', config.LEDGER_ENTRANCE_CHANNEL_ID))
+    v.add_item(_btn('Main', '🏠', config.MAIN_CHANNEL_ID))
+    v.add_item(_btn('100', '💯', config.SUBMISSIONS_CHANNEL_ID))
     return v
 
 
@@ -2444,7 +2450,37 @@ class LeaderboardsCog(commands.Cog):
                 nerve_log_error(f"Leaderboard refresh {lb_name}", e)
                 failed.append(lb_name)
 
+        # Dress thread-bottom spacer messages (map/feat threads) with the nav
+        # row — normal refreshes edit board messages and never touch the
+        # standalone spacer, so existing threads need this retro pass. Skips
+        # spacers that already have buttons; safe to re-run.
+        dressed = 0
+        try:
+            _seen_threads = set()
+            for rec in all_lb_rows:
+                tid = str(rec.get('Thread ID') or '').strip()
+                if not tid or tid in _seen_threads:
+                    continue
+                _seen_threads.add(tid)
+                try:
+                    th = guild.get_channel(int(tid)) or await guild.fetch_channel(int(tid))
+                    last = [m async for m in th.history(limit=1)]
+                    if last:
+                        m = last[0]
+                        if (m.author.id == interaction.client.user.id and m.attachments
+                                and not m.embeds and not (m.content or '').strip()
+                                and not m.components):
+                            await m.edit(view=_nav_view(guild.id))
+                            dressed += 1
+                            await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+        except Exception as _e_nd:
+            print(f"[NAV] spacer dress error: {_e_nd}")
+
         summary = f"✅ Refreshed {len(done)} boards."
+        if dressed:
+            summary += f" Nav buttons added to {dressed} threads."
         if failed:
             summary += f"\n❌ Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)
