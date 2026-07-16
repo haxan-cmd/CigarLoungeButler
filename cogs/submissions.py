@@ -2110,6 +2110,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _tilt = round((_vd_team_total - _ett) / min(_vd_team_total, _ett) * 100)
         _T = getattr(config, 'LOBBY_TILT_STOMP', 50)
         _L = getattr(config, 'LOBBY_TILT_LEAN', 25)
+        # Result-agnostic by design: the kill gap is the story, win or lose
         if _tilt >= _T:
             _tm = ('🍼', 'Training Grounds')
         elif _tilt >= _L:

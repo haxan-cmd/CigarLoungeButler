@@ -113,7 +113,9 @@ The T column (takedowns) is always a small integer, typically 10–400. The SCOR
 
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null}"""
+Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
+
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
 def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None) -> dict:
@@ -127,7 +129,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         'weapon': None, 'subclass': None, 'map': None, 'faction': None, 'name': None,
         'takedowns': None, 'kills': None, 'deaths': None, 'score': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
-        'team_total_kills': None, 'enemy_total_kills': None,
+        'team_total_kills': None, 'enemy_total_kills': None, 'match_result': None,
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _gemini_client:
