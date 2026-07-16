@@ -2652,42 +2652,86 @@ class RegistryCog(commands.Cog):
         # -- Total marks
         total_marks = sum(flat_marks.values())
 
-        # -- Build output
+        # ── Season & combat record extras ─────────────────────────────────
+        avg_td = round(sum(td_list) / len(td_list)) if td_list else 0
+        avg_k = round(sum(kill_list) / len(kill_list)) if kill_list else 0
+        kill_rate = round(avg_k / avg_td * 100) if avg_td else 0
+        brutal_count = sum(1 for r in player_subs if len(r) > 11 and 'Brutal' in (r[11] or ''))
+        tuff_count = sum(1 for ld_r in ld_all
+                         if len(ld_r) > 1 and ld_r[0].strip() == 'TUFF'
+                         and ld_r[1].strip() == resolved_name)
+        season_line = None
+        try:
+            _season = await _db.get_current_season()
+            if _season:
+                from cogs.favourites import season_total
+                _standings, _, _ = await season_total(_season)
+                _slabel = _season.get('label') or 'the season'
+                for _i, (_nm, _pts) in enumerate(_standings, 1):
+                    if _nm == resolved_name:
+                        season_line = f"#{_i} in {_slabel} — {_pts} GP"
+                        break
+        except Exception as _se:
+            print(f"[STATS] season line error: {_se}")
+        counting_line = None
+        try:
+            _tc = dict(await _db.counting_top('counts', 500))
+            _tb = dict(await _db.counting_top('breaks', 500))
+            _cc, _cb = _tc.get(resolved_name, 0), _tb.get(resolved_name, 0)
+            if _cc or _cb:
+                counting_line = f"🔢 {_cc} counts · {_cb} break{'s' if _cb != 1 else ''}"
+        except Exception:
+            pass
+
+        # -- Build output as a gold embed (matches boards/cards/blurbs)
         cigar = "<:cigar:1444893851427803298>"
-        lines = [f"{cigar} **`{resolved_name}`** — {sub_count} submissions", ""]
+        emb = discord.Embed(
+            colour=0xC9A24B,
+            description=(f"{cigar} **`{resolved_name}`** — {sub_count} submissions · "
+                         f"{total_marks} career marks"))
+
+        def _field(name, lines_):
+            v = "\n".join(lines_)
+            if len(v) > 1024:
+                v = v[:1000].rsplit('\n', 1)[0] + "\n…"
+            if v.strip():
+                emb.add_field(name=name, value=v, inline=False)
 
         if butler_titles:
-            lines.append("**Current Titles**")
-            for t in butler_titles:
-                lines.append(f"│ {t}")
-            lines.append("")
+            _field("Current Titles", [f"│ {t}" for t in butler_titles])
 
-        lines.append("**Title Standings**")
-        for t in title_lines:
-            lines.append(f"│ {t}")
+        _field("Title Standings", [f"│ {t}" for t in title_lines])
 
-        # Personal Bests
+        record_lines = []
+        if season_line:
+            record_lines.append(f"│ 🏁 {season_line}")
+        if td_list:
+            record_lines.append(f"│ 📊 avg {avg_td} TD / {avg_k} K per run ({kill_rate}% kill rate)")
+        if tuff_count:
+            record_lines.append(f"│ <a:TUFF2:1520779243879927898> {tuff_count} TUFF entr{'y' if tuff_count == 1 else 'ies'}")
+        if brutal_count:
+            record_lines.append(f"│ 🔴 {brutal_count} Brutal lobb{'y' if brutal_count == 1 else 'ies'} survived")
+        if counting_line:
+            record_lines.append(f"│ {counting_line}")
+        if record_lines:
+            _field("Season & Record", record_lines)
+
         pb_td_str = _pb_str(best_td_row)
         pb_kills_str = _pb_str(best_kills_row) if best_kills_row and _pb_str(best_kills_row) != pb_td_str else None
-        has_pb = pb_td_str or pb_kills_str or biggest_lead_str
-        has_lethality = best_lethality > 0
-
-        if has_pb or has_lethality:
-            lines.append("")
-            lines.append("**Personal Bests**")
-            if pb_td_str:
-                lines.append(f"│ <a:toptkd:1360312666475728958> {pb_td_str}")
-            if pb_kills_str:
-                lines.append(f"│ <a:topkill:1360314538364240024> {pb_kills_str}")
-            if biggest_lead_str:
-                lines.append(f"│ 🏆 {biggest_lead_str}")
-            if has_lethality:
-                lethal_emoji = "<a:mostlethal:1520490418817601658>" if best_lethality >= 5.0 else "🧪"
-                lines.append(f"│ {lethal_emoji} {best_lethality}% peak lethality")
+        pb_lines = []
+        if pb_td_str:
+            pb_lines.append(f"│ <a:toptkd:1360312666475728958> {pb_td_str}")
+        if pb_kills_str:
+            pb_lines.append(f"│ <a:topkill:1360314538364240024> {pb_kills_str}")
+        if biggest_lead_str:
+            pb_lines.append(f"│ 🏆 {biggest_lead_str}")
+        if best_lethality > 0:
+            lethal_emoji = "<a:mostlethal:1520490418817601658>" if best_lethality >= 5.0 else "🧪"
+            pb_lines.append(f"│ {lethal_emoji} {best_lethality}% peak lethality")
+        if pb_lines:
+            _field("Personal Bests", pb_lines)
 
         if special_ops:
-            lines.append("")
-            lines.append("**Special Ops**")
             ops_parts = []
             for feat, link in special_ops.items():
                 emoji = SPECIAL_OPS_EMOJIS.get(feat, "")
@@ -2695,14 +2739,12 @@ class RegistryCog(commands.Cog):
                     ops_parts.append(f"[{emoji} {feat}]({link})")
                 else:
                     ops_parts.append(f"{emoji} {feat}")
-            lines.append("│ " + "  ".join(ops_parts))
+            _field("Special Ops", ["│ " + "  ".join(ops_parts)])
 
         if hh_count > 0:
             _hh_emoji = "<:hhanded:1430199468246044772>"
             hh_suffix = " ✓" if hh_complete else ""
-            lines.append("")
-            lines.append(f"**Hundred Handed**")
-            lines.append(f"│ {_hh_emoji} {hh_count}/{HH_TOTAL}{hh_suffix}")
+            _field("Hundred Handed", [f"│ {_hh_emoji} {hh_count}/{HH_TOTAL}{hh_suffix}"])
 
         if bounty_completions:
             def _place(n):
@@ -2716,26 +2758,23 @@ class RegistryCog(commands.Cog):
                 (emoji or _dart) + _place(pl)
                 for _, pl, emoji in _sorted_bounties
             )
-            lines.append("")
-            lines.append(f"**Bounties**")
-            lines.append(f"│ {bounty_row}")
+            _field("Bounties", [f"│ {bounty_row}"])
 
         _mcounts = await get_mastered_weapons_for_player(int(discord_id_str))
         if _mcounts:
             _VIRT = config.VIRTUOSO_THRESHOLD
             _vdefault = getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "\U0001f48e")
-            lines.append("")
-            lines.append("**Weapon Mastery**")
+            mastery_lines = []
             for w, c in sorted(_mcounts.items(), key=lambda t: -t[1]):
                 if c >= _VIRT:
                     _e = config.VIRTUOSO_WEAPON_EMOJIS.get(w, _vdefault)
-                    lines.append(f"│ {_e} **{w}** ×{c} — *Virtuoso*")
+                    mastery_lines.append(f"│ {_e} **{w}** ×{c} — *Virtuoso*")
                 else:
                     _me = getattr(config, "MASTERY_WEAPON_EMOJIS", {}).get(w, "👑")
-                    lines.append(f"│ {_me} {w} ×{c}")
+                    mastery_lines.append(f"│ {_me} {w} ×{c}")
+            _field("Weapon Mastery", mastery_lines)
 
-        output = "\n".join(lines)
-        await interaction.followup.send(output[:1900])
+        await interaction.followup.send(embed=emb)
 
 
 async def setup(bot):
