@@ -2108,7 +2108,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
 
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
-    if kills is not None and takedowns and takedowns > 0:
+    # Pacifist runs are support play: a 0.0% Lethality line is noise, not a stat
+    if (kills is not None and takedowns and takedowns > 0
+            and not (kills == 0 and takedowns <= 10)):
         _leth_g = round(kills / takedowns * 100, 1)
         blurb_parts.append(f"🩸 {_leth_g}% Lethality")
 

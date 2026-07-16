@@ -1314,6 +1314,13 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     def _rk(r):
         if len(r) > 11 and r[11] and ('Resubmit' in str(r[11]) or 'Unlisted' in str(r[11])):
             return False
+        # Pacifist runs (0 kills, <=10 TD) are support play — one of them in a
+        # 5-game window would tank the player's Lethality/Warlord streak
+        try:
+            if int(r[8] or 0) == 0 and int(r[7] or 0) <= 10:
+                return False
+        except (ValueError, TypeError):
+            pass
         if window_start is not None:
             try:
                 _t = datetime.strptime(str(r[0]).strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()

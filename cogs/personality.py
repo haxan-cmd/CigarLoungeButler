@@ -1328,7 +1328,7 @@ class PersonalityCog(commands.Cog):
                                         _ltd = int(_lr[7]); _lk = int(_lr[8])
                                     except (ValueError, IndexError):
                                         continue
-                                    if _ltd > 0 and _lk >= 0:
+                                    if _ltd > 0 and _lk >= 0 and not (_lk == 0 and _ltd <= 10):
                                         _ratio = _lk / _ltd * 100
                                         _leth_runs.append(_ratio)
                                         if _best_leth is None or _ratio > _best_leth[0]:

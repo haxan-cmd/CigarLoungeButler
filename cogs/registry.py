@@ -2542,6 +2542,8 @@ class RegistryCog(commands.Cog):
                 rtd = int(r[7]); rk = int(r[8])
             except (ValueError, IndexError):
                 continue
+            if rk == 0 and rtd <= 10:
+                continue  # pacifist runs stay out of the averages and PBs
             td_list.append(rtd); kill_list.append(rk)
             if rtd > pb_td:
                 pb_td = rtd; best_td_row = r
