@@ -77,7 +77,8 @@ def build_challenge_rules_embeds():
         "<a:200tkd:1363648828414230538> +1 for 200 Takedowns\n"
         "<a:100kill:1361412390339608686> +1 for 100 Kills\n"
         "<a:triple:1365532698260668466> +1 for Triple\n"
-        "<a:highscore:1360312918545269057> +1 for Leaderboard High Score"
+        "<a:highscore:1360312918545269057> +1 for Leaderboard High Score\n"
+        "🔴 +1 for a Brutal lobby — your team outkilled by 75% or more. Valor pay."
     ), inline=False)
     e.add_field(name="Note", value="Goedendag counts for Polearms **and** Engineer (Footman).", inline=False)
     embeds.append(e)
