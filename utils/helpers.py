@@ -1,5 +1,6 @@
 import os
 import random
+import asyncio
 from datetime import datetime, timezone
 
 import config
@@ -26,16 +27,27 @@ async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
     would consume the entire allowance and return empty content."""
     if not _openai_client:
         return ''
-    r = await _openai_client.chat.completions.create(
-        model=BUTLER_MODEL,
-        max_completion_tokens=max_tokens,
-        reasoning_effort='none',
-        messages=[
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': prompt},
-        ],
-    )
-    return (r.choices[0].message.content or '').strip()
+    # One retry: a transient refusal (or a blip) otherwise costs the player a
+    # silent non-answer, which reads as the Butler ignoring them.
+    last_err = None
+    for _attempt in range(2):
+        try:
+            r = await _openai_client.chat.completions.create(
+                model=BUTLER_MODEL,
+                max_completion_tokens=max_tokens,
+                reasoning_effort='none',
+                messages=[
+                    {'role': 'system', 'content': system},
+                    {'role': 'user', 'content': prompt},
+                ],
+            )
+            return (r.choices[0].message.content or '').strip()
+        except Exception as e:
+            last_err = e
+            if _attempt == 0:
+                await asyncio.sleep(1.5)
+    print(f"[BUTLER] completion failed after retry (model={BUTLER_MODEL}): {last_err}")
+    return ''
 
 # Gemini client for vision (scorecard parsing)
 _gemini_client = None
