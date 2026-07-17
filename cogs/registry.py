@@ -860,6 +860,112 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
 # source of truth now so the two can't drift.
 
 
+def _feats_of_legend_lines(named_feats, feat_submissions, board_counts):
+    """Feats of Legend bullet lines — shared by the registry card and /stats so
+    the two renderings can never drift. Returns [] when the player has none."""
+    import re
+    lines = []
+    if not (named_feats or feat_submissions):
+        return lines
+    if 'hhanded' in named_feats:
+        lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
+    # Flawless shows with link as PB; everything else groups with ×N count
+    flawless_emoji = FEAT_EMOJIS['Flawless']
+    flawless_entry = None
+    feat_counts = {}
+    feat_display = {}
+    FEAT_DISPLAY_ORDER = [
+        FEAT_EMOJIS['200 Takedowns'],
+        FEAT_EMOJIS['100 Kills'],
+        FEAT_EMOJIS['Triple'],
+        FEAT_EMOJIS['Predator'],
+    ]
+    for emojis, link in feat_submissions:
+        parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
+        normalized = ''.join(sorted(parts))
+        if normalized == flawless_emoji:
+            if flawless_entry is None:
+                flawless_entry = (emojis, link)
+            continue
+        if FEAT_EMOJIS['Triple'] in normalized:
+            if not (FEAT_EMOJIS['200 Takedowns'] in normalized and FEAT_EMOJIS['100 Kills'] in normalized):
+                continue
+        feat_counts[normalized] = feat_counts.get(normalized, 0) + 1
+        if normalized not in feat_display:
+            ordered = [e for e in FEAT_DISPLAY_ORDER if e in normalized]
+            remaining = [p for p in parts if p not in FEAT_DISPLAY_ORDER]
+            feat_display[normalized] = ''.join(ordered + remaining)
+
+    _e = FEAT_EMOJIS
+    FEAT_LABELS = {
+        ''.join(sorted([_e['Pacifist']])):                                               "Pacifist",
+        ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
+        ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",
+        ''.join(sorted([_e['Triple']])):                                                 "Triple",
+        ''.join(sorted([_e['Predator']])):                                               "Predator",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills']])):                         "200 TD / 100 Kills",
+        ''.join(sorted([_e['200 Takedowns'], _e['Triple']])):                            "Triple",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple']])):           "Triple",
+        ''.join(sorted([_e['200 Takedowns'], _e['Predator']])):                          "Predator",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Predator']])):         "Predator",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Predator']])): "Triple + Predator",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless']])): "Hundred-Handed",
+        ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless'], _e['Predator']])): "Hundred-Handed + Predator",
+    }
+
+    if flawless_entry:
+        emojis, link = flawless_entry
+        lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
+    _board_count_map = {
+        ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
+        ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
+    }
+    _triple_db = board_counts.get('Triple') or None
+    _rendered_labels = set()
+    for normalized, count in feat_counts.items():
+        hhanded_emoji = "<:hhanded:1430199468246044772>"
+        has_hhanded = hhanded_emoji in normalized
+        lookup_key = normalized.replace(hhanded_emoji, '')
+        if has_hhanded:
+            if 'hhanded' in named_feats:
+                continue
+            label = "Hundred-Handed"
+        else:
+            label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
+        if label == "Triple" and _triple_db is not None:
+            display_count = _triple_db
+        elif label == "200 Takedowns" and board_counts.get('200 Takedowns'):
+            display_count = board_counts['200 Takedowns']
+        elif label == "100 Kills" and board_counts.get('100 Kills'):
+            display_count = board_counts['100 Kills']
+        else:
+            _db_override = _board_count_map.get(normalized)
+            display_count = _db_override if _db_override is not None else count
+        if display_count >= 5:
+            label_str = f"**{label}**"
+        else:
+            label_str = f"*{label}*"
+        suffix = f" ×{display_count}" if display_count > 1 else ""
+        display_emojis = feat_display.get(normalized, normalized)
+        lines.append(f"• {display_emojis}{suffix} {label_str}")
+        _rendered_labels.add(label)
+    _fallback_feats = [
+        ('200 Takedowns', FEAT_EMOJIS['200 Takedowns']),
+        ('100 Kills',     FEAT_EMOJIS['100 Kills']),
+        ('Triple',        FEAT_EMOJIS['Triple']),
+    ]
+    for _fb_label, _fb_emoji in _fallback_feats:
+        if _fb_label in _rendered_labels:
+            continue
+        _fb_count = board_counts.get(_fb_label, 0)
+        if _fb_count == 0:
+            continue
+        _fb_suffix = f" ×{_fb_count}" if _fb_count > 1 else ""
+        _fb_label_str = f"**{_fb_label}**" if _fb_count >= 5 else f"*{_fb_label}*"
+        lines.append(f"• {_fb_emoji}{_fb_suffix} {_fb_label_str}")
+    return lines
+
+
 async def build_registry_messages(player_name, discord_id, cached_data=None, guild=None):
     """Build list of message strings for a player's registry card (one per class + header)."""
     class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
@@ -928,115 +1034,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
             lines.append(f"• {prefix}{b}{placement_str}")
         lines.append("")
 
-    if named_feats or feat_submissions:
+    # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
+    _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts)
+    if _fol_lines:
         lines.append("**Feats of Legend:**")
-        if 'hhanded' in named_feats:
-            lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
-        # Flawless shows with link as PB; everything else groups with ×N count
-        flawless_emoji = FEAT_EMOJIS['Flawless']
-        flawless_entry = None
-        feat_counts = {}  # normalized_key -> count
-        feat_display = {}  # normalized_key -> display emoji string
-        # Preferred display order for known combos
-        FEAT_DISPLAY_ORDER = [
-            FEAT_EMOJIS['200 Takedowns'],
-            FEAT_EMOJIS['100 Kills'],
-            FEAT_EMOJIS['Triple'],
-            FEAT_EMOJIS['Predator'],
-        ]
-        for emojis, link in feat_submissions:
-            parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
-            normalized = ''.join(sorted(parts))
-            if normalized == flawless_emoji:
-                if flawless_entry is None:
-                    flawless_entry = (emojis, link)
-                continue
-            # Skip incomplete Triple combos — must have all three: 200TD, 100K, Triple emoji
-            if FEAT_EMOJIS['Triple'] in normalized:
-                if not (FEAT_EMOJIS['200 Takedowns'] in normalized and FEAT_EMOJIS['100 Kills'] in normalized):
-                    continue
-            feat_counts[normalized] = feat_counts.get(normalized, 0) + 1
-            if normalized not in feat_display:
-                # Build display string in preferred order
-                ordered = [e for e in FEAT_DISPLAY_ORDER if e in normalized]
-                # Add any remaining emojis not in the order list
-                remaining = [p for p in parts if p not in FEAT_DISPLAY_ORDER]
-                feat_display[normalized] = ''.join(ordered + remaining)
-
-        # Label map: normalized emoji string -> display label
-        _e = FEAT_EMOJIS
-        FEAT_LABELS = {
-            ''.join(sorted([_e['Pacifist']])):                                               "Pacifist",
-            ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
-            ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",
-            ''.join(sorted([_e['Triple']])):                                                 "Triple",
-            ''.join(sorted([_e['Predator']])):                                               "Predator",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills']])):                         "200 TD / 100 Kills",
-            ''.join(sorted([_e['200 Takedowns'], _e['Triple']])):                            "Triple",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple']])):           "Triple",
-            ''.join(sorted([_e['200 Takedowns'], _e['Predator']])):                          "Predator",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Predator']])):         "Predator",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Predator']])): "Triple + Predator",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless']])): "Hundred-Handed",
-            ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless'], _e['Predator']])): "Hundred-Handed + Predator",
-        }
-
-        if flawless_entry:
-            emojis, link = flawless_entry
-            lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
-        # Board counts override for standalone feats.
-        # If manual DB value > 0, it wins over submission scan count.
-        # Keyed by emoji combo for 100K/200TD; Triple matches by label (combos vary).
-        _board_count_map = {
-            ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
-            ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),
-        }
-        _triple_db = board_counts.get('Triple') or None  # >0 wins; 0/None = use feat_counts
-        _rendered_labels = set()
-        for normalized, count in feat_counts.items():
-            # Strip hhanded emoji before label lookup
-            hhanded_emoji = "<:hhanded:1430199468246044772>"
-            has_hhanded = hhanded_emoji in normalized
-            lookup_key = normalized.replace(hhanded_emoji, '')
-            if has_hhanded:
-                if 'hhanded' in named_feats:
-                    continue  # already rendered as "The Hundred-Handed" above
-                label = "Hundred-Handed"
-            else:
-                label = FEAT_LABELS.get(lookup_key, FEAT_LABELS.get(normalized, "Feat"))
-            # Prefer board counts for standalone feat labels
-            if label == "Triple" and _triple_db is not None:
-                display_count = _triple_db
-            elif label == "200 Takedowns" and board_counts.get('200 Takedowns'):
-                display_count = board_counts['200 Takedowns']
-            elif label == "100 Kills" and board_counts.get('100 Kills'):
-                display_count = board_counts['100 Kills']
-            else:
-                _db_override = _board_count_map.get(normalized)
-                display_count = _db_override if _db_override is not None else count
-            if display_count >= 5:
-                label_str = f"**{label}**"
-            else:
-                label_str = f"*{label}*"
-            suffix = f" ×{display_count}" if display_count > 1 else ""
-            display_emojis = feat_display.get(normalized, normalized)
-            lines.append(f"• {display_emojis}{suffix} {label_str}")
-            _rendered_labels.add(label)
-        # Fallback: render board counts for feats not covered by feat_counts loop
-        _fallback_feats = [
-            ('200 Takedowns', FEAT_EMOJIS['200 Takedowns']),
-            ('100 Kills',     FEAT_EMOJIS['100 Kills']),
-            ('Triple',        FEAT_EMOJIS['Triple']),
-        ]
-        for _fb_label, _fb_emoji in _fallback_feats:
-            if _fb_label in _rendered_labels:
-                continue
-            _fb_count = board_counts.get(_fb_label, 0)
-            if _fb_count == 0:
-                continue
-            _fb_suffix = f" ×{_fb_count}" if _fb_count > 1 else ""
-            _fb_label_str = f"**{_fb_label}**" if _fb_count >= 5 else f"*{_fb_label}*"
-            lines.append(f"• {_fb_emoji}{_fb_suffix} {_fb_label_str}")
+        lines.extend(_fol_lines)
         lines.append("")
 
     if best_placements:
@@ -2635,6 +2637,36 @@ class RegistryCog(commands.Cog):
         except Exception:
             hh_count = 0
             hh_complete = False
+        # ── Card page 1 extras: title, class ranks, feats, placements ────
+        player_title = get_player_title(len(bounty_completions))
+        try:
+            named_feats, feat_submissions, fol_board_counts = await get_feats_for_player(int(discord_id_str))
+            # HH progress computed above is authoritative here (no guild role lookup needed)
+            if hh_complete:
+                named_feats.add('hhanded')
+            else:
+                named_feats.discard('hhanded')
+            fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, fol_board_counts)
+        except Exception as _fe:
+            print(f"[STATS] feats of legend error: {_fe}")
+            fol_lines = []
+        try:
+            class_stats, _ = await calculate_registry_stats(int(discord_id_str))
+            def _cls_total(cd):
+                return sum(wd.get('marks', 0)
+                           for sd in (cd.get('subclasses') or {}).values()
+                           for wd in (sd.get('weapons') or {}).values())
+            class_title_lines = [
+                f"│ {cls}: {CLASS_RANK_EMOJIS.get(cd['rank'], '')} — {cd['rank']}"
+                for cls, cd in sorted(class_stats.items(), key=lambda kv: -_cls_total(kv[1]))
+            ]
+        except Exception as _ce:
+            print(f"[STATS] class titles error: {_ce}")
+            class_title_lines = []
+        try:
+            stats_placements = await get_best_placements_for_player(int(discord_id_str))
+        except Exception:
+            stats_placements = []
         # ── Lethality ────────────────────────────────────────────────────
         best_lethality = 0.0
         for r in player_subs:
@@ -2696,7 +2728,7 @@ class RegistryCog(commands.Cog):
         emb = discord.Embed(
             colour=0xC9A24B,
             description=(f"{cigar} **`{resolved_name}`** — {sub_count} submissions · "
-                         f"{total_marks} career marks"))
+                         f"{total_marks} career marks\n*{player_title}*"))
 
         def _field(name, lines_):
             v = "\n".join(lines_)
@@ -2704,6 +2736,9 @@ class RegistryCog(commands.Cog):
                 v = v[:1000].rsplit('\n', 1)[0] + "\n…"
             if v.strip():
                 emb.add_field(name=name, value=v, inline=False)
+
+        if class_title_lines:
+            _field("Titles", class_title_lines)
 
         if butler_titles:
             _field("Current Titles", [f"│ {t}" for t in butler_titles])
@@ -2748,6 +2783,14 @@ class RegistryCog(commands.Cog):
                 else:
                     ops_parts.append(f"{emoji} {feat}")
             _field("Special Ops", ["│ " + "  ".join(ops_parts)])
+
+        if fol_lines:
+            _field("Feats of Legend", [l.replace('• ', '│ ', 1) for l in fol_lines])
+
+        if stats_placements:
+            _field("Best Placements", [
+                f"│ {emoji} {lb_name} — #{pos}" + (f" (+{gap})" if gap is not None else "")
+                for pos, lb_name, emoji, gap in stats_placements])
 
         if hh_count > 0:
             _hh_emoji = "<:hhanded:1430199468246044772>"
