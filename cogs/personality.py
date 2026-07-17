@@ -978,6 +978,55 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"[COUNTING] valid track error: {e}")
 
+    @app_commands.command(name="butler_report", description="Best / worst rated Butler replies, for prompt tuning (mod only).")
+    @app_commands.describe(
+        sort="best = most liked, worst = most disliked, talked = most replied-to",
+        kind="Filter to stats answers or banter",
+        limit="How many replies to show (default 10)")
+    @app_commands.choices(
+        sort=[app_commands.Choice(name="Best", value="best"),
+              app_commands.Choice(name="Worst", value="worst"),
+              app_commands.Choice(name="Most talked about", value="talked")],
+        kind=[app_commands.Choice(name="Stats answers", value="stats"),
+              app_commands.Choice(name="Banter", value="banter")])
+    async def butler_report(self, interaction: discord.Interaction, sort: str = "best",
+                            kind: str = None, limit: int = 10):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            rows = await _db.butler_feedback_top(sort, max(1, min(limit, 20)), kind)
+            agg = await _db.butler_feedback_stats()
+        except Exception as e:
+            await interaction.followup.send(f"Feedback query failed: {e}", ephemeral=True)
+            return
+        if not rows:
+            await interaction.followup.send(
+                "No rated replies yet. Players need to react to the Butler first "
+                "(or reply to him) before there's anything to rank.", ephemeral=True)
+            return
+        _total = agg.get('total') or 0
+        _rated = agg.get('rated') or 0
+        _pct = f"{_rated / _total * 100:.0f}%" if _total else "0%"
+        emb = discord.Embed(
+            colour=0xC9A24B,
+            title=f"Butler report — {sort}{f' ({kind})' if kind else ''}",
+            description=(f"{_total} replies logged · {_rated} rated ({_pct}) · "
+                         f"👍 {agg.get('pos') or 0} · 👎 {agg.get('neg') or 0} · "
+                         f"💬 {agg.get('replies') or 0} replies"))
+        for r in rows:
+            _score = (r['positive'] or 0) - (r['negative'] or 0)
+            _reacts = r['reactions'] or 'no reacts'
+            _rep = r['replies'] or 0
+            _rep_str = f" · 💬{_rep}" if _rep else ""
+            _name = f"{_score:+d} · {_reacts}{_rep_str} · {r['player_name']}"
+            _trig = (r['trigger'] or '')[:90]
+            _resp = (r['response'] or '')[:280]
+            emb.add_field(name=_name[:256], value=f"> {_trig}\n{_resp}"[:1024], inline=False)
+        emb.set_footer(text="Promote the winners into BUTLER_SYSTEM_PROMPT as examples")
+        await interaction.followup.send(embed=emb, ephemeral=True)
+
     @app_commands.command(name="counting_backfill", description="Replay the counting channel's full history to rebuild counting stats (mod only).")
     async def counting_backfill(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
@@ -1072,6 +1121,18 @@ class PersonalityCog(commands.Cog):
         channel_id = message.channel.id
         is_main = channel_id == MAIN_CHANNEL_ID
         is_pinged = self.bot.user in message.mentions
+
+        # Engagement signal: someone replied directly to a Butler line. Counts
+        # whether or not it triggers another response — a reply is a reaction
+        # that took effort. Fire-and-forget; never blocks the reply path.
+        if message.reference and message.reference.message_id:
+            try:
+                _ref = message.reference.resolved
+                _ref_is_butler = (_ref.author.id == self.bot.user.id) if _ref else True
+                if _ref_is_butler:
+                    await _db.butler_add_reply(message.reference.message_id)
+            except Exception as _fe:
+                print(f"[BUTLER] feedback reply error: {_fe}")
 
         # Idiot role — every now and then, curtly dismiss them. Skipped when they
         # actually ping the Butler (so a direct question still gets a real answer),
@@ -1778,7 +1839,19 @@ class PersonalityCog(commands.Cog):
                     # post-hoc — the model never writes URLs itself)
                     response_text = await _linkify_reply(response_text, message.guild)
                     sent_msg = await message.reply(response_text, mention_author=False)
-                    _ctx_kind = 'stats' if player_stats_ctx else 'banter'
+                    # Label by what was ASKED, not by whether stats happened to be
+                    # attached — registered players always carry stats, so the old
+                    # 'stats if player_stats_ctx' test marked every joke as a stats answer.
+                    _is_data_q = _looks_like_data_question(resolved_message)
+                    _ctx_kind = 'data' if _is_data_q else 'banter'
+                    # Seed a one-click verdict on data answers only: correctness is what
+                    # needs grading, and a ✅/❌ prompt under banter kills the joke.
+                    if _is_data_q and not _is_rules_q:
+                        for _fb_emoji in ('✅', '❌'):
+                            try:
+                                await sent_msg.add_reaction(_fb_emoji)
+                            except Exception:
+                                pass
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
                     print(f"[BUTLER] reply={response_text!r}")
                     if player_stats_ctx:
@@ -1795,6 +1868,14 @@ class PersonalityCog(commands.Cog):
                     if len(BUTLER_RESPONSE_LOG) > 200:
                         oldest = next(iter(BUTLER_RESPONSE_LOG))
                         del BUTLER_RESPONSE_LOG[oldest]
+                    # Persist it too — the dict above dies on every deploy, which is
+                    # why months of player reactions have left no trace. /butler_report
+                    # reads this table.
+                    try:
+                        await _db.butler_log_reply(sent_msg.id, player_name, message.content,
+                                                   response_text, _ctx_kind)
+                    except Exception as _fe:
+                        print(f"[BUTLER] feedback log error: {_fe}")
                     return
 
         image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
@@ -1864,13 +1945,11 @@ class PersonalityCog(commands.Cog):
         if user.bot:
             return
         msg_id = reaction.message.id
-        if msg_id not in BUTLER_RESPONSE_LOG:
-            return
         emoji_str = str(reaction.emoji)
-        entry = BUTLER_RESPONSE_LOG[msg_id]
-        entry['reactions'].append(emoji_str)
-        positive = {'😂', '😆', '🤣', '👍', '❤️', '🔥', '💀', '😭', '👏'}
-        negative = {'👎', '🙄', '😐'}
+        # ✅/❌ are the Butler's own seeded verdict buttons on data answers — an
+        # explicit "this was right/wrong", distinct from 🔥 meaning "good burn".
+        positive = {'✅', '😂', '😆', '🤣', '👍', '❤️', '🔥', '💀', '😭', '👏'}
+        negative = {'❌', '👎', '🙄', '😐'}
         middle_finger = {'🖕'}
         if emoji_str in positive:
             sentiment = 'positive'
@@ -1880,7 +1959,21 @@ class PersonalityCog(commands.Cog):
             sentiment = 'middle_finger'
         else:
             sentiment = 'neutral'
-        print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{entry['trigger']}' | response: '{entry['response']}'")
+        # DB first: it outlives restarts, so a react on yesterday's line still counts.
+        # A miss here means the message isn't a Butler reply — the usual case.
+        try:
+            known = await _db.butler_add_reaction(msg_id, emoji_str, sentiment)
+        except Exception as _fe:
+            print(f"[BUTLER] feedback reaction error: {_fe}")
+            known = msg_id in BUTLER_RESPONSE_LOG
+        if not known:
+            return
+        entry = BUTLER_RESPONSE_LOG.get(msg_id)
+        if entry is not None:
+            entry['reactions'].append(emoji_str)
+        _trig = entry['trigger'] if entry else '?'
+        _resp = entry['response'] if entry else '?'
+        print(f"[BUTLER REACTION] {sentiment} | {user.display_name} reacted {emoji_str} | trigger: '{_trig}' | response: '{_resp}'")
 
 
 async def setup(bot):
