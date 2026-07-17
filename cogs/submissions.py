@@ -173,6 +173,114 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
     )
     return row_id, None
 
+class HealingHornModal(discord.ui.Modal, title="Healing Horn Submission"):
+    """Manual score entry for a Healing Horn run — the in-game popup screenshot
+    can't go through scorecard vision, so the player types the total."""
+    def __init__(self, original_message, prompt_msg=None, default_score=""):
+        super().__init__()
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.score_input = discord.ui.TextInput(
+            label="Total healing (from the HEALING popup)",
+            placeholder="e.g. 903",
+            default=default_score,
+            required=True,
+            max_length=7,
+        )
+        self.add_item(self.score_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.score_input.value).replace(',', '').replace('+', '').strip()
+        try:
+            score = int(raw)
+        except ValueError:
+            await interaction.response.send_message(
+                "That doesn't look like a number, sir. Try again.", ephemeral=True)
+            return
+        if not (1 <= score <= 999999):
+            await interaction.response.send_message(
+                "A healing total between 1 and 999,999, if you please.", ephemeral=True)
+            return
+        await interaction.response.defer()
+
+        author = self.original_message.author
+        discord_id = str(author.id)
+        try:
+            player_row = await _db.get_player(discord_id)
+        except Exception:
+            player_row = None
+        player_name = (player_row[1].strip() if player_row and len(player_row) > 1 and player_row[1]
+                       else author.display_name)
+
+        from cogs.leaderboards import submit_healing_horn_score
+        async with _BOARD_LOCK:
+            pos, prev = await submit_healing_horn_score(
+                interaction.guild, player_name, discord_id, score,
+                self.original_message.jump_url)
+
+        horn = config.SPECIAL_OPS_EMOJIS.get("Healing Horn", "")
+        if pos is None:
+            emb = discord.Embed(
+                colour=0x36393f,
+                description="The Healing Horn board isn't set up yet. A mod will need to create it first.")
+        elif pos == 'not_improved':
+            emb = discord.Embed(
+                colour=_BLURB_GOLD,
+                description=(f"{horn} **`{player_name}`** — {score} healing noted, but your "
+                             f"standing best is **{prev}**. The board stands."))
+        else:
+            prev_str = f" *(previous best {prev})*" if prev else ""
+            emb = discord.Embed(
+                colour=_BLURB_GOLD,
+                description=(f"{horn} **`{player_name}`** — **{score}** healing, "
+                             f"**#{pos}** on the Healing Horn board{prev_str}."))
+            try:
+                await self.original_message.add_reaction(horn or "\U0001F3BA")
+            except Exception:
+                pass
+
+        try:
+            if self.prompt_msg:
+                await self.prompt_msg.delete()
+        except Exception:
+            pass
+        await interaction.followup.send(embed=emb)
+
+
+class HealingHornView(discord.ui.View):
+    def __init__(self, original_message, prompt_msg=None):
+        super().__init__(timeout=300)
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+
+    async def on_timeout(self):
+        try:
+            expired_embed = discord.Embed(
+                title="Window Expired",
+                description="Post your screenshot again to open a new Healing Horn submission.",
+                color=0x36393f,
+            )
+            expired_embed.set_footer(text="Cigar Lounge Butler")
+            await self.prompt_msg.edit(content=None, embed=expired_embed, view=None)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label='Submit Healing Score', style=discord.ButtonStyle.green, emoji='\U0001F3BA')
+    async def horn_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message(
+                "I'm afraid I can only take instruction from the one who posted this engagement, sir.",
+                ephemeral=True)
+            return
+        # Prefill from the caption if a number rode along, e.g. "healing horn 903"
+        _txt = re.sub(r'healing\s*horn', '', self.original_message.content or '', flags=re.I)
+        _m = re.search(r'\d[\d,]{0,6}', _txt)
+        default_score = _m.group(0).replace(',', '') if _m else ""
+        await interaction.response.send_modal(
+            HealingHornModal(self.original_message, self.prompt_msg, default_score))
+
+
 class SubmitView(discord.ui.View):
     def __init__(self, original_message, prompt_msg=None):
         super().__init__(timeout=300)
@@ -3062,6 +3170,19 @@ class SubmissionsCog(commands.Cog):
         # Prevent unbounded growth — keep only the last 200 message IDs
         if len(self._prompted_messages) > 200:
             self._prompted_messages = set(list(self._prompted_messages)[-200:])
+
+        # Healing Horn manual flow: a HEALING-popup screenshot captioned
+        # "healing horn" skips scorecard vision entirely — the player types
+        # the total into a modal and it lands on the Healing Horn board.
+        if 'healing horn' in (message.content or '').lower():
+            hh_view = HealingHornView(message)
+            hh_prompt = await message.reply(
+                "\U0001F3BA Healing Horn run detected! Click below to enter your healing total.",
+                mention_author=False,
+                view=hh_view
+            )
+            hh_view.prompt_msg = hh_prompt
+            return
 
         view = SubmitView(message)
         prompt = await message.reply(

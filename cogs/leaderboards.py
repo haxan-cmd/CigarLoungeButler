@@ -1253,6 +1253,54 @@ _HH_LEGACY_COMPLETERS = [
 ]
 
 
+async def submit_healing_horn_score(guild, player_name, discord_id, score, message_link):
+    """Manual Healing Horn submission (screenshot of the in-game HEALING popup,
+    score typed by the player). Personal-best upsert on the Healing Horn board
+    plus an in-place re-render of that one board.
+
+    Returns (position, prev_best) on success, ('not_improved', prev_best) when
+    the score does not beat the player's standing best, or (None, None) when the
+    board row is missing. Caller must hold the submissions _BOARD_LOCK."""
+    lb_name = "Healing Horn"
+    all_lb_rows = await _get_lb_records()
+    lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+    if not lb_row:
+        return (None, None)
+
+    board_values = await _db.get_leaderboard_by_board(lb_name)
+    existing_score = None
+    for row in board_values:
+        if len(row) > 2 and row[2] == discord_id:
+            existing_score = int(row[3]) if len(row) > 3 and row[3] else 0
+            break
+    if existing_score is not None and score <= existing_score:
+        return ('not_improved', existing_score)
+
+    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, "Healing Horn")
+
+    board_rows = await _db.get_leaderboard_by_board(lb_name)
+    entries = sorted(
+        [{'player': r[1] if len(r) > 1 else '',
+          'did': r[2] if len(r) > 2 else '',
+          'score': int(r[3]) if len(r) > 3 and r[3] else 0,
+          'link': r[4] if len(r) > 4 else '',
+          'weapon': r[5] if len(r) > 5 else ''} for r in board_rows],
+        key=lambda x: x['score'], reverse=True)
+    pos = next((i + 1 for i, e in enumerate(entries) if e['did'] == discord_id), None)
+
+    embeds = await _rated_embeds(lb_name, entries, False, None, 0, False, "", True)
+    thread_id = int(lb_row['Thread ID'])
+    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+    try:
+        thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        new_ids = await _sync_board_messages(thread, embeds, message_ids)
+        if new_ids != message_ids:
+            await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+    except Exception as e:
+        print(f"[HEALING HORN] board render error: {e}")
+    return (pos, existing_score)
+
+
 def _map_header(lb_name: str) -> str:
     """Return the text CONTENT header for a map board message, e.g.
     '[icon] Falmire Agatha [icon]' — sent as the message's content alongside
