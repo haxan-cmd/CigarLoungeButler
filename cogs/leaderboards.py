@@ -743,6 +743,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             await _prune_pacifist_board()
             any_updated = True
+            # Render in place: the generic render at the bottom of this loop is
+            # skipped by the continue below, and it couldn't rank Pacifist anyway
+            # (one row per player, td tiebreak). _render_board knows the rules.
+            _pac_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+            if _pac_row:
+                await _render_board(guild, _pac_row, lb_name)
             continue
 
         if unlimited_top50:
