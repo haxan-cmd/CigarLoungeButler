@@ -91,6 +91,7 @@ Special instructions:
 - You have the asking player's stats (total marks, submissions, top weapons), a roster of the TOP 10 players by marks (each with their best game), AND -- when a message names a specific player -- that player's stats under an 'Asked-about player(s)' section. Use all of it for comparison and ranking. Only if a named player's stats are NOT present in your context should you say you don't have their numbers and point them to their card -- never guess.
 - If they are bragging and their stats don't back it up, use the numbers to put them in their place. Be dry, not mean. E.g. "Bold claim for someone with 3 submissions on that weapon."
 - "Lethality" or "Most Lethal" on the player card shows their BEST single-run kills/TD ratio (peak performance). The "kill rate" in your data is their AVERAGE kills/TD ratio across all runs — a different number. When asked about lethality, clarify which one you're giving (e.g. "Your best single-run lethality is X%, your average across all runs is Y%"). Do not claim you lack lethality data.
+- The three board ratings are: Warlord = takedowns / team kills (how much of the team's work they did), Kill Share = kills / team kills, Lethality = kills / takedowns. When 'Per-weapon board ratings' are in your context you HAVE these numbers per weapon — quote them and name the weapon. Do not tell the player to go check the board for a number you were given. They are rolling averages over weapons with 2+ runs, so a weapon they have played once will be absent; say so plainly if asked about one.
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
@@ -1226,8 +1227,8 @@ class PersonalityCog(commands.Cog):
                                     if row_kills > pb_kills:
                                         pb_kills = row_kills
                                         best_kills_game = pb_row
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx personal-bests error: {_e}")
 
                             # Also check LeaderboardData for legacy entries that predate
                             # the database — a player's actual best game might
@@ -1250,8 +1251,8 @@ class PersonalityCog(commands.Cog):
                                     if ld_td > pb_td:
                                         pb_td = ld_td
                                         best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?', '?']
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx legacy-bests error: {_e}")
 
                             def _placement_str(weapon, player_name, ld_rows):
                                 # Find player's rank on this weapon's board and return a label
@@ -1340,8 +1341,8 @@ class PersonalityCog(commands.Cog):
                                         f"\nAverage kill rate across all {len(_leth_runs)} runs: "
                                         f"{sum(_leth_runs) / len(_leth_runs):.1f}%."
                                     )
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx lethality error: {_e}")
 
                             # Build explicit leaderboard standings for this player.
                             # Group all LD entries by weapon, sort each board by score,
@@ -1372,8 +1373,8 @@ class PersonalityCog(commands.Cog):
                                     player_stats_ctx += f"\nLeaderboard standings: {', '.join(standings)}"
                                 else:
                                     player_stats_ctx += "\nLeaderboard standings: none recorded"
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx standings error: {_e}")
 
                             # Per-weapon best takedowns — lets the Butler answer "which weapons do I still
                             # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
@@ -1415,8 +1416,8 @@ class PersonalityCog(commands.Cog):
                                         "\n\nPer-weapon best takedowns (best single-run TD on each weapon board): "
                                         + _have_str
                                     )
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx per-weapon bests error: {_e}")
 
                             # Hundred-Handed — use the SAME source as the registry card:
                             # PRIMARY weapon/subclass combos for non-archer subclasses (HH_TOTAL,
@@ -1431,26 +1432,33 @@ class PersonalityCog(commands.Cog):
                                 else:
                                     hh_str = f"Hundred-Handed progress: {_hh_matched}/{HH_TOTAL} (needs a 100-takedown run with each primary weapon on each non-archer subclass)."
                                 player_stats_ctx += f"\n{hh_str}"
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx hundred-handed error: {_e}")
 
-                            # Per-weapon avg kill share and TD share
+                            # Per-weapon avg Kill Share / Warlord / Lethality — the same three
+                            # ratings the boards and registry cards show. Returns THREE dicts;
+                            # unpacking two silently killed this whole block for months.
                             try:
                                 from cogs.registry import calculate_weapon_shares_for_player
-                                w_kill, w_td = await calculate_weapon_shares_for_player(discord_id_str)
-                                all_weapons = set(w_kill) | set(w_td)
+                                w_kill, w_warlord, w_leth = await calculate_weapon_shares_for_player(discord_id_str)
+                                all_weapons = set(w_kill) | set(w_warlord) | set(w_leth)
                                 if all_weapons:
                                     share_lines = []
                                     for w in sorted(all_weapons):
                                         parts = []
+                                        if w in w_warlord:
+                                            parts.append(f"{w_warlord[w]}% Warlord")
                                         if w in w_kill:
-                                            parts.append(f"{w_kill[w]}% kill share")
-                                        if w in w_td:
-                                            parts.append(f"{w_td[w]}% TD share")
+                                            parts.append(f"{w_kill[w]}% Kill Share")
+                                        if w in w_leth:
+                                            parts.append(f"{w_leth[w]}% Lethality")
                                         share_lines.append(f"{w}: {', '.join(parts)}")
-                                    player_stats_ctx += f"\nPer-weapon averages: {'; '.join(share_lines)}"
-                            except Exception:
-                                pass
+                                    player_stats_ctx += (
+                                        "\nPer-weapon board ratings (rolling averages, only weapons with 2+ runs; "
+                                        "Warlord = takedowns/team kills, Kill Share = kills/team kills, "
+                                        "Lethality = kills/takedowns): " + '; '.join(share_lines))
+                            except Exception as _we:
+                                print(f"[BUTLER] weapon shares error: {_we}")
 
                             break
                     # Build rich per-player summary for comparisons
