@@ -13,7 +13,7 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `bot.py` | Startup, healthcheck HTTP server (+ `/kofi` webhook route), command sync, graceful shutdown, global error handlers. Runs as `__main__`. |
 | `config.py` | ALL constants: channel/role IDs, weapon/class/map tables, alias maps, emoji tokens, rank thresholds. No imports from project modules. |
 | `utils/db.py` | The only file that talks to Postgres. Pool, TTL cache, targeted queries, schema/index bootstrap (`_ensure_schema` / `_ensure_indexes`). |
-| `utils/helpers.py` | AI clients (Anthropic + Gemini vision), vision scorecard parser, nerve-centre logging/alerts, milestone detection, shared shutdown state. |
+| `utils/helpers.py` | AI clients (OpenAI chat + Gemini vision), `butler_complete` (the single Butler chat call path), vision scorecard parser, nerve-centre logging/alerts, milestone detection, shared shutdown state. |
 | `utils/parsing.py` | Pure caption to (weapon, subclass) parser. Unit-tested. |
 | `utils/ranks.py` | Pure rank/title/Hundred-Handed math. Unit-tested. |
 | `cogs/submissions.py` | The submission pipeline: on_message trigger, vision, confirm UI views, finalise worker, reactions/blurb, background updates. Also the edit flow. |
@@ -87,8 +87,8 @@ Sheets era). Cogs index into them positionally. Key maps:
 ## Environment variables
 
 `DISCORD_TOKEN` (required) · `DATABASE_URL` (Postgres; bot runs without it but
-most features need it) · `ANTHROPIC_API_KEY` (Butler chat; optional, quips fall
-back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback) ·
+most features need it) · `OPENAI_API_KEY` (Butler chat, GPT-5.6 Luna; optional,
+quips fall back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback) ·
 `KOFI_TOKEN` (webhook verification; optional) · `PORT` (healthcheck, default 8080).
 
 ## Deploy & ops

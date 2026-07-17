@@ -20,8 +20,8 @@ python-dotenv==1.2.2
 # Database
 asyncpg>=0.29
 
-# AI (Butler quips + scorecard vision)
-anthropic>=0.40
+# AI (Butler chat/quips + scorecard vision)
+openai>=1.60
 google-genai>=1.0
 
 # Image pre-processing for vision

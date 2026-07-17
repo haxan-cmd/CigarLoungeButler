@@ -120,7 +120,7 @@ Dry, sardonic responses to pings and unprompted one-liners in the main channel e
 | Language | Python 3.13 |
 | Bot framework | discord.py 2.x |
 | Data | PostgreSQL (asyncpg) |
-| AI — Butler chat | Anthropic Claude Haiku |
+| AI — Butler chat | OpenAI GPT-5.6 Luna |
 | AI — Scoreboard vision | Google Gemini Flash |
 | Hosting | Railway (auto-deploy on push) |
 | Version control | GitHub |
@@ -143,7 +143,7 @@ Environment variables (via `.env` locally, Railway variables in production):
 |---|---|---|
 | `DISCORD_TOKEN` | ✅ | Bot token |
 | `DATABASE_URL` | for real use | Postgres connection string. The bot boots without it, but nearly everything needs it. Apply `schema.sql` once; later migrations run automatically at startup. |
-| `ANTHROPIC_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
+| `OPENAI_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
 | `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
 | `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
 | `PORT` | optional | Healthcheck server port (default 8080) |

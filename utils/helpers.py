@@ -4,13 +4,38 @@ from datetime import datetime, timezone
 
 import config
 
-# Shared Anthropic client - initialised once, used by any cog that needs a quick Butler line
-_anthropic_client = None
+# Shared OpenAI client - initialised once, used by any cog that needs a Butler line.
+# The Butler's conversational voice runs on GPT-5.6 Luna (the cheap, high-volume
+# tier). Vision stays on Gemini, below — these are separate concerns.
+_openai_client = None
 try:
-    import anthropic as _anthropic
-    _anthropic_client = _anthropic.AsyncAnthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+    import openai as _openai
+    _openai_client = _openai.AsyncOpenAI(api_key=os.environ['OPENAI_API_KEY'])
 except Exception:
     pass
+
+BUTLER_MODEL = 'gpt-5.6-luna'
+
+
+async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
+    """One Butler completion. Returns '' on any failure — callers supply their
+    own fallback line.
+
+    reasoning_effort='none' is REQUIRED, not a tuning knob: GPT-5.6 is a
+    reasoning model, and with budgets this small (50-350) reasoning tokens
+    would consume the entire allowance and return empty content."""
+    if not _openai_client:
+        return ''
+    r = await _openai_client.chat.completions.create(
+        model=BUTLER_MODEL,
+        max_completion_tokens=max_tokens,
+        reasoning_effort='none',
+        messages=[
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': prompt},
+        ],
+    )
+    return (r.choices[0].message.content or '').strip()
 
 # Gemini client for vision (scorecard parsing)
 _gemini_client = None
@@ -27,17 +52,9 @@ _BUTLER_SYSTEM_BRIEF = (
 )
 
 async def butler_quip(prompt: str, fallback: str = '') -> str:
-    """Call Haiku for a short Butler line. Returns fallback if unavailable."""
-    if not _anthropic_client:
-        return fallback
+    """Short Butler line. Returns fallback if unavailable."""
     try:
-        r = await _anthropic_client.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=60,
-            system=_BUTLER_SYSTEM_BRIEF,
-            messages=[{'role': 'user', 'content': prompt}]
-        )
-        return r.content[0].text.strip()
+        return (await butler_complete(_BUTLER_SYSTEM_BRIEF, prompt, 60)) or fallback
     except Exception:
         return fallback
 

@@ -7,7 +7,6 @@ import re
 import json
 from datetime import time as dt_time
 import random
-import anthropic
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -136,30 +135,24 @@ _COUNTING_INSULT_FALLBACKS = [
 ]
 
 import os as _os
-_anthropic_client = None
-try:
-    _anthropic_client = anthropic.AsyncAnthropic(api_key=_os.environ['ANTHROPIC_API_KEY'])
-except Exception as _e:
-    print(f"Butler AI unavailable: {_e}")
+from utils.helpers import butler_complete as _butler_complete, _openai_client as _ai_client
+if not _ai_client:
+    print("Butler AI unavailable: no OPENAI_API_KEY / openai package")
 
 
 async def _generate_counting_insult(name):
     """One dry, condescending line for whoever just broke the count. AI with a
     static fallback. The caller prepends the offender's mention, so the line
     itself should not use their name."""
-    if _anthropic_client:
+    if _ai_client:
         try:
-            r = await _anthropic_client.messages.create(
-                model='claude-haiku-4-5-20251001',
-                max_tokens=50,
-                system=BUTLER_SYSTEM_PROMPT,
-                messages=[{'role': 'user', 'content': (
-                    f"{name} just broke the count in the counting channel and earned the Idiot role. "
-                    "Give one dry, condescending one-line insult about their inability to count in order. "
-                    "One sentence. No emoji. Do not use their name. Vary it each time."
-                )}]
+            line = await _butler_complete(
+                BUTLER_SYSTEM_PROMPT,
+                (f"{name} just broke the count in the counting channel and earned the Idiot role. "
+                 "Give one dry, condescending one-line insult about their inability to count in order. "
+                 "One sentence. No emoji. Do not use their name. Vary it each time."),
+                50,
             )
-            line = r.content[0].text.strip()
             if line and line != 'SKIP':
                 return line
         except Exception as e:
@@ -321,8 +314,8 @@ async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=No
 
 
 async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False, is_rules=False):
-    """Call Anthropic API for Butler response. Returns response string or None."""
-    if not _anthropic_client:
+    """Call the Butler chat model for a response. Returns response string or None."""
+    if not _ai_client:
         return None
     try:
         context_str = ''
@@ -379,15 +372,9 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                              'stay to one or two sentences as usual.]')
             user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
-        response = await _anthropic_client.messages.create(
-            model='claude-haiku-4-5-20251001',
-            # Data questions get headroom for a short list; banter stays terse
-            max_tokens=350 if _is_data else 150,
-            system=BUTLER_SYSTEM_PROMPT,
-            messages=[{'role': 'user', 'content': user_prompt}]
-        )
-        text = response.content[0].text.strip()
-        if text == 'SKIP':
+        # Data questions get headroom for a short list; banter stays terse
+        text = await _butler_complete(BUTLER_SYSTEM_PROMPT, user_prompt, 350 if _is_data else 150)
+        if not text or text == 'SKIP':
             return None
         eyeball = False
         if text.startswith('EYEBALL'):
@@ -513,24 +500,18 @@ async def _generate_absurd_question():
     nothing to do with the game or stats, just something comical or hypothetical
     in the Butler's flat voice. Plain text, no options. Falls back to a static
     list if the AI is unavailable or returns nothing usable."""
-    if _anthropic_client:
+    if _ai_client:
         try:
-            response = await _anthropic_client.messages.create(
-                model='claude-haiku-4-5-20251001',
-                max_tokens=80,
-                system=BUTLER_SYSTEM_PROMPT,
-                messages=[{
-                    'role': 'user',
-                    'content': (
-                        'Pose a single dry, absurd, open-ended question to the room — nothing to do '
-                        'with the game, stats, or leaderboards. Food, hypotheticals, bleak little hot '
-                        'takes, anything. It should invite people to answer in chat. One sentence, '
-                        'under 140 characters, in your usual flat, faintly weary voice. Reply with '
-                        'ONLY the question text — no quotes, no options, no preamble.'
-                    )
-                }]
+            question = await _butler_complete(
+                BUTLER_SYSTEM_PROMPT,
+                ('Pose a single dry, absurd, open-ended question to the room — nothing to do '
+                 'with the game, stats, or leaderboards. Food, hypotheticals, bleak little hot '
+                 'takes, anything. It should invite people to answer in chat. One sentence, '
+                 'under 140 characters, in your usual flat, faintly weary voice. Reply with '
+                 'ONLY the question text — no quotes, no options, no preamble.'),
+                80,
             )
-            question = response.content[0].text.strip().strip('"').strip()
+            question = question.strip('"').strip()
             question = question.replace('\n', ' ')[:300]
             if len(question) >= 8:
                 return question
@@ -722,7 +703,7 @@ class PersonalityCog(commands.Cog):
     async def butler_organic_post(self):
         """Occasionally post an unprompted Butler one-liner in main."""
         import random
-        if not _anthropic_client or not BUTLER_ORGANIC_POSTS_ENABLED:
+        if not _ai_client or not BUTLER_ORGANIC_POSTS_ENABLED:
             return
         # ~15% chance each 3-hour window — roughly once a day, still random
         if random.random() > 0.15:
@@ -734,16 +715,11 @@ class PersonalityCog(commands.Cog):
             main_ch = guild.get_channel(MAIN_CHANNEL_ID) or await guild.fetch_channel(MAIN_CHANNEL_ID)
             if not main_ch:
                 return
-            response = await _anthropic_client.messages.create(
-                model='claude-haiku-4-5-20251001',
-                max_tokens=50,
-                system=BUTLER_SYSTEM_PROMPT,
-                messages=[{
-                    'role': 'user',
-                    'content': ('Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long. Pick a genuinely fresh subject each time — the hour, the furniture, the quiet, a passing thought, the state of the lounge. Do NOT mention shiny heads, skulls, polished surfaces, gleaming helms, or the bald woman; you lean on those far too often.')
-                }]
+            line = await _butler_complete(
+                BUTLER_SYSTEM_PROMPT,
+                ('Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long. Pick a genuinely fresh subject each time — the hour, the furniture, the quiet, a passing thought, the state of the lounge. Do NOT mention shiny heads, skulls, polished surfaces, gleaming helms, or the bald woman; you lean on those far too often.'),
+                50,
             )
-            line = response.content[0].text.strip()
             if line and line != 'SKIP':
                 await main_ch.send(f'*{line}*')
         except Exception as e:
@@ -1135,7 +1111,7 @@ class PersonalityCog(commands.Cog):
             return
         should_respond = (is_pinged or mentions_butler or mentions_bald_female
                           or mentions_manager or mentions_stats or _proactive_rules)
-        if should_respond and _anthropic_client:
+        if should_respond and _ai_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'
             # The Manager (Bald Female) only gets a reply on an explicit @mention —
