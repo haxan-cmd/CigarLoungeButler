@@ -61,9 +61,12 @@ Sheets era). Cogs index into them positionally. Key maps:
     records, rebuilds, backfills, and ratings, but still counts for marks + bounty.
 - Board names: weapon boards are the weapon name; map boards are
   `"{Map} - {Faction}"`; feat boards are `100 Kills`, `200 Takedowns`, `Triple`,
-  `TUFF`, `Flawless`, `Mallet`, `Knife`, `Healing Horn`, `Pacifist`.
-  Feat boards are per-run ("unlimited") except Flawless/Mallet/Knife/Healing Horn
-  (personal-best). Weapon/map boards are top-10. VIP runs are excluded from weapon boards.
+  `TUFF`, `Flawless`, `Mallet`, `Knife`, `Healing Horn`, `Healing Banner`, `Pacifist`.
+  Feat boards are per-run ("unlimited") except Flawless/Mallet/Knife/Healing Horn/Healing Banner
+  (personal-best). Healing Horn and Healing Banner also accept manual submissions:
+  a HEALING-popup screenshot captioned "horn"/"banner" opens a score modal
+  (submissions.py HealingScoreView, leaderboards.py submit_manual_pb_score).
+  Weapon/map boards are top-10. VIP runs are excluded from weapon boards.
 - Hot paths use targeted queries (`get_leaderboard_by_board`,
   `get_submissions_by_player`, SQL MAX/COUNT). Don't "simplify" them into
   `get_all_*` scans. The TTL cache in db.py (5s) collapses bursts; cached lists

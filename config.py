@@ -357,6 +357,7 @@ FEAT_EMOJIS = {
 SPECIAL_OPS_EMOJIS = {
     "Fist and Shield": "<a:captain_america:1366801668041211934>",
     "Healing Horn":    "<a:passive:1365531248268673086>",
+    "Healing Banner":  "🚩",
     "Mallet":          "🔨",
     "Knife":           "🔪",
 }
@@ -377,19 +378,20 @@ FACTION_EMOJIS = {
     "Tenosia":"<:tenosia:1350669567269273682>",
 }
 
+# (attacker, defender) — corrected against in-game banners, 2026-07-16
 MAP_ATTACK_DEFENSE = {
     "Aberfell":          ("Agatha", "Mason"),
     "Askandir":          ("Mason",  "Tenosia"),
-    "Baudwyn":           ("Mason",  "Tenosia"),
-    "Bridgetown":        ("Agatha", "Tenosia"),
-    "Coxwell":           ("Agatha", "Mason"),
-    "Darkforest":        ("Agatha", "Mason"),
+    "Baudwyn":           ("Tenosia", "Mason"),
+    "Bridgetown":        ("Tenosia", "Agatha"),
+    "Coxwell":           ("Mason",  "Agatha"),
+    "Darkforest":        ("Mason",  "Agatha"),
     "Falmire":           ("Agatha", "Mason"),
-    "Galencourt":        ("Agatha", "Mason"),
-    "Lionspire":         ("Agatha", "Mason"),
+    "Galencourt":        ("Mason",  "Agatha"),
+    "Lionspire":         ("Mason",  "Agatha"),
     "Montcrux":          ("Agatha", "Tenosia"),
     "Rudhelm":           ("Agatha", "Mason"),
-    "Thayic Stronghold": ("Agatha", "Mason"),
+    "Thayic Stronghold": ("Mason",  "Agatha"),
     "Trayan Citadel":    ("Agatha", "Mason"),
 }
 

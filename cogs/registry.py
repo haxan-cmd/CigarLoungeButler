@@ -338,7 +338,7 @@ async def _alltime_title_holders(cached_data=None):
     Apex/Frenzied = highest average on the 100 Kills / 200 Takedowns boards.)"""
     ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
     SKIP_LB = {"100 Kills", "200 Takedowns"}
-    NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn"}
+    NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn", "Healing Banner"}
     lb_groups = {}
     for row in ld:
         if len(row) < 4:
@@ -2359,7 +2359,7 @@ class RegistryCog(commands.Cog):
         ld = await _db.get_all_leaderboard_data()
         SKIP_LB = {"100 Kills", "200 Takedowns"}
         WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
-        NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn"}
+        NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn", "Healing Banner"}
 
         lb_groups = {}
         for row in ld:
@@ -2443,7 +2443,7 @@ class RegistryCog(commands.Cog):
         # More accurate: count unique board names
         all_board_names = set(lb_groups.keys()) - {"100 Kills", "200 Takedowns"}
         total_combined_boards = len(all_board_names)
-        total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn"}])
+        total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn", "Healing Banner"}])
         total_map_boards = len([b for b in all_board_names if " - " in b])
 
         _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Apex", "Frenzied"])
@@ -2560,7 +2560,7 @@ class RegistryCog(commands.Cog):
             if ld_r[1].strip() != resolved_name:
                 continue
             lb = ld_r[0].strip()
-            if ' - ' in lb or lb in {'Flawless', 'Healing Horn', '200 Takedowns', '100 Kills'}:
+            if ' - ' in lb or lb in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns', '100 Kills'}:
                 continue
             try:
                 ld_td = int(ld_r[3])
@@ -2588,7 +2588,7 @@ class RegistryCog(commands.Cog):
         try:
             from collections import defaultdict
             boards: dict = defaultdict(list)
-            SKIP_BOARDS = {'100 Kills', '200 Takedowns', 'Flawless', 'Healing Horn'}
+            SKIP_BOARDS = {'100 Kills', '200 Takedowns', 'Flawless', 'Healing Horn', 'Healing Banner'}
             for ld_r in ld_all:
                 if len(ld_r) < 4:
                     continue

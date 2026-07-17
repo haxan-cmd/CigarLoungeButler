@@ -852,7 +852,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 # /backfill_feat_boards, NOT by the weapon/map rebuild below.
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
-    "Flawless", "Mallet", "Knife", "Healing Horn", "Pacifist",
+    "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist",
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
 
@@ -1253,15 +1253,14 @@ _HH_LEGACY_COMPLETERS = [
 ]
 
 
-async def submit_healing_horn_score(guild, player_name, discord_id, score, message_link):
-    """Manual Healing Horn submission (screenshot of the in-game HEALING popup,
-    score typed by the player). Personal-best upsert on the Healing Horn board
-    plus an in-place re-render of that one board.
+async def submit_manual_pb_score(guild, lb_name, player_name, discord_id, score, message_link):
+    """Manual personal-best submission (screenshot of the in-game HEALING popup,
+    score typed by the player) for boards like Healing Horn and Healing Banner.
+    PB upsert on the named board plus an in-place re-render of that one board.
 
     Returns (position, prev_best) on success, ('not_improved', prev_best) when
     the score does not beat the player's standing best, or (None, None) when the
     board row is missing. Caller must hold the submissions _BOARD_LOCK."""
-    lb_name = "Healing Horn"
     all_lb_rows = await _get_lb_records()
     lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
     if not lb_row:
@@ -1276,7 +1275,7 @@ async def submit_healing_horn_score(guild, player_name, discord_id, score, messa
     if existing_score is not None and score <= existing_score:
         return ('not_improved', existing_score)
 
-    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, "Healing Horn")
+    await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, lb_name)
 
     board_rows = await _db.get_leaderboard_by_board(lb_name)
     entries = sorted(
@@ -1609,7 +1608,7 @@ async def archive_and_reset_boards(guild):
     thread, then clear those boards. Feat boards, marks, ranks and mastery are
     untouched. Boards are only cleared AFTER a successful archive.
     Returns (weapon_boards, map_boards, rows_cleared, thread_url|None)."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF", "Pacifist"}
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF", "Pacifist"}
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
@@ -2243,7 +2242,7 @@ async def seed_alltime_from_current(guild):
     """Merge the CURRENT seasonal board scores into the all-time top-10 WITHOUT
     clearing anything, then render. Safe to run repeatedly \u2014 keeps each
     player's best score. Used to populate/preview all-time before any reset."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF", "Pacifist"}
+    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF", "Pacifist"}
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
@@ -3331,6 +3330,34 @@ class LeaderboardsCog(commands.Cog):
         note = "" if survived else " ⚠️ (ranked below top-10, stored but not shown)"
         await interaction.edit_original_response(
             content=f"✅ Set **{player}** = {score} on **{board}**.{note}")
+
+    @app_commands.command(name="setup_healing_banner_board", description="Create the Healing Banner board thread in the feats forum (mod only).")
+    async def setup_healing_banner_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        lb_name = "Healing Banner"
+        recs = await _get_lb_records()
+        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
+            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
+            return
+        # Mirror the Healing Horn row's type so classification treats them alike
+        horn = next((r for r in recs if r['Leaderboard Name'] == "Healing Horn"), None)
+        board_type = (horn.get('Type', '') if horn else '') or 'feat'
+        try:
+            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
+                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            embeds = await _rated_embeds(lb_name, [], False, None, 0, False, "", True)
+            result = await forum.create_thread(name=lb_name, embeds=embeds)
+            thread, first_msg = result.thread, result.message
+            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), board_type)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Created **{lb_name}** board: {thread.mention}. "
+            f"Players submit with a HEALING popup screenshot captioned `banner`.", ephemeral=True)
 
     @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):

@@ -1265,7 +1265,7 @@ class PersonalityCog(commands.Cog):
                                     if ld_row[1].strip() != player_name_for_ld:
                                         continue
                                     lb_name = ld_row[0].strip()
-                                    if ' - ' in lb_name or lb_name in {'Flawless', 'Healing Horn', '200 Takedowns', '100 Kills'}:
+                                    if ' - ' in lb_name or lb_name in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns', '100 Kills'}:
                                         continue
                                     try:
                                         ld_td = int(ld_row[3])
@@ -1403,7 +1403,7 @@ class PersonalityCog(commands.Cog):
                             # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
                             # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
                             try:
-                                _NON_WEAPON = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Triple", "TUFF"}
+                                _NON_WEAPON = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF"}
                                 weapon_boards = set()
                                 for _lr in ld_for_pb:
                                     _b = _lr[0].strip() if _lr else ''
@@ -1638,7 +1638,7 @@ class PersonalityCog(commands.Cog):
                             continue
                         if lb_name == '100 Kills':
                             player_pb_kills[pname] = max(player_pb_kills.get(pname, 0), score)
-                        elif ' - ' not in lb_name and lb_name not in {'Flawless', 'Healing Horn', '200 Takedowns'}:
+                        elif ' - ' not in lb_name and lb_name not in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns'}:
                             player_pb_td[pname] = max(player_pb_td.get(pname, 0), score)
 
                     pb_lines = []

@@ -234,7 +234,7 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     non_weapon_feat_placements = {}
 
     WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}
-    NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn'}
+    NON_WEAPON_FEAT_BOARDS = {'Flawless', 'Healing Horn', 'Healing Banner'}
     SKIP_LB = {'100 Kills', '200 Takedowns'}
 
     lb_groups = {}
