@@ -424,20 +424,37 @@ async def _linkify_reply(text, guild):
             if nm and tid and len(nm) >= 3:
                 targets.append((nm, tid, 0))
         targets.sort(key=lambda t: -len(t[0]))
+        spans = []  # regions occupied by links we've inserted
+
+        def _in_span(a, b):
+            return any(not (b <= s or a >= e) for s, e in spans)
+
         for nm, tid, flags in targets:
             if linked >= 5:
                 break
             pat = re.compile(r'(?<![\[\w`])' + re.escape(nm) + r'(?![\w\]`])', flags)
-            m = pat.search(out)
-            if not m:
-                continue
-            # don't relink inside an existing masked link
-            if out.rfind('](', 0, m.start()) > out.rfind(')', 0, m.start()):
-                continue
-            out = (out[:m.start()]
-                   + f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
-                   + out[m.end():])
-            linked += 1
+            pos = 0
+            while True:
+                m = pat.search(out, pos)
+                if not m:
+                    break
+                s, e = m.start(), m.end()
+                # skip if inside a link we inserted, inside an existing link's
+                # LABEL (open '[' with no ']' yet), or inside a URL body —
+                # nesting a link in a link renders as raw markdown soup
+                if (_in_span(s, e)
+                        or out.rfind('[', 0, s) > out.rfind(']', 0, s)
+                        or out.rfind('](', 0, s) > out.rfind(')', 0, s)):
+                    pos = e
+                    continue
+                repl = f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
+                out = out[:s] + repl + out[e:]
+                delta = len(repl) - (e - s)
+                spans = [(a if a < s else a + delta, b if b <= s else b + delta)
+                         for a, b in spans]
+                spans.append((s, s + len(repl)))
+                linked += 1
+                break
         return out
     except Exception as e:
         print(f"[BUTLER] linkify error: {e}")
