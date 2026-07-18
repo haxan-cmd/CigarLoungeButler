@@ -187,15 +187,24 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             import io as _io
             img = _PImage.open(_io.BytesIO(image_bytes)).convert('RGB')
             w, h = img.size
-            # Normalize the long edge to ~1920px (≈1080p). Gemini tiles images
-            # internally and reads a full scoreboard fine at this size, so 4K
-            # screenshots only add upload + processing time (the old code left
-            # big images at full size — a 4K PNG is multi-MB and slow). Small
-            # images are still upscaled to 1920 so dense-lobby text stays legible.
-            TARGET_W = 2560
-            if w > 0 and w != TARGET_W:
-                scale = TARGET_W / w
-                img = img.resize((TARGET_W, max(1, int(h * scale))), _PImage.LANCZOS)
+            # Normalize by HEIGHT, not width. Scoreboard rows are horizontal, so the
+            # readable size of each row's T/K/D digits scales with image HEIGHT. The
+            # old width-normalization (fix width to 2560) crushed ultrawide monitors:
+            # a 3440x1440 board became 2560x1071, dropping row height ~26% until a
+            # dense 64-player roster was too small to read and the model skipped rows.
+            # Height-normalizing keeps every aspect ratio's rows the same legible size
+            # (a 16:9 board still lands at 2560x1440, unchanged). Width is capped only
+            # for super-ultrawide so uploads stay sane; Gemini tiles the rest.
+            TARGET_H = 1440
+            MAX_W = 3840
+            if h > 0:
+                scale = TARGET_H / h
+                if w * scale > MAX_W:
+                    scale = MAX_W / w
+                new_w = max(1, int(w * scale))
+                new_h = max(1, int(h * scale))
+                if (new_w, new_h) != (w, h):
+                    img = img.resize((new_w, new_h), _PImage.LANCZOS)
             # Sharpen and boost contrast slightly (after resize, to recover edges)
             img = img.filter(_PIFilter.SHARPEN)
             img = _PIEnhance.Contrast(img).enhance(1.3)
