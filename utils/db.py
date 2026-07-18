@@ -508,6 +508,29 @@ async def get_player_igns(discord_id: str) -> list[str]:
             return []
 
 
+async def alt_name_leaderboard(limit: int = 10) -> list[dict]:
+    """Rank players by how many distinct in-game names they've been seen under.
+    Counts the registered name plus every learned IGN, de-duplicated
+    case-insensitively so 'Ck NJ' and 'ck nj' don't both count."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT player_name, igns FROM players "
+            "WHERE player_name IS NOT NULL")
+    out = []
+    for r in rows:
+        names = {}
+        for n in [r['player_name']] + list(r['igns'] or []):
+            if n and n.strip():
+                names.setdefault(n.strip().lower(), n.strip())
+        if len(names) > 1:  # only players with at least one alt beyond their name
+            out.append({'player_name': r['player_name'],
+                        'count': len(names),
+                        'names': list(names.values())})
+    out.sort(key=lambda x: -x['count'])
+    return out[:limit]
+
+
 async def save_player_ign(discord_id: str, ign: str):
     """Append a new in-game name alias if not already stored."""
     _cache_invalidate('players')

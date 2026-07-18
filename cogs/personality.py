@@ -899,6 +899,33 @@ class PersonalityCog(commands.Cog):
 
 
 
+    @app_commands.command(name="aliases", description="Who has the most in-game names (the witness-protection board).")
+    async def aliases(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        try:
+            board = await _db.alt_name_leaderboard(10)
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't tally the aliases: {e}", ephemeral=True)
+            return
+        if not board:
+            await interaction.followup.send(
+                "Everyone here goes by exactly one name. Suspiciously honest.", ephemeral=True)
+            return
+        _medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = []
+        for i, p in enumerate(board, 1):
+            prefix = _medals.get(i, f"`#{i}`")
+            # Show a few of the aliases, dry Butler aside on the leader
+            _alts = ", ".join(f"`{n}`" for n in p['names'][:6])
+            _more = f" +{len(p['names']) - 6} more" if len(p['names']) > 6 else ""
+            lines.append(f"{prefix} **{p['player_name']}** — {p['count']} names{_more}\n   {_alts}")
+        emb = discord.Embed(
+            colour=0xC9A24B,
+            title="🎭 The Witness Protection Board",
+            description="Players who cannot seem to settle on a single name:\n\n" + "\n".join(lines))
+        emb.set_footer(text="Counted from every scorecard name the Butler has learned.")
+        await interaction.followup.send(embed=emb)
+
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
     async def health(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
