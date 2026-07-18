@@ -438,16 +438,28 @@ class SubmitView(discord.ui.View):
                 # shared clan tag lets vision grab a teammate's row.
                 parsed['_name_warn'] = None
                 try:
+                    from difflib import SequenceMatcher as _SM
                     _read = re.sub(r'[^a-z0-9]', '', (parsed.get('name') or '').lower())
                     _known = [re.sub(r'[^a-z0-9]', '', (n or '').lower())
                               for n in ([player_display_name] + list(stored_igns or []))]
                     _known = [k for k in _known if len(k) >= 2]
-                    if _read and _known and not any(k in _read or _read in k for k in _known):
+                    # Substring OR fuzzy match. A new IGN is only learned AFTER this run
+                    # finalises, so a first-time IGN can never be in _known — pure substring
+                    # matching scolded people for spelling their own name slightly differently
+                    # ("Hikuta" vs "xHikura", "Massive Σggplant" vs "Massive Eggplant").
+                    # 0.6 separates real variants (>=0.67 observed) from teammate rows (<=0.46).
+                    _matched = any(
+                        k in _read or _read in k or _SM(None, _read, k).ratio() >= 0.6
+                        for k in _known)
+                    if _read and _known and not _matched:
+                        # Not an accusation: an unrecognised IGN is the NORMAL first
+                        # submission for anyone whose in-game name differs from Discord.
                         parsed['_name_warn'] = (
-                            f"the scorecard row reads **{parsed.get('name')}**, which doesn't match "
-                            f"your name — make sure this is YOUR run, not a teammate's.")
-                except Exception:
-                    pass
+                            f"I don't recognise **{parsed.get('name')}** as one of your names. "
+                            f"If that's you, hit Confirm and I'll remember it for next time. "
+                            f"If it's a teammate's row, fix it before confirming.")
+                except Exception as _ne:
+                    print(f"[VISION] name-match guard error: {_ne}")
     
             # Caption keyword prefill: vision usually can't read weapon/subclass, so
             # if the player typed them in the caption (e.g. "Poleman Halberd") use
@@ -479,7 +491,7 @@ class SubmitView(discord.ui.View):
                 if parsed.get('kills') is not None:     lines.append(f"Kills: `{parsed['kills']}`")
                 if parsed.get('deaths') is not None:    lines.append(f"Deaths: `{parsed['deaths']}`")
                 if parsed.get('_name_warn'):
-                    lines.append(f"\n⚠️ {parsed['_name_warn']}")
+                    lines.append(f"\nℹ️ {parsed['_name_warn']}")
                 if parsed.get('_stat_warn'):
                     lines.append(f"\n⚠️ {parsed['_stat_warn']}")
                 # Weapon/class are never printed on the scoreboard \u2014 asking for
