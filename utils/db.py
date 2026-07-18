@@ -326,14 +326,19 @@ async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 9
             return []
         # Same map + time window in SQL; the fuzzy total match happens in Python so
         # OCR variance between two screenshots of one game doesn't break the join.
+        # Window bounds are computed here in Python and passed as plain timestamps —
+        # doing the interval arithmetic in SQL ($4 * interval '1 minute') made
+        # Postgres infer the param as an interval and blew up the whole comparison.
+        from datetime import timedelta as _td
+        _lo = me['submitted_at'] - _td(minutes=window_min)
+        _hi = me['submitted_at'] + _td(minutes=window_min)
         rows = await conn.fetch(
             "SELECT player_name, discord_id, weapon, takedowns, kills, deaths, "
             "total_lobby_kills, team_kill_share, message_link FROM submissions "
             "WHERE map = $1 AND discord_id <> $2 AND total_lobby_kills IS NOT NULL "
-            "AND submitted_at BETWEEN $3 - ($4 * interval '1 minute') "
-            "                     AND $3 + ($4 * interval '1 minute') "
+            "AND submitted_at BETWEEN $3 AND $4 "
             "ORDER BY submitted_at DESC",
-            me['map'], str(discord_id), me['submitted_at'], window_min)
+            me['map'], str(discord_id), _lo, _hi)
 
     _my_total = me['total_lobby_kills']
     # Tolerance: larger of 30 kills or 6% of the lobby total. A single OCR row error

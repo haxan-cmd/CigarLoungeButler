@@ -2317,10 +2317,22 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if total_team_kills and kills:
         _team_kill_share = round(kills / total_team_kills * 100, 1)
 
-    # TUFF: gap between player kills and 2nd place teammate's takedowns
+    # TUFF: gap between player kills and best teammate's takedowns (kills - best_teammate_TD).
+    # Documented rule (challenge-rules embed): "you score TUFF when your kills beat your
+    # best teammate's takedowns" — the board tracks the +N margin.
     _second_place_td = None
     if _team_td:
         _second_place_td = sorted(_team_td, reverse=True)[0]
+    # Log the computation so TUFF outcomes are visible in the logs — board updates
+    # themselves aren't logged, which made "is TUFF working?" impossible to answer.
+    if _second_place_td is not None and kills is not None:
+        _tuff_gap = kills - _second_place_td
+        print(f"[TUFF] {interaction.user.display_name}: kills={kills} "
+              f"best_teammate_td={_second_place_td} gap={_tuff_gap:+d} "
+              f"-> {'QUALIFIES (+' + str(_tuff_gap) + ')' if _tuff_gap > 0 else 'no TUFF'}")
+    else:
+        print(f"[TUFF] {interaction.user.display_name}: no teammate TDs read from vision "
+              f"(team_td rows={len(_team_td)}) — TUFF cannot be computed")
 
     # Visibility: vision read the faction banners but returned no roster rows,
     # so team rank and TUFF can't be computed for this run. Flag it so a mod can
