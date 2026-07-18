@@ -185,9 +185,10 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         ranked.sort(key=lambda t: (-t[1], t[0]))  # name tiebreak = stable order on ties
         return ranked
 
-    # ── EXECUTIONER -- volume-adjusted kills ÷ team total kills % (games in parens) ──
+    # ── KILL SHARE -- volume-adjusted kills ÷ team total kills % (games in parens) ──
+    # Board display + season category points. Carries no role: the Executioner
+    # title moved to true Lethality below, which is what its name always implied.
     _leth = _shrunk_rank(team_kill_shares)
-    lethal_ranked = [p for p, _adj, _n in _leth]
     most_lethal_top5 = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _leth[:5]]
 
     # ── WARLORD -- volume-adjusted takedowns ÷ team total kills % ──
@@ -196,9 +197,13 @@ async def calculate_butler_stats(week_start=None, week_end=None):
     most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
 
-    # ── LETHALITY -- weapon-agnostic kills ÷ takedowns % (display-only on the report) ──
+    # ── EXECUTIONER / LETHALITY -- weapon-agnostic kills ÷ takedowns % ──
+    # The Executioner role is awarded on THIS. It used to be awarded on Kill Share
+    # above while being named most_lethal_*, so the holder never matched the
+    # Lethality board and nobody could work out why.
     _true_leth = _shrunk_rank(lethal_ratios)
     lethality_list = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _true_leth[:5]]
+    most_lethal_player = _true_leth[0][0] if _true_leth else None
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -350,12 +355,14 @@ async def calculate_butler_stats(week_start=None, week_end=None):
         'apex': apex or "N/A",
         'frenzied': frenzied or "N/A",
         'top_total_tally': top_total_tally,
-        'high_lethality': most_lethal_top5 if most_lethal_top5 else [],
-        'most_lethal_player': lethal_ranked[0] if lethal_ranked else None,
+        'high_lethality': most_lethal_top5 if most_lethal_top5 else [],   # Kill Share board
+        'most_lethal_player': most_lethal_player,                         # Executioner = Lethality #1
         'warlord_player': warlord_player,
         'most_dominant': most_dominant if most_dominant else [],
         'lethality_list': lethality_list if lethality_list else [],
-        '_lethal_adj': {p: adj for p, adj, _n in _leth},
+        # Incumbency margin compares like with like: Executioner is decided on
+        # Lethality, so its scores must come from _true_leth, not Kill Share.
+        '_lethal_adj': {p: adj for p, adj, _n in _true_leth},
         '_warlord_adj': {p: adj for p, adj, _n in _dom},
         'top_weapons_by_kill_share': top_weapons_by_kill_share,
         'top_weapons_by_td_share': top_weapons_by_td_share,
@@ -427,7 +434,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · recent-weighted)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="🩸 Lethality  *(kills per takedown · recent-weighted)*",
+    embed.add_field(name="🩸 Lethality  *(kills per takedown · recent-weighted)* — 🗡️ Executioner",
                     value=_table(_rows(stats.get("lethality_list"), plain=True)) if stats.get("lethality_list") else "```\n— not enough data —\n```",
                     inline=False)
 
@@ -455,7 +462,8 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     ]), inline=False)
     embed.set_footer(text=("Kill Share / Warlord / Lethality here are recency-weighted averages for THIS "
                            "season (5+ games) -- current form, not an all-time peak. The all-time boards "
-                           "show your best 5-games-in-a-row instead."))
+                           "show your best 5-games-in-a-row instead. Executioner goes to the Lethality "
+                           "leader, Warlord to the Warlord leader; a challenger must beat the holder by 1%."))
     return embed
 
 
@@ -469,8 +477,8 @@ async def update_title_roles(guild, stats, include_weekly=True):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Kill Share',
-         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Kill Share title is yours. The butler is mildly impressed."),
+        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Lethality',
+         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Executioner's title is yours. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]
@@ -502,11 +510,14 @@ async def update_title_roles(guild, stats, include_weekly=True):
         if current_holders and new_member in current_holders:
             continue
 
-        # Volatile season titles (Most Lethal / Warlord) recompute on every
+        # Volatile season titles (Executioner / Warlord) recompute on every
         # submission, and the Bayesian league mean shifts whenever ANYONE plays,
         # which made the role thrash between two near-tied players who had not even
         # submitted. Require a challenger to clearly beat the incumbent before we
         # take the title off them, so a hair's-width or mean-shift wobble cannot flip it.
+        # Margin is 1%, NOT 3%: shrinkage compresses the field so hard that the whole
+        # top five spans ~2.5%, and a 3% margin was wider than the entire spread —
+        # it made the title permanent for whoever claimed it first.
         _score_key = {'most_lethal_player': '_lethal_adj', 'warlord_player': '_warlord_adj'}.get(stat_key)
         if _score_key and current_holders:
             _scores = stats.get(_score_key) or {}
@@ -520,8 +531,8 @@ async def update_title_roles(guild, stats, include_weekly=True):
             if _chal is None:
                 _chal = _member_score(new_member)
             _inc = max((x for x in (_member_score(m) for m in current_holders) if x is not None), default=None)
-            if _inc is not None and _chal is not None and _chal <= _inc * 1.03:
-                continue  # incumbent still within 3% -> keep the title, no thrash
+            if _inc is not None and _chal is not None and _chal <= _inc * 1.01:
+                continue  # incumbent still within 1% -> keep the title, no thrash
 
         for old_member in current_holders:
             try:

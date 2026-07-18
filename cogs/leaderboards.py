@@ -141,7 +141,7 @@ def _champion_lines(stats, keys=None):
         'campaign_master':    (te.get('Campaign Master', '\U0001f5fa\ufe0f'),  'Campaign Master'),
         'apex':               (te.get('apex_title', '\U0001f480'),              'Apex'),
         'frenzied':           (te.get('frenzied_title', '\U0001fa93'),          'Frenzied'),
-        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Kill Share'),
+        'most_lethal_player': (te.get('Lethality', '\U0001f9ea'),               'Executioner'),
         'warlord_player':     (te.get('Warlord', '\U0001f6e1\ufe0f'),          'Warlord'),
     }
     order = keys or ['grand_marshal', 'weapons_master', 'campaign_master',

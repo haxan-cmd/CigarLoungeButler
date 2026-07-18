@@ -1644,8 +1644,14 @@ class PersonalityCog(commands.Cog):
                             player_stats_ctx += (
                                 "\nSeason category leaders: "
                                 f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
+                                f"Lethality {_lead('lethality_list')}; "
                                 f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
                                 f"Highest TD {_lead('top_td_list')}")
+                            player_stats_ctx += (
+                                "\n[Titles: the Executioner role goes to the Lethality leader "
+                                "(kills/takedowns); the Warlord role to the Warlord leader "
+                                "(takedowns/team kills). Kill Share (kills/team kills) is a "
+                                "scored season category but carries no role.]")
                     except Exception as _sce:
                         print(f"[BUTLER] season ctx error: {_sce}")
 
