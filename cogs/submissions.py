@@ -2474,6 +2474,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_score_ratio=_team_score_ratio,
             team_kill_share=_team_kill_share,
             team_td_share=_team_td_share,
+            second_place_td=_second_place_td,
             score=_score,
         )
         # log_submission returns (row_id, dup_weapon): row_id is the exact row index
