@@ -36,6 +36,9 @@ _INDEXES = [
     ("idx_ld_discord_id",          "leaderboard_data", "(discord_id)"),
     ("idx_ld_message_link",        "leaderboard_data", "(message_link)"),
     ("idx_bounty_players_title",   "bounty_players",   "(bounty_title)"),
+    # Same-lobby lookup filters on map + submission time (then fuzzy-matches the
+    # lobby kill total in Python), so index those two columns.
+    ("idx_submissions_map_time",   "submissions",      "(map, submitted_at)"),
 ]
 
 
@@ -289,6 +292,80 @@ async def get_submission_by_link(message_link: str):
         return None
     return (r['weapon'] or '', r['map'] or '', r['faction'] or '',
             r['kills'], float(r['team_kill_share']) if r['team_kill_share'] is not None else None)
+
+
+async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 90) -> list[dict]:
+    """Find OTHER players who submitted the SAME match as this run.
+
+    Fingerprint: total_lobby_kills is the sum of every player's kills across both
+    teams, so anyone in the same lobby records (roughly) the same value. It comes
+    from OCR of 30+ scoreboard rows, so two players' screenshots rarely produce the
+    IDENTICAL integer — one misread row shifts the sum by a few. We therefore match
+    on same map + a time window, then keep rows whose lobby total is within a
+    tolerance of ours (not exact). team_kill_share (a % of TEAM kills) lets us
+    derive each player's team total; matching totals => teammates, else opponents.
+
+    Returns a list of dicts (player_name, discord_id, weapon, takedowns, kills,
+    deaths, same_team, link), newest first. Empty when the run has no lobby total
+    (older rows, or vision couldn't read the board)."""
+    def _team_total(kills, share):
+        # total_team_kills = kills / (share/100). Same lobby, same team => same total.
+        if kills and share and share > 0:
+            return kills * 100.0 / float(share)
+        return None
+
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        me = await conn.fetchrow(
+            "SELECT submitted_at, map, total_lobby_kills, kills, team_kill_share "
+            "FROM submissions WHERE message_link=$1 LIMIT 1", message_link)
+        if not me or me['total_lobby_kills'] is None or not me['map']:
+            print(f"[LOBBYMATE] no lobby fingerprint for this run "
+                  f"(total_lobby_kills={me['total_lobby_kills'] if me else 'no-row'}, "
+                  f"map={me['map'] if me else '?'}) — cannot match")
+            return []
+        # Same map + time window in SQL; the fuzzy total match happens in Python so
+        # OCR variance between two screenshots of one game doesn't break the join.
+        rows = await conn.fetch(
+            "SELECT player_name, discord_id, weapon, takedowns, kills, deaths, "
+            "total_lobby_kills, team_kill_share, message_link FROM submissions "
+            "WHERE map = $1 AND discord_id <> $2 AND total_lobby_kills IS NOT NULL "
+            "AND submitted_at BETWEEN $3 - ($4 * interval '1 minute') "
+            "                     AND $3 + ($4 * interval '1 minute') "
+            "ORDER BY submitted_at DESC",
+            me['map'], str(discord_id), me['submitted_at'], window_min)
+
+    _my_total = me['total_lobby_kills']
+    # Tolerance: larger of 30 kills or 6% of the lobby total. A single OCR row error
+    # is a handful of kills; 6% of a ~1400-kill lobby is ~85, comfortably absorbing
+    # several misreads while staying well below a different game's total.
+    _tol = max(30, int(_my_total * 0.06))
+    _my_team = _team_total(me['kills'], me['team_kill_share'])
+    out = []
+    seen = set()
+    _rejected = 0
+    for r in rows:
+        if r['discord_id'] in seen:
+            continue
+        if abs((r['total_lobby_kills'] or 0) - _my_total) > _tol:
+            _rejected += 1
+            continue  # same map + time but a different match
+        seen.add(r['discord_id'])
+        _their_team = _team_total(r['kills'], r['team_kill_share'])
+        if _my_team and _their_team:
+            same_team = abs(_my_team - _their_team) <= max(_my_team, _their_team) * 0.10
+        else:
+            same_team = None
+        out.append({
+            'player_name': r['player_name'], 'discord_id': r['discord_id'],
+            'weapon': r['weapon'] or '', 'takedowns': r['takedowns'],
+            'kills': r['kills'], 'deaths': r['deaths'],
+            'same_team': same_team, 'link': r['message_link'] or '',
+        })
+    print(f"[LOBBYMATE] map={me['map']} total={_my_total} tol=±{_tol} window=±{window_min}m "
+          f"-> {len(rows)} same-map candidates, {_rejected} rejected on total, "
+          f"{len(out)} mates matched")
+    return out
 
 
 async def get_submission_feats(submission_id: int) -> str:
