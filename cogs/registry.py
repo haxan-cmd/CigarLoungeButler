@@ -532,11 +532,12 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 player_name = row[1].strip() if len(row) > 1 else None
                 break
         if player_name:
-            lf_rows = (cached_data or {}).get('legacy_feats') or await _db.get_legacy_feats_for_player(player_name)
+            lf_rows = (cached_data or {}).get('legacy_feats') or await _db.get_legacy_feats_for_player(player_name, discord_id_str)
+            # No name-equality gate below: get_legacy_feats_for_player already scoped this
+            # to the player by id-or-name. Gating on the CURRENT name would drop an
+            # id-matched row that still carries the player's OLD name (the rename bug).
             for row in lf_rows:
                 if len(row) < 2:
-                    continue
-                if row[0].strip().lower() != player_name.lower():
                     continue
                 emojis = row[1].strip()
                 link = row[2].strip() if len(row) > 2 else ''
@@ -810,7 +811,7 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
                 if r and r[0].strip() == discord_id_str:
                     player_name = r[1].strip() if len(r) > 1 else None
                     break
-            lb_rows = (await _db.get_legacy_bounties_for_player(player_name)) if player_name else []
+            lb_rows = (await _db.get_legacy_bounties_for_player(player_name, discord_id_str)) if player_name else []
             if player_name:
                 existing_titles = {t.lower() for t, _, _ in completions}
                 # Build emoji lookup from bounty sheet
@@ -819,7 +820,9 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
                     if brow and len(brow) > 3:
                         bounty_emoji_lookup[brow[0].strip().lower()] = brow[3].strip()
                 for r in lb_rows:
-                    if len(r) < 2 or r[0].strip().lower() != player_name.lower():
+                    # Scoped by id-or-name in SQL already; no CURRENT-name gate here or a
+                    # renamed player's id-matched row (old name) would be dropped.
+                    if len(r) < 2:
                         continue
                     raw_title = r[1].strip()
                     import re as _re

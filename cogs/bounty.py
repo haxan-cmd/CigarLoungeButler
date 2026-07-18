@@ -1112,7 +1112,7 @@ class BountyCog(commands.Cog):
         # Retroactive credit — a legacy-bounties record shows on the card directly,
         # no matter the weapon requirements. This is what makes Plague work.
         try:
-            await _db.add_legacy_bounty(player_name, title, None)
+            await _db.add_legacy_bounty(player_name, title, None, discord_id=player_id)
         except Exception as e:
             print(f"[BOUNTY_COMPLETE] legacy credit error: {e}")
 

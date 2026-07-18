@@ -24,7 +24,35 @@ async def db_init():
     )
     await _ensure_indexes()
     await _ensure_schema()
+    await _backfill_legacy_ids()
     print("[DB] Postgres pool ready.")
+
+
+async def _backfill_legacy_ids():
+    """Stamp discord_id onto legacy_bounties / legacy_feats rows that don't have one,
+    by matching their stored name against the players table (name + IGNs). Idempotent:
+    only touches NULL-id rows, so it's safe to run on every startup. Once stamped, a
+    row is found by id and survives any future rename."""
+    try:
+        name_to_id = await get_name_to_id_map()
+        if not name_to_id:
+            return
+        pool = _pool_check()
+        stamped = 0
+        async with pool.acquire() as conn:
+            for tbl in ('legacy_bounties', 'legacy_feats'):
+                rows = await conn.fetch(
+                    f"SELECT id, player_name FROM {tbl} WHERE discord_id IS NULL")
+                for r in rows:
+                    did = name_to_id.get((r['player_name'] or '').strip().lower())
+                    if did:
+                        await conn.execute(
+                            f"UPDATE {tbl} SET discord_id = $1 WHERE id = $2", did, r['id'])
+                        stamped += 1
+        if stamped:
+            print(f"[DB] Backfilled discord_id onto {stamped} legacy rows.")
+    except Exception as e:
+        print(f"[DB] legacy id backfill skipped: {e}")
 
 
 # Hot-path indexes. These columns are filtered on constantly (per-player and
@@ -67,6 +95,11 @@ _SCHEMA_STATEMENTS = [
     "player_name TEXT, trigger TEXT, response TEXT, ctx_kind TEXT, "
     "reactions TEXT DEFAULT '', positive INT DEFAULT 0, negative INT DEFAULT 0, "
     "replies INT DEFAULT 0)",
+    # Legacy tables were keyed by player NAME, so a rename hid a player's bounty/feat
+    # credit off their card (the Eggplant/Ascension/Ser Wolf whack-a-mole). Add a
+    # discord_id so a stamped row is found by id regardless of what they rename to.
+    "ALTER TABLE legacy_bounties ADD COLUMN IF NOT EXISTS discord_id TEXT",
+    "ALTER TABLE legacy_feats ADD COLUMN IF NOT EXISTS discord_id TEXT",
 ]
 
 
@@ -1259,16 +1292,20 @@ async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: i
             )
 
 
-async def get_legacy_feats_for_player(player_name: str) -> list[list]:
+async def get_legacy_feats_for_player(player_name: str, discord_id: str = None) -> list[list]:
+    """Match by discord_id (rename-proof, when the row is stamped) OR by name (old
+    rows, and callers that don't know the id). Pass discord_id whenever you have it."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM legacy_feats WHERE LOWER(player_name)=LOWER($1)", player_name
-        )
+            "SELECT * FROM legacy_feats "
+            "WHERE ($2::text IS NOT NULL AND discord_id = $2) "
+            "   OR LOWER(player_name) = LOWER($1)",
+            player_name, str(discord_id) if discord_id else None)
     return [[r['player_name'], r['emojis'] or '', r['message_link'] or ''] for r in rows]
 
 
-async def add_legacy_feat(player_name: str, emojis: str, link: str):
+async def add_legacy_feat(player_name: str, emojis: str, link: str, discord_id: str = None):
     pool = _pool_check()
     async with pool.acquire() as conn:
         exists = await conn.fetchrow(
@@ -1277,22 +1314,27 @@ async def add_legacy_feat(player_name: str, emojis: str, link: str):
         )
         if not exists:
             await conn.execute(
-                "INSERT INTO legacy_feats (player_name, emojis, message_link) VALUES ($1,$2,$3)",
-                player_name, emojis, link or ''
+                "INSERT INTO legacy_feats (player_name, emojis, message_link, discord_id) "
+                "VALUES ($1,$2,$3,$4)",
+                player_name, emojis, link or '', str(discord_id) if discord_id else None
             )
 
 
-async def get_legacy_bounties_for_player(player_name: str) -> list[list]:
+async def get_legacy_bounties_for_player(player_name: str, discord_id: str = None) -> list[list]:
+    """Match by discord_id (rename-proof, when stamped) OR by name (old rows / callers
+    without the id). Pass discord_id whenever you have it so a rename can't hide credit."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM legacy_bounties WHERE LOWER(player_name)=LOWER($1)", player_name
-        )
+            "SELECT * FROM legacy_bounties "
+            "WHERE ($2::text IS NOT NULL AND discord_id = $2) "
+            "   OR LOWER(player_name) = LOWER($1)",
+            player_name, str(discord_id) if discord_id else None)
     return [[r['player_name'], r['bounty_title'] or '',
              str(r['completed']) if r['completed'] is not None else ''] for r in rows]
 
 
-async def add_legacy_bounty(player_name: str, bounty_title: str, placement):
+async def add_legacy_bounty(player_name: str, bounty_title: str, placement, discord_id: str = None):
     pool = _pool_check()
     placement_int = None
     if placement:
@@ -1307,8 +1349,9 @@ async def add_legacy_bounty(player_name: str, bounty_title: str, placement):
         )
         if not exists:
             await conn.execute(
-                "INSERT INTO legacy_bounties (player_name, bounty_title, completed) VALUES ($1,$2,$3)",
-                player_name, bounty_title, placement_int
+                "INSERT INTO legacy_bounties (player_name, bounty_title, completed, discord_id) "
+                "VALUES ($1,$2,$3,$4)",
+                player_name, bounty_title, placement_int, str(discord_id) if discord_id else None
             )
 
 
