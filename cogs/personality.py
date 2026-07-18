@@ -96,6 +96,7 @@ Special instructions:
 - Keep responses under 80 tokens.
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
 - You have server-wide weapon run counts (100+ TD) when available.
+- When 'lobbymates' are in your context, those are players who submitted the SAME match as the asker — teammates fought on their side, opponents on the other. You may narrate this: who was there, who outscored whom. Only claim it when the context actually lists them; never invent a lobbymate.
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
@@ -201,6 +202,7 @@ _DATA_QUESTION_WORDS = (
     'hundred handed', 'mastery', 'mastered', 'virtuoso', 'highest', 'how many',
     'top 10', 'top ten', 'title', 'predator', 'triple', 'flawless', 'bounty',
     'progress', 'average', ' avg', 'compare', 'standing', 'best game',
+    'lobby', 'same game', 'same match', 'teammate', 'who was i', 'who else',
 )
 
 
@@ -1520,6 +1522,37 @@ class PersonalityCog(commands.Cog):
                                         "Lethality = kills/takedowns): " + '; '.join(share_lines))
                             except Exception as _we:
                                 print(f"[BUTLER] weapon shares error: {_we}")
+
+                            # Lobbymates — only when the asker mentions the lobby/match/who
+                            # they played with. Reads their most recent run's lobby and lists
+                            # who else logged it (teammates vs opponents), so the Butler can do
+                            # "you were in NJ's lobby, he outscored you". Skipped otherwise to
+                            # keep the prompt lean.
+                            try:
+                                _lm_q = resolved_message.lower()
+                                if any(w in _lm_q for w in ('lobby', 'same game', 'same match',
+                                                            'played with', 'against', 'teammate',
+                                                            'who was i', 'who else')):
+                                    _recent = next((r for r in (player_subs_pb or [])
+                                                    if len(r) > 12 and r[12].strip()), None)
+                                    if _recent:
+                                        _mates = await _db.get_lobbymates(discord_id_str, _recent[12].strip())
+                                        if _mates:
+                                            _ml = []
+                                            for _m in _mates[:6]:
+                                                _side = ('teammate' if _m['same_team'] is True
+                                                         else 'opponent' if _m['same_team'] is False
+                                                         else 'same lobby')
+                                                _ml.append(f"{_m['player_name']} ({_side}, "
+                                                           f"{_m['takedowns']} TD / {_m['kills']} K)")
+                                            player_stats_ctx += (
+                                                "\nMost recent logged match lobbymates (players who "
+                                                "submitted the SAME game): " + "; ".join(_ml))
+                                        else:
+                                            player_stats_ctx += ("\nNo one else has logged the asker's "
+                                                                 "most recent match.")
+                            except Exception as _lme:
+                                print(f"[BUTLER] ctx lobbymate error: {_lme}")
 
                             break
                     # Build rich per-player summary for comparisons
