@@ -926,6 +926,36 @@ class PersonalityCog(commands.Cog):
         emb.set_footer(text="Counted from every scorecard name the Butler has learned.")
         await interaction.followup.send(embed=emb)
 
+    @app_commands.command(name="dedupe_aliases", description="Clean up misspelt/duplicate in-game names (mod only).")
+    @app_commands.describe(apply="Leave off to preview; set True to actually remove duplicates.")
+    async def dedupe_aliases(self, interaction: discord.Interaction, apply: bool = False):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            changes = await _db.dedupe_all_aliases(dry_run=not apply)
+        except Exception as e:
+            await interaction.followup.send(f"Dedupe failed: {e}", ephemeral=True)
+            return
+        if not changes:
+            await interaction.followup.send("No duplicate aliases found. Clean as a whistle.", ephemeral=True)
+            return
+        total = sum(c['removed'] for c in changes)
+        header = (f"✅ Removed {total} duplicate name(s) across {len(changes)} player(s)."
+                  if apply else
+                  f"🔎 Preview: {total} duplicate name(s) across {len(changes)} player(s). "
+                  f"Run again with `apply: True` to remove them.")
+        lines = []
+        for c in changes[:15]:
+            _dropped = [n for n in c['before'] if n not in c['after']]
+            lines.append(f"**{c['player_name']}**: dropping {', '.join(f'`{n}`' for n in _dropped[:8])}")
+        emb = discord.Embed(colour=0xC9A24B, title="Alias cleanup",
+                            description=header + "\n\n" + "\n".join(lines))
+        if len(changes) > 15:
+            emb.set_footer(text=f"+{len(changes) - 15} more players")
+        await interaction.followup.send(embed=emb, ephemeral=True)
+
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
     async def health(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):

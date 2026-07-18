@@ -531,21 +531,128 @@ async def alt_name_leaderboard(limit: int = 10) -> list[dict]:
     return out[:limit]
 
 
+# Common gamer-name homoglyphs -> the Latin letter they stand in for. Safe to be
+# aggressive: IGN dedup only ever compares names belonging to the SAME player, so
+# over-folding can merge a player's own variants but never two different people.
+_HOMOGLYPHS = str.maketrans({
+    'Σ': 'e', 'Ξ': 'e', '3': 'e', '€': 'e',
+    'Ø': 'o', 'Ө': 'o', 'Ɵ': 'o', 'ø': 'o', '0': 'o', 'Θ': 'o', 'о': 'o',
+    'Я': 'r', 'Ʀ': 'r',
+    'Ƭ': 't', '†': 't', 'Т': 't', '7': 't',
+    'И': 'n', ' Π': 'n',
+    'Ł': 'l', '£': 'l', '1': 'l', '|': 'l',
+    'ß': 'b', 'Ƨ': 's', '$': 's', '5': 's',
+    'А': 'a', '@': 'a', '4': 'a',
+    'Е': 'e', 'Р': 'p', 'С': 'c', 'Х': 'x', 'К': 'k', 'М': 'm',
+    '™': '', '®': '', '~': '', '_': '', '-': '',
+})
+
+
+def _normalize_ign(s: str) -> str:
+    """Fold an in-game name to a comparable core: map common homoglyphs to their
+    Latin stand-ins, NFKD ascii-fold the accents, drop everything non-alphanumeric,
+    lowercase. 'Massive Σggplant'/'Massive Eggplant' and 'D~Ƭ~Я~Ө'/'D~T~R~O' each
+    collapse to the same core so a fuzzy compare sees them as one name."""
+    import unicodedata as _ud
+    mapped = (s or '').translate(_HOMOGLYPHS)
+    folded = _ud.normalize('NFKD', mapped).encode('ascii', 'ignore').decode('ascii')
+    return ''.join(c for c in folded.lower() if c.isalnum())
+
+
+def _ign_is_duplicate(candidate: str, existing: list[str], threshold: float = 0.85) -> bool:
+    """True if `candidate` is really a misspelling/variant of a name we already have.
+    Exact (case-insensitive) match, normalized-equal, or fuzzy >= threshold all count.
+    0.85 catches special-character misreads without merging genuinely distinct aliases
+    (a clan-tag form like 'Ck NJ' vs 'NJ' scores well below it)."""
+    from difflib import SequenceMatcher as _SM
+    cl = (candidate or '').strip().lower()
+    cn = _normalize_ign(candidate)
+    if not cn:
+        return True  # nothing usable to store
+    for e in existing:
+        if (e or '').strip().lower() == cl:
+            return True
+        en = _normalize_ign(e)
+        if not en:
+            continue
+        if en == cn:
+            return True
+        if _SM(None, cn, en).ratio() >= threshold:
+            return True
+    return False
+
+
 async def save_player_ign(discord_id: str, ign: str):
-    """Append a new in-game name alias if not already stored."""
+    """Append a new in-game name alias — unless it's really a variant of a name we
+    already have. In-game names carry special characters vision reads inconsistently,
+    so exact-match dedup let one player accumulate six spellings of one name; a fuzzy
+    guard collapses those to the first spelling learned."""
     _cache_invalidate('players')
     pool = _pool_check()
     async with pool.acquire() as conn:
         try:
-            # Append only if not already in the array
+            row = await conn.fetchrow(
+                "SELECT player_name, igns FROM players WHERE discord_id=$1", str(discord_id))
+            if not row:
+                return
+            existing = [row['player_name']] + list(row['igns'] or [])
+            if _ign_is_duplicate(ign, existing):
+                print(f"[IGN] Skipped '{ign}' for discord_id={discord_id} "
+                      f"(variant of an existing name)")
+                return
             await conn.execute(
                 """UPDATE players SET igns = array_append(igns, $1)
                    WHERE discord_id=$2 AND NOT ($1 = ANY(COALESCE(igns, '{}')))""",
-                ign, str(discord_id)
-            )
+                ign, str(discord_id))
             print(f"[IGN] Appended alias '{ign}' for discord_id={discord_id}")
         except Exception as e:
             print(f"[IGN] save failed: {e}")
+
+
+async def dedupe_all_aliases(dry_run: bool = True) -> list[dict]:
+    """Collapse existing near-duplicate IGNs across all players. For each player,
+    keep the registered name plus one representative per fuzzy cluster (the spelling
+    closest to the registered name wins, ties broken by length then alphabetically).
+    Returns per-player before/after for a report. dry_run leaves the DB untouched."""
+    from difflib import SequenceMatcher as _SM
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT discord_id, player_name, igns FROM players "
+            "WHERE array_length(igns, 1) >= 1")
+    changes = []
+    for r in rows:
+        igns = [i for i in (r['igns'] or []) if i and i.strip()]
+        if not igns:
+            continue
+        base = r['player_name'] or ''
+        base_n = _normalize_ign(base)
+        kept = []          # representative IGNs we keep
+        for ign in igns:
+            n = _normalize_ign(ign)
+            # Drop if it collapses into the registered name or an already-kept IGN
+            if base_n and (n == base_n or (n and _SM(None, n, base_n).ratio() >= 0.85)):
+                continue
+            dup_of = next((k for k in kept
+                           if _normalize_ign(k) == n
+                           or _SM(None, n, _normalize_ign(k)).ratio() >= 0.85), None)
+            if dup_of is None:
+                kept.append(ign)
+            else:
+                # Prefer the spelling closest to the registered name
+                if base_n and _SM(None, n, base_n).ratio() > _SM(None, _normalize_ign(dup_of), base_n).ratio():
+                    kept[kept.index(dup_of)] = ign
+        if len(kept) != len(igns):
+            changes.append({'discord_id': r['discord_id'], 'player_name': base,
+                            'before': igns, 'after': kept,
+                            'removed': len(igns) - len(kept)})
+            if not dry_run:
+                await conn.execute(
+                    "UPDATE players SET igns = $1 WHERE discord_id = $2",
+                    kept, r['discord_id'])
+    if not dry_run:
+        _cache_invalidate('players')
+    return changes
 
 
 async def increment_manual_feat_count(discord_id: str, feat: str):
