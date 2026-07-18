@@ -966,16 +966,39 @@ class PersonalityCog(commands.Cog):
 
     async def _health_digest(self, guild):
         """Post the self-check to the nerve centre, but only when there are
-        problems — a silent green run shouldn't spam the channel."""
+        problems — a silent green run shouldn't spam the channel.
+
+        The 24h loop re-fires on every startup, and every deploy restarts the bot,
+        so without a guard a run of pushes spams the digest. The in-memory marker
+        can't survive restarts, so we ALSO scan the channel: if today's digest is
+        already posted, stay quiet. Restart-proof."""
         try:
-            rep = await _db.health_report()
-            problems = [(k, v) for k, v in rep.items() if v[1]]
-            if not problems:
-                print("[HEALTH] daily self-check: all green")
-                return
             ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
                   or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
             if not ch:
+                return
+            _today = datetime.now(timezone.utc).date()
+            # In-memory fast path
+            if getattr(self, "_health_digest_day", None) == _today.isoformat():
+                return
+            # Restart-proof path: did we already post a digest today?
+            try:
+                async for _m in ch.history(limit=30):
+                    if (_m.author.id == self.bot.user.id
+                            and _m.created_at.date() == _today
+                            and "self-check found" in (_m.content or "")):
+                        self._health_digest_day = _today.isoformat()
+                        return
+            except Exception:
+                pass
+
+            rep = await _db.health_report()
+            problems = [(k, v) for k, v in rep.items() if v[1]]
+            # Mark the day regardless of outcome so a green run doesn't keep
+            # re-scanning history on every restart either.
+            self._health_digest_day = _today.isoformat()
+            if not problems:
+                print("[HEALTH] daily self-check: all green")
                 return
             lines = [f"⚠️ **{k.replace('_', ' ')}** — {v[0]}" + (f"\n   ↳ *{v[2]}*" if v[2] else "")
                      for k, v in problems]
