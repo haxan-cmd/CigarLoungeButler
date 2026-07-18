@@ -170,6 +170,45 @@ Also read match_result: the huge VICTORY or DEFEAT text in the center of the scr
 {"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
+_HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
+scoreboard (the columns RANK | NAME | SCORE | T | K | D | PING). Read EVERY row, top to
+bottom, skipping none. For each row return its T (takedowns) and K (kills) integers.
+T is the takedowns column (typically 10-400), K is kills (<= T), both far smaller than
+the SCORE column. Ignore RANK, SCORE, D, PING, and any Discord/voice overlay cards on
+the screen edges. Return ONLY this JSON: {"scores":[T,T,...],"kills":[K,K,...]} with one
+entry per row in top-to-bottom order. Start with { and end with }."""
+
+
+def _read_half_roster(pil_img, gtypes, gemini_client):
+    """Read one cropped team-column's T/K values. Returns (scores, kills) lists.
+    Cropping to a single team doubles the effective text size and removes the other
+    half, which is what lets vision read every row on a dense 60-player board that it
+    skips when shown the whole thing at once."""
+    import io as _io, json as _json
+    buf = _io.BytesIO()
+    pil_img.save(buf, format='JPEG', quality=95)
+    part = gtypes.Part.from_bytes(data=buf.getvalue(), mime_type='image/jpeg')
+    r = gemini_client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=[_HALF_ROSTER_PROMPT, part],
+        config=gtypes.GenerateContentConfig(
+            temperature=0, response_mime_type='application/json',
+            max_output_tokens=2048,
+            thinking_config=gtypes.ThinkingConfig(thinking_budget=256)))
+    raw = (r.text or '').strip()
+    if raw.startswith('```'):
+        raw = raw.split('```')[1]
+        if raw.startswith('json'):
+            raw = raw[4:].strip()
+    s = raw.find('{')
+    if s == -1:
+        return [], []
+    d, _ = _json.JSONDecoder().raw_decode(raw[s:])
+    def _ints(x):
+        return [v for v in (x or []) if isinstance(v, int) and 0 < v <= 600]
+    return _ints(d.get('scores')), _ints(d.get('kills'))
+
+
 def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None) -> dict:
     """
     Pass a Discord image URL to Gemini vision and extract scorecard fields.
@@ -205,6 +244,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
 
         # Pre-process image: upscale small images and sharpen for better OCR accuracy
         _iw = _ih = 0  # image dims, filled in below — referenced by the roster-retry log
+        _pp_img = None  # the preprocessed PIL image, kept for the half-crop roster pass
         try:
             from PIL import Image as _PImage, ImageEnhance as _PIEnhance, ImageFilter as _PIFilter
             import io as _io
@@ -237,6 +277,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             image_bytes = buf.getvalue()
             content_type = 'image/jpeg'
             _iw, _ih = img.size
+            _pp_img = img  # keep for the half-crop roster recovery pass
             print(f"[VISION] Pre-processed to {_iw}x{_ih} JPEG ({len(image_bytes)} bytes)")
         except Exception as pp_err:
             print(f"[VISION] Pre-process skipped: {pp_err}")
@@ -406,9 +447,51 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                                 data[_rk] = _rdata[_rk]
                     else:
                         print(f"[VISION] Roster pass no better ({_roster_len(_rdata)} cells) "
-                              f"— likely a cropped screenshot; roster genuinely absent")
+                              f"— trying half-crop")
             except Exception as _rre:
                 print(f"[VISION] Roster pass error: {_rre}")
+
+        # Half-crop roster recovery: dense boards (50-64 players) stay unreadable even
+        # on the full-image retry — the rows are simply too small. Crop to each team
+        # COLUMN (half the width) so the text roughly doubles and vision faces one team
+        # at a time, then assign the half that contains the submitter's own T/K as their
+        # team. This is what finally reads TUFF-eligible rosters on packed lobbies.
+        if _roster_len(data) < 4 and _has_totals and _pp_img is not None:
+            try:
+                _pw, _ph = _pp_img.size
+                _mid = _pw // 2
+                _ov = int(_pw * 0.04)  # slight overlap so a centre gutter can't clip edge digits
+                _left = _pp_img.crop((0, 0, _mid + _ov, _ph))
+                _right = _pp_img.crop((max(0, _mid - _ov), 0, _pw, _ph))
+                _ls, _lk = _read_half_roster(_left, _gtypes, _gemini_client)
+                _rs, _rk = _read_half_roster(_right, _gtypes, _gemini_client)
+                print(f"[VISION] Half-crop rosters: left {len(_ls)} rows, right {len(_rs)} rows")
+                _std, _sk = data.get('takedowns'), data.get('kills')
+
+                def _strip_self(scores, kills):
+                    # drop one instance of the submitter's own row from their team half
+                    if isinstance(_std, int) and _std in scores:
+                        i = scores.index(_std)
+                        scores = scores[:i] + scores[i + 1:]
+                        if i < len(kills):
+                            kills = kills[:i] + kills[i + 1:]
+                    return scores, kills
+
+                _ts = _tk = _es = _ek = None
+                if isinstance(_std, int) and _std in _ls:
+                    _ts, _tk = _strip_self(_ls, _lk); _es, _ek = _rs, _rk
+                elif isinstance(_std, int) and _std in _rs:
+                    _ts, _tk = _strip_self(_rs, _rk); _es, _ek = _ls, _lk
+                else:
+                    print("[VISION] Half-crop: submitter's own row not found in either half; skipping")
+
+                _merged = {'team_scores': _ts or [], 'team_kills': _tk or [],
+                           'enemy_scores': _es or [], 'enemy_kills': _ek or []}
+                if _ts and _roster_len(_merged) > _roster_len(data):
+                    data.update(_merged)
+                    print(f"[VISION] Half-crop recovered roster: team {len(_ts)} / enemy {len(_es or [])}")
+            except Exception as _hce:
+                print(f"[VISION] Half-crop pass error: {_hce}")
 
         # Coerce numeric fields to int, ignore bad values
         for field in ('takedowns', 'kills', 'deaths', 'team_total_kills', 'enemy_total_kills'):
