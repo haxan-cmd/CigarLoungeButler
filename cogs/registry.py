@@ -491,6 +491,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
         'Pacifist':      FEAT_EMOJIS['Pacifist'],
     }
     board_counts = {}  # lb_name -> count of entries on that board for this player
+    flawless_pb_link = ''  # authoritative PB link from the Flawless board (personal-best)
     try:
         ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
         for row in ld_rows:
@@ -500,6 +501,11 @@ async def get_feats_for_player(discord_id, cached_data=None):
             if lb_name in FEAT_BOARD_EMOJIS:
                 board_counts[lb_name] = board_counts.get(lb_name, 0) + 1
                 link = row[4].strip() if len(row) > 4 else ''
+                # The Flawless board keeps ONE row per player — their best flawless —
+                # and upserts the link on a new PB. Capture it here (before the
+                # seen_links skip) so the card links to the PB, not the oldest flawless.
+                if lb_name == 'Flawless' and link:
+                    flawless_pb_link = link
                 if link and link in seen_links:
                     continue
                 emoji = FEAT_BOARD_EMOJIS[lb_name]
@@ -557,7 +563,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
             link_to_best[link] = (emojis, link)
     feats = list(link_to_best.values()) + no_link_feats
 
-    return named_feats, feats, board_counts
+    return named_feats, feats, board_counts, flawless_pb_link
 
 # NOTE: _SUBCLASS_PRIMARIES is defined once, at module top (line ~27), as an alias
 # of config._SUBCLASS_PRIMARIES. A second hardcoded copy used to live here and was
@@ -863,9 +869,13 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
 # source of truth now so the two can't drift.
 
 
-def _feats_of_legend_lines(named_feats, feat_submissions, board_counts):
+def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link=''):
     """Feats of Legend bullet lines — shared by the registry card and /stats so
-    the two renderings can never drift. Returns [] when the player has none."""
+    the two renderings can never drift. Returns [] when the player has none.
+
+    flawless_pb_link (from the Flawless personal-best board) overrides the flawless
+    line's link so it always points at the player's BEST flawless game, not the
+    first one found in submission order."""
     import re
     lines = []
     if not (named_feats or feat_submissions):
@@ -918,6 +928,9 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts):
 
     if flawless_entry:
         emojis, link = flawless_entry
+        # Prefer the Flawless board's PB link — it tracks the player's BEST flawless,
+        # while `link` here is just whichever flawless appeared first in submission order.
+        link = flawless_pb_link or link
         lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
     _board_count_map = {
         ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
@@ -980,7 +993,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     bounties_done = await get_bounty_completions_for_player(discord_id, cached_data)
     player_title = get_player_title(len(bounties_done))
     mastered = await get_mastered_weapons_for_player(discord_id, cached_data)
-    named_feats, feat_submissions, board_counts = await get_feats_for_player(discord_id, cached_data)
+    named_feats, feat_submissions, board_counts, flawless_pb_link = await get_feats_for_player(discord_id, cached_data)
     # Hundred-Handed is authoritative via the ROLE (the curated source of truth): the
     # card shows it iff the player holds the role, regardless of logged-combo data.
     if guild is not None:
@@ -1038,7 +1051,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
         lines.append("")
 
     # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
-    _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts)
+    _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link)
     if _fol_lines:
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
@@ -2643,13 +2656,13 @@ class RegistryCog(commands.Cog):
         # ── Card page 1 extras: title, class ranks, feats, placements ────
         player_title = get_player_title(len(bounty_completions))
         try:
-            named_feats, feat_submissions, fol_board_counts = await get_feats_for_player(int(discord_id_str))
+            named_feats, feat_submissions, fol_board_counts, fol_flawless_link = await get_feats_for_player(int(discord_id_str))
             # HH progress computed above is authoritative here (no guild role lookup needed)
             if hh_complete:
                 named_feats.add('hhanded')
             else:
                 named_feats.discard('hhanded')
-            fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, fol_board_counts)
+            fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, fol_board_counts, fol_flawless_link)
         except Exception as _fe:
             print(f"[STATS] feats of legend error: {_fe}")
             fol_lines = []
