@@ -2980,6 +2980,31 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[NAME LINK] blurb update error: {_nle}")
         await asyncio.sleep(1)
 
+        # Lobbymates: anyone else who submitted this exact match. total_lobby_kills
+        # is the same for every player in a lobby, so a matching value + map + a
+        # tight time window is a reliable fingerprint. Purely additive to the blurb.
+        # Asymmetric by nature: the FIRST person to submit a match can't see mates who
+        # haven't uploaded yet — only later submitters get the line. That's fine; the
+        # Butler's on-demand context (below) fills it in for anyone who asks afterward.
+        try:
+            _mates = await _db.get_lobbymates(str(interaction.user.id), message_link)
+            if _mates:
+                _lines = []
+                for _mm in _mates[:3]:
+                    if _mm['same_team'] is True:
+                        _rel = "alongside"
+                    elif _mm['same_team'] is False:
+                        _rel = "against"
+                    else:
+                        _rel = "in a lobby with"
+                    _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`")
+                if _lines:
+                    _fresh_lm = await summary_reply.channel.fetch_message(summary_reply.id)
+                    _lm_desc = _blurb_desc(_fresh_lm)
+                    await _blurb_edit(summary_reply, _lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
+        except Exception as _lme:
+            print(f"[LOBBYMATE] blurb update error: {_lme}")
+
         # Update bounty cards index
         try:
             bounty = await get_active_bounty()
