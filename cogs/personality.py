@@ -899,18 +899,65 @@ class PersonalityCog(commands.Cog):
 
 
 
+    @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
+    async def health(self, interaction: discord.Interaction):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            rep = await _db.health_report()
+        except Exception as e:
+            await interaction.followup.send(f"Health check failed: {e}", ephemeral=True)
+            return
+        _problems = [(k, v) for k, v in rep.items() if v[1]]
+        emb = discord.Embed(
+            colour=0xC9524B if _problems else 0x4BC96A,
+            title="Butler self-check",
+            description=(f"⚠️ {len(_problems)} issue(s) need attention"
+                         if _problems else "✅ All checks green"))
+        for _k, (_val, _bad, _note) in rep.items():
+            _icon = "⚠️" if _bad else "✅"
+            _v = _val + (f"\n*{_note}*" if _bad and _note else "")
+            emb.add_field(name=f"{_icon} {_k.replace('_', ' ')}", value=_v[:1024], inline=False)
+        await interaction.followup.send(embed=emb, ephemeral=True)
+
     @tasks.loop(hours=24)
     async def daily_cycle_tasks(self):
         """Daily upkeep: remind mods to prep the next bounty as month-end nears.
         (Apex/Frenzied already update live on every submission, scoped to the
-        current season, so they need no refresh here.)"""
+        current season, so they need no refresh here.) Also runs the self-check
+        and posts to the nerve centre ONLY when something is actually wrong."""
         try:
             guild = self.bot.get_guild(GUILD_ID)
             if not guild:
                 return
             await self._bounty_prep_reminder(guild)
+            await self._health_digest(guild)
         except Exception as e:
             print(f"[DAILY] cycle tasks error: {e}")
+
+    async def _health_digest(self, guild):
+        """Post the self-check to the nerve centre, but only when there are
+        problems — a silent green run shouldn't spam the channel."""
+        try:
+            rep = await _db.health_report()
+            problems = [(k, v) for k, v in rep.items() if v[1]]
+            if not problems:
+                print("[HEALTH] daily self-check: all green")
+                return
+            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
+                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            if not ch:
+                return
+            lines = [f"⚠️ **{k.replace('_', ' ')}** — {v[0]}" + (f"\n   ↳ *{v[2]}*" if v[2] else "")
+                     for k, v in problems]
+            mod = guild.get_role(config.MOD_ROLE_ID)
+            mention = mod.mention if mod else "Mods"
+            await ch.send(f"🩺 {mention} — daily self-check found {len(problems)} issue(s):\n"
+                          + "\n".join(lines) + "\n\nRun `/health` for the full report.")
+        except Exception as e:
+            print(f"[HEALTH] digest error: {e}")
 
     @daily_cycle_tasks.before_loop
     async def before_daily_cycle_tasks(self):

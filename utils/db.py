@@ -1385,6 +1385,79 @@ async def get_snapshots(limit: int = 52) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ── Health report ─────────────────────────────────────────────────────────────
+
+async def health_report(recent_n: int = 100) -> dict:
+    """Data-driven self-check: query the DB for the invariants we keep debugging by
+    hand, so the bot can flag its own problems instead of us grepping logs. Each
+    entry is (value, is_problem, note). Cheap enough to run daily or on demand."""
+    pool = _pool_check()
+    out = {}
+    async with pool.acquire() as conn:
+        # Vision roster reads: total_lobby_kills is NULL when vision skipped the
+        # roster rows (which also kills TUFF + lobbymate + team ratings). Track the
+        # miss rate over the most recent runs.
+        vis = await conn.fetchrow(
+            "SELECT COUNT(*) AS n, "
+            "COUNT(*) FILTER (WHERE total_lobby_kills IS NULL) AS no_lobby, "
+            "COUNT(*) FILTER (WHERE second_place_td IS NULL) AS no_2nd "
+            "FROM (SELECT total_lobby_kills, second_place_td FROM submissions "
+            "      ORDER BY id DESC LIMIT $1) s", recent_n)
+        _n = vis['n'] or 1
+        _miss = vis['no_lobby'] or 0
+        _pct = _miss / _n * 100
+        out['vision_roster'] = (
+            f"{_n - _miss}/{_n} roster reads OK ({_pct:.0f}% missed)",
+            _pct > 25,
+            "vision skipping rosters -> TUFF/lobbymate/ratings blank" if _pct > 25 else "")
+        out['tuff_blockable'] = (
+            f"{vis['no_2nd'] or 0}/{_n} recent runs have no 2nd-place TD (TUFF can't score)",
+            (vis['no_2nd'] or 0) / _n > 0.30, "")
+
+        # TUFF board liveness — is anything landing there at all?
+        _tuff = await conn.fetchval(
+            "SELECT COUNT(*) FROM leaderboard_data WHERE board_name = 'TUFF'")
+        out['tuff_board'] = (f"{_tuff} entries on the TUFF board", _tuff == 0,
+                             "TUFF board empty — nothing has scored" if _tuff == 0 else "")
+
+        # Orphan legacy bounties — a rename hides a bounty credit off the card.
+        _orphans = await conn.fetch(
+            "SELECT DISTINCT lb.player_name FROM legacy_bounties lb "
+            "LEFT JOIN players p ON LOWER(p.player_name) = LOWER(lb.player_name) "
+            "WHERE p.player_name IS NULL")
+        _on = [r['player_name'] for r in _orphans]
+        out['orphan_bounties'] = (
+            f"{len(_on)} legacy bounties match no player" + (f": {', '.join(_on[:6])}" if _on else ""),
+            len(_on) > 0, "fix with an UPDATE to the current registered name" if _on else "")
+
+        # Boards registered without a Discord thread/message — silent render skips.
+        _brokeb = await conn.fetch(
+            "SELECT board_name FROM leaderboards "
+            "WHERE COALESCE(thread_id,'') = '' OR COALESCE(message_ids,'') = ''")
+        _bb = [r['board_name'] for r in _brokeb]
+        out['unlinked_boards'] = (
+            f"{len(_bb)} boards have no thread/message" + (f": {', '.join(_bb[:6])}" if _bb else ""),
+            len(_bb) > 0, "")
+
+        # Players with submissions but zero marks — usually a marks-calc drift.
+        _drift = await conn.fetchval(
+            "SELECT COUNT(*) FROM players WHERE COALESCE(total_marks,0) = 0 "
+            "AND COALESCE(submission_count,0) > 3")
+        out['marks_drift'] = (f"{_drift} active players show 0 marks", _drift > 0, "")
+
+        # Butler feedback loop — is it collecting anything?
+        try:
+            fb = await conn.fetchrow(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE positive+negative+replies > 0) AS rated "
+                "FROM butler_feedback")
+            out['butler_feedback'] = (
+                f"{fb['total']} replies logged, {fb['rated']} with feedback", False, "")
+        except Exception:
+            out['butler_feedback'] = ("feedback table not present yet", False, "")
+    return out
+
+
 # ── Butler feedback ───────────────────────────────────────────────────────────
 
 async def butler_log_reply(message_id: str, player_name: str, trigger: str,
