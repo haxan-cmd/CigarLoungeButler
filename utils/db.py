@@ -100,6 +100,12 @@ _SCHEMA_STATEMENTS = [
     # discord_id so a stamped row is found by id regardless of what they rename to.
     "ALTER TABLE legacy_bounties ADD COLUMN IF NOT EXISTS discord_id TEXT",
     "ALTER TABLE legacy_feats ADD COLUMN IF NOT EXISTS discord_id TEXT",
+    # Faction banner kill totals (the big "AGATHA 642 / MASON 604" numbers). These are
+    # read far more reliably than the roster-summed total_lobby_kills, and the (min,max)
+    # pair is a much stronger same-lobby fingerprint — two different games rarely share
+    # both team totals. Used by get_lobbymates to stop false-positive lobby matches.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS team_total_kills INTEGER",
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS enemy_total_kills INTEGER",
 ]
 
 
@@ -284,7 +290,8 @@ async def add_submission(
     takedowns, kills, deaths, vip, feats, message_link,
     lobby_rank=None, lobby_size=None, kills_rank=None,
     team_rank=None, team_size=None, total_lobby_kills=None,
-    team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None, score=None
+    team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None, score=None,
+    team_total_kills=None, enemy_total_kills=None
 ) -> int:
     """Insert a submission and return its id (replaces sheet row index)."""
     _cache_invalidate('submissions')
@@ -299,14 +306,16 @@ async def add_submission(
             (submitted_at, player_name, discord_id, weapon, subclass, map, faction,
              takedowns, kills, deaths, vip, feats, message_link,
              lobby_rank, lobby_size, kills_rank, team_rank, team_size,
-             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score,
+             team_total_kills, enemy_total_kills)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
             RETURNING id
         """,
             timestamp, discord_name, str(discord_id), weapon, cls, map_name, faction,
             takedowns, kills, deaths, vip_bool, feats, message_link,
             lobby_rank, lobby_size, kills_rank, team_rank, team_size,
-            total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score
+            total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score,
+            team_total_kills, enemy_total_kills
         )
     return row_id
 
@@ -327,67 +336,78 @@ async def get_submission_by_link(message_link: str):
             r['kills'], float(r['team_kill_share']) if r['team_kill_share'] is not None else None)
 
 
-async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 90) -> list[dict]:
+async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 45) -> list[dict]:
     """Find OTHER players who submitted the SAME match as this run.
 
-    Fingerprint: total_lobby_kills is the sum of every player's kills across both
-    teams, so anyone in the same lobby records (roughly) the same value. It comes
-    from OCR of 30+ scoreboard rows, so two players' screenshots rarely produce the
-    IDENTICAL integer — one misread row shifts the sum by a few. We therefore match
-    on same map + a time window, then keep rows whose lobby total is within a
-    tolerance of ours (not exact). team_kill_share (a % of TEAM kills) lets us
-    derive each player's team total; matching totals => teammates, else opponents.
+    Fingerprint: the faction banner kill totals (the big "AGATHA 642 / MASON 604"
+    numbers). These read reliably and are identical for everyone in the lobby, so the
+    sorted (min,max) PAIR is a strong match — two different games rarely share both
+    team totals. We require the same map, a tight time window (lobbymates upload
+    within minutes), and both banner totals within a small tolerance.
 
-    Returns a list of dicts (player_name, discord_id, weapon, takedowns, kills,
-    deaths, same_team, link), newest first. Empty when the run has no lobby total
-    (older rows, or vision couldn't read the board)."""
+    Rows logged before banner totals were stored fall back to the old roster-sum
+    (total_lobby_kills) match, which is looser — but new rows use the reliable pair,
+    which is what stops the false positives (e.g. crediting someone who merely played
+    the same popular map around the same time).
+
+    Returns dicts (player_name, discord_id, weapon, takedowns, kills, deaths,
+    same_team, link), newest first."""
     def _team_total(kills, share):
-        # total_team_kills = kills / (share/100). Same lobby, same team => same total.
         if kills and share and share > 0:
             return kills * 100.0 / float(share)
         return None
 
+    def _pair(a, b):  # sorted (min,max) banner totals, side-invariant
+        vals = [v for v in (a, b) if isinstance(v, int) and v > 0]
+        return (min(vals), max(vals)) if len(vals) == 2 else None
+
     pool = _pool_check()
     async with pool.acquire() as conn:
         me = await conn.fetchrow(
-            "SELECT submitted_at, map, total_lobby_kills, kills, team_kill_share "
+            "SELECT submitted_at, map, total_lobby_kills, kills, team_kill_share, "
+            "team_total_kills, enemy_total_kills "
             "FROM submissions WHERE message_link=$1 LIMIT 1", message_link)
-        if not me or me['total_lobby_kills'] is None or not me['map']:
-            print(f"[LOBBYMATE] no lobby fingerprint for this run "
-                  f"(total_lobby_kills={me['total_lobby_kills'] if me else 'no-row'}, "
-                  f"map={me['map'] if me else '?'}) — cannot match")
+        if not me or not me['map']:
+            print("[LOBBYMATE] no row/map for this run — cannot match")
             return []
-        # Same map + time window in SQL; the fuzzy total match happens in Python so
-        # OCR variance between two screenshots of one game doesn't break the join.
-        # Window bounds are computed here in Python and passed as plain timestamps —
-        # doing the interval arithmetic in SQL ($4 * interval '1 minute') made
-        # Postgres infer the param as an interval and blew up the whole comparison.
+        _my_pair = _pair(me['team_total_kills'], me['enemy_total_kills'])
+        _my_total = me['total_lobby_kills']
+        if _my_pair is None and _my_total is None:
+            print("[LOBBYMATE] no banner totals and no roster total — cannot match")
+            return []
         from datetime import timedelta as _td
         _lo = me['submitted_at'] - _td(minutes=window_min)
         _hi = me['submitted_at'] + _td(minutes=window_min)
         rows = await conn.fetch(
             "SELECT player_name, discord_id, weapon, takedowns, kills, deaths, "
-            "total_lobby_kills, team_kill_share, message_link FROM submissions "
-            "WHERE map = $1 AND discord_id <> $2 AND total_lobby_kills IS NOT NULL "
-            "AND submitted_at BETWEEN $3 AND $4 "
+            "total_lobby_kills, team_kill_share, team_total_kills, enemy_total_kills, "
+            "message_link FROM submissions "
+            "WHERE map = $1 AND discord_id <> $2 AND submitted_at BETWEEN $3 AND $4 "
             "ORDER BY submitted_at DESC",
             me['map'], str(discord_id), _lo, _hi)
 
-    _my_total = me['total_lobby_kills']
-    # Tolerance: larger of 30 kills or 6% of the lobby total. A single OCR row error
-    # is a handful of kills; 6% of a ~1400-kill lobby is ~85, comfortably absorbing
-    # several misreads while staying well below a different game's total.
-    _tol = max(30, int(_my_total * 0.06))
     _my_team = _team_total(me['kills'], me['team_kill_share'])
     out = []
     seen = set()
-    _rejected = 0
+    _rej = 0
     for r in rows:
         if r['discord_id'] in seen:
             continue
-        if abs((r['total_lobby_kills'] or 0) - _my_total) > _tol:
-            _rejected += 1
-            continue  # same map + time but a different match
+        _their_pair = _pair(r['team_total_kills'], r['enemy_total_kills'])
+        matched = False
+        if _my_pair and _their_pair:
+            # Both have reliable banner totals: require BOTH team totals close (±4%
+            # or ±12). A different game would have to coincidentally share both.
+            _tolp = max(12, int(_my_pair[1] * 0.04))
+            matched = (abs(_my_pair[0] - _their_pair[0]) <= _tolp
+                       and abs(_my_pair[1] - _their_pair[1]) <= _tolp)
+        elif _my_total is not None and r['total_lobby_kills'] is not None:
+            # Legacy fallback: roster-sum match (looser, pre-banner rows only).
+            _tol = max(30, int(_my_total * 0.06))
+            matched = abs(r['total_lobby_kills'] - _my_total) <= _tol
+        if not matched:
+            _rej += 1
+            continue
         seen.add(r['discord_id'])
         _their_team = _team_total(r['kills'], r['team_kill_share'])
         if _my_team and _their_team:
@@ -400,9 +420,8 @@ async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 9
             'kills': r['kills'], 'deaths': r['deaths'],
             'same_team': same_team, 'link': r['message_link'] or '',
         })
-    print(f"[LOBBYMATE] map={me['map']} total={_my_total} tol=±{_tol} window=±{window_min}m "
-          f"-> {len(rows)} same-map candidates, {_rejected} rejected on total, "
-          f"{len(out)} mates matched")
+    print(f"[LOBBYMATE] map={me['map']} pair={_my_pair} total={_my_total} window=±{window_min}m "
+          f"-> {len(rows)} same-map candidates, {_rej} rejected, {len(out)} mates matched")
     return out
 
 

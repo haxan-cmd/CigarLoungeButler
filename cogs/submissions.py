@@ -137,7 +137,8 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          takedowns, kills, deaths, vip, feats, message_link,
                          lobby_rank=None, lobby_size=None, kills_rank=None,
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
-                         team_kill_share=None, team_td_share=None, second_place_td=None, score=None):
+                         team_kill_share=None, team_td_share=None, second_place_td=None, score=None,
+                         team_total_kills=None, enemy_total_kills=None):
     from datetime import datetime as _dt, timezone as _tz
     # Naive UTC: submitted_at is TIMESTAMP (no tz), asyncpg rejects aware values
     now = _dt.now(_tz.utc).replace(tzinfo=None)
@@ -170,6 +171,8 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
         team_td_share=round(team_td_share, 1) if team_td_share is not None else None,
         second_place_td=second_place_td,
         score=score,
+        team_total_kills=team_total_kills,
+        enemy_total_kills=enemy_total_kills,
     )
     return row_id, None
 
@@ -2476,6 +2479,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             team_td_share=_team_td_share,
             second_place_td=_second_place_td,
             score=_score,
+            team_total_kills=_vd_team_total if isinstance(_vd_team_total, int) else None,
+            enemy_total_kills=_ett if isinstance(_ett, int) else None,
         )
         # log_submission returns (row_id, dup_weapon): row_id is the exact row index
         # it wrote to, or None if this was a dedup-skipped repeat — in which case
