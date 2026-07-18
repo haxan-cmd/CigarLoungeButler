@@ -57,6 +57,13 @@ _SCHEMA_STATEMENTS = [
     "record INT DEFAULT 0, total_counts BIGINT DEFAULT 0)",
     "CREATE TABLE IF NOT EXISTS counting_users ("
     "discord_id TEXT PRIMARY KEY, name TEXT, counts INT DEFAULT 0, breaks INT DEFAULT 0)",
+    # Butler reply feedback: one row per AI reply, updated in place as players
+    # react or reply to it. The raw material for prompt tuning — see /butler_report.
+    "CREATE TABLE IF NOT EXISTS butler_feedback ("
+    "message_id TEXT PRIMARY KEY, created_at TIMESTAMP DEFAULT NOW(), "
+    "player_name TEXT, trigger TEXT, response TEXT, ctx_kind TEXT, "
+    "reactions TEXT DEFAULT '', positive INT DEFAULT 0, negative INT DEFAULT 0, "
+    "replies INT DEFAULT 0)",
 ]
 
 
@@ -1294,6 +1301,82 @@ async def get_snapshots(limit: int = 52) -> list[dict]:
             "SELECT * FROM snapshots ORDER BY snapshot_date DESC LIMIT $1", limit
         )
     return [dict(r) for r in rows]
+
+
+# ── Butler feedback ───────────────────────────────────────────────────────────
+
+async def butler_log_reply(message_id: str, player_name: str, trigger: str,
+                           response: str, ctx_kind: str):
+    """Record a Butler reply so reactions can be attributed to it later. Trigger
+    and response are trimmed — this is tuning material, not a transcript."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO butler_feedback (message_id, player_name, trigger, response, ctx_kind) "
+            "VALUES ($1,$2,$3,$4,$5) ON CONFLICT (message_id) DO NOTHING",
+            str(message_id), player_name, (trigger or '')[:500], (response or '')[:2000], ctx_kind)
+
+
+async def butler_add_reaction(message_id: str, emoji: str, sentiment: str) -> bool:
+    """Attach a reaction to a logged reply. Returns False if the message isn't a
+    Butler reply we know about (the common case — most reactions are on player
+    messages), so callers can treat it as a cheap membership test."""
+    pool = _pool_check()
+    _pos = 1 if sentiment == 'positive' else 0
+    _neg = 1 if sentiment == 'negative' else 0
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "UPDATE butler_feedback SET reactions = CASE WHEN reactions = '' THEN $2 "
+            "ELSE reactions || ' ' || $2 END, positive = positive + $3, negative = negative + $4 "
+            "WHERE message_id = $1",
+            str(message_id), emoji, _pos, _neg)
+    return res.split()[-1] != '0'
+
+
+async def butler_add_reply(message_id: str) -> bool:
+    """Someone replied to a Butler message — engagement signal."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "UPDATE butler_feedback SET replies = replies + 1 WHERE message_id = $1",
+            str(message_id))
+    return res.split()[-1] != '0'
+
+
+async def butler_feedback_top(order: str = 'best', limit: int = 10,
+                              ctx_kind: str = None) -> list[dict]:
+    """Best / worst / most-discussed Butler replies for /butler_report.
+    'best' ranks by net positive reactions, 'worst' by net negative, 'talked'
+    by replies. Only rows with some signal — silence is not evidence."""
+    pool = _pool_check()
+    _where = "WHERE (positive + negative + replies) > 0"
+    _params = []
+    if ctx_kind:
+        _params.append(ctx_kind)
+        _where += f" AND ctx_kind = ${len(_params)}"
+    _order = {
+        'best':   "(positive - negative) DESC, replies DESC",
+        'worst':  "(negative - positive) DESC, replies DESC",
+        'talked': "replies DESC, positive DESC",
+    }.get(order, "(positive - negative) DESC")
+    _params.append(limit)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT * FROM butler_feedback {_where} ORDER BY {_order} LIMIT ${len(_params)}",
+            *_params)
+    return [dict(r) for r in rows]
+
+
+async def butler_feedback_stats() -> dict:
+    """Aggregate counts for the report header."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(*) FILTER (WHERE positive + negative + replies > 0) AS rated, "
+            "COALESCE(SUM(positive),0) AS pos, COALESCE(SUM(negative),0) AS neg, "
+            "COALESCE(SUM(replies),0) AS replies FROM butler_feedback")
+    return dict(r) if r else {}
 
 
 # ── Counting channel ──────────────────────────────────────────────────────────
