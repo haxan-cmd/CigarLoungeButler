@@ -1382,6 +1382,12 @@ class PersonalityCog(commands.Cog):
                     return _re_mentions.sub(r'<@!?(\d+)>', _replace, text)
                 resolved_message = _resolve_mentions(message.content)
 
+                # Is this a stats/data question, or just banter? Banter ("you like jazz
+                # butler?") does NOT need the whole-roster comparison context — that block
+                # is the ~2000-token bulk of every prompt. Gating it here cuts banter
+                # prompts ~5x (cost + latency) with no change to data answers.
+                _is_data_q = _looks_like_data_question(resolved_message)
+
                 # Pull player stats for context — lets Butler roast braggers with receipts
                 player_stats_ctx = ''
                 try:
@@ -1682,9 +1688,11 @@ class PersonalityCog(commands.Cog):
                                 print(f"[BUTLER] ctx lobbymate error: {_lme}")
 
                             break
-                    # Build rich per-player summary for comparisons
-                    subs_all = await _db.get_all_submissions()
-                    ld_all = await _db.get_all_leaderboard_data()
+                    # Build rich per-player summary for comparisons — data questions
+                    # only. For banter these stay empty, so every roster loop below
+                    # no-ops and the ~2000-token roster dump never enters the prompt.
+                    subs_all = await _db.get_all_submissions() if _is_data_q else []
+                    ld_all = await _db.get_all_leaderboard_data() if _is_data_q else []
 
                     # Unique weapons and subclasses per player from submissions
                     player_weapon_diversity = {}  # name -> set of weapons
@@ -1779,7 +1787,8 @@ class PersonalityCog(commands.Cog):
                     # what the Butler should lean on when talking performance.
                     try:
                         from cogs.favourites import season_total
-                        _season = await _db.get_current_season()
+                        # Season standings are comparison context — data questions only.
+                        _season = await _db.get_current_season() if _is_data_q else None
                         if _season:
                             _standings, _sstats, _ = await season_total(_season)
                             _lbl = _season.get('label') or f"Season {_season['id']}"
@@ -2008,7 +2017,7 @@ class PersonalityCog(commands.Cog):
                     # Label by what was ASKED, not by whether stats happened to be
                     # attached — registered players always carry stats, so the old
                     # 'stats if player_stats_ctx' test marked every joke as a stats answer.
-                    _is_data_q = _looks_like_data_question(resolved_message)
+                    # (_is_data_q computed once up top, before the context build.)
                     _ctx_kind = 'data' if _is_data_q else 'banter'
                     # Seed a one-click verdict on data answers only: correctness is what
                     # needs grading, and a ✅/❌ prompt under banter kills the joke.
