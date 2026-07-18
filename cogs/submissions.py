@@ -2190,6 +2190,25 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # averages, or the TUFF gap (kills - best teammate TD).
     if isinstance(takedowns, int) and takedowns in _team_td:
         _team_td.remove(takedowns)
+
+    def _strip_bleed_spikes(vals, label=""):
+        # Column bleed: vision reads a SCORE-column value (e.g. a bottom player's
+        # "300" or "750") as a takedown. It slips past the 600 cap but is a wild
+        # outlier — a real roster is smooth. Drop any top value more than 2.5x the
+        # MEDIAN of the values beneath it (median resists multiple bleed spikes,
+        # unlike comparing to just the next value). This is what killed Roam's TUFF:
+        # a phantom 300 became his "best teammate" and turned a +4 gap into -236.
+        vals = sorted(vals, reverse=True)
+        while len(vals) >= 2:
+            rest = vals[1:]
+            mid = sorted(rest)[len(rest) // 2]  # median of the rest
+            if vals[0] > 2.5 * mid:
+                _bad = vals.pop(0)
+                print(f"[VISION] Dropped {label} bleed spike {_bad} (median of rest {mid})")
+            else:
+                break
+        return vals
+    _team_td = _strip_bleed_spikes(_team_td, "team_td")
     _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and 0 < k <= _TDMAX]
     _enemy_td = [s for s in vd.get('enemy_scores', []) if isinstance(s, int) and 0 < s <= _TDMAX]
     _enemy_k  = [k for k in vd.get('enemy_kills',  []) if isinstance(k, int) and 0 < k <= _TDMAX]
