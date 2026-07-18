@@ -181,6 +181,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             return empty
 
         # Pre-process image: upscale small images and sharpen for better OCR accuracy
+        _iw = _ih = 0  # image dims, filled in below — referenced by the roster-retry log
         try:
             from PIL import Image as _PImage, ImageEnhance as _PIEnhance, ImageFilter as _PIFilter
             import io as _io
@@ -203,7 +204,8 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             img.save(buf, format='JPEG', quality=95)
             image_bytes = buf.getvalue()
             content_type = 'image/jpeg'
-            print(f"[VISION] Pre-processed to {img.size[0]}x{img.size[1]} JPEG ({len(image_bytes)} bytes)")
+            _iw, _ih = img.size
+            print(f"[VISION] Pre-processed to {_iw}x{_ih} JPEG ({len(image_bytes)} bytes)")
         except Exception as pp_err:
             print(f"[VISION] Pre-process skipped: {pp_err}")
 
@@ -232,9 +234,12 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         temperature=0,
                         response_mime_type='application/json',
                         # Cap output so a runaway response (a real 65k-char blob was
-                        # seen) gets cut off fast instead of hanging ~100s; a normal
-                        # scorecard JSON is ~200 tokens, so this is huge headroom.
-                        max_output_tokens=2048,
+                        # seen) gets cut off fast instead of hanging ~100s. A full
+                        # 64-player lobby's four roster arrays plus fields can approach
+                        # ~1k tokens, and the 512-token thinking budget also draws from
+                        # this pool — 2048 risked truncating the roster on big lobbies,
+                        # so 4096 gives real headroom without inviting a runaway.
+                        max_output_tokens=4096,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
@@ -324,6 +329,54 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                             print(f"[VISION] Correction pass still no name match (got '{_data2.get('name')}'); keeping original")
                 except Exception as _ce:
                     print(f"[VISION] Correction pass error: {_ce}")
+
+        # Roster-completeness retry: the highlighted player read fine, but the
+        # team/enemy roster arrays came back empty or thin. That blanks TUFF, the
+        # lobbymate fingerprint, team ratings AND cross-verification. If the faction
+        # banner totals were read (proof a full scoreboard IS in the image, not a
+        # crop), take ONE more pass that asks specifically for every roster row.
+        def _roster_len(d):
+            return sum(len(d.get(k) or []) for k in
+                       ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'))
+        _has_totals = isinstance(data.get('team_total_kills'), int) or isinstance(data.get('enemy_total_kills'), int)
+        if _roster_len(data) < 4 and _has_totals:
+            print(f"[VISION] Roster thin ({_roster_len(data)} cells) but totals present "
+                  f"— retrying for full roster (img {_iw}x{_ih})")
+            _roster_req = (
+                "\n\nROSTER PASS: Your previous read captured the highlighted player but "
+                "SKIPPED most or all of the other rows. Read EVERY OTHER row in the "
+                "RANK|NAME|SCORE|T|K|D|PING table, both teams, top to bottom, skipping none. "
+                "Fill team_scores/team_kills (same team as the highlighted player) and "
+                "enemy_scores/enemy_kills (other team) completely. Keep the highlighted "
+                "player's own stats exactly as before. Return the full JSON object.")
+            try:
+                _rr = _gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt + _roster_req, image_part],
+                    config=_gtypes.GenerateContentConfig(
+                        temperature=0, response_mime_type='application/json',
+                        max_output_tokens=4096,
+                        thinking_config=_gtypes.ThinkingConfig(thinking_budget=512)))
+                _rraw = (_rr.text or '').strip()
+                if _rraw.startswith('```'):
+                    _rraw = _rraw.split('```')[1]
+                    if _rraw.startswith('json'):
+                        _rraw = _rraw[4:].strip()
+                _rs = _rraw.find('{')
+                if _rs != -1:
+                    _rdata, _ = _json.JSONDecoder().raw_decode(_rraw[_rs:])
+                    if _roster_len(_rdata) > _roster_len(data):
+                        print(f"[VISION] Roster pass recovered {_roster_len(_rdata)} cells "
+                              f"(was {_roster_len(data)})")
+                        # Keep the original player fields; adopt the fuller roster.
+                        for _rk in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
+                            if _rdata.get(_rk):
+                                data[_rk] = _rdata[_rk]
+                    else:
+                        print(f"[VISION] Roster pass no better ({_roster_len(_rdata)} cells) "
+                              f"— likely a cropped screenshot; roster genuinely absent")
+            except Exception as _rre:
+                print(f"[VISION] Roster pass error: {_rre}")
 
         # Coerce numeric fields to int, ignore bad values
         for field in ('takedowns', 'kills', 'deaths', 'team_total_kills', 'enemy_total_kills'):
