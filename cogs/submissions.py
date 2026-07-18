@@ -27,7 +27,7 @@ from utils.helpers import (
     detect_weapon_milestones, build_milestone_message,
     nerve_log_submission, nerve_log_error, nerve_log_milestone,
     submission_state, butler_quip, vision_parse_scorecard,
-    submission_start, submission_end,
+    submission_start, submission_end, swallow,
 )
 
 def _ordinal(n):
@@ -430,8 +430,8 @@ class SubmitView(discord.ui.View):
                             parsed['_stat_warn'] = (
                                 f"Takedowns `{_td}` is far above the rest of the lobby "
                                 f"(next highest ~{_hi}) — double-check it's not a misread.")
-                except Exception:
-                    pass
+                except Exception as _e:
+                    swallow(_e, "stat-warn anomaly check")
 
                 # Name-match guard: if the identified row's name doesn't match the
                 # submitter (Discord name or a known IGN), warn — this is how a
@@ -1634,8 +1634,8 @@ async def _apply_edit(interaction, ev):
                 _ok, _oks = _row[3], _row[4]
                 if _ok and _oks and _oks > 0:
                     _team_total = round(int(_ok) / (_oks / 100.0))
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as _e:
+                swallow(_e, "edit team-total re-derive")
     except Exception as _e_old:
         print(f"[EDIT] pre-edit lookup error: {_e_old}")
     try:
@@ -1773,8 +1773,8 @@ async def _apply_edit(interaction, ev):
     try:
         from cogs.leaderboards import _get_lb_records as _lb_gr, _board_jump_path as _bjp2
         _lb_tmap = {r['Leaderboard Name']: _bjp2(r) for r in await _lb_gr() if r.get('Thread ID')}
-    except Exception:
-        pass
+    except Exception as _e:
+        swallow(_e, "edit blurb board-links")
     _gid = ev.original_message.guild.id
     _placed = {lb for lb, _ in _edit_placements}
     def _blink(board, text):
@@ -2953,8 +2953,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         try:
             await _db.get_all_submissions()
             await _db.get_all_players()
-        except Exception:
-            pass
+        except Exception as _e:
+            swallow(_e, "bg pre-fetch")
 
         # Update registry card
         try:

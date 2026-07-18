@@ -5,6 +5,29 @@ from datetime import datetime, timezone
 
 import config
 
+
+def swallow(exc, context=""):
+    """Log a caught-and-continued exception instead of silently dropping it.
+
+    The `except Exception: pass` pattern is how the two worst bugs this codebase
+    has shipped stayed invisible for months (a wrong-arity unpack that blanked
+    Warlord/Kill Share, and a dropped column that blanked TUFF). This turns those
+    silent swallows into one greppable line that names WHERE the error was raised,
+    so 'the bot is quietly dumber than it should be' becomes a log search.
+
+    Use in place of `pass` in a handler whose failure shouldn't crash the caller
+    but also shouldn't vanish: `except Exception as e: swallow(e, "context")`."""
+    loc = ""
+    tb = getattr(exc, "__traceback__", None)
+    if tb is not None:
+        last = tb
+        while last.tb_next:  # walk to the frame where it was actually raised
+            last = last.tb_next
+        fname = last.tb_frame.f_code.co_filename.replace("\\", "/").split("/")[-1]
+        loc = f"{fname}:{last.tb_lineno} "
+    tag = f"[{context}] " if context else ""
+    print(f"[SWALLOW] {tag}{loc}{type(exc).__name__}: {exc}")
+
 # Shared OpenAI client - initialised once, used by any cog that needs a Butler line.
 # The Butler's conversational voice runs on GPT-5.6 Luna (the cheap, high-volume
 # tier). Vision stays on Gemini, below — these are separate concerns.
