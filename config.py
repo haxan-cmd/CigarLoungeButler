@@ -57,6 +57,9 @@ INDEX_THREAD_FEATS          = 1519531724881526834
 
 # ── Role IDs ─────────────────────────────────────────────────────────────────
 MOD_ROLE_ID             = 1472259982241300611
+# The Manager (Bald Female) — nerve-centre digests ping her directly rather than the
+# mod role (which renders as a stray "@Null").
+MANAGER_ID              = 131581203256967168
 GRAND_MARSHAL_ROLE_ID   = 1467680214560674020
 WEAPONS_MASTER_ROLE_ID  = 1467679890706010277
 CAMPAIGN_MASTER_ROLE_ID = 1518820158821367858

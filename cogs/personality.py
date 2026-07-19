@@ -1032,10 +1032,10 @@ class PersonalityCog(commands.Cog):
                 return
             lines = [f"⚠️ **{k.replace('_', ' ')}** — {v[0]}" + (f"\n   ↳ *{v[2]}*" if v[2] else "")
                      for k, v in problems]
-            mod = guild.get_role(config.MOD_ROLE_ID)
-            mention = mod.mention if mod else "Mods"
+            mention = f"<@{config.MANAGER_ID}>"
             await ch.send(f"🩺 {mention} — daily self-check found {len(problems)} issue(s):\n"
-                          + "\n".join(lines) + "\n\nRun `/health` for the full report.")
+                          + "\n".join(lines) + "\n\nRun `/health` for the full report.",
+                          allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         except Exception as e:
             print(f"[HEALTH] digest error: {e}")
 
@@ -1060,12 +1060,12 @@ class PersonalityCog(commands.Cog):
             ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
                   or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
             if ch:
-                mod = guild.get_role(config.MOD_ROLE_ID)
-                mention = mod.mention if mod else "Mods"
+                mention = f"<@{config.MANAGER_ID}>"
                 await ch.send(
                     f"\U0001f4c5 {mention} \u2014 **{days_left} day(s) left** in this month's bounty/season. "
                     f"Prep next month's bounty (weapon list, bonus challenge, picture) and run "
-                    f"`/bounty_create` when ready to roll it over."
+                    f"`/bounty_create` when ready to roll it over.",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
                 )
         except Exception as e:
             print(f"[DAILY] bounty reminder error: {e}")
