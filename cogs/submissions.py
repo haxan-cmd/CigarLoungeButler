@@ -2193,20 +2193,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     def _strip_bleed_spikes(vals, label=""):
         # Column bleed: vision reads a SCORE-column value (e.g. a bottom player's
-        # "300" or "750") as a takedown. It slips past the 600 cap but is a wild
-        # outlier — a real roster is smooth. Drop any top value more than 2.5x the
-        # MEDIAN of the values beneath it (median resists multiple bleed spikes,
-        # unlike comparing to just the next value). This is what killed Roam's TUFF:
-        # a phantom 300 became his "best teammate" and turned a +4 gap into -236.
+        # "300") as a takedown. A real bleed is an ISOLATED spike — far above even
+        # the next-highest player. Drop the top value only if it exceeds the
+        # next-highest by more than 2.5x AND clears 200 (no legit single-game TD
+        # sits that high while the runner-up is <2/5 of it). Compare to the NEXT
+        # value, NOT the median: scoreboards are right-skewed (a few 80-140 stars,
+        # many 0-30 players), so a median comparison flags legit clustered stars as
+        # spikes — which invented false TUFFs (C10H15N's 90/88/85 were real).
         vals = sorted(vals, reverse=True)
-        while len(vals) >= 2:
-            rest = vals[1:]
-            mid = sorted(rest)[len(rest) // 2]  # median of the rest
-            if vals[0] > 2.5 * mid:
-                _bad = vals.pop(0)
-                print(f"[VISION] Dropped {label} bleed spike {_bad} (median of rest {mid})")
-            else:
-                break
+        while len(vals) >= 2 and vals[0] > 200 and vals[0] > 2.5 * vals[1]:
+            _bad = vals.pop(0)
+            print(f"[VISION] Dropped {label} bleed spike {_bad} (next-highest {vals[0]})")
         return vals
     _team_td = _strip_bleed_spikes(_team_td, "team_td")
     _team_k  = [k for k in vd.get('team_kills',  []) if isinstance(k, int) and 0 < k <= _TDMAX]
