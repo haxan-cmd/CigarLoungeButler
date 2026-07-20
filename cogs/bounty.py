@@ -44,6 +44,60 @@ async def get_active_bounty():
     return None
 
 
+async def ensure_bounty_boards(guild, bounty):
+    """Post any of the three channel boards that are missing, and record their ids.
+
+    bounty_create leaves all three unset, and the on_message hook that used to
+    create them only fires when a human happens to post an image in the bounty
+    channel. Relying on that meant a fresh bounty could sit with an empty channel.
+    Returns the list of boards created.
+    """
+    channel = guild.get_channel(bounty.get('channel_id'))
+    if not channel and bounty.get('channel_id'):
+        try:
+            channel = await guild.fetch_channel(bounty['channel_id'])
+        except Exception:
+            channel = None
+    if not channel:
+        return []
+
+    _e = bounty.get('theme_emoji') or ''
+
+    def _placeholder(heading, empty):
+        return (f"```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n"
+                f"  {_e} {heading} {_e}\n"
+                f"\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n"
+                f"{empty}\n```")
+
+    made = []
+    if not bounty.get('completions_msg_id'):
+        m = await channel.send(_placeholder('COMPLETIONS', 'No completions yet.'))
+        await _db.update_bounty_field(bounty['id'], 'completions_msg_id', str(m.id))
+        bounty['completions_msg_id'] = m.id
+        made.append('completions')
+    if not bounty.get('bonus_msg_id'):
+        try:
+            _txt = _build_bonus_board_text(bounty)
+        except Exception:
+            _txt = _placeholder('BONUS COMPLETIONS', 'No bonus completions yet.')
+        m = await channel.send(_txt)
+        await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', str(m.id))
+        bounty['bonus_msg_id'] = m.id
+        made.append('bonus')
+    if not bounty.get('progress_msg_id'):
+        try:
+            _txt = await build_progress_board(bounty, top_n=10)
+        except Exception:
+            _txt = _placeholder('TOP HUNTERS', 'No submissions yet.')
+        m = await channel.send(_txt)
+        await _db.update_bounty_field(bounty['id'], 'progress_msg_id', str(m.id))
+        bounty['progress_msg_id'] = m.id
+        made.append('progress')
+    return made
+
+
 def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_done, completions):
     """
     Completions list only — used to be the full community card (weapon progress
@@ -687,7 +741,7 @@ class BountyCog(commands.Cog):
             reason=f"Bounty role for: {title}"
         )
         try:
-            await bounty_role.edit(unicode_emoji="🐱")
+            await bounty_role.edit(unicode_emoji=theme_emoji)
         except Exception:
             pass
 
@@ -711,6 +765,13 @@ class BountyCog(commands.Cog):
             f"📖 Ledger: {forum_mention}\n"
             f"🎭 Role: {bounty_role.mention}"
         )
+        try:
+            _fresh = await get_active_bounty()
+            if _fresh:
+                _made = await ensure_bounty_boards(guild, _fresh)
+                print(f"[BOUNTY] posted boards on create: {_made}")
+        except Exception as _be:
+            print(f"[BOUNTY] board post error: {_be}")
         try:
             _sid = await _db.start_season(title)
             from cogs.favourites import roll_featured
@@ -841,6 +902,12 @@ class BountyCog(commands.Cog):
             bounty_channel = interaction.guild.get_channel(bounty['channel_id'])
             if not bounty_channel:
                 await interaction.followup.send("Bounty channel not found.", ephemeral=True)
+                return
+
+            made = await ensure_bounty_boards(interaction.guild, bounty)
+            if 'progress' in made:
+                await interaction.followup.send(
+                    f"Posted missing boards: {', '.join(made)}.", ephemeral=True)
                 return
 
             if bounty.get('progress_msg_id'):
