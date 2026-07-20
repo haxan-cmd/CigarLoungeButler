@@ -61,6 +61,17 @@ async def ensure_bounty_boards(guild, bounty):
     if not channel:
         return []
 
+    async def _alive(mid):
+        """A stored id is not proof the message still exists: mods delete these by
+        hand. Confirm before skipping, or a deleted board can never come back."""
+        if not mid:
+            return False
+        try:
+            await channel.fetch_message(int(mid))
+            return True
+        except Exception:
+            return False
+
     _e = bounty.get('theme_emoji') or ''
 
     def _placeholder(heading, empty):
@@ -72,12 +83,12 @@ async def ensure_bounty_boards(guild, bounty):
                 f"{empty}\n```")
 
     made = []
-    if not bounty.get('completions_msg_id'):
+    if not await _alive(bounty.get('completions_msg_id')):
         m = await channel.send(_placeholder('COMPLETIONS', 'No completions yet.'))
         await _db.update_bounty_field(bounty['id'], 'completions_msg_id', str(m.id))
         bounty['completions_msg_id'] = m.id
         made.append('completions')
-    if not bounty.get('bonus_msg_id'):
+    if not await _alive(bounty.get('bonus_msg_id')):
         try:
             _txt = _build_bonus_board_text(bounty)
         except Exception:
@@ -86,7 +97,7 @@ async def ensure_bounty_boards(guild, bounty):
         await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', str(m.id))
         bounty['bonus_msg_id'] = m.id
         made.append('bonus')
-    if not bounty.get('progress_msg_id'):
+    if not await _alive(bounty.get('progress_msg_id')):
         try:
             _txt = await build_progress_board(bounty, top_n=10)
         except Exception:
