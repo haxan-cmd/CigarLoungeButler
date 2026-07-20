@@ -2633,6 +2633,34 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         mention_author=False, view=edit_view)
     edit_view._message = summary_reply
 
+    # The blurb below was edited up to five times in a row, each with its own
+    # fetch+edit round-trip, so it visibly mutated several times and every site
+    # had to re-fetch to avoid clobbering the previous one (see the comment on the
+    # placement block). Hold one cached copy, mutate locally, commit twice at most.
+    _blurb_state = {'desc': None, 'dirty': False}
+
+    async def blurb_read():
+        if _blurb_state['desc'] is None:
+            try:
+                _m = await summary_reply.channel.fetch_message(summary_reply.id)
+                _blurb_state['desc'] = _blurb_desc(_m)
+            except Exception:
+                _blurb_state['desc'] = _blurb_desc(summary_reply)
+        return _blurb_state['desc']
+
+    def blurb_write(desc):
+        _blurb_state['desc'] = desc
+        _blurb_state['dirty'] = True
+
+    async def blurb_commit():
+        if not _blurb_state['dirty'] or _blurb_state['desc'] is None:
+            return
+        _blurb_state['dirty'] = False
+        try:
+            await _blurb_edit(summary_reply, _blurb_state['desc'])
+        except Exception as _bce:
+            print(f"[BLURB] commit error: {_bce}")
+
     # Background tasks — run after confirmation is posted
     _guild = interaction.guild
     _user_id = interaction.user.id
@@ -2735,8 +2763,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         n = int(m.group(1)) + 1
                         return f"**{n} Mark{'s' if n != 1 else ''}**"
                     return _re.sub(r'\*\*(\d+) [Mm]arks?\*\*', replacer, content)
-                new_content = increment_marks(_blurb_desc(summary_reply)) + "\n<a:highscore:1360312918545269057> +1 High Score"
-                await _blurb_edit(summary_reply, new_content)
+                blurb_write(increment_marks(await blurb_read())
+                            + "\n<a:highscore:1360312918545269057> +1 High Score")
             except Exception as e:
                 print(f"Highscore mark edit error: {e}")
             # Bookkeeping (lower priority): record the High Score feat so mark totals
@@ -2878,10 +2906,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                                 _badge = (_memoji, "Master")
                         if _badge:
                             try:
-                                _vfresh = await summary_reply.channel.fetch_message(summary_reply.id)
-                                _vdesc = _blurb_desc(_vfresh)
+                                _vdesc = await blurb_read()
                                 if _badge[1] not in _vdesc:
-                                    await _blurb_edit(summary_reply, _vdesc + f"\n{_badge[0]} **{_badge[1]}**")
+                                    blurb_write(_vdesc + f"\n{_badge[0]} **{_badge[1]}**")
                             except Exception as _vbe:
                                 print(f"[BADGE] error: {_vbe}")
                         _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)
@@ -2971,11 +2998,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 # it bumped the mark count and appended the "+1 High Score" line, but the
                 # stale in-memory copy didn't reflect it, so placing on a board was
                 # silently dropping the High Score line and the extra mark.
-                try:
-                    _fresh_reply = await summary_reply.channel.fetch_message(summary_reply.id)
-                except Exception:
-                    _fresh_reply = summary_reply
-                new_content = _blurb_desc(_fresh_reply)
+                new_content = await blurb_read()
                 # 100 Kills board rank onto the "+1" line (hyperlinked to the board).
                 _kills_pos = next((p for lb, p in placements if lb == "100 Kills"), None)
                 if _kills_pos is not None:
@@ -3021,9 +3044,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                                        + new_content[_mblock.start():])
                     else:
                         new_content = f"{new_content}\n\n{bounty_line}"
-                await _blurb_edit(summary_reply, new_content + (f"\n{trailer}" if trailer else ""))
+                blurb_write(new_content + (f"\n{trailer}" if trailer else ""))
             except Exception as e:
                 print(f"Placement edit error: {e}")
+            # Commit here as well as at the end: if _bg_tasks later times out, the
+            # placement/marks content is the part players actually care about.
+            await blurb_commit()
 
         # Auto-learn IGN: if vision read a name from the scoreboard that differs from Discord name, save it
         _vision_name = (vision_data or {}).get('name')
@@ -3079,10 +3105,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if _tid:
                 _plain = f"`{_user_name}`"
                 _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"
-                _fresh = await summary_reply.channel.fetch_message(summary_reply.id)
-                _fdesc = _blurb_desc(_fresh)
+                _fdesc = await blurb_read()
                 if _plain in _fdesc:
-                    await _blurb_edit(summary_reply, _fdesc.replace(_plain, _link, 1))
+                    blurb_write(_fdesc.replace(_plain, _link, 1))
         except Exception as _nle:
             print(f"[NAME LINK] blurb update error: {_nle}")
         await asyncio.sleep(1)
@@ -3106,11 +3131,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         _rel = "in a lobby with"
                     _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`")
                 if _lines:
-                    _fresh_lm = await summary_reply.channel.fetch_message(summary_reply.id)
-                    _lm_desc = _blurb_desc(_fresh_lm)
-                    await _blurb_edit(summary_reply, _lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
+                    _lm_desc = await blurb_read()
+                    blurb_write(_lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
         except Exception as _lme:
             print(f"[LOBBYMATE] blurb update error: {_lme}")
+        await blurb_commit()
 
         # Update bounty cards index
         try:
