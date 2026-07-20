@@ -30,6 +30,22 @@ from utils.helpers import (
     submission_start, submission_end, swallow,
 )
 
+# Bounty reactions and blurb links follow the ACTIVE bounty's theme emoji.
+# These were hardcoded to the Meowy Massacre cat and kept showing it after the
+# bounty rolled over.
+_BOUNTY_EMOJI_FALLBACK = "\U0001f3af"  # dart, if a bounty has no emoji set
+
+
+async def _bounty_emoji():
+    """Theme emoji of the active bounty, falling back if there isn't one."""
+    try:
+        from cogs.bounty import get_active_bounty
+        _b = await get_active_bounty()
+        return (_b or {}).get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK
+    except Exception:
+        return _BOUNTY_EMOJI_FALLBACK
+
+
 def _ordinal(n):
     return {1:'st',2:'nd',3:'rd'}.get(n if n < 20 else n % 10, 'th')
 
@@ -2537,7 +2553,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 )
                 print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon} (corrected from {dup_weapon})")
                 if bounty_hit:
-                    await original_message.add_reaction("🐱")
+                    await original_message.add_reaction(await _bounty_emoji())
             except Exception as e:
                 nerve_log_error("Bounty check", e)
         print(f"[DEDUP] Duplicate submission fully skipped for {interaction.user.display_name}")
@@ -2708,9 +2724,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 )
                 print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
                 if bounty_hit:
-                    await safe_react("🐱")
                     # Check if this run completed the bounty
                     _bounty = await get_active_bounty()
+                    await safe_react((_bounty or {}).get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK)
                     if _bounty:
                         newly_completed = await check_bounty_completion(
                             interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
@@ -2721,8 +2737,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             _pbr = await get_player_bounty_progress(_bounty['title'], str(interaction.user.id))
                             _fp = _pbr.get('forum_post_id') if _pbr else None
                             if _fp:
+                                _bemoji = _bounty.get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK
                                 bounty_line = (
-                                    f"🐱 [+1 {_bounty['title']}]"
+                                    f"{_bemoji} [+1 {_bounty['title']}]"
                                     f"(https://discord.com/channels/{interaction.guild.id}/{_fp})"
                                 )
                         except Exception as _blerr:
