@@ -1839,6 +1839,32 @@ async def _apply_edit(interaction, ev):
         print(f"[EDIT] stats block rebuild error: {_e_sb}")
     if _stat_lines:
         new_summary += "\n\n" + "\n".join(f"*{s}*" for s in _stat_lines)
+
+    # Bounty progress line. Rebuilt here rather than carried over, so an edit that
+    # moves the run off a bounty weapon (or under the TD floor) correctly drops it.
+    # Mirrors the gate in update_bounty: bounty weapon, 100+ TD, not a resubmit.
+    try:
+        from cogs.bounty import get_active_bounty, get_player_bounty_progress
+        _eb = await get_active_bounty()
+        _eb_ok = (
+            _eb
+            and 'Resubmit' not in (_feats or [])
+            and (ev.takedowns or 0) >= 100
+            and any((ev.weapon or '').strip().lower() == str(k).strip().lower()
+                    for k in (_eb.get('weapons') or {}))
+        )
+        if _eb_ok:
+            _epbr = await get_player_bounty_progress(_eb['title'], str(ev.author.id))
+            _efp = _epbr.get('forum_post_id') if _epbr else None
+            if _efp:
+                _eemoji = _eb.get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK
+                new_summary += (
+                    f"\n\n{_eemoji} [+1 {_eb['title']}]"
+                    f"(https://discord.com/channels/{_edit_guild_id}/{_efp})"
+                )
+    except Exception as _ebe:
+        print(f"[EDIT] bounty line rebuild error: {_ebe}")
+
     _is_pac = (ev.kills == 0 and ev.takedowns <= 10)
     _me = 0 if _is_pac else 1
     _ml = [] if _is_pac else ["<:cigar:1444893851427803298> *+1 Submission*"]
@@ -2113,6 +2139,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             await original_message.add_reaction(emoji)
         except Exception as e:
             print(f"Reaction failed ({emoji}): {e}")
+
+    # Reactions decided AFTER the blurb is posted (high score, TUFF, bounty, ...)
+    # are cosmetic and were each a blocking round-trip, holding the per-guild
+    # submission queue for the sum of them. Schedule instead, reap at the end.
+    _late_react_tasks = []
+
+    def react_later(emoji):
+        if not emoji:
+            return
+        _late_react_tasks.append(asyncio.create_task(safe_react(emoji)))
 
     # Cigar always lands first; the rest fire concurrently right after.
     await safe_react("<:cigar:1444893851427803298>")
@@ -2616,7 +2652,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             ]
             beats_personal_best = not player_existing or takedowns > max(player_existing)
             if qualifies_board and beats_personal_best:
-                await safe_react("<:weapon_hs:1350656128635375698>")
+                react_later("<:weapon_hs:1350656128635375698>")
 
         # Update leaderboards (skip for ranged submissions)
         any_updated = False
@@ -2680,7 +2716,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if _weapon_hs or _map_hs:
             # Immediate visual feedback FIRST — react + bump the blurb before any
             # bookkeeping, so the user sees the High Score right away.
-            await safe_react("<a:highscore:1360312918545269057>")
+            react_later("<a:highscore:1360312918545269057>")
             try:
                 import re as _re
                 def increment_marks(content):
@@ -2708,9 +2744,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 except Exception as e:
                     print(f"Highscore feat write error: {e}")
         if any(lb == "TUFF" for lb, _ in placements):
-            await safe_react("<a:TUFF2:1520779243879927898>")
+            react_later("<a:TUFF2:1520779243879927898>")
         if any(lb == "Pacifist" for lb, _ in placements):
-            await safe_react("<a:passive:1365531248268673086>")
+            react_later("<a:passive:1365531248268673086>")
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
@@ -2726,7 +2762,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if bounty_hit:
                     # Check if this run completed the bounty
                     _bounty = await get_active_bounty()
-                    await safe_react((_bounty or {}).get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK)
+                    react_later((_bounty or {}).get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK)
                     if _bounty:
                         newly_completed = await check_bounty_completion(
                             interaction.guild, _bounty, interaction.user.display_name, interaction.user.id
@@ -3231,6 +3267,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 await nerve_alert(interaction.client, "background tasks", _bge)
             except Exception:
                 pass
+    # Reap the deferred reactions. They have been running concurrently with
+    # everything above, so this is almost always already done; awaiting keeps a
+    # strong reference so the loop cannot garbage-collect a pending task, and
+    # stops exceptions being reported as "never retrieved".
+    if _late_react_tasks:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*_late_react_tasks, return_exceptions=True), timeout=15)
+        except asyncio.TimeoutError:
+            print("[REACT] deferred reactions still pending after 15s")
+
     asyncio.create_task(_bg_runner())
 
 
