@@ -555,7 +555,7 @@ class BountyCog(commands.Cog):
         for row in existing_bounties:
             if len(row) >= 9 and row[8] == 'TRUE':
                 bounty_id = int(row[15])
-                await _db.update_bounty_field(bounty_id, 'active', 'FALSE')
+                await _db.update_bounty_field(bounty_id, 'active', False)
 
         def parse_weapon(raw):
             if raw is None:
@@ -665,7 +665,7 @@ class BountyCog(commands.Cog):
         )
 
         # Mark inactive immediately
-        await _db.update_bounty_field(bounty['id'], 'active', 'FALSE')
+        await _db.update_bounty_field(bounty['id'], 'active', False)
 
         guild = interaction.guild
 

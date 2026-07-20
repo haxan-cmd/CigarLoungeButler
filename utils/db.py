@@ -952,6 +952,10 @@ async def update_bounty_field(bounty_id: int, field: str, value):
                'completions_msg_id', 'bonus_msg_id', 'progress_msg_id', 'channel_id'}
     if field not in allowed:
         raise ValueError(f"Field {field} not allowed")
+    # `active` is a real BOOLEAN column and asyncpg will not coerce a string.
+    # Callers have historically passed 'FALSE'/'TRUE', so normalise here.
+    if field == 'active' and isinstance(value, str):
+        value = value.strip().upper() in ('TRUE', 'T', '1', 'YES', 'Y')
     async with pool.acquire() as conn:
         await conn.execute(f"UPDATE bounties SET {field}=$1 WHERE id=$2", value, bounty_id)
 
