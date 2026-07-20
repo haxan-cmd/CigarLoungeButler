@@ -671,7 +671,7 @@ class BountyCog(commands.Cog):
 
         # Close the season tied to this bounty: post the Hall of Fame entry, then end it.
         try:
-            from cogs.favourites import finalize_season
+            from cogs.favourites import finalize_season, _hof_index_refresh
             from cogs.leaderboards import snapshot_monthly_to_hof
             _season = await _db.get_current_season()
             if _season:
@@ -684,6 +684,13 @@ class BountyCog(commands.Cog):
                 except Exception as _me:
                     print(f"[MONTHLY HOF] snapshot error: {_me}")
                 await _db.end_current_season()
+                # finalize_season refreshed the index while this season was still
+                # open, so its line read "(in progress)". Re-render now that
+                # ended_at is set.
+                try:
+                    await _hof_index_refresh(guild)
+                except Exception as _ie:
+                    print(f"[HOF] index re-refresh error: {_ie}")
         except Exception as _se:
             print(f"[SEASON] finalize error: {_se}")
         closed_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -716,6 +723,30 @@ class BountyCog(commands.Cog):
             print(f"Bounty cards stamped CLOSED for {bounty['title']}")
         except Exception as e:
             print(f"Bounty card stamp error: {e}")
+
+        # ── REFRESH FINISHERS' REGISTRY CARDS ────────────────────────────────
+        # Card completions are derived live from bounty_players.progress, but a card
+        # is only re-rendered when something calls create_or_update_registry_card.
+        # Nothing did that on bounty end, so finishers kept a stale card (and a stale
+        # title, which is keyed off the completion count) until their next run.
+        try:
+            from cogs.registry import create_or_update_registry_card
+            _comp_names = {
+                str(c['id']): (c.get('name') if isinstance(c, dict) else None)
+                for c in bounty['completions']
+            }
+            for _cid, _cname in _comp_names.items():
+                try:
+                    _m = guild.get_member(int(_cid))
+                    await create_or_update_registry_card(
+                        guild, int(_cid), _cname or (_m.display_name if _m else str(_cid))
+                    )
+                    await asyncio.sleep(0.5)
+                except Exception as _ce:
+                    print(f"[BOUNTY END] card refresh failed for {_cid}: {_ce}")
+            print(f"[BOUNTY END] refreshed {len(_comp_names)} finisher cards")
+        except Exception as _ce:
+            print(f"[BOUNTY END] card refresh sweep error: {_ce}")
 
         await asyncio.sleep(86400)
         channel = guild.get_channel(bounty['channel_id'])
