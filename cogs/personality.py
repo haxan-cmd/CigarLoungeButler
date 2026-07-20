@@ -1780,7 +1780,10 @@ class PersonalityCog(commands.Cog):
                         f"{n}: {s} runs, {lw} on boards{_bestgame(n)}{_lethality_str(n)}, {m} career marks"
                         for n, m, s, uw, us, lw in all_players_summary[:10]
                     ]
-                    if summary_lines:
+                    # Only emit the roster when the underlying scans actually ran (data
+                    # questions). For banter subs_all/ld_all are empty, so every player would
+                    # read "0 runs, 0 on boards" — the Butler then states that as fact.
+                    if summary_lines and _is_data_q:
                         player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
 
                     # Season board — championship standings + category form. This is
