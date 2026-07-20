@@ -83,11 +83,6 @@ WEAPONS_1H = [
     "Pick Axe", "Rapier", "Short Sword", "Sword", "Warhammer", "Cudgel",
 ]
 
-# Entries that sit on the weapon lists for BOARD ROUTING but make no sense as a
-# "featured weapon of the season": they are personal-best feat boards, not
-# weapons people grind takedowns with. Only roll_featured consults this.
-FEATURED_WEAPON_EXCLUDE = {"Healing Horn", "Healing Banner", "Mallet", "Knife"}
-
 CLASS_WEAPON_MAP = {
     "Officer":        ["Axe", "Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "Sword", "War Axe"],
     "Guardian":       ["Axe", "Falchion", "Fist and Shield", "Hatchet", "Heavy Cavalry Sword", "Mace", "One-Handed Spear", "Short Sword", "Warhammer"],
@@ -215,6 +210,16 @@ MAP_ALIASES = {
 }
 
 FEAT_WEAPONS = ["Mallet", "Knife", "Healing Horn", "Fist and Shield"]
+
+# Never roll these as a Special Feature. They sit on the 1H/2H lists for board
+# ROUTING, but they are personal-best feat boards, not weapons anyone grinds
+# takedowns on, so featuring one gives the season a dead objective.
+FEATURED_WEAPON_EXCLUDE = set(FEAT_WEAPONS) | {"Healing Banner"}
+
+# A weapon or map needs at least this many logged runs all-time to be eligible
+# as a Special Feature. Without a floor the inverse-frequency weighting below
+# actively hunts for whatever nobody plays.
+FEATURED_MIN_RUNS = 15
 
 VIP_MAPS = {
     ("Trayan Citadel",    "Agatha"),

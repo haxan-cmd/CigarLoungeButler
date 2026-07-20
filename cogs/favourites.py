@@ -627,20 +627,34 @@ async def roll_featured(season_id):
     if fins:
         prev = await _db.get_season_features(fins[0]["id"])
 
+    _min_runs = getattr(config, 'FEATURED_MIN_RUNS', 0)
+
     def _pick(candidates, counts, exclude):
-        pool = [c for c in candidates if c and c != exclude] or [c for c in candidates if c]
+        # Eligible = played enough to be a real objective. Falls back to the raw
+        # pool if the floor would leave nothing to choose from.
+        live = [c for c in candidates if c and counts.get(c, 0) >= _min_runs]
+        base = live or [c for c in candidates if c]
+        pool = [c for c in base if c != exclude] or base
         if not pool:
             return None
-        weights = [1.0 / (counts.get(c, 0) + 1) for c in pool]
+        # Still favour the less-played, but by sqrt rather than a straight
+        # inverse: 1/(n+1) made a never-touched pick ~500x likelier than a
+        # popular one, which is how Fist and Shield kept winning.
+        weights = [1.0 / ((counts.get(c, 0) + 1) ** 0.5) for c in pool]
         return random.choices(pool, weights=weights, k=1)[0]
 
     _skip = getattr(config, 'FEATURED_WEAPON_EXCLUDE', set())
     _w1h = [w for w in config.WEAPONS_1H if w not in _skip]
     _w2h = [w for w in config.WEAPONS_2H if w not in _skip]
-    f1h = _pick(_w1h, wcount, prev.get("weapon_1h"))
-    f2h = _pick(_w2h, wcount, prev.get("weapon_2h"))
-    m1 = _pick(list(config.MAPS), mcount, prev.get("map_1"))
-    m2 = _pick([x for x in config.MAPS if x != m1], mcount, prev.get("map_2"))
+    # Exclude the CURRENT pick as well as last season's, so a re-roll actually
+    # rolls: prev only covers the last FINISHED season.
+    cur = await _db.get_season_features(season_id) or {}
+    def _avoid(slot):
+        return cur.get(slot) or prev.get(slot)
+    f1h = _pick(_w1h, wcount, _avoid("weapon_1h"))
+    f2h = _pick(_w2h, wcount, _avoid("weapon_2h"))
+    m1 = _pick(list(config.MAPS), mcount, _avoid("map_1"))
+    m2 = _pick([x for x in config.MAPS if x != m1], mcount, _avoid("map_2"))
     for slot, val in (("weapon_1h", f1h), ("weapon_2h", f2h), ("map_1", m1), ("map_2", m2)):
         if val:
             await _db.set_season_feature(season_id, slot, val)
