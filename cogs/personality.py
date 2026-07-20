@@ -2056,55 +2056,6 @@ class PersonalityCog(commands.Cog):
                         print(f"[BUTLER] feedback log error: {_fe}")
                     return
 
-        image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
-
-        # Check if this is an art post in the active bounty channel
-        from cogs.bounty import get_active_bounty
-        bounty = await get_active_bounty()
-        if bounty and message.channel.id == bounty['channel_id']:
-            has_image = any(
-                att.filename.lower().endswith(image_extensions)
-                for att in message.attachments
-            )
-            if has_image and not bounty['completions_msg_id'] and not bounty['bonus_msg_id']:
-                # msg ids must be saved as str (TEXT columns) or the write fails
-                # and these placeholders re-post on every image (2026-07-13)
-                _emoji = bounty['theme_emoji']
-                completions_placeholder = (
-                    f"```\n"
-                    f"╭──────────────────────────────╮\n"
-                    f"  {_emoji} COMPLETIONS {_emoji}\n"
-                    f"╰──────────────────────────────╯\n"
-                    f"No completions yet.\n"
-                    f"```"
-                )
-                bonus_placeholder = (
-                    f"```\n"
-                    f"╭──────────────────────────────╮\n"
-                    f"  {_emoji} BONUS COMPLETIONS {_emoji}\n"
-                    f"╰──────────────────────────────╯\n"
-                    f"No bonus completions yet.\n"
-                    f"```"
-                )
-                try:
-                    comp_msg = await message.channel.send(completions_placeholder)
-                    bonus_msg = await message.channel.send(bonus_placeholder)
-                    progress_placeholder = (
-                        f"```\n"
-                        f"╭──────────────────────────────╮\n"
-                        f"  {_emoji} TOP HUNTERS {_emoji}\n"
-                        f"╰──────────────────────────────╯\n"
-                        f"No submissions yet.\n"
-                        f"```"
-                    )
-                    progress_msg = await message.channel.send(progress_placeholder)
-                    await _db.update_bounty_field(bounty['id'], 'completions_msg_id', str(comp_msg.id))
-                    await _db.update_bounty_field(bounty['id'], 'bonus_msg_id', str(bonus_msg.id))
-                    await _db.update_bounty_field(bounty['id'], 'progress_msg_id', str(progress_msg.id))
-                except Exception as e:
-                    print(f"Bounty placeholder post error: {e}")
-            return
-
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
         """Track reactions on Butler responses for feedback analysis. Also the

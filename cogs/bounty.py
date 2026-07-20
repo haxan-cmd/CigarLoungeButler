@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
+import utils.challenges as _ch
 
 MOD_ROLE_ID             = config.MOD_ROLE_ID
 BOUNTY_FORUM_CHANNEL_ID = config.BOUNTY_FORUM_CHANNEL_ID
@@ -303,58 +304,11 @@ def build_player_bounty_card(bounty, player_progress):
     return "\n".join(lines)
 
 
-def _parse_ts(raw):
-    """Best-effort parse of a stored timestamp string to a naive UTC datetime."""
-    if not raw:
-        return None
-    s = str(raw).strip().replace('UTC', '').strip()
-    try:
-        return datetime.fromisoformat(s)
-    except ValueError:
-        pass
-    for _fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
-        try:
-            return datetime.strptime(s, _fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_special(bounty):
-    """Break the special-challenge text into machine-checkable parts.
-
-    Returns None when there is no challenge, else a dict:
-      text        lowercased challenge string
-      min_td      takedowns a run must reach (default 100)
-      max_deaths  deaths a run must stay UNDER, or None if unconstrained
-      need        how many qualifying runs are required (default 1)
-      any_weapon  True when the challenge accepts any weapon on the bounty
-    """
-    sc = (bounty.get('special_challenge') or '').lower()
-    if not sc:
-        return None
-    import re as _re
-    _td = _re.search(r'(\d+)\s*takedown', sc)
-    _dd = _re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
-    _ct = _re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or _re.search(r'\bx\s*(\d+)\b', sc)
-    return {
-        'text': sc,
-        'min_td': int(_td.group(1)) if _td else 100,
-        'max_deaths': int(_dd.group(1)) if _dd else None,
-        'need': max(1, int(_ct.group(1))) if _ct else 1,
-        'any_weapon': ('any bounty weapon' in sc) or ('any weapon' in sc),
-    }
-
-
-def _special_weapon_ok(bounty, spec, weapon):
-    """Does this weapon satisfy the challenge? Either it is named in the challenge
-    text, or the challenge accepts any weapon on the bounty roster."""
-    if not weapon:
-        return False
-    w = weapon.strip().lower()
-    if spec['any_weapon']:
-        return any(w == str(k).strip().lower() for k in (bounty.get('weapons') or {}))
-    return w in spec['text']
+# Pure parsing lives in utils/challenges.py so it can be unit tested without
+# pulling in discord/db. These aliases keep the existing call sites unchanged.
+_parse_ts = _ch.parse_ts
+_parse_special = _ch.parse_special
+_special_weapon_ok = _ch.special_weapon_ok
 
 
 async def _count_special_runs(bounty, player_id):
@@ -376,25 +330,13 @@ async def _count_special_runs(bounty, player_id):
     for r in subs:
         if len(r) < 10:
             continue
-        feats = (r[11] or '').lower() if len(r) > 11 else ''
-        if 'resubmit' in feats:
-            continue
+        feats = (r[11] or '') if len(r) > 11 else ''
         if start is not None:
             ts = _parse_ts(r[0])
             if ts is None or ts < start:
                 continue
-        if not _special_weapon_ok(bounty, spec, r[3] or ''):
-            continue
-        try:
-            td = int(r[7]) if r[7] else 0
-            dk = int(r[9]) if r[9] else 0
-        except (ValueError, TypeError):
-            continue
-        if td < spec['min_td']:
-            continue
-        if spec['max_deaths'] is not None and dk >= spec['max_deaths']:
-            continue
-        n += 1
+        if _ch.run_qualifies(bounty, spec, r[3] or '', r[7], r[9], feats):
+            n += 1
     return n
 
 
@@ -784,6 +726,26 @@ class BountyCog(commands.Cog):
             f"📖 Ledger: {forum_mention}\n"
             f"🎭 Role: {bounty_role.mention}"
         )
+
+        # Echo how the special challenge actually PARSED. It is matched by regex
+        # over free text, so a reworded challenge can silently never qualify —
+        # far better to see that here than at the end of the month.
+        _spec = _parse_special({'special_challenge': special_challenge})
+        if _spec:
+            _bits = [f"{_spec['min_td']}+ TD"]
+            if _spec['max_deaths'] is not None:
+                _bits.append(f"under {_spec['max_deaths']} deaths")
+            _bits.append(f"x{_spec['need']}")
+            _bits.append("any bounty weapon" if _spec['any_weapon'] else "weapon named in the text")
+            msg += f"\n\n🧪 Special challenge parsed as: **{', '.join(_bits)}**"
+            if not _spec['any_weapon']:
+                _named = [w for w in weapons if w.lower() in _spec['text']]
+                if _named:
+                    msg += f"\nMatches: {', '.join(_named)}"
+                else:
+                    msg += ("\n⚠️ **No weapon matches this challenge.** Nothing will ever "
+                            "qualify. Either name a weapon in the text or use the phrase "
+                            "'any bounty weapon'.")
         try:
             _fresh = await get_active_bounty()
             if _fresh:

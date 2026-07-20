@@ -166,6 +166,19 @@ def _cache_get(key: str):
 def _cache_set(key: str, data: list):
     _cache[key] = (_time.monotonic(), data)
 
+def _as_int(v, default=0):
+    """Coerce a Sheets-era string to int for a typed Postgres column. asyncpg
+    does not coerce, and these blow up only when the write actually runs."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    try:
+        return int(float(str(v).strip()))
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+
 def _cache_invalidate(*keys: str):
     for k in keys:
         _cache.pop(k, None)
@@ -907,6 +920,7 @@ async def set_legacy_discord_id(player_name: str, discord_id: str) -> int:
 
 async def upsert_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
     _cache_invalidate('leaderboard_data')
+    score = _as_int(score)
     pool = _pool_check()
     async with pool.acquire() as conn:
         # UPDATE-first, INSERT on zero rows (updates every matching row)
@@ -1077,6 +1091,7 @@ async def upsert_index_post(forum_name, channel_id, message_id):
 async def add_leaderboard_entry(board_name, player_name, discord_id, score, message_link, weapon):
     """Always insert a new row (used for unlimited boards like 100 Kills / 200 Takedowns)."""
     _cache_invalidate('leaderboard_data')
+    score = _as_int(score)
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -1310,6 +1325,7 @@ async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: i
     """
     pool = _pool_check()
     subclass = subclass or ''
+    marks = _as_int(marks)
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
             "SELECT id FROM legacy_marks WHERE LOWER(player_name)=LOWER($1) AND weapon=$2 AND subclass=$3 LIMIT 1",
@@ -1819,6 +1835,11 @@ async def kofi_init():
 
 async def add_kofi_donation(transaction_id: str, donor_name: str, amount: float, currency: str) -> bool:
     pool = _pool_check()
+    from decimal import Decimal as _Dec, InvalidOperation as _InvOp
+    try:
+        amount = _Dec(str(amount))
+    except (_InvOp, ValueError, TypeError):
+        amount = _Dec('0')
     async with pool.acquire() as conn:
         # UNIQUE(kofi_transaction_id) dedups webhook retries atomically
         row_id = await conn.fetchval(
@@ -2011,6 +2032,7 @@ async def set_season_start(season_id: int, started_at):
 async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str) -> bool:
     """Idempotent per (season, player, reason) so a resubmission can't farm it."""
     pool = _pool_check()
+    points = _as_int(points)
     async with pool.acquire() as conn:
         res = await conn.execute(
             # Column order must match the arg order: (points, reason) swapped here
