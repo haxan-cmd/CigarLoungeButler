@@ -228,6 +228,43 @@ def build_challenge_rules_embeds():
     ), inline=False)
     embeds.append(e)
 
+    # ── SEASON CHAMPIONSHIP ───────────────────────────────────────────────────
+    e = discord.Embed(
+        title="🏆  Season Championship",
+        description=(
+            "Every bounty cycle is a season. Grand Prix points (GP) come from three places. "
+            "Highest total takes the crown and a permanent Hall of Fame entry."
+        ),
+        colour=C("#D4AF37"),
+    )
+    e.add_field(name="1. Category points  (max 25)", value=(
+        "Top 5 in each category score **5 / 4 / 3 / 2 / 1** GP:\n"
+        "<a:mostlethal:1520490418817601658> **Kill Share**: your share of your team's kills\n"
+        "<:warlord:1520490364039860347> **Warlord**: your takedowns against your team's kills\n"
+        "**Total Tally**: every takedown you log this season, added up\n"
+        "**Most Kills**: your single best run\n"
+        "**Highest Takedowns**: your single best run"
+    ), inline=False)
+    e.add_field(name="2. Special Features  (max 12)", value=(
+        "Four focuses are rolled at random each season: a 1H weapon, a 2H weapon and two maps. "
+        "On each one, the highest takedowns in a single run scores **3** GP and the runner-up **1**."
+    ), inline=False)
+    e.add_field(name="3. Bounty race  (max 5)", value=(
+        "Completing the monthly bounty pays by finishing position: "
+        "**5** for first, **4** for second, **3** for third, **2** for everyone after."
+    ), inline=False)
+    e.add_field(name="Why the rate boards reward consistency", value=(
+        "Kill Share and Warlord are percentages, so a raw average would let one lucky game win "
+        "outright. Both are volume-adjusted: your average is pulled toward the community mean "
+        "until you have games behind it, and recent runs count for more than old ones. "
+        "Play steadily and it climbs. A single freak scoreline will not carry you."
+    ), inline=False)
+    e.add_field(name="What does not count", value=(
+        "Runs tagged `Resubmit` (an old game uploaded later) or `Unlisted` (pulled by a mod) "
+        "are excluded from every season category."
+    ), inline=False)
+    embeds.append(e)
+
     # 6. Player titles
     e = discord.Embed(
         title="🏆  Player Titles",
@@ -490,7 +527,22 @@ class AdminCog(commands.Cog):
                 except Exception as e:
                     print(f"Error updating message {msg_id}: {e}")
 
-            await interaction.followup.send(f"Updated {updated}/{len(msg_ids)} challenge rules embeds.", ephemeral=True)
+            # Embeds added since the original post have no message to edit. Send
+            # them and extend the stored id list, so a new section does not
+            # require re-posting (and duplicating) the whole channel.
+            added = 0
+            if len(embeds) > len(msg_ids):
+                new_ids = list(msg_ids)
+                for embed in embeds[len(msg_ids):]:
+                    msg = await channel.send(embed=embed)
+                    new_ids.append(msg.id)
+                    added += 1
+                    await asyncio.sleep(0.5)
+                await save_challenge_rules_message_ids(new_ids)
+
+            _tail = f", posted {added} new" if added else ""
+            await interaction.followup.send(
+                f"Updated {updated}/{len(msg_ids)} challenge rules embeds{_tail}.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
