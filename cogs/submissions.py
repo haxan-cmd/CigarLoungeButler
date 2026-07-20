@@ -2958,13 +2958,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         1,
                     )
                 if bounty_line:
-                    # Slot the bounty link under the VIP line, above the marks rundown.
-                    _mark_anchor = "<:cigar:1444893851427803298>"
-                    if _mark_anchor in new_content:
-                        new_content = new_content.replace(
-                            _mark_anchor, f"{bounty_line}\n{_mark_anchor}", 1)
+                    # Own block, below the stat rows and above the marks rundown.
+                    # Bounty progress awards no marks, so sitting it inside the
+                    # rundown next to "+1 Submission" read as a second mark.
+                    import re as _re2
+                    _mblock = _re2.search(
+                        r'\n\n(?:\*\*\d+ Marks?\*\* on |<a:passive:\d+> \*\*Pacifist run\*\*)',
+                        new_content)
+                    if _mblock:
+                        new_content = (new_content[:_mblock.start()]
+                                       + f"\n\n{bounty_line}"
+                                       + new_content[_mblock.start():])
                     else:
-                        new_content = f"{new_content}\n{bounty_line}"
+                        new_content = f"{new_content}\n\n{bounty_line}"
                 await _blurb_edit(summary_reply, new_content + (f"\n{trailer}" if trailer else ""))
             except Exception as e:
                 print(f"Placement edit error: {e}")
