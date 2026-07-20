@@ -291,12 +291,14 @@ def build_player_bounty_card(bounty, player_progress):
         else:
             lines.append(f"`▸ {weapon:<22} {progress:>4}`")
 
-    sc_cur = player_progress.get('__special__', 0)
-    sc_progress = f"{sc_cur}/1"
+    _spec = _parse_special(bounty)
+    _need = _spec['need'] if _spec else 1
+    sc_cur = min(player_progress.get('__special__', 0), _need)
+    sc_progress = f"{sc_cur}/{_need}"
     lines.append(f"```")
     lines.append(f"  {bounty['theme_emoji']} SPECIAL CHALLENGE")
     lines.append(f"```")
-    if sc_cur >= 1:
+    if sc_cur >= _need:
         lines.append(f"~~`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`~~")
     else:
         lines.append(f"`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`")
@@ -466,6 +468,14 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     raw = player_progress.get(matched_key, 0)
     cur = raw['current'] if isinstance(raw, dict) else int(raw)
     player_progress[matched_key] = cur + 1
+
+    # Recount the special challenge and store it, so the player's card can show
+    # real progress (2/3) instead of sitting at 0/1 until a mod credits them.
+    # Must happen before the card is rendered below.
+    try:
+        player_progress['__special__'] = await _count_special_runs(bounty, player_id)
+    except Exception as _se:
+        print(f"[BOUNTY] special recount failed for {player_name}: {_se}")
 
     forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
     forum_channel = guild.get_channel(forum_channel_id)
@@ -1054,9 +1064,11 @@ class BountyCog(commands.Cog):
         player_progress = player_row['progress'] if player_row else {}
         forum_post_id = player_row.get('forum_post_id') if player_row else None
 
-        already_done = player_progress.get('__special__', 0) >= 1
+        _cspec = _parse_special(bounty)
+        _cneed = _cspec['need'] if _cspec else 1
+        already_done = player_progress.get('__special__', 0) >= _cneed
 
-        player_progress['__special__'] = 1
+        player_progress['__special__'] = _cneed
 
         # Update global bounty special_done flag
         bounty['special_done'] = True
