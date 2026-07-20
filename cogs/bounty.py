@@ -230,44 +230,107 @@ def build_player_bounty_card(bounty, player_progress):
     return "\n".join(lines)
 
 
+def _parse_ts(raw):
+    """Best-effort parse of a stored timestamp string to a naive UTC datetime."""
+    if not raw:
+        return None
+    s = str(raw).strip().replace('UTC', '').strip()
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    for _fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(s, _fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def _parse_special(bounty):
-    """(challenge_text_lower, min_takedowns) for the bonus challenge, or (None, None)."""
+    """Break the special-challenge text into machine-checkable parts.
+
+    Returns None when there is no challenge, else a dict:
+      text        lowercased challenge string
+      min_td      takedowns a run must reach (default 100)
+      max_deaths  deaths a run must stay UNDER, or None if unconstrained
+      need        how many qualifying runs are required (default 1)
+      any_weapon  True when the challenge accepts any weapon on the bounty
+    """
     sc = (bounty.get('special_challenge') or '').lower()
     if not sc:
-        return None, None
+        return None
     import re as _re
-    _m = _re.search(r'(\d+)\s*takedown', sc)
-    return sc, (int(_m.group(1)) if _m else 100)
+    _td = _re.search(r'(\d+)\s*takedown', sc)
+    _dd = _re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
+    _ct = _re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or _re.search(r'\bx\s*(\d+)\b', sc)
+    return {
+        'text': sc,
+        'min_td': int(_td.group(1)) if _td else 100,
+        'max_deaths': int(_dd.group(1)) if _dd else None,
+        'need': max(1, int(_ct.group(1))) if _ct else 1,
+        'any_weapon': ('any bounty weapon' in sc) or ('any weapon' in sc),
+    }
 
 
-def _run_is_special(bounty, weapon, takedowns):
-    """True if THIS run qualifies as the special/bonus challenge (weapon named in the
-    challenge text, TD threshold met)."""
-    sc, min_td = _parse_special(bounty)
-    if not sc or not weapon:
+def _special_weapon_ok(bounty, spec, weapon):
+    """Does this weapon satisfy the challenge? Either it is named in the challenge
+    text, or the challenge accepts any weapon on the bounty roster."""
+    if not weapon:
         return False
-    return weapon.lower() in sc and takedowns >= min_td
+    w = weapon.strip().lower()
+    if spec['any_weapon']:
+        return any(w == str(k).strip().lower() for k in (bounty.get('weapons') or {}))
+    return w in spec['text']
 
 
-async def _player_has_special_run(bounty, player_id):
-    """True if ANY of the player's past submissions is a qualifying bonus-challenge run.
-    Lets us credit a katar run done BEFORE the bounty was finished (either-order rule)."""
-    sc, min_td = _parse_special(bounty)
-    if not sc:
-        return False
+async def _count_special_runs(bounty, player_id):
+    """Count the player's runs INSIDE the bounty window that satisfy the challenge.
+
+    Reads submission rows straight from the DB, so deaths (index 9) are available
+    here without threading them through the submission pipeline. Resubmits are
+    excluded, matching how they are excluded from bounty progress elsewhere.
+    """
+    spec = _parse_special(bounty)
+    if not spec:
+        return 0
     try:
         subs = await _db.get_submissions_by_player(str(player_id))
     except Exception:
-        subs = []
+        return 0
+    start = _parse_ts(bounty.get('start_date'))
+    n = 0
     for r in subs:
-        w = (r[3] or '') if len(r) > 3 else ''
+        if len(r) < 10:
+            continue
+        feats = (r[11] or '').lower() if len(r) > 11 else ''
+        if 'resubmit' in feats:
+            continue
+        if start is not None:
+            ts = _parse_ts(r[0])
+            if ts is None or ts < start:
+                continue
+        if not _special_weapon_ok(bounty, spec, r[3] or ''):
+            continue
         try:
-            td = int(r[7]) if len(r) > 7 and r[7] else 0
+            td = int(r[7]) if r[7] else 0
+            dk = int(r[9]) if r[9] else 0
         except (ValueError, TypeError):
-            td = 0
-        if w and w.lower() in sc and td >= min_td:
-            return True
-    return False
+            continue
+        if td < spec['min_td']:
+            continue
+        if spec['max_deaths'] is not None and dk >= spec['max_deaths']:
+            continue
+        n += 1
+    return n
+
+
+async def _special_satisfied(bounty, player_id):
+    """True once the player has enough qualifying runs for the challenge."""
+    spec = _parse_special(bounty)
+    if not spec:
+        return False
+    return (await _count_special_runs(bounty, player_id)) >= spec['need']
 
 
 async def _commit_bonus(guild, bounty, player_name, player_id):
@@ -312,11 +375,15 @@ async def _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player
     player has already finished the main bounty, credit the bonus. If they haven't finished
     yet, do nothing now -- the completion path will credit this run once they do (either
     order). No-ops unless the run is the special challenge."""
-    if not _run_is_special(bounty, weapon, takedowns):
+    spec = _parse_special(bounty)
+    if not spec:
         return
+    # Challenges can require N qualifying runs, so a single submission is never
+    # enough on its own: re-count the player's history instead of judging this run.
     if not any(str(c.get('id')) == str(player_id) for c in bounty.get('completions', [])):
-        print(f"[BOUNTY] {player_name} did the bonus challenge ({weapon} {takedowns}TD) "
-              f"before finishing the bounty -- will credit when they complete it.")
+        return
+    _done = await _count_special_runs(bounty, player_id)
+    if _done < spec['need']:
         return
     await _commit_bonus(guild, bounty, player_name, player_id)
 
@@ -451,7 +518,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
                 print(f"Bounty completion ping error: {e}")
 
         # Either-order bonus: credit a special run they already did, now the bounty is done.
-        if await _player_has_special_run(bounty, player_id):
+        if await _special_satisfied(bounty, player_id):
             await _commit_bonus(guild, bounty, player_name, player_id)
 
     # Save updated state
@@ -530,6 +597,7 @@ class BountyCog(commands.Cog):
         weapon3="Weapon slot 3", weapon4="Weapon slot 4",
         weapon5="Weapon slot 5", weapon6="Weapon slot 6",
         weapon7="Weapon slot 7 (optional)",
+        weapon8="Weapon slot 8 (optional)",
         special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)",
         image="Bounty picture to post in the new bounty channel (optional)"
     )
@@ -542,6 +610,7 @@ class BountyCog(commands.Cog):
         weapon4: str, weapon5: str, weapon6: str,
         special_challenge: str,
         weapon7: str = None,
+        weapon8: str = None,
         image: discord.Attachment = None,
     ):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -576,6 +645,8 @@ class BountyCog(commands.Cog):
         raw_weapons = [weapon1, weapon2, weapon3, weapon4, weapon5, weapon6]
         if weapon7:
             raw_weapons.append(weapon7)
+        if weapon8:
+            raw_weapons.append(weapon8)
 
         weapons = {}
         for raw in raw_weapons:
@@ -586,7 +657,7 @@ class BountyCog(commands.Cog):
 
         guild = interaction.guild
 
-        formatted_channel_name = f"🐱 ┃{channel_name}"
+        formatted_channel_name = f"{theme_emoji} ┃{channel_name}"
 
         bulletin_board = guild.get_channel(BULLETIN_BOARD_CATEGORY_ID)
         channel = await guild.create_text_channel(formatted_channel_name, category=bulletin_board)
