@@ -2140,17 +2140,28 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"Reaction failed ({emoji}): {e}")
 
-    # Reactions decided AFTER the blurb is posted (high score, TUFF, bounty, ...)
-    # are cosmetic and were each a blocking round-trip, holding the per-guild
-    # submission queue for the sum of them. Schedule instead, reap at the end.
-    _late_react_tasks = []
+    # Every result reaction lands in ONE burst rather than trickling in. Some are
+    # known immediately (flawless, triple) and some only after the DB write and
+    # board lookups (high score, TUFF, bounty), so the early ones are held until
+    # the late ones are decided, then all fire together. The cigar still goes out
+    # first and on its own: it is the "received you" signal, not a result.
+    _pending_reacts = []
+    _react_tasks = []
 
     def react_later(emoji):
-        if not emoji:
-            return
-        _late_react_tasks.append(asyncio.create_task(safe_react(emoji)))
+        if emoji and emoji not in _pending_reacts:
+            _pending_reacts.append(emoji)
 
-    # Cigar always lands first; the rest fire concurrently right after.
+    def flush_reacts():
+        if not _pending_reacts:
+            return
+        _batch = list(_pending_reacts)
+        _pending_reacts.clear()
+        # gather() schedules immediately and returns a future; do NOT wrap it in
+        # create_task (that expects a coroutine and raises TypeError).
+        _react_tasks.append(
+            asyncio.gather(*(safe_react(e) for e in _batch), return_exceptions=True))
+
     await safe_react("<:cigar:1444893851427803298>")
     _rest_reacts = []
     if deaths == 0 and takedowns > 0 and not (kills == 0 and takedowns <= 10):
@@ -2163,8 +2174,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _rest_reacts.append("<a:200tkd:1363648828414230538>")
     if takedowns >= 150 and deaths == 0:
         _rest_reacts.append("<a:predator:1366794896081555567>")
-    if _rest_reacts:
-        await asyncio.gather(*(safe_react(e) for e in _rest_reacts), return_exceptions=True)
+    for _e in _rest_reacts:
+        react_later(_e)
 
     # High-lethality sticker: reply with the configured sticker when kills/TD is exceptional.
     try:
@@ -2785,6 +2796,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 print(f"Bounty update error: {e}")
                 traceback.print_exc()
 
+        # Last reaction is decided by here: send them all as one burst.
+        flush_reacts()
+
         # ── BUTLER PERSONALITY HOOKS ─────────────────────────────────────────────
         try:
             main_channel = interaction.guild.get_channel(MAIN_CHANNEL_ID)
@@ -3271,12 +3285,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # everything above, so this is almost always already done; awaiting keeps a
     # strong reference so the loop cannot garbage-collect a pending task, and
     # stops exceptions being reported as "never retrieved".
-    if _late_react_tasks:
+    flush_reacts()   # anything queued after the burst (rare paths)
+    if _react_tasks:
         try:
             await asyncio.wait_for(
-                asyncio.gather(*_late_react_tasks, return_exceptions=True), timeout=15)
+                asyncio.gather(*_react_tasks, return_exceptions=True), timeout=15)
         except asyncio.TimeoutError:
-            print("[REACT] deferred reactions still pending after 15s")
+            print("[REACT] reactions still pending after 15s")
 
     asyncio.create_task(_bg_runner())
 
