@@ -298,10 +298,11 @@ def build_player_bounty_card(bounty, player_progress):
     lines.append(f"```")
     lines.append(f"  {bounty['theme_emoji']} SPECIAL CHALLENGE")
     lines.append(f"```")
+    _sc_label = _describe_special(_spec) or bounty['special_challenge']
     if sc_cur >= _need:
-        lines.append(f"~~`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`~~")
+        lines.append(f"~~`▸ {_sc_label:<22} {sc_progress:>4}`~~")
     else:
-        lines.append(f"`▸ {bounty['special_challenge']:<22} {sc_progress:>4}`")
+        lines.append(f"`▸ {_sc_label:<22} {sc_progress:>4}`")
 
     return "\n".join(lines)
 
@@ -311,6 +312,7 @@ def build_player_bounty_card(bounty, player_progress):
 _parse_ts = _ch.parse_ts
 _parse_special = _ch.parse_special
 _special_weapon_ok = _ch.special_weapon_ok
+_describe_special = _ch.describe
 
 
 async def _count_special_runs(bounty, player_id):

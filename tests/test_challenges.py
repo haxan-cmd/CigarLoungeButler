@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.challenges import (parse_special, parse_ts, run_qualifies,
+from utils.challenges import (describe, parse_special, parse_ts, run_qualifies,
                               special_weapon_ok)
 
 
@@ -106,6 +106,23 @@ def test_run_qualifies_handles_dirty_values():
     assert run_qualifies(FIELD_TEST, s, 'Maul', '120', '4') is True   # strings
     assert run_qualifies(FIELD_TEST, s, 'Maul', None, None) is False
     assert run_qualifies(FIELD_TEST, s, 'Maul', 'abc', '4') is False
+
+
+def test_describe_is_compact_and_derived():
+    """The card label comes from the parse, not the prose, so it can't drift
+    from what is actually enforced."""
+    assert describe(parse_special(FIELD_TEST)) == '100+ TD, <10 deaths x3'
+    assert describe(parse_special(LEGACY)) == '100+ TD'
+    assert describe(parse_special({'special_challenge': '150 takedowns twice, under 5 deaths'})) \
+        == '150+ TD, <5 deaths'
+    assert describe(None) == ''
+
+
+def test_describe_fits_the_card_column():
+    """Authored text is a sentence; the label has to stay near the 22-char
+    column the weapon rows use."""
+    assert len(describe(parse_special(FIELD_TEST))) <= 24
+    assert len(FIELD_TEST['special_challenge']) > 60  # the thing we're replacing
 
 
 def test_parse_ts_formats():

@@ -83,6 +83,11 @@ WEAPONS_1H = [
     "Pick Axe", "Rapier", "Short Sword", "Sword", "Warhammer", "Cudgel",
 ]
 
+# Entries that sit on the weapon lists for BOARD ROUTING but make no sense as a
+# "featured weapon of the season": they are personal-best feat boards, not
+# weapons people grind takedowns with. Only roll_featured consults this.
+FEATURED_WEAPON_EXCLUDE = {"Healing Horn", "Healing Banner", "Mallet", "Knife"}
+
 CLASS_WEAPON_MAP = {
     "Officer":        ["Axe", "Greatsword", "Heavy Mace", "Longsword", "Mace", "Pole Axe", "Sword", "War Axe"],
     "Guardian":       ["Axe", "Falchion", "Fist and Shield", "Hatchet", "Heavy Cavalry Sword", "Mace", "One-Handed Spear", "Short Sword", "Warhammer"],

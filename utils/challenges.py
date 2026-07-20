@@ -50,6 +50,24 @@ def parse_special(bounty):
     }
 
 
+def describe(spec):
+    """Short label for the challenge, built from what was actually parsed.
+
+    The authored text is a sentence and runs far past the weapon column on a
+    player card. This stays compact and, because it is derived from the parse
+    rather than the prose, it cannot drift from what is being enforced.
+    """
+    if not spec:
+        return ''
+    bits = [f"{spec['min_td']}+ TD"]
+    if spec['max_deaths'] is not None:
+        bits.append(f"<{spec['max_deaths']} deaths")
+    label = ', '.join(bits)
+    if spec['need'] > 1:
+        label += f" x{spec['need']}"
+    return label
+
+
 def special_weapon_ok(bounty, spec, weapon):
     """Does this weapon satisfy the challenge? Either it is named in the challenge
     text, or the challenge accepts any weapon on the bounty roster."""

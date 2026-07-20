@@ -634,8 +634,11 @@ async def roll_featured(season_id):
         weights = [1.0 / (counts.get(c, 0) + 1) for c in pool]
         return random.choices(pool, weights=weights, k=1)[0]
 
-    f1h = _pick(list(config.WEAPONS_1H), wcount, prev.get("weapon_1h"))
-    f2h = _pick(list(config.WEAPONS_2H), wcount, prev.get("weapon_2h"))
+    _skip = getattr(config, 'FEATURED_WEAPON_EXCLUDE', set())
+    _w1h = [w for w in config.WEAPONS_1H if w not in _skip]
+    _w2h = [w for w in config.WEAPONS_2H if w not in _skip]
+    f1h = _pick(_w1h, wcount, prev.get("weapon_1h"))
+    f2h = _pick(_w2h, wcount, prev.get("weapon_2h"))
     m1 = _pick(list(config.MAPS), mcount, prev.get("map_1"))
     m2 = _pick([x for x in config.MAPS if x != m1], mcount, prev.get("map_2"))
     for slot, val in (("weapon_1h", f1h), ("weapon_2h", f2h), ("map_1", m1), ("map_2", m2)):
