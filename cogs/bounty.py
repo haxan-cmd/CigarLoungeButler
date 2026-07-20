@@ -69,8 +69,13 @@ async def ensure_bounty_boards(guild, bounty):
         try:
             await channel.fetch_message(int(mid))
             return True
-        except Exception:
+        except discord.NotFound:
             return False
+        except Exception as _fe:
+            # Transient API/permission failure. Assume the board is still there:
+            # a false "missing" would post a duplicate and orphan the original.
+            print(f"[BOUNTY] board liveness check failed for {mid}: {_fe}")
+            return True
 
     _e = bounty.get('theme_emoji') or ''
 
