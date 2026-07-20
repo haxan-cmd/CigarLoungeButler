@@ -329,7 +329,20 @@ async def _count_special_runs(bounty, player_id):
         subs = await _db.get_submissions_by_player(str(player_id))
     except Exception:
         return 0
-    start = _parse_ts(bounty.get('start_date'))
+    # bounties.start_date is a DATE, so it floors to midnight and would count
+    # runs submitted earlier that day, before the bounty existed. The season row
+    # opens at the same moment via start_season() and is a TIMESTAMPTZ, so it
+    # gives the real cutoff. Fall back to the date only if there is no season.
+    start = None
+    try:
+        _season = await _db.get_current_season()
+        _sa = _season.get('started_at') if _season else None
+        if _sa is not None:
+            start = _sa.replace(tzinfo=None) if getattr(_sa, 'tzinfo', None) else _sa
+    except Exception as _we:
+        print(f"[BOUNTY] season window lookup failed: {_we}")
+    if start is None:
+        start = _parse_ts(bounty.get('start_date'))
     n = 0
     for r in subs:
         if len(r) < 10:
