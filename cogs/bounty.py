@@ -192,10 +192,15 @@ async def build_progress_board(bounty, top_n=10):
                 medal = f"{i+1}. "
             suffix = f"/ {total_target}" if total_target else ""
             lines.append(f"{medal} {name:<20} {count} {suffix}")
-    else:
-        lines.append("  No active hunters yet.")
+        lines.append("```")
+        return "\n".join(lines)
+
+    # Nobody has logged a qualifying run yet. Show a blank card rather than an
+    # empty box, so the per-weapon targets and the bonus line are visible from
+    # day one and players know what they are filling in.
+    lines.append("  Nobody on the board yet. Here is what you are filling in:")
     lines.append("```")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n" + build_player_bounty_card(bounty, {})
 
 
 async def update_progress_board(bounty, bounty_channel):
