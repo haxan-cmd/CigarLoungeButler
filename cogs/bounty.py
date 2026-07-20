@@ -657,7 +657,7 @@ class BountyCog(commands.Cog):
 
         guild = interaction.guild
 
-        formatted_channel_name = f"{theme_emoji} ┃{channel_name}"
+        formatted_channel_name = f"{theme_emoji}┃{channel_name}"
 
         bulletin_board = guild.get_channel(BULLETIN_BOARD_CATEGORY_ID)
         channel = await guild.create_text_channel(formatted_channel_name, category=bulletin_board)
@@ -701,7 +701,7 @@ class BountyCog(commands.Cog):
             active=True,
             role_id=str(bounty_role.id),
             forum_channel_id=str(forum_channel.id) if forum_channel else '',
-            start_date=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+            start_date=datetime.now(timezone.utc).date()
         )
 
         forum_mention = forum_channel.mention if forum_channel else f"*(forum creation failed: {forum_error})*"

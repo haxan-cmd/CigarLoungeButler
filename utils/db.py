@@ -963,6 +963,18 @@ async def update_bounty_field(bounty_id: int, field: str, value):
 async def add_bounty(title, channel_id, message_id, theme_emoji, weapons,
                      special_challenge, active, role_id, forum_channel_id, start_date) -> int:
     pool = _pool_check()
+    # start_date is a DATE column; asyncpg will not coerce a formatted string.
+    if isinstance(start_date, str):
+        _s = start_date.replace('UTC', '').strip()
+        start_date = None
+        for _fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+            try:
+                start_date = datetime.strptime(_s, _fmt).date()
+                break
+            except ValueError:
+                continue
+    elif isinstance(start_date, datetime):
+        start_date = start_date.date()
     async with pool.acquire() as conn:
         return await conn.fetchval("""
             INSERT INTO bounties
