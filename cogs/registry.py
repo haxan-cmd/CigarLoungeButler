@@ -1947,13 +1947,18 @@ class RegistryCog(commands.Cog):
 
         # Bounty blurb — pull active bounty weapons dynamically
         bounty_blurb = "**What is this?** A roughly monthly community challenge. Only specific weapons count for each bounty."
+        # Each bounty gets its OWN ledger forum (stored on the bounty row), so the
+        # index has to follow the active bounty rather than the static config id,
+        # or it keeps rebuilding the previous bounty's forum.
+        bounty_forum_id = BOUNTY_CARDS_FORUM_ID
         try:
             from cogs.bounty import get_active_bounty
             active_bounty = await get_active_bounty()
             if active_bounty:
+                bounty_forum_id = active_bounty.get('forum_channel_id') or BOUNTY_CARDS_FORUM_ID
                 weapon_list = ', '.join(active_bounty['weapons'].keys())
                 bounty_blurb = (
-                    f"[{active_bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
+                    f"[{active_bounty['title']}](https://discord.com/channels/{interaction.guild.id}/{active_bounty['channel_id']})\n\n"
                     f"A monthly bounty where select weapons qualify toward completion. Submit the required number of runs per weapon to complete the bounty. Often comes with a bonus challenge.\n\n"
                     f"**Weapons & Requirements:**\n" +
                     "\n".join(f"▸ {w}: {d['total']} runs" for w, d in active_bounty['weapons'].items())
@@ -1967,7 +1972,7 @@ class RegistryCog(commands.Cog):
             "weapons_2h":   (WEAPONS_2H_FORUM_ID,   "2H Weapons",   weapons_blurb),
             "weapons_1h":   (WEAPONS_1H_FORUM_ID,   "1H Weapons",   weapons_blurb),
             "feats":        (FEATS_FORUM_ID,         "Feats of War", None),
-            "bounty_cards": (BOUNTY_CARDS_FORUM_ID,  "Bounty Cards", bounty_blurb),
+            "bounty_cards": (bounty_forum_id,        "Bounty Cards", bounty_blurb),
         }
         if forum == "all":
             await update_archive_index(interaction.guild)
