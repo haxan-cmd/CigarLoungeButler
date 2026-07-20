@@ -40,6 +40,15 @@ except Exception:
 
 BUTLER_MODEL = 'gpt-5.6-luna'
 
+# Bot reference so low-level helpers (which have no interaction/cog) can raise
+# nerve-centre alerts. Set once from bot.py on_ready.
+_bot_ref = None
+
+
+def set_bot_ref(bot):
+    global _bot_ref
+    _bot_ref = bot
+
 
 async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
     """One Butler completion. Returns '' on any failure — callers supply their
@@ -70,6 +79,11 @@ async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
             if _attempt == 0:
                 await asyncio.sleep(1.5)
     print(f"[BUTLER] completion failed after retry (model={BUTLER_MODEL}): {last_err}")
+    if _bot_ref is not None:
+        try:
+            await nerve_alert(_bot_ref, f"Butler AI completion ({BUTLER_MODEL})", last_err)
+        except Exception:
+            pass
     return ''
 
 # Gemini client for vision (scorecard parsing)

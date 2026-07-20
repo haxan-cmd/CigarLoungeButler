@@ -77,6 +77,11 @@ async def on_ready():
     bot.session_start = datetime.now(timezone.utc)
     print(f"✅ Session started at {bot.session_start.isoformat()}")
     try:
+        from utils.helpers import set_bot_ref
+        set_bot_ref(bot)
+    except Exception as _sbe:
+        print(f"[STARTUP] set_bot_ref failed: {_sbe}")
+    try:
         guild = discord.Object(id=config.GUILD_ID)
         # Sync all commands to the guild only (global list already cleared)
         bot.tree.copy_global_to(guild=guild)
