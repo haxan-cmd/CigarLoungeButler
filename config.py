@@ -221,6 +221,11 @@ FEATURED_WEAPON_EXCLUDE = set(FEAT_WEAPONS) | {"Healing Banner"}
 # actively hunts for whatever nobody plays.
 FEATURED_MIN_RUNS = 15
 
+# Max masked links the Butler may insert into one reply. Low values keep prose
+# readable, but a bulleted list of 8 bounty weapons looked broken when only the
+# first 5 (longest names first) got linked.
+BUTLER_MAX_LINKS = 14
+
 VIP_MAPS = {
     ("Trayan Citadel",    "Agatha"),
     ("Trayan Citadel",    "Mason"),

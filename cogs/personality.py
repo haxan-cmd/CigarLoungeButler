@@ -419,8 +419,9 @@ async def _linkify_reply(text, guild):
         def _in_span(a, b):
             return any(not (b <= s or a >= e) for s, e in spans)
 
+        _max_links = getattr(config, 'BUTLER_MAX_LINKS', 5)
         for nm, tid, flags in targets:
-            if linked >= 5:
+            if linked >= _max_links:
                 break
             pat = re.compile(r'(?<![\[\w`])' + re.escape(nm) + r'(?![\w\]`])', flags)
             pos = 0
