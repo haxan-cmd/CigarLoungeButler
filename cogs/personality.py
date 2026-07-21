@@ -1827,6 +1827,48 @@ class PersonalityCog(commands.Cog):
                     except Exception as _sce:
                         print(f"[BUTLER] season ctx error: {_sce}")
 
+                    # Live bounty state. The system prompt explains how bounties WORK
+                    # but carried no current data, so the Butler could not name this
+                    # month's weapons or tell anyone how they were doing.
+                    try:
+                        if _is_data_q:
+                            from cogs.bounty import (get_active_bounty,
+                                                     get_player_bounty_progress,
+                                                     _count_special_runs, _parse_special)
+                            _b = await get_active_bounty()
+                            if _b:
+                                _bw = _b.get('weapons') or {}
+                                def _tot(v):
+                                    return v.get('total', 0) if isinstance(v, dict) else v
+                                def _cur(v):
+                                    return v.get('current', 0) if isinstance(v, dict) else (v or 0)
+                                player_stats_ctx += (
+                                    f"\n\nActive bounty: {_b['title']}. A run counts when it "
+                                    f"hits 100+ takedowns. Required per weapon: "
+                                    + ", ".join(f"{k} {_tot(v)}" for k, v in _bw.items()))
+                                _spec = _parse_special(_b)
+                                _need = _spec['need'] if _spec else 1
+                                if _b.get('special_challenge'):
+                                    player_stats_ctx += (
+                                        f"\nSpecial challenge: {_b['special_challenge']} "
+                                        f"({_need} qualifying run(s) needed)")
+                                _comps = _b.get('completions') or []
+                                player_stats_ctx += (
+                                    "\nCompleted by: " + ", ".join(
+                                        f"{i}. {c.get('name')}" for i, c in enumerate(_comps, 1))
+                                    if _comps else "\nNobody has completed it yet.")
+                                _pr = await get_player_bounty_progress(
+                                    _b['title'], discord_id_str)
+                                _prog = (_pr or {}).get('progress') or {}
+                                _mine_b = ", ".join(
+                                    f"{k} {_cur(_prog.get(k, 0))}/{_tot(v)}" for k, v in _bw.items())
+                                _sc = await _count_special_runs(_b, discord_id_str)
+                                player_stats_ctx += (
+                                    f"\n{player_name}'s bounty progress: {_mine_b or 'nothing yet'}"
+                                    f"; special challenge {min(_sc, _need)}/{_need}")
+                    except Exception as _bce:
+                        print(f"[BUTLER] bounty ctx error: {_bce}")
+
                     # On-demand: if the message names a registered player who isn't the
                     # asker and isn't already in the top-10 above, surface THEIR stats too --
                     # people constantly ask "how does <X> compare". Capped to keep it lean.
