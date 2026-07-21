@@ -225,9 +225,23 @@ def _as_int(v, default=0):
         return default
 
 
+_data_versions: dict = {}
+
+
 def _cache_invalidate(*keys: str):
     for k in keys:
         _cache.pop(k, None)
+        _data_versions[k] = _data_versions.get(k, 0) + 1
+
+
+def data_version(*keys: str) -> int:
+    """Monotonic counter over the named tables, bumped on every write.
+
+    Lets an expensive DERIVED aggregate memoize exactly: key the memo on this and
+    it stays correct forever without guessing a TTL, because any write to the
+    underlying table changes the key. Cheap to call.
+    """
+    return sum(_data_versions.get(k, 0) for k in keys)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1983,6 +1997,7 @@ async def season_init():
 
 async def start_season(label: str) -> int:
     """Open a new season (defensively closing any still-open one). Returns its id."""
+    _cache_invalidate('seasons')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE seasons SET ended_at = NOW() WHERE ended_at IS NULL")
@@ -2053,6 +2068,7 @@ async def get_season(season_id: int):
 
 
 async def end_current_season():
+    _cache_invalidate('seasons')
     pool = _pool_check()
     async with pool.acquire() as conn:
         r = await conn.fetchrow(
@@ -2085,6 +2101,7 @@ async def set_season_thread(season_id: int, thread_id: str):
 
 
 async def set_season_start(season_id: int, started_at):
+    _cache_invalidate('seasons')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE seasons SET started_at = $1 WHERE id = $2", started_at, season_id)
@@ -2092,6 +2109,7 @@ async def set_season_start(season_id: int, started_at):
 
 async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str) -> bool:
     """Idempotent per (season, player, reason) so a resubmission can't farm it."""
+    _cache_invalidate('seasons')
     pool = _pool_check()
     points = _as_int(points)
     async with pool.acquire() as conn:
@@ -2113,6 +2131,7 @@ async def get_season_bonuses(season_id: int) -> dict:
 
 
 async def set_season_feature(season_id: int, slot: str, value: str):
+    _cache_invalidate('seasons')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(

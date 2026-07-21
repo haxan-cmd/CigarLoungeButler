@@ -26,7 +26,36 @@ WARLORD_ROLE_ID            = config.WARLORD_ROLE_ID
 
 _butlers_report_cooldowns = {}
 
+# Memoised results of the (expensive) aggregate below. Keyed on the window PLUS
+# a data version that bumps on every submissions/leaderboard write, so an entry
+# can never go stale — a write changes the key rather than needing invalidation.
+# Worth it because this scans both tables in Python and is called repeatedly:
+# once per Butler data question, once per /season_standings, and once PER SEASON
+# inside the Hall of Fame index rebuild.
+# NOTE: returned dicts are shared references — treat them read-only, same
+# contract as the db-layer cache.
+_STATS_MEMO: dict = {}
+_STATS_MEMO_MAX = 12
+
+
 async def calculate_butler_stats(week_start=None, week_end=None):
+    _ver = _db.data_version('submissions', 'leaderboard_data')
+    _key = (week_start, week_end, _ver)
+    _hit = _STATS_MEMO.get(_key)
+    if _hit is not None:
+        return _hit
+    # Any version bump makes every older entry unreachable; drop them so the memo
+    # cannot grow without bound.
+    for _k in [k for k in _STATS_MEMO if k[2] != _ver]:
+        _STATS_MEMO.pop(_k, None)
+    _result = await _calculate_butler_stats_uncached(week_start, week_end)
+    if len(_STATS_MEMO) >= _STATS_MEMO_MAX:
+        _STATS_MEMO.pop(next(iter(_STATS_MEMO)), None)
+    _STATS_MEMO[_key] = _result
+    return _result
+
+
+async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     # week_start/end are UTC timestamps — if passed, submission stats are scoped to that window.
     # Title holders (Grand Marshal etc.) always use all-time data regardless.
     all_subs = await _db.get_all_submissions()
@@ -713,8 +742,34 @@ async def compute_featured(season):
     return boards, points
 
 
+_SEASON_TOTAL_MEMO: dict = {}
+
+
 async def season_total(season):
-    """Combined standings: core category GP + bounty bonuses + featured boards."""
+    """Combined standings: core category GP + bounty bonuses + featured boards.
+
+    Memoised on (season, data version): the Hall of Fame index calls this once per
+    season on every rebuild, and each call scans submissions twice (once for the
+    categories, once inside compute_featured). Returned tuple is a shared
+    reference — treat it read-only.
+    """
+    # 'seasons' covers bonuses and featured picks, which change standings without
+    # any submission being written.
+    _ver = _db.data_version('submissions', 'leaderboard_data', 'seasons')
+    _key = (season["id"], season.get("ended_at") is not None, _ver)
+    _hit = _SEASON_TOTAL_MEMO.get(_key)
+    if _hit is not None:
+        return _hit
+    for _k in [k for k in _SEASON_TOTAL_MEMO if k[2] != _ver]:
+        _SEASON_TOTAL_MEMO.pop(_k, None)
+    _res = await _season_total_uncached(season)
+    if len(_SEASON_TOTAL_MEMO) >= 24:
+        _SEASON_TOTAL_MEMO.pop(next(iter(_SEASON_TOTAL_MEMO)), None)
+    _SEASON_TOTAL_MEMO[_key] = _res
+    return _res
+
+
+async def _season_total_uncached(season):
     bonuses = await _db.get_season_bonuses(season["id"])
     core, core_stats = await compute_season_standings(season["started_at"], season.get("ended_at"), bonuses)
     points = dict(core)
