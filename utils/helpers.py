@@ -140,7 +140,7 @@ CRITICAL: a player's in-game name OFTEN does NOT match the hint. If no row's nam
 
 Step 1: Using both methods above, identify the submitting player's row.
 Step 2: Read the T, K, D values ONLY from that exact row - do not read from any row above or below it.
-Step 3: That same player must NOT appear in team_scores or team_kills - those arrays are for all OTHER teammates only.
+Step 3: That same player must NOT appear in team_takedowns or team_kills - those arrays are for all OTHER teammates only.
 
 Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown - may appear as an icon tooltip or text; null if not visible)
@@ -154,10 +154,15 @@ NOTE: The two large numbers at the TOP of the screen, one on each side (one per 
 - score: the number under the column header literally reading "SCORE" for the highlighted row. It is a 4-5 digit points total, almost always shown WITH a comma (e.g. "9,260", "11,653") -- strip the comma and return it as an integer (9260, 11653). SCORE is the THIRD column (RANK | NAME | SCORE | T | K | D | PING) and is far LARGER than the T/K/D numbers to its right. This column is ALWAYS present and legible for every listed player, so you MUST read the highlighted row's SCORE value; only return null if that row is entirely unreadable. Never confuse SCORE with T (takedowns).
 
 The scoreboard shows TWO teams side by side. For ALL other rows (excluding the highlighted player), split by team:
-- team_scores: T column integers for players on the SAME team as the highlighted player
+- team_takedowns: T column integers for players on the SAME team as the highlighted player
 - team_kills: K column integers for players on the SAME team as the highlighted player
-- enemy_scores: T column integers for players on the ENEMY team
+- enemy_takedowns: T column integers for players on the ENEMY team
 - enemy_kills: K column integers for players on the ENEMY team
+
+CRITICAL — these four arrays take T and K ONLY, never SCORE. T values are small
+(typically 0-200). SCORE values are thousands (e.g. 9,260). If any number you are
+about to put in these arrays is above 600, you are reading the wrong column: go
+back one column to the right of NAME and use T instead.
 
 COLUMN READING EXAMPLES - study these carefully before reading the image:
 
@@ -181,7 +186,7 @@ Your response must be ONLY the JSON object below - no explanation, no preamble, 
 
 Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_scores":[],"team_kills":[],"enemy_scores":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"enemy_takedowns":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
 _HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
@@ -426,15 +431,33 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             return sum(len(d.get(k) or []) for k in
                        ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'))
         _has_totals = isinstance(data.get('team_total_kills'), int) or isinstance(data.get('enemy_total_kills'), int)
-        if _roster_len(data) < 4 and _has_totals:
+
+        def _is_score_column(d):
+            """A full roster whose values are all in the thousands is the SCORE
+            column, not T. Downstream filters it to nothing (0 < s <= 600) and TUFF
+            silently blanks, which read as 'vision skipped the roster'. 6 of 7 such
+            misses in one day's logs were this. Retry rather than drop it."""
+            for _k in ('team_scores', 'enemy_scores'):
+                _v = [x for x in (d.get(_k) or []) if isinstance(x, int)]
+                if len(_v) >= 4 and min(_v) > 600:
+                    return True
+            return False
+
+        _wrong_col = _is_score_column(data)
+        if _wrong_col:
+            print(f"[VISION] Roster looks like the SCORE column "
+                  f"(min {min(x for x in (data.get('team_scores') or [1]) if isinstance(x, int))}) "
+                  f"— retrying for the T column")
+        if (_roster_len(data) < 4 or _wrong_col) and _has_totals:
             print(f"[VISION] Roster thin ({_roster_len(data)} cells) but totals present "
                   f"— retrying for full roster (img {_iw}x{_ih})")
             _roster_req = (
                 "\n\nROSTER PASS: Your previous read captured the highlighted player but "
                 "SKIPPED most or all of the other rows. Read EVERY OTHER row in the "
                 "RANK|NAME|SCORE|T|K|D|PING table, both teams, top to bottom, skipping none. "
-                "Fill team_scores/team_kills (same team as the highlighted player) and "
-                "enemy_scores/enemy_kills (other team) completely. Keep the highlighted "
+                "Fill team_takedowns/team_kills (same team as the highlighted player) and "
+                "enemy_takedowns/enemy_kills (other team) completely. T and K columns "
+                "ONLY, never SCORE. Keep the highlighted "
                 "player's own stats exactly as before. Return the full JSON object.")
             try:
                 _rr = _gemini_client.models.generate_content(
@@ -452,9 +475,12 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                 _rs = _rraw.find('{')
                 if _rs != -1:
                     _rdata, _ = _json.JSONDecoder().raw_decode(_rraw[_rs:])
-                    if _roster_len(_rdata) > _roster_len(data):
+                    if _roster_len(_rdata) > _roster_len(data) or (
+                            _wrong_col and not _is_score_column(_rdata)
+                            and _roster_len(_rdata) >= 4):
                         print(f"[VISION] Roster pass recovered {_roster_len(_rdata)} cells "
-                              f"(was {_roster_len(data)})")
+                              f"(was {_roster_len(data)}"
+                              f"{', wrong column' if _wrong_col else ''})")
                         # Keep the original player fields; adopt the fuller roster.
                         for _rk in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
                             if _rdata.get(_rk):
@@ -519,6 +545,14 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                 data['score'] = int(str(data['score']).replace(',', '').strip())
         except (ValueError, TypeError):
             data['score'] = None
+        # The prompt now asks for team_takedowns/enemy_takedowns (the old *_scores
+        # names invited the model to read the SCORE column). Map them back onto the
+        # internal keys, accepting either so a stale response still parses.
+        for _new, _old in (('team_takedowns', 'team_scores'),
+                           ('enemy_takedowns', 'enemy_scores')):
+            if isinstance(data.get(_new), list) and not data.get(_old):
+                data[_old] = data.pop(_new)
+            data.pop(_new, None)
         for list_field in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
             if not isinstance(data.get(list_field), list):
                 data[list_field] = []

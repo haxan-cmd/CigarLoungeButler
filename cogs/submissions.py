@@ -2427,7 +2427,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             if _ncr:
                 _mlr = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
                 await _ncr.send(
-                    f"👓 **Vision skipped the roster rows** on {interaction.user.display_name}'s run "
+                    f"👓 **No teammate takedowns read** on {interaction.user.display_name}'s run "
                     f"({takedowns} TD / {kills} K). Team rank and TUFF not computed — check the "
                     f"scorecard for a missed TUFF (kills vs best teammate TD).\n{_mlr}")
         except Exception as _e_nr:
