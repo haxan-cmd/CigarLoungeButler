@@ -3142,17 +3142,25 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[LOBBYMATE] blurb update error: {_lme}")
         await blurb_commit()
 
-        # Update bounty cards index
+        # Update bounty cards index. Each bounty has its OWN ledger forum (stored on
+        # the bounty row); the static BOUNTY_CARDS_FORUM_ID is the previous one, so
+        # refreshing that left the current bounty's index stale every time.
         try:
             bounty = await get_active_bounty()
             if bounty:
+                _bfid = bounty.get('forum_channel_id') or BOUNTY_CARDS_FORUM_ID
+                _bch = bounty.get('channel_id')
+                _blink = (f"[{bounty['title']}](https://discord.com/channels/{_guild.id}/{_bch})"
+                          if _bch else f"**{bounty['title']}**")
+                def _wtot(d):
+                    return d.get('total', 0) if isinstance(d, dict) else d
                 bounty_blurb = (
-                    f"[{bounty['title']}](https://discord.com/channels/1324379304544567356/1518657579088216217)\n\n"
+                    f"{_blink}\n\n"
                     f"A monthly bounty where select weapons qualify toward completion. Submit the required number of runs per weapon to complete the bounty. Often comes with a bonus challenge.\n\n"
                     f"**Weapons & Requirements:**\n" +
-                    "\n".join(f"▸ {w}: {d['total']} runs" for w, d in bounty['weapons'].items())
+                    "\n".join(f"▸ {w}: {_wtot(d)} runs" for w, d in bounty['weapons'].items())
                 )
-                await update_leaderboard_index(_guild, BOUNTY_CARDS_FORUM_ID, "Bounty Cards", bounty_blurb)
+                await update_leaderboard_index(_guild, _bfid, "Bounty Cards", bounty_blurb)
         except Exception as e:
             print(f"Bounty cards index update error: {e}")
 

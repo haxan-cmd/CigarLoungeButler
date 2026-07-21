@@ -434,7 +434,10 @@ PRESTIGE_THRESHOLDS = [175, 210, 260, 335, 460]
 
 SUBCLASS_RANKS = ["Initiate", "Veteran", "Master", "Grandmaster", "Champion", "Paragon", "Apex"]
 CLASS_RANKS    = ["Sworn", "Trusted", "Proven", "Honored", "Esteemed", "Exalted", "Ascended"]
-PLAYER_TITLES  = ["Unbound", "Proven", "Respected", "Distinguished", "Renowned", "Illustrious", "Exemplar", "Legend"]
+# Player titles by TOTAL bounties completed (index = count, capped at the top).
+# Cigar-lounge / made-man theme. Assigned manually now, but get_player_title
+# still renders this on the registry card from the bounty count.
+PLAYER_TITLES  = ["Lounger", "Insider", "Regular", "Made Man", "High Roller", "Kingpin", "Legend"]
 
 SUBCLASS_RANK_THRESHOLDS = list(enumerate(SUBCLASS_RANKS))
 CLASS_RANK_THRESHOLDS    = list(enumerate(CLASS_RANKS))

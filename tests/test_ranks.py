@@ -60,9 +60,9 @@ def test_class_rank_every_three_levels_and_cap():
 
 # ── player titles ──
 def test_player_title_progression_and_cap():
-    assert get_player_title(0)  == "Unbound"
-    assert get_player_title(1)  == "Proven"
-    assert get_player_title(7)  == "Legend"
+    assert get_player_title(0)  == "Lounger"
+    assert get_player_title(1)  == "Insider"
+    assert get_player_title(6)  == "Legend"
     assert get_player_title(99) == "Legend"   # cannot exceed the final title
 
 

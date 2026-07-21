@@ -253,6 +253,14 @@ def build_challenge_rules_embeds():
         "Completing the monthly bounty pays by finishing position: "
         "**5** for first, **4** for second, **3** for third, **2** for everyone after."
     ), inline=False)
+    e.add_field(name="🎯 The bonus challenge (paid on completion)", value=(
+        "The bounty's bonus challenge tallies **while the bounty is live**: every "
+        "qualifying run counts toward it as you go. You don't have to save it for last "
+        "or do it in any order. But it only **pays out when you finish the main bounty** "
+        "— clear the weapon objectives and any bonus progress you've already banked is "
+        "credited at that moment. Do it before or after; either way it lands when the "
+        "bounty is done."
+    ), inline=False)
     e.add_field(name="Why the rate boards reward consistency", value=(
         "Kill Share and Warlord are percentages, so a raw average would let one lucky game win "
         "outright. Both are volume-adjusted: your average is pulled toward the community mean "
@@ -271,9 +279,9 @@ def build_challenge_rules_embeds():
         description="Complete bounties — that's how you rank up.",
         colour=C("#1D9E75"),
     )
-    e.add_field(name="Ranks", value=(
-        "0 — Unbound\n1 — Proven\n2 — Respected\n3 — Distinguished\n"
-        "4 — Renowned\n5 — Illustrious\n6 — Exemplar\n7 — Legend"
+    e.add_field(name="Ranks (total bounties completed)", value=(
+        "0 — Lounger\n1 — Insider\n2 — Regular\n3 — Made Man\n"
+        "4 — High Roller\n5 — Kingpin\n6+ — Legend"
     ), inline=False)
     embeds.append(e)
 
@@ -282,7 +290,7 @@ def build_challenge_rules_embeds():
         title="🗓️  The Monthly Cycle",
         description=(
             "Each month opens a new **bounty** and **season** together. Complete the bounty's "
-            "weapon objectives to climb your player title (Unbound → Legend)."
+            "weapon objectives to climb your player title (Lounger → Legend)."
         ),
         colour=C("#C9A84C"),
     )
