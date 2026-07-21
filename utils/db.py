@@ -1020,6 +1020,23 @@ async def get_all_bounties() -> list[list]:
     ]
 
 
+async def get_submissions_since(minutes: int = 60) -> list[list]:
+    """Submissions logged in the last N minutes, newest first.
+
+    The nerve-centre digest used an in-memory buffer that was wiped by every
+    deploy, so any submission before a restart vanished from the hourly report.
+    Reading the table instead makes the count survive restarts.
+    """
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT submitted_at, player_name, weapon, feats FROM submissions "
+            "WHERE submitted_at > NOW() - ($1 || ' minutes')::INTERVAL "
+            "ORDER BY submitted_at DESC", str(int(minutes)))
+    return [[r['submitted_at'], r['player_name'] or '', r['weapon'] or '',
+             r['feats'] or ''] for r in rows]
+
+
 async def update_bounty_field(bounty_id: int, field: str, value):
     pool = _pool_check()
     allowed = {'weapons', 'special_done', 'completions', 'bonus_completions', 'active', 'message_id',

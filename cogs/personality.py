@@ -869,11 +869,26 @@ class PersonalityCog(commands.Cog):
             except Exception as db_h:
                 health_lines.append(f"🔴 DB pool check failed: {db_h}")
 
+            # Submissions come from the TABLE, not the in-memory buffer: that
+            # buffer is wiped by every deploy, so a restart silently zeroed the
+            # hour's count. Errors/milestones stay in-memory — they're transient
+            # by nature and have nowhere else to live.
+            try:
+                _recent_subs = await _db.get_submissions_since(60)
+                _sub_block = [f"📋 **Submissions — {len(_recent_subs)}**"]
+                for _r in _recent_subs[:15]:
+                    _ts = _r[0].strftime('%H:%M') if hasattr(_r[0], 'strftime') else str(_r[0])[:5]
+                    _tag = " *(resubmit)*" if 'Resubmit' in (_r[3] or '') else ''
+                    _sub_block.append(f"  `{_ts}` **{_r[1]}** — {_r[2]}{_tag}")
+                if len(_recent_subs) > 15:
+                    _sub_block.append(f"  …and {len(_recent_subs) - 15} more")
+                _subs_text = "\n".join(_sub_block)
+            except Exception as _se:
+                print(f"[NERVE] submission count failed: {_se}")
+                _subs_text = "📋 **Submissions — unavailable**"
+
             embed = discord.Embed(title="🧠  Nerve Center", color=0x8b6914, timestamp=now_dt)
-            if digest:
-                embed.description = digest
-            else:
-                embed.description = "📋 **Submissions — 0**"
+            embed.description = (f"{digest}\n{_subs_text}" if digest else _subs_text)[:4000]
             embed.add_field(name="🔧 Health", value="\n".join(health_lines), inline=False)
             embed.set_footer(text="Hourly digest")
             await ch.send(embed=embed)

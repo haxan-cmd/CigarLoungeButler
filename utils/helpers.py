@@ -814,12 +814,10 @@ def nerve_flush():
         for ts, err in errors:
             parts.append(f"  `{ts}` {err}")
 
-    if subs:
-        parts.append(f"📋 **Submissions — {len(subs)}**")
-        for ts, player, weapon in subs:
-            parts.append(f"  `{ts}` **{player}** — {weapon}")
-    else:
-        parts.append("📋 **Submissions — 0**")
+    # Submissions are NOT reported from this buffer any more: it is in-memory and
+    # every deploy wiped it, so a restart silently zeroed the hour. The digest
+    # reads the submissions table directly instead. Still drained below so the
+    # buffer can't grow unbounded between restarts.
 
     if milestones:
         parts.append(f"🏆 **Milestones — {len(milestones)}**")
