@@ -606,6 +606,26 @@ def _cat_names(items, plain=False):
     return out
 
 
+def _cat_pairs(items, plain=False):
+    """[(name, value_str)] for a category's top-5, normalising the two shapes
+    calculate_butler_stats produces: "name -- value" strings for the rate
+    categories, (name, value) tuples for the count ones."""
+    out = []
+    for it in (items or [])[:len(_GP_POINTS)]:
+        if plain and isinstance(it, str):
+            nm, _, val = it.partition(" -- ")
+            out.append((nm.strip(), val.strip()))
+        elif isinstance(it, (list, tuple)) and it and it[0]:
+            out.append((str(it[0]).strip(), str(it[1]) if len(it) > 1 else ""))
+    return out
+
+
+def _ordinal_gp(n):
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
 def _cat_top(items, plain=False):
     for it in (items or [])[:1]:
         if plain and isinstance(it, str):
@@ -1165,6 +1185,78 @@ class FavouritesCog(commands.Cog):
         lines = [f"**\U0001f3c1 {label} — Live Standings**", ""]
         for i, (nm, pts) in enumerate(standings[:15], 1):
             lines.append(f"`{i:>2}.` **{nm}** — {pts} pts")
+        await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="my_season", description="Your season GP: where the points came from and what's closest to gaining more.")
+    @app_commands.describe(player="Whose season to show (defaults to you)")
+    async def my_season(self, interaction: discord.Interaction, player: discord.Member = None):
+        await interaction.response.defer()
+        season = await _db.get_current_season()
+        if not season:
+            await interaction.followup.send("No season is running — a season opens when a bounty starts.")
+            return
+
+        member = player or interaction.user
+        # Match on the canonical name the boards use, not the Discord display name:
+        # they diverge constantly and a mismatch would report a real player as 0 GP.
+        name = member.display_name
+        try:
+            _prow = await _db.get_player(str(member.id))
+            if _prow and len(_prow) > 1 and (_prow[1] or '').strip():
+                name = _prow[1].strip()
+        except Exception as _pe:
+            print(f"[MY_SEASON] canonical name lookup failed: {_pe}")
+
+        standings, stats, featured = await season_total(season)
+        label = season.get("label") or f"Season {season['id']}"
+
+        _rank = next((i for i, (nm, _) in enumerate(standings, 1) if nm == name), None)
+        _gp = next((p for nm, p in standings if nm == name), 0)
+
+        lines = [f"**\U0001f3c1 {label} — {name}**", ""]
+        if _rank:
+            lines.append(f"**{_gp} GP** · {_ordinal_gp(_rank)} of {len(standings)}")
+        else:
+            lines.append("**0 GP** · not on the board yet")
+        lines.append("")
+        lines.append("**Where the points came from**")
+
+        _any = False
+        for _lbl, _key, _plain in _SEASON_CATEGORIES:
+            _pairs = _cat_pairs(stats.get(_key), _plain)
+            _pos = next((i for i, (nm, _v) in enumerate(_pairs, 1) if nm == name), None)
+            if _pos:
+                _any = True
+                lines.append(f"`{_lbl:<18}` {_ordinal_gp(_pos)} — **+{_GP_POINTS[_pos - 1]} GP**")
+            elif len(_pairs) >= len(_GP_POINTS):
+                # Full board: the last scoring place is the bar to beat.
+                _cut = _pairs[-1][1]
+                lines.append(f"`{_lbl:<18}` — *(needs {_cut} to score)*")
+            else:
+                lines.append(f"`{_lbl:<18}` — *(open, top 5 all score)*")
+
+        for _flabel, _fval, _ftop in (featured or []):
+            _fpos = next((i for i, (nm, _td) in enumerate(_ftop, 1) if nm == name), None)
+            if _fpos and _fpos <= len(_FEATURED_POINTS):
+                _any = True
+                lines.append(f"`{'Featured: ' + str(_fval):<18}` {_ordinal_gp(_fpos)} — "
+                             f"**+{_FEATURED_POINTS[_fpos - 1]} GP**")
+
+        try:
+            _bon = await _db.get_season_bonuses(season["id"])
+            if _bon.get(name):
+                _any = True
+                lines.append(f"`{'Bounty race':<18}` — **+{_bon[name]} GP**")
+        except Exception as _be:
+            print(f"[MY_SEASON] bonus lookup failed: {_be}")
+
+        if not _any:
+            lines.append("*Nothing scoring yet. Top 5 in any category pays 5/4/3/2/1.*")
+
+        if _rank and _rank > 1:
+            _above = standings[_rank - 2]
+            lines += ["", f"**{_above[1] - _gp} GP** behind {_above[0]} in {_ordinal_gp(_rank - 1)}."]
+
         await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="title_standings", description="Board count + average placement for the all-time titles (the tiebreak).")
