@@ -17,10 +17,17 @@ _pool: asyncpg.Pool | None = None
 async def db_init():
     """Call once at bot startup to create the connection pool."""
     global _pool
+    # Sizing: the submission queue is serial per guild, but _bg_tasks is detached
+    # and unbounded, so a burst of submissions opens many connections at once. At
+    # max_size=10 that saturated silently — asyncpg waits for a free connection
+    # with no timeout, so the symptom was "everything got slow", not an error.
     _pool = await asyncpg.create_pool(
         os.environ['DATABASE_URL'],
-        min_size=2,
-        max_size=10,
+        min_size=int(os.environ.get('DB_POOL_MIN', 4)),
+        max_size=int(os.environ.get('DB_POOL_MAX', 24)),
+        # A query that hangs must not hold a connection forever.
+        command_timeout=float(os.environ.get('DB_COMMAND_TIMEOUT', 30)),
+        max_inactive_connection_lifetime=300,
     )
     await _ensure_indexes()
     await _ensure_schema()
@@ -162,9 +169,26 @@ async def db_close():
         await _pool.close()
 
 
+_pool_warn_at = 0.0  # throttle for the saturation warning
+
+
 def _pool_check():
     if not _pool:
         raise RuntimeError("DB pool not initialised — call db_init() first.")
+    # Saturation is otherwise invisible: asyncpg queues acquire() with no timeout,
+    # so a full pool looks like "the bot got slow" rather than an error. Warn at
+    # most twice a minute so a burst can be seen in the logs after the fact.
+    global _pool_warn_at
+    try:
+        _idle, _size = _pool.get_idle_size(), _pool.get_size()
+        if _idle == 0 and _size >= _pool.get_max_size():
+            _now = _time.monotonic()
+            if _now - _pool_warn_at > 30:
+                _pool_warn_at = _now
+                print(f"[DB] pool saturated: {_size}/{_pool.get_max_size()} "
+                      f"connections in use, 0 idle — queries are now queuing")
+    except Exception:
+        pass
     return _pool
 
 

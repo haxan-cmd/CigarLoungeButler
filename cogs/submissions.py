@@ -3295,6 +3295,19 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # Backstop so the detached background job can't hang forever. Each block
         # inside _bg_tasks has its own try/except for errors; this bounds total
         # runtime if a Discord/DB call stalls instead of erroring.
+        #
+        # The semaphore is acquired OUTSIDE the timeout on purpose: queuing for a
+        # slot is not the work stalling, and counting it would make every task
+        # behind a burst "time out" for doing nothing wrong.
+        _wait0 = asyncio.get_running_loop().time()
+        async with _BG_SEMAPHORE:
+            _waited = asyncio.get_running_loop().time() - _wait0
+            if _waited > 5:
+                print(f"[BG] waited {_waited:.1f}s for a slot "
+                      f"(limit {_BG_LIMIT}) — submissions are bursting")
+            await _bg_body()
+
+    async def _bg_body():
         try:
             await asyncio.wait_for(_bg_tasks(), timeout=120)
         except asyncio.TimeoutError:
@@ -3323,8 +3336,21 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except asyncio.TimeoutError:
             print("[REACT] reactions still pending after 15s")
 
-    asyncio.create_task(_bg_runner())
+    _bgt = asyncio.create_task(_bg_runner())
+    _bg_task_refs.add(_bgt)
+    _bgt.add_done_callback(_bg_task_refs.discard)
 
+
+# _bg_tasks is detached, so a burst of submissions used to spawn an unbounded
+# number of them: each doing full-table scans, opening pool connections and
+# queuing on _BOARD_LOCK. Bound it so a burst forms an orderly queue instead of a
+# stampede. Sized well under the DB pool so background work can never starve the
+# foreground submission path of connections.
+_BG_LIMIT = int(os.environ.get('BG_TASK_LIMIT', 6))
+_BG_SEMAPHORE = asyncio.Semaphore(_BG_LIMIT)
+# asyncio only holds a weak reference to a running task: without this a detached
+# task can be garbage-collected mid-flight and silently vanish.
+_bg_task_refs: set = set()
 
 _active_vision: set[int] = set()  # prevents double-processing same message
 _queued_msgs: set[int] = set()  # prevents same message being finalised twice
