@@ -311,8 +311,14 @@ async def get_challenge_rules_message_ids():
         return []
 
 async def save_challenge_rules_message_ids(msg_ids):
-    labels = ['Intro', 'Earning Marks', 'Weapon Ranks', 'Subclass & Class', 'Feats of Legend',
-              'Leaderboards', 'Titles', 'Player Titles', 'Monthly Cycle']
+    # Descriptive only; the DB stores one label per message id. Kept in sync with
+    # build_challenge_rules_embeds so the count matches. Extra ids get a generic
+    # label rather than dropping, so a future section can't desync the save.
+    labels = ['Intro', 'Earning Marks', 'Lobby Difficulty', 'Weapon Ranks',
+              'Subclass & Class', 'Feats of Legend', 'Leaderboards', 'Titles',
+              'Season Championship', 'Player Titles', 'Monthly Cycle']
+    labels += [f'Section {i}' for i in range(len(labels), len(msg_ids))]
+    labels = labels[:len(msg_ids)]
     try:
         await _db.save_challenge_rules(msg_ids, labels)
     except Exception as e:
