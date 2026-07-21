@@ -111,6 +111,10 @@ _SCHEMA_STATEMENTS = [
     # detached a player's whole mark history (786 marks across 6 players, found
     # 2026-07-20), taking their weapon ranks and mastery badges with it.
     "ALTER TABLE legacy_marks ADD COLUMN IF NOT EXISTS discord_id TEXT",
+    # season_bonus was name-keyed too. A rename mid-season split a player in two
+    # on the championship table: category points under the new name, an orphaned
+    # bonus row under the old one.
+    "ALTER TABLE season_bonus ADD COLUMN IF NOT EXISTS discord_id TEXT",
     # Faction banner kill totals (the big "AGATHA 642 / MASON 604" numbers). These are
     # read far more reliably than the roster-summed total_lobby_kills, and the (min,max)
     # pair is a much stronger same-lobby fingerprint — two different games rarely share
@@ -134,7 +138,7 @@ async def _ensure_schema():
     # player. Only fills NULLs, so it is safe to run on every boot and cannot
     # overwrite a correct id. Rows for players who already renamed AND were never
     # reconciled stay NULL — those need a manual name match, once.
-    for _tbl in ('legacy_marks', 'legacy_feats', 'legacy_bounties'):
+    for _tbl in ('legacy_marks', 'legacy_feats', 'legacy_bounties', 'season_bonus'):
         try:
             async with _pool.acquire() as conn:
                 _res = await conn.execute(
@@ -2124,27 +2128,51 @@ async def set_season_start(season_id: int, started_at):
         await conn.execute("UPDATE seasons SET started_at = $1 WHERE id = $2", started_at, season_id)
 
 
-async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str) -> bool:
-    """Idempotent per (season, player, reason) so a resubmission can't farm it."""
+async def award_season_bonus(season_id: int, player_name: str, points: int, reason: str,
+                             discord_id: str = None) -> bool:
+    """Idempotent per (season, player, reason) so a resubmission can't farm it.
+
+    Pass discord_id whenever you have it: the row is still deduped on name (that
+    is the unique constraint), but the id is what lets standings survive a rename.
+    """
     _cache_invalidate('seasons')
     pool = _pool_check()
     points = _as_int(points)
+    _did = str(discord_id) if discord_id else None
     async with pool.acquire() as conn:
+        # Already awarded under a PREVIOUS name? Then this is the same player
+        # completing once, not a second award — don't stack a duplicate.
+        if _did:
+            _prior = await conn.fetchval(
+                "SELECT id FROM season_bonus WHERE season_id=$1 AND discord_id=$2 "
+                "AND reason=$3 LIMIT 1", season_id, _did, reason)
+            if _prior:
+                return False
+        # Column order must match the arg order: (points, reason) swapped here
+        # once put the int in the TEXT column and every bonus failed (2026-07-14)
         res = await conn.execute(
-            # Column order must match the arg order: (points, reason) swapped here
-            # once put the int in the TEXT column and every bonus failed (2026-07-14)
-            "INSERT INTO season_bonus (season_id, player_name, points, reason) VALUES ($1,$2,$3,$4) "
-            "ON CONFLICT (season_id, player_name, reason) DO NOTHING", season_id, player_name, points, reason)
+            "INSERT INTO season_bonus (season_id, player_name, points, reason, discord_id) "
+            "VALUES ($1,$2,$3,$4,$5) "
+            "ON CONFLICT (season_id, player_name, reason) DO NOTHING",
+            season_id, player_name, points, reason, _did)
     return res.split()[-1] == '1'
 
 
 async def get_season_bonuses(season_id: int) -> dict:
+    """{current player_name: points}. Resolves through discord_id where present so
+    a player who renamed mid-season keeps one row in the standings instead of
+    appearing twice (old name holding the bonus, new name holding the points)."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT player_name, SUM(points) AS pts FROM season_bonus WHERE season_id = $1 GROUP BY player_name",
+            "SELECT COALESCE(p.player_name, sb.player_name) AS name, "
+            "       SUM(sb.points) AS pts "
+            "FROM season_bonus sb "
+            "LEFT JOIN players p ON p.discord_id = sb.discord_id "
+            "WHERE sb.season_id = $1 "
+            "GROUP BY COALESCE(p.player_name, sb.player_name)",
             season_id)
-    return {r['player_name']: int(r['pts']) for r in rows}
+    return {r['name']: int(r['pts']) for r in rows}
 
 
 async def set_season_feature(season_id: int, slot: str, value: str):

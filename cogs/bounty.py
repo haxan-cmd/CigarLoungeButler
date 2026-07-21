@@ -544,7 +544,8 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             _bseason = await _db.get_current_season()
             if _bseason:
                 await _db.award_season_bonus(_bseason['id'], player_name,
-                                             race_points, "Bounty completion")
+                                             race_points, "Bounty completion",
+                                             discord_id=str(player_id))
         except Exception as _sbe:
             print(f"[SEASON] bounty bonus error: {_sbe}")
         if bounty_channel and bounty_role:

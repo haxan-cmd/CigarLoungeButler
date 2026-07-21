@@ -2875,7 +2875,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     try:
                         _bseason = await _db.get_current_season()
                         if _bseason:
-                            await _db.award_season_bonus(_bseason['id'], player, config.BOUNTY_COMPLETION_BONUS, "Bounty completion")
+                            await _db.award_season_bonus(
+                                _bseason['id'], player, config.BOUNTY_COMPLETION_BONUS,
+                                "Bounty completion", discord_id=str(interaction.user.id))
                     except Exception as _be:
                         print(f"[SEASON] bounty bonus error: {_be}")
                     line = await butler_quip(
