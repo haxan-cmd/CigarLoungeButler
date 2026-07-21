@@ -2870,16 +2870,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _first_msg = f"**{player}** took [#1]({message_link}) on {boards}."
                     await main_channel.send(await _lky(_first_msg, _guild))
 
-                # Bounty completion
+                # Bounty completion. The season GP is awarded by update_bounty
+                # (cogs/bounty.py), which knows the player's FINISH POSITION and pays
+                # the race accordingly: 5/4/3, then 2 for everyone after. A second
+                # award used to live here paying a flat BOUNTY_COMPLETION_BONUS to
+                # everyone; idempotency meant it normally lost the race and did
+                # nothing, but if the bounty.py path ever errored it would silently
+                # hand 5 GP to a fourth-place finisher. Only the quip belongs here.
                 if newly_completed:
-                    try:
-                        _bseason = await _db.get_current_season()
-                        if _bseason:
-                            await _db.award_season_bonus(
-                                _bseason['id'], player, config.BOUNTY_COMPLETION_BONUS,
-                                "Bounty completion", discord_id=str(interaction.user.id))
-                    except Exception as _be:
-                        print(f"[SEASON] bounty bonus error: {_be}")
                     line = await butler_quip(
                         f"{player} just completed the bounty. React as the Butler — acknowledge it, "
                         "maybe reference the bald woman (Bald Female, a server legend) in comparison. One or two sentences.",
