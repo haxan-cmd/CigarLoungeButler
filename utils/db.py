@@ -100,6 +100,10 @@ _SCHEMA_STATEMENTS = [
     # discord_id so a stamped row is found by id regardless of what they rename to.
     "ALTER TABLE legacy_bounties ADD COLUMN IF NOT EXISTS discord_id TEXT",
     "ALTER TABLE legacy_feats ADD COLUMN IF NOT EXISTS discord_id TEXT",
+    # legacy_marks was missed when the other two were stamped. A rename silently
+    # detached a player's whole mark history (786 marks across 6 players, found
+    # 2026-07-20), taking their weapon ranks and mastery badges with it.
+    "ALTER TABLE legacy_marks ADD COLUMN IF NOT EXISTS discord_id TEXT",
     # Faction banner kill totals (the big "AGATHA 642 / MASON 604" numbers). These are
     # read far more reliably than the roster-summed total_lobby_kills, and the (min,max)
     # pair is a much stronger same-lobby fingerprint — two different games rarely share
@@ -118,6 +122,24 @@ async def _ensure_schema():
                 await conn.execute(stmt)
         except Exception as e:
             print(f"[DB] schema statement skipped ({stmt[:60]}...): {e}")
+
+    # Stamp discord_id onto legacy rows whose player_name still matches a current
+    # player. Only fills NULLs, so it is safe to run on every boot and cannot
+    # overwrite a correct id. Rows for players who already renamed AND were never
+    # reconciled stay NULL — those need a manual name match, once.
+    for _tbl in ('legacy_marks', 'legacy_feats', 'legacy_bounties'):
+        try:
+            async with _pool.acquire() as conn:
+                _res = await conn.execute(
+                    f"UPDATE {_tbl} lt SET discord_id = p.discord_id "
+                    "FROM players p "
+                    "WHERE lt.discord_id IS NULL "
+                    "  AND LOWER(TRIM(p.player_name)) = LOWER(TRIM(lt.player_name))")
+                _n = _res.split()[-1]
+                if _n not in ('0', ''):
+                    print(f"[DB] backfilled discord_id on {_n} {_tbl} rows")
+        except Exception as e:
+            print(f"[DB] {_tbl} discord_id backfill skipped: {e}")
     print("[DB] schema ensured.")
 
 
@@ -1303,17 +1325,26 @@ async def get_registry_card(discord_id: str) -> list | None:
 
 # ── Legacy tables ─────────────────────────────────────────────────────────────
 
-async def get_legacy_marks_for_player(player_name: str) -> list[list]:
+async def get_legacy_marks_for_player(player_name: str, discord_id: str = None) -> list[list]:
+    """Match by discord_id (rename-proof, when stamped) OR by name (old rows /
+    callers without the id). Pass discord_id whenever you have it."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM legacy_marks WHERE LOWER(player_name)=LOWER($1)", player_name
+            "SELECT * FROM legacy_marks "
+            "WHERE ($2::text IS NOT NULL AND discord_id = $2) "
+            "   OR LOWER(player_name) = LOWER($1)",
+            player_name, str(discord_id) if discord_id else None
         )
+    # 5th element is the stamped discord_id (may be None on un-backfilled rows).
+    # Existing consumers only index 0-3, so appending is backward compatible.
     return [[r['player_name'], r['weapon'] or '', r['subclass'] or '',
-             str(r['marks']) if r['marks'] is not None else '0'] for r in rows]
+             str(r['marks']) if r['marks'] is not None else '0',
+             r['discord_id'] or ''] for r in rows]
 
 
-async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: int):
+async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: int,
+                          discord_id: str = None):
     """Add (or accumulate onto) a legacy mark for player+weapon+subclass.
 
     Previously this only checked player_name+weapon for an existing row, ignoring
@@ -1327,19 +1358,25 @@ async def add_legacy_mark(player_name: str, weapon: str, subclass: str, marks: i
     subclass = subclass or ''
     marks = _as_int(marks)
     async with pool.acquire() as conn:
+        _did = str(discord_id) if discord_id else None
+        # Find by id first (survives a rename), then fall back to name.
         existing = await conn.fetchrow(
-            "SELECT id FROM legacy_marks WHERE LOWER(player_name)=LOWER($1) AND weapon=$2 AND subclass=$3 LIMIT 1",
-            player_name, weapon, subclass
+            "SELECT id FROM legacy_marks "
+            "WHERE (($4::text IS NOT NULL AND discord_id = $4) OR LOWER(player_name)=LOWER($1)) "
+            "  AND weapon=$2 AND subclass=$3 LIMIT 1",
+            player_name, weapon, subclass, _did
         )
         if existing:
             await conn.execute(
-                "UPDATE legacy_marks SET marks = marks + $1 WHERE id = $2",
-                marks, existing['id']
+                "UPDATE legacy_marks SET marks = marks + $1, "
+                "discord_id = COALESCE(discord_id, $3) WHERE id = $2",
+                marks, existing['id'], _did
             )
         else:
             await conn.execute(
-                "INSERT INTO legacy_marks (player_name, weapon, subclass, marks) VALUES ($1,$2,$3,$4)",
-                player_name, weapon, subclass, marks
+                "INSERT INTO legacy_marks (player_name, weapon, subclass, marks, discord_id) "
+                "VALUES ($1,$2,$3,$4,$5)",
+                player_name, weapon, subclass, marks, _did
             )
 
 

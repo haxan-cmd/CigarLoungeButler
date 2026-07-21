@@ -150,13 +150,19 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         if player_name:
             if cached_data and 'legacy_marks' in cached_data:
                 legacy_rows = cached_data['legacy_marks']
+                # A shared cache holds EVERY player's rows, so it still has to be
+                # filtered. Match on id when the row carries one, else on name.
+                legacy_rows = [
+                    r for r in legacy_rows
+                    if (len(r) > 4 and str(r[4] or '') == discord_id_str)
+                    or (r and r[0].strip().lower() == player_name.lower())
+                ]
             else:
-                legacy_rows = await _db.get_legacy_marks_for_player(player_name)
+                # Query filters by id OR name, so a renamed player keeps their marks.
+                legacy_rows = await _db.get_legacy_marks_for_player(
+                    player_name, discord_id=discord_id_str)
             for row in legacy_rows:
                 if len(row) < 4:
-                    continue
-                # DB rows are already filtered to this player — check anyway for safety
-                if row[0].strip().lower() != player_name.lower():
                     continue
                 weapon = row[1].strip()
                 subclass = row[2].strip() if len(row) > 2 else ''

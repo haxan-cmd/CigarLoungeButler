@@ -2906,9 +2906,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                                 _badge = (_memoji, "Master")
                         if _badge:
                             try:
+                                # Match the exact badge line, not the bare word:
+                                # SUBCLASS_RANKS contains "Master" AND "Grandmaster",
+                                # so any caption or rank mentioning either used to
+                                # suppress the badge entirely.
                                 _vdesc = await blurb_read()
-                                if _badge[1] not in _vdesc:
-                                    blurb_write(_vdesc + f"\n{_badge[0]} **{_badge[1]}**")
+                                _badge_line = f"{_badge[0]} **{_badge[1]}**"
+                                if _badge_line not in _vdesc:
+                                    blurb_write(_vdesc + f"\n{_badge_line}")
                             except Exception as _vbe:
                                 print(f"[BADGE] error: {_vbe}")
                         _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)

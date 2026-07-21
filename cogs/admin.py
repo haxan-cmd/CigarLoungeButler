@@ -960,7 +960,8 @@ class AdminCog(commands.Cog):
         except Exception as e:
             print(f"[AWARD_MARKS] canonical-name lookup failed for {player.id}, using display_name: {e}")
         try:
-            await _db.add_legacy_mark(_canonical_name, weapon, subclass, marks)
+            await _db.add_legacy_mark(_canonical_name, weapon, subclass, marks,
+                                      discord_id=str(player.id))
         except Exception as e:
             await interaction.followup.send(f"\u274c DB error: {e}", ephemeral=True)
             return
