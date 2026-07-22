@@ -336,6 +336,19 @@ async def get_all_submissions() -> list[list]:
     return data
 
 
+async def get_submissions_after(after_id: int, limit: int = 500) -> list[dict]:
+    """Cursor page for the read-only export endpoint (route in bot.py):
+    submissions with id > after_id, ascending, as raw row dicts, the same
+    shape dump_database emits. Uncached on purpose: export callers poll
+    rarely, and a mirror must see deletions promptly."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM submissions WHERE id > $1 ORDER BY id LIMIT $2",
+            after_id, limit)
+    return [dict(r) for r in rows]
+
+
 async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:
     """Targeted fetch: one player's submissions, newest first — uses the
     submissions(discord_id) index instead of scanning the whole table.

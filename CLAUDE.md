@@ -10,7 +10,7 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 
 | File | Owns |
 |---|---|
-| `bot.py` | Startup, healthcheck HTTP server (+ `/kofi` webhook route), command sync, graceful shutdown, global error handlers. Runs as `__main__`. |
+| `bot.py` | Startup, healthcheck HTTP server (+ `/kofi` webhook and `/export/submissions` routes), command sync, graceful shutdown, global error handlers. Runs as `__main__`. |
 | `config.py` | ALL constants: channel/role IDs, weapon/class/map tables, alias maps, emoji tokens, rank thresholds. No imports from project modules. |
 | `utils/db.py` | The only file that talks to Postgres. Pool, TTL cache, targeted queries, schema/index bootstrap (`_ensure_schema` / `_ensure_indexes`). |
 | `utils/helpers.py` | AI clients (OpenAI chat + Gemini vision), `butler_complete` (the single Butler chat call path), vision scorecard parser, nerve-centre logging/alerts, milestone detection, shared shutdown state. |
@@ -89,7 +89,9 @@ Sheets era). Cogs index into them positionally. Key maps:
 `DISCORD_TOKEN` (required) · `DATABASE_URL` (Postgres; bot runs without it but
 most features need it) · `OPENAI_API_KEY` (Butler chat, GPT-5.6 Luna; optional,
 quips fall back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback) ·
-`KOFI_TOKEN` (webhook verification; optional) · `PORT` (healthcheck, default 8080).
+`KOFI_TOKEN` (webhook verification; optional) · `EXPORT_TOKEN` (bearer token for
+the read-only `GET /export/submissions` cursor export; endpoint off when unset) ·
+`PORT` (healthcheck, default 8080).
 
 ## Deploy & ops
 

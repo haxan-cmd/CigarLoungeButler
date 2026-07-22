@@ -1,4 +1,5 @@
 import asyncio
+import json
 import traceback
 import os
 import signal
@@ -36,9 +37,44 @@ async def run_healthcheck():
             return web.Response(status=503, text="kofi cog not loaded")
         return await cog.handle_webhook(request)
 
+    async def export_submissions(request):
+        # Read-only cursor export of the submissions table, for community
+        # mirrors (leaderboard sites and the like). Callers page forward by id:
+        # pass the highest id already held as after_id, get the next batch in
+        # insertion order, repeat until nextCursor comes back null. Rows are
+        # serialized exactly like the scheduled backup (raw column dicts,
+        # datetimes as naive-UTC strings), so a consumer of one can consume
+        # the other. Off unless EXPORT_TOKEN is set.
+        token = os.environ.get("EXPORT_TOKEN", "")
+        if not token:
+            return web.Response(status=503, text="export disabled")
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {token}":
+            return web.Response(status=403, text="forbidden")
+        try:
+            after_id = int(request.query.get("after_id", 0))
+            limit = int(request.query.get("limit", 500))
+        except ValueError:
+            return web.Response(status=400, text="after_id and limit must be integers")
+        if after_id < 0 or not (1 <= limit <= 1000):
+            return web.Response(status=400, text="after_id must be >= 0, limit 1 to 1000")
+        try:
+            from utils.db import get_submissions_after
+            rows = await get_submissions_after(after_id, limit)
+        except RuntimeError:
+            # Pool not initialised (DATABASE_URL unset or boot still in progress).
+            return web.Response(status=503, text="database unavailable")
+        # A full page may end exactly on the last row; the follow-up call then
+        # returns an empty page and nextCursor null, which is fine.
+        next_cursor = rows[-1]["id"] if len(rows) == limit else None
+        return web.json_response(
+            {"rows": rows, "nextCursor": next_cursor},
+            dumps=lambda d: json.dumps(d, default=str, ensure_ascii=False))
+
     app = _web_app
     app.router.add_get("/", handle)
     app.router.add_post("/kofi", kofi_webhook)
+    app.router.add_get("/export/submissions", export_submissions)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))

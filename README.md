@@ -146,6 +146,7 @@ Environment variables (via `.env` locally, Railway variables in production):
 | `OPENAI_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
 | `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
 | `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
+| `EXPORT_TOKEN` | optional | Enables `GET /export/submissions`, a bearer-token, read-only cursor export of the submissions table for community mirrors. Off when unset. |
 | `PORT` | optional | Healthcheck server port (default 8080) |
 
 All server-specific IDs (guild, channels, roles, emojis) live in `config.py`; a
