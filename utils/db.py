@@ -1034,11 +1034,13 @@ async def get_submissions_since(minutes: int = 60) -> list[list]:
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT submitted_at, player_name, weapon, feats FROM submissions "
+            "SELECT submitted_at, player_name, weapon, feats, "
+            "       takedowns, kills, map FROM submissions "
             "WHERE submitted_at > NOW() - ($1 || ' minutes')::INTERVAL "
             "ORDER BY submitted_at DESC", str(int(minutes)))
     return [[r['submitted_at'], r['player_name'] or '', r['weapon'] or '',
-             r['feats'] or ''] for r in rows]
+             r['feats'] or '', r['takedowns'] or 0, r['kills'] or 0,
+             r['map'] or ''] for r in rows]
 
 
 async def update_bounty_field(bounty_id: int, field: str, value):

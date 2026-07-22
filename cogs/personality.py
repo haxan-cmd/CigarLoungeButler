@@ -972,6 +972,64 @@ class PersonalityCog(commands.Cog):
             emb.set_footer(text=f"+{len(changes) - 15} more players")
         await interaction.followup.send(embed=emb, ephemeral=True)
 
+    @app_commands.command(name="activity", description="Submission activity over a chosen window: totals, top players and weapons.")
+    @app_commands.describe(window="How far back to look")
+    @app_commands.choices(window=[
+        app_commands.Choice(name="Last 24 hours", value=1440),
+        app_commands.Choice(name="Last 7 days", value=10080),
+        app_commands.Choice(name="Last 30 days", value=43200),
+    ])
+    async def activity(self, interaction: discord.Interaction,
+                       window: app_commands.Choice[int] = None):
+        await interaction.response.defer()
+        _mins = window.value if window else 1440
+        _label = window.name if window else "Last 24 hours"
+        try:
+            rows = await _db.get_submissions_since(_mins)
+        except Exception as _ae:
+            await interaction.followup.send(f"Couldn't read activity: {_ae}")
+            return
+
+        # Resubmits are old runs re-uploaded — count them separately so the "new
+        # activity" number isn't inflated by a backfill.
+        _live = [r for r in rows if 'Resubmit' not in (r[3] or '')]
+        _resub = len(rows) - len(_live)
+
+        if not _live and not _resub:
+            await interaction.followup.send(f"**📊 {_label}** — no submissions.")
+            return
+
+        from collections import Counter
+        _players = Counter(r[1] for r in _live if r[1])
+        _weapons = Counter(r[2] for r in _live if r[2])
+        _maps = Counter(r[6] for r in _live if r[6])
+
+        lines = [f"**📊 Activity — {_label}**", ""]
+        _line = f"**{len(_live)}** run{'s' if len(_live) != 1 else ''} from **{len(_players)}** player{'s' if len(_players) != 1 else ''}"
+        if _resub:
+            _line += f"  ·  {_resub} resubmit{'s' if _resub != 1 else ''}"
+        lines.append(_line)
+
+        if _players:
+            lines += ["", "**Most active**"]
+            for nm, c in _players.most_common(5):
+                lines.append(f"`{c:>3}` {nm}")
+        if _weapons:
+            lines += ["", "**Top weapons**"]
+            for w, c in _weapons.most_common(5):
+                lines.append(f"`{c:>3}` {w}")
+
+        # Biggest single run in the window (by takedowns), excluding resubmits.
+        try:
+            _best = max(_live, key=lambda r: int(r[4] or 0), default=None)
+            if _best and int(_best[4] or 0) > 0:
+                lines += ["", f"**Top run:** {_best[1]} — {_best[4]} TD / {_best[5]} K"
+                              + (f" on {_best[2]}" if _best[2] else "")]
+        except Exception:
+            pass
+
+        await interaction.followup.send("\n".join(lines))
+
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
     async def health(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
