@@ -104,7 +104,7 @@ class KofiCog(commands.Cog, name="KofiCog"):
             log.error(f"[KOFI] Webhook error: {e}")
             return web.Response(status=500, text="error")
 
-    @app_commands.command(name="post_kofi_dashboard", description="Post the Ko-fi support dashboard in this channel.")
+    @app_commands.command(name="post_kofi_dashboard", description="Post the Ko-fi support dashboard in this channel (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
     async def post_kofi_dashboard(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

@@ -2,7 +2,7 @@
 
 `[Admin]` = server administrator · `[Mod]` = mod role · everything else below is usable by anyone.
 
-**Changed this update:** `/season_reset` is now **non-destructive** (snapshots the month's Lethality/Warlord to the Hall of Fame, boards stay permanent) · **new** `/refresh_monthly` and `/purge_forum` · removed `/force_snapshot` and `/purge_archive`.
+**New this update:** `/commands` (everyone — lists the commands you can run) · `/activity` (submission dashboard over 24h / 7d / 30d) · `/explore` (break a feat down across weapons, players, maps) · `/my_season` (your personal season GP breakdown). Player titles are now the lounge ladder: Lounger → Insider → Regular → Made Man → High Roller → Kingpin → Legend, by total bounties completed.
 
 ---
 
@@ -55,12 +55,18 @@
 - `/set_feat_count` **[Mod]** — Set a player's 100 Kills / 200 Takedowns / Triple count.
 - `/remove_submission` **[Admin]** — Remove a fake/erroneous submission and roll back all tables.
 
+## Player Stats & Visuals
+- `/commands` — List the commands you can use, grouped by what they do.
+- `/activity` — Submission dashboard over a chosen window (24h / 7d / 30d): totals, top players and weapons, as a chart.
+- `/explore` — Break a feat (100 Kills, Triple, Predator…) down across weapons, players, maps or subclass, as a chart.
+- `/my_season` — Your personal season GP: rank, where each point came from, and how far off the next scoring place.
+- `/stats` — Show a player's title standings and weapon ranks.
+- `/rank` — Show the top 10 for a weapon or class board.
+
 ## Butler Monthly, Reports & Titles
 - `/butlers_report` — Summon the Butler Monthly report.
 - `/season_standings` — Live standings for the current season.
 - `/title_standings` — Board count + average placement for the all-time titles.
-- `/stats` — Show a player's title standings and weapon ranks.
-- `/rank` — Show the top 10 for a weapon or class board.
 - `/refresh_titles` **[Mod]** — Recalculate Butler Monthly titles + reassign roles.
 - `/title_guide` **[Admin]** — Post the Butler Monthly title guide.
 

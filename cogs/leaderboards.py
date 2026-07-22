@@ -2337,7 +2337,7 @@ class LeaderboardsCog(commands.Cog):
             f"Pin the **\U0001f4cb All-Time Records Index** thread to the top of the forum.",
             ephemeral=True)
 
-    @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread")
+    @app_commands.command(name="setup", description="Set up a bot-owned leaderboard in this thread (mod only)")
     @app_commands.describe(
         name="Name of the leaderboard e.g. War Axe",
         type="Type: weapon, feat, or map"
@@ -2412,7 +2412,7 @@ class LeaderboardsCog(commands.Cog):
 
             await interaction.edit_original_response(content=f"✅ Leaderboard for **{name}** set up successfully.")
 
-    @app_commands.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name")
+    @app_commands.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name (mod only)")
     @app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
     async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):

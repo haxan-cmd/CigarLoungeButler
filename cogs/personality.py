@@ -1059,6 +1059,72 @@ class PersonalityCog(commands.Cog):
         lines += ["", _footer]
         await interaction.followup.send("\n".join(lines))
 
+    @app_commands.command(name="commands", description="List the commands you can use, grouped by what they do.")
+    async def commands_list(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        # Tier from the description convention every command already follows:
+        # "(admin only)" / "(mod only)". Self-maintaining — a new command is
+        # classified by its own text, nothing to update here.
+        _is_admin = interaction.user.guild_permissions.administrator
+        _is_mod = _is_admin or any(r.id == config.MOD_ROLE_ID for r in getattr(interaction.user, 'roles', []))
+
+        def _tier(desc):
+            d = (desc or '').lower()
+            if 'admin only' in d:
+                return 'admin'
+            if 'mod only' in d:
+                return 'mod'
+            return 'all'
+
+        _visible = {'all': True, 'mod': _is_mod, 'admin': _is_admin}
+        _rows = []
+        for _cmd in interaction.client.tree.walk_commands():
+            if not isinstance(_cmd, app_commands.Command):
+                continue
+            _t = _tier(_cmd.description)
+            if not _visible.get(_t):
+                continue
+            # Strip the "(mod only)" tail from the shown blurb; the tier is the tag.
+            _blurb = re.sub(r'\s*\(?(?:mod|admin) only\)?\.?\s*$', '',
+                            _cmd.description or '', flags=re.I).strip()
+            _tag = {'mod': ' `[Mod]`', 'admin': ' `[Admin]`', 'all': ''}[_t]
+            _rows.append((_cmd.qualified_name, _blurb, _tag, _t))
+
+        _rows.sort(key=lambda r: ({'all': 0, 'mod': 1, 'admin': 2}[r[3]], r[0]))
+
+        embed = discord.Embed(
+            title="\U0001f9fe Butler Commands",
+            description=("Everything you can run right now."
+                         if _is_mod else "The commands available to everyone."),
+            colour=discord.Colour.from_str("#e0a84c"))
+
+        def _add(tier, label):
+            _sub = [r for r in _rows if r[3] == tier]
+            if not _sub:
+                return
+            _lines = [f"`/{nm}`{tag} — {blurb}" for nm, blurb, tag, _ in _sub]
+            # Discord field values cap at 1024 chars; split if needed.
+            _chunk, _n = [], 0
+            _part = 1
+            for _l in _lines:
+                if _n + len(_l) + 1 > 1000 and _chunk:
+                    embed.add_field(name=(label if _part == 1 else f"{label} (cont.)"),
+                                    value="\n".join(_chunk), inline=False)
+                    _chunk, _n, _part = [], 0, _part + 1
+                _chunk.append(_l); _n += len(_l) + 1
+            if _chunk:
+                embed.add_field(name=(label if _part == 1 else f"{label} (cont.)"),
+                                value="\n".join(_chunk), inline=False)
+
+        _add('all', "Everyone")
+        if _is_mod:
+            _add('mod', "Mod")
+        if _is_admin:
+            _add('admin', "Admin")
+
+        embed.set_footer(text=f"{len(_rows)} commands available to you")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @app_commands.command(name="explore", description="Break a feat down across weapons, players, maps and more.")
     @app_commands.describe(feat="Which feat to break down", by="Group the results by")
     @app_commands.choices(
