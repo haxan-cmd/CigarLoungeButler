@@ -1024,6 +1024,51 @@ async def get_all_bounties() -> list[list]:
     ]
 
 
+# Columns a breakdown may group by. Whitelisted because the name is interpolated
+# into SQL (asyncpg can't parameterise an identifier). Never widen this from user
+# input without adding the value here.
+_BREAKDOWN_COLUMNS = {
+    'weapon': 'weapon', 'player': 'player_name', 'map': 'map',
+    'subclass': 'subclass', 'faction': 'faction',
+}
+
+
+async def get_feat_breakdown(feat: str, group_by: str,
+                             min_count: int = 1, limit: int = 12) -> list[list]:
+    """Count runs carrying `feat`, grouped by a whitelisted column.
+
+    e.g. get_feat_breakdown('100 Kills', 'weapon') -> which weapons players have
+    logged a 100-kill run with, most first. Resubmit/Unlisted excluded so the
+    view matches the boards. Returns [[label, count], ...].
+    """
+    col = _BREAKDOWN_COLUMNS.get(group_by)
+    if not col:
+        raise ValueError(f"group_by {group_by!r} not allowed")
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT {col} AS label, COUNT(*) AS n FROM submissions "
+            "WHERE feats ILIKE '%' || $1 || '%' "
+            "  AND feats NOT ILIKE '%Resubmit%' "
+            "  AND feats NOT ILIKE '%Unlisted%' "
+            f"  AND COALESCE({col}, '') <> '' "
+            f"GROUP BY {col} HAVING COUNT(*) >= $2 "
+            "ORDER BY n DESC, label ASC LIMIT $3",
+            feat, int(min_count), int(limit))
+    return [[r['label'], int(r['n'])] for r in rows]
+
+
+async def get_feat_total(feat: str) -> int:
+    """Total non-resubmit runs carrying a feat (the denominator for a breakdown)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "SELECT COUNT(*) FROM submissions "
+            "WHERE feats ILIKE '%' || $1 || '%' "
+            "  AND feats NOT ILIKE '%Resubmit%' AND feats NOT ILIKE '%Unlisted%'",
+            feat) or 0)
+
+
 async def get_submissions_since(minutes: int = 60) -> list[list]:
     """Submissions logged in the last N minutes, newest first.
 
@@ -1743,10 +1788,14 @@ async def health_report(recent_n: int = 100) -> dict:
                              "TUFF board empty — nothing has scored" if _tuff == 0 else "")
 
         # Orphan legacy bounties — a rename hides a bounty credit off the card.
+        # Match the way the CARD reader resolves them: by discord_id first (which
+        # survives a rename) and only then by name. Otherwise a row correctly
+        # linked by id but carrying an old name is falsely flagged every day.
         _orphans = await conn.fetch(
             "SELECT DISTINCT lb.player_name FROM legacy_bounties lb "
-            "LEFT JOIN players p ON LOWER(p.player_name) = LOWER(lb.player_name) "
-            "WHERE p.player_name IS NULL")
+            "LEFT JOIN players pid  ON pid.discord_id = lb.discord_id "
+            "LEFT JOIN players pnm  ON LOWER(pnm.player_name) = LOWER(lb.player_name) "
+            "WHERE pid.discord_id IS NULL AND pnm.player_name IS NULL")
         _on = [r['player_name'] for r in _orphans]
         out['orphan_bounties'] = (
             f"{len(_on)} legacy bounties match no player" + (f": {', '.join(_on[:6])}" if _on else ""),

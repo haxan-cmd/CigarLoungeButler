@@ -1004,30 +1004,115 @@ class PersonalityCog(commands.Cog):
         _weapons = Counter(r[2] for r in _live if r[2])
         _maps = Counter(r[6] for r in _live if r[6])
 
-        lines = [f"**📊 Activity — {_label}**", ""]
-        _line = f"**{len(_live)}** run{'s' if len(_live) != 1 else ''} from **{len(_players)}** player{'s' if len(_players) != 1 else ''}"
+        # Bucket the window for the time series. Bucket span keeps the x-axis
+        # readable: 24h -> 3-hour buckets, otherwise daily.
+        from datetime import datetime, timezone, timedelta
+        _now = datetime.now(timezone.utc)
+        if _mins <= 1440:
+            _bspan, _bcount, _bfmt = 180, 8, '%Hh'       # 8 x 3h
+        elif _mins <= 10080:
+            _bspan, _bcount, _bfmt = 1440, 7, '%a'       # 7 x 1d
+        else:
+            _bspan, _bcount, _bfmt = 1440, 30, '%d'      # 30 x 1d
+        _edges = [_now - timedelta(minutes=_bspan * (i + 1)) for i in range(_bcount)][::-1]
+        _series = [0] * _bcount
+        for _r in _live:
+            _ts = _r[0]
+            if getattr(_ts, 'tzinfo', None) is None:
+                _ts = _ts.replace(tzinfo=timezone.utc)
+            for _bi in range(_bcount):
+                _lo = _edges[_bi]
+                _hi = _lo + timedelta(minutes=_bspan)
+                if _lo <= _ts < _hi or (_bi == _bcount - 1 and _ts >= _lo):
+                    _series[_bi] += 1
+                    break
+        _labels = [(_e + timedelta(minutes=_bspan)).strftime(_bfmt) for _e in _edges]
+
+        _sub = f"{len(_live)} runs · {len(_players)} players"
         if _resub:
-            _line += f"  ·  {_resub} resubmit{'s' if _resub != 1 else ''}"
-        lines.append(_line)
+            _sub += f" · {_resub} resubmit{'s' if _resub != 1 else ''}"
+        _best = max(_live, key=lambda r: int(r[4] or 0), default=None)
+        _footer = (f"Top run: {_best[1]}  {_best[4]} TD / {_best[5]} K"
+                   if _best and int(_best[4] or 0) > 0 else "Cigar Lounge")
 
-        if _players:
-            lines += ["", "**Most active**"]
-            for nm, c in _players.most_common(5):
-                lines.append(f"`{c:>3}` {nm}")
-        if _weapons:
-            lines += ["", "**Top weapons**"]
-            for w, c in _weapons.most_common(5):
-                lines.append(f"`{c:>3}` {w}")
-
-        # Biggest single run in the window (by takedowns), excluding resubmits.
         try:
-            _best = max(_live, key=lambda r: int(r[4] or 0), default=None)
-            if _best and int(_best[4] or 0) > 0:
-                lines += ["", f"**Top run:** {_best[1]} — {_best[4]} TD / {_best[5]} K"
-                              + (f" on {_best[2]}" if _best[2] else "")]
-        except Exception:
-            pass
+            import utils.charts as _charts
+            _png = await _charts.render_async(
+                _charts.render_activity_dashboard,
+                title="Lounge Activity", subtitle=f"{_label} · {_sub}",
+                series_labels=_labels, series_counts=_series,
+                top_players=_players.most_common(5),
+                top_weapons=_weapons.most_common(5),
+                footer=_footer)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(_png), filename="activity.png"))
+            return
+        except Exception as _ce:
+            print(f"[ACTIVITY] chart render failed, text fallback: {_ce}")
 
+        # Text fallback if matplotlib is unavailable or the render errors.
+        lines = [f"**📊 Activity — {_label}**", "", _sub]
+        if _players:
+            lines += ["", "**Most active**"] + [f"`{c:>3}` {nm}" for nm, c in _players.most_common(5)]
+        if _weapons:
+            lines += ["", "**Top weapons**"] + [f"`{c:>3}` {w}" for w, c in _weapons.most_common(5)]
+        lines += ["", _footer]
+        await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="explore", description="Break a feat down across weapons, players, maps and more.")
+    @app_commands.describe(feat="Which feat to break down", by="Group the results by")
+    @app_commands.choices(
+        feat=[
+            app_commands.Choice(name="100 Kills", value="100 Kills"),
+            app_commands.Choice(name="200 Takedowns", value="200 Takedowns"),
+            app_commands.Choice(name="Triple", value="Triple"),
+            app_commands.Choice(name="Predator", value="Predator"),
+            app_commands.Choice(name="Flawless", value="Flawless"),
+            app_commands.Choice(name="Pacifist", value="Pacifist"),
+            app_commands.Choice(name="High Score", value="High Score"),
+            app_commands.Choice(name="Brutal lobby", value="Brutal"),
+        ],
+        by=[
+            app_commands.Choice(name="Weapon", value="weapon"),
+            app_commands.Choice(name="Player", value="player"),
+            app_commands.Choice(name="Map", value="map"),
+            app_commands.Choice(name="Subclass", value="subclass"),
+        ],
+    )
+    async def explore(self, interaction: discord.Interaction,
+                      feat: app_commands.Choice[str],
+                      by: app_commands.Choice[str] = None):
+        await interaction.response.defer()
+        _by = by.value if by else "weapon"
+        _by_label = (by.name if by else "Weapon")
+        try:
+            pairs = await _db.get_feat_breakdown(feat.value, _by, limit=12)
+            total = await _db.get_feat_total(feat.value)
+        except Exception as _ee:
+            await interaction.followup.send(f"Couldn't build that view: {_ee}")
+            return
+
+        if not pairs:
+            await interaction.followup.send(
+                f"No **{feat.name}** runs on record yet.")
+            return
+
+        _sub = f"{total} run{'s' if total != 1 else ''} · grouped by {_by_label.lower()}"
+        _footer = f"{len(pairs)} {_by_label.lower()}{'s' if len(pairs) != 1 else ''} shown · Cigar Lounge"
+        try:
+            import utils.charts as _charts
+            _png = await _charts.render_async(
+                _charts.render_breakdown,
+                title=f"{feat.name} — by {_by_label}",
+                subtitle=_sub, pairs=pairs, value_label="runs", footer=_footer)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(_png), filename="explore.png"))
+            return
+        except Exception as _ce:
+            print(f"[EXPLORE] chart render failed, text fallback: {_ce}")
+
+        lines = [f"**{feat.name} — by {_by_label}**", f"*{_sub}*", ""]
+        lines += [f"`{c:>3}` {lbl}" for lbl, c in pairs]
         await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
