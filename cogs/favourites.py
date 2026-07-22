@@ -1222,18 +1222,22 @@ class FavouritesCog(commands.Cog):
         lines.append("**Where the points came from**")
 
         _any = False
+        _card_rows = []      # (category, position|None, gp, note) for the image
         for _lbl, _key, _plain in _SEASON_CATEGORIES:
             _pairs = _cat_pairs(stats.get(_key), _plain)
             _pos = next((i for i, (nm, _v) in enumerate(_pairs, 1) if nm == name), None)
             if _pos:
                 _any = True
                 lines.append(f"`{_lbl:<18}` {_ordinal_gp(_pos)} — **+{_GP_POINTS[_pos - 1]} GP**")
+                _card_rows.append((_lbl, _pos, _GP_POINTS[_pos - 1], None))
             elif len(_pairs) >= len(_GP_POINTS):
                 # Full board: the last scoring place is the bar to beat.
                 _cut = _pairs[-1][1]
                 lines.append(f"`{_lbl:<18}` — *(needs {_cut} to score)*")
+                _card_rows.append((_lbl, None, 0, f"needs {_cut} to score"))
             else:
                 lines.append(f"`{_lbl:<18}` — *(open, top 5 all score)*")
+                _card_rows.append((_lbl, None, 0, "open — top 5 all score"))
 
         for _flabel, _fval, _ftop in (featured or []):
             _fpos = next((i for i, (nm, _td) in enumerate(_ftop, 1) if nm == name), None)
@@ -1241,21 +1245,41 @@ class FavouritesCog(commands.Cog):
                 _any = True
                 lines.append(f"`{'Featured: ' + str(_fval):<18}` {_ordinal_gp(_fpos)} — "
                              f"**+{_FEATURED_POINTS[_fpos - 1]} GP**")
+                _card_rows.append((f"Featured: {_fval}", _fpos,
+                                   _FEATURED_POINTS[_fpos - 1], None))
 
         try:
             _bon = await _db.get_season_bonuses(season["id"])
             if _bon.get(name):
                 _any = True
                 lines.append(f"`{'Bounty race':<18}` — **+{_bon[name]} GP**")
+                _card_rows.append(("Bounty race", None, _bon[name],
+                                   f"+{_bon[name]} GP"))
         except Exception as _be:
             print(f"[MY_SEASON] bonus lookup failed: {_be}")
 
         if not _any:
             lines.append("*Nothing scoring yet. Top 5 in any category pays 5/4/3/2/1.*")
 
+        _behind = None
         if _rank and _rank > 1:
             _above = standings[_rank - 2]
             lines += ["", f"**{_above[1] - _gp} GP** behind {_above[0]} in {_ordinal_gp(_rank - 1)}."]
+            _behind = (_above[1] - _gp, _above[0], _rank - 1)
+
+        try:
+            import io as _io2
+            import utils.charts as _charts
+            _png = await _charts.render_async(
+                _charts.render_season_card,
+                player=name, season_label=label, gp=_gp, rank=_rank,
+                field_size=len(standings), rows=_card_rows, behind=_behind,
+                footer="Cigar Lounge")
+            await interaction.followup.send(
+                file=discord.File(_io2.BytesIO(_png), filename="season.png"))
+            return
+        except Exception as _ce:
+            print(f"[SEASON] card render failed, text fallback: {_ce}")
 
         await interaction.followup.send("\n".join(lines))
 

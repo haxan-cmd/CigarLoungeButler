@@ -207,7 +207,8 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
     # ~3.5in tall and the gold rule cut straight through the subtitle.
     def _y(inches_from_top):
         return 1.0 - (inches_from_top / _h)
-    fig.subplots_adjust(left=0.385, right=0.945, top=_y(1.05), bottom=0.115)
+    fig.subplots_adjust(left=0.385, right=0.945, top=_y(1.05),
+                        bottom=(0.62 / _h))
 
     fig.text(0.055, _y(0.34), title, color=FG, fontsize=21, fontweight='bold',
              ha='left', va='center')
@@ -240,11 +241,88 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
         _draw_icons(fig, ax, labels, size=0.052)
     ax.set_xlabel(value_label, color=MUT, fontsize=10.5, labelpad=8)
 
-    fig.text(0.945, 0.025, footer, color=MUT, fontsize=8.5, ha='right')
+    # Footer in inches from the bottom, same reason as the header: on a 1-2 bar
+    # chart a fixed fraction put it on top of the x-axis label.
+    fig.text(0.945, (0.16 / _h), footer, color=MUT, fontsize=8.5,
+             ha='right', va='bottom')
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_season_card(*, player, season_label, gp, rank, field_size,
+                       rows, behind=None, footer='') -> bytes:
+    """Personal season card.
+
+    rows: [(category, position_or_None, gp_awarded, note)] in display order.
+          position None means "not scoring"; note carries the cutoff text.
+    behind: optional (gp_gap, name, their_rank) for the chase line.
+    BLOCKING — call via render_async.
+    """
+    _n = max(1, len(rows))
+    # header block (1.30in) + rows + footer band (0.75in). Over-allocating left a
+    # dead gap under the last row.
+    _h = 2.05 + _n * 0.42
+    plt, fig = _new_figure((9.2, _h))
+
+    def _y(inches_from_top):
+        return 1.0 - (inches_from_top / _h)
+
+    # ── Header block: name, then the GP number as the hero element ───────────
+    fig.text(0.055, _y(0.36), player, color=FG, fontsize=22,
+             fontweight='bold', ha='left', va='center')
+    fig.text(0.055, _y(0.68), season_label, color=MUT, fontsize=12,
+             ha='left', va='center')
+
+    _rank_txt = f"{rank} of {field_size}" if rank else "unranked"
+    fig.text(0.945, _y(0.40), f"{gp}", color=GOLD, fontsize=34,
+             fontweight='bold', ha='right', va='center')
+    fig.text(0.945, _y(0.74), f"GP · {_rank_txt}", color=MUT, fontsize=11,
+             ha='right', va='center')
+    fig.add_artist(plt.Line2D([0.055, 0.945], [_y(0.95), _y(0.95)],
+                              color=GOLD, linewidth=1.5, alpha=0.6))
+
+    # ── Category rows ────────────────────────────────────────────────────────
+    _top = _y(1.30)
+    _row_h = 0.42 / _h
+    for i, (cat, pos, pts, note) in enumerate(rows):
+        y = _top - i * _row_h
+        scoring = pos is not None
+        fig.text(0.055, y, cat, color=FG if scoring else MUT,
+                 fontsize=11.5, ha='left', va='center')
+        if scoring:
+            fig.text(0.62, y, _ordinal(pos), color=FG, fontsize=11.5,
+                     ha='right', va='center')
+            fig.text(0.945, y, f"+{pts} GP", color=GOLD, fontsize=11.5,
+                     fontweight='bold', ha='right', va='center')
+        else:
+            fig.text(0.945, y, note or '—', color=MUT, fontsize=10.5,
+                     ha='right', va='center', style='italic')
+        # hairline between rows
+        if i < len(rows) - 1:
+            fig.add_artist(plt.Line2D([0.055, 0.945], [y - _row_h / 2, y - _row_h / 2],
+                                      color=GRID, linewidth=0.7, alpha=0.6))
+
+    if behind:
+        _gap, _who, _their_rank = behind
+        fig.text(0.055, _y(_h - 0.42),
+                 f"{_gap} GP behind {_who} in {_ordinal(_their_rank)}",
+                 color=FG, fontsize=11.5, ha='left', va='center')
+    if footer:
+        fig.text(0.945, _y(_h - 0.42), footer, color=MUT, fontsize=8.5,
+                 ha='right', va='center')
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _ordinal(n):
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
 
 
 def _draw_hbar(ax, pairs, title):
