@@ -1098,31 +1098,58 @@ class PersonalityCog(commands.Cog):
                          if _is_mod else "The commands available to everyone."),
             colour=discord.Colour.from_str("#e0a84c"))
 
-        def _add(tier, label):
+        # Discord caps an embed at 6000 chars TOTAL. With 80+ commands, full
+        # descriptions blow past that, so only the player tier gets blurbs; the
+        # mod/admin tiers are compact name lists. _budget is a hard backstop.
+        _budget = [5200]  # leave headroom for title/description/footer
+
+        def _field(name, value):
+            if not value or _budget[0] <= 0:
+                return
+            if len(value) > 1000:
+                value = value[:990].rsplit("\n", 1)[0] + "\n…"
+            if len(value) + len(name) > _budget[0]:
+                return
+            _budget[0] -= len(value) + len(name)
+            embed.add_field(name=name, value=value, inline=False)
+
+        def _add_detailed(tier, label):
             _sub = [r for r in _rows if r[3] == tier]
             if not _sub:
                 return
-            _lines = [f"`/{nm}`{tag} — {blurb}" for nm, blurb, tag, _ in _sub]
-            # Discord field values cap at 1024 chars; split if needed.
-            _chunk, _n = [], 0
-            _part = 1
-            for _l in _lines:
-                if _n + len(_l) + 1 > 1000 and _chunk:
-                    embed.add_field(name=(label if _part == 1 else f"{label} (cont.)"),
-                                    value="\n".join(_chunk), inline=False)
+            _chunk, _n, _part = [], 0, 1
+            for nm, blurb, tag, _ in _sub:
+                _l = f"`/{nm}` — {blurb}"
+                if _n + len(_l) + 1 > 950 and _chunk:
+                    _field(label if _part == 1 else f"{label} (cont.)", "\n".join(_chunk))
                     _chunk, _n, _part = [], 0, _part + 1
                 _chunk.append(_l); _n += len(_l) + 1
             if _chunk:
-                embed.add_field(name=(label if _part == 1 else f"{label} (cont.)"),
-                                value="\n".join(_chunk), inline=False)
+                _field(label if _part == 1 else f"{label} (cont.)", "\n".join(_chunk))
 
-        _add('all', "Everyone")
+        def _add_compact(tier, label):
+            _sub = [r for r in _rows if r[3] == tier]
+            if not _sub:
+                return
+            _names = [f"`/{nm}`" for nm, _b, _t, _ in _sub]
+            _chunk, _n, _part = [], 0, 1
+            for _nm in _names:
+                if _n + len(_nm) + 2 > 950 and _chunk:
+                    _field(f"{label} ({len(_sub)})" if _part == 1 else f"{label} (cont.)",
+                           " · ".join(_chunk))
+                    _chunk, _n, _part = [], 0, _part + 1
+                _chunk.append(_nm); _n += len(_nm) + 2
+            if _chunk:
+                _field(f"{label} ({len(_sub)})" if _part == 1 else f"{label} (cont.)",
+                       " · ".join(_chunk))
+
+        _add_detailed('all', "Everyone")
         if _is_mod:
-            _add('mod', "Mod")
+            _add_compact('mod', "Mod")
         if _is_admin:
-            _add('admin', "Admin")
+            _add_compact('admin', "Admin")
 
-        embed.set_footer(text=f"{len(_rows)} commands available to you")
+        embed.set_footer(text=f"{len(_rows)} commands available to you · full details in ADMIN_COMMANDS.md")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="explore", description="Explore the stats: any metric, grouped any way, filtered by feat or season.")
