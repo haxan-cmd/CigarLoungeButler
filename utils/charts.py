@@ -200,13 +200,20 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
                      value_fmt=None, samples=None) -> bytes:
     """A single horizontal-bar breakdown. BLOCKING — call via render_async."""
     _n = max(1, len(pairs))
-    plt, fig = _new_figure((10, 2.5 + _n * 0.48))
-    _top = 0.845 if _n > 3 else 0.78
-    fig.subplots_adjust(left=0.385, right=0.945, top=_top, bottom=0.115)
+    _h = 2.5 + _n * 0.48
+    plt, fig = _new_figure((10, _h))
+    # Header is positioned in INCHES from the top, converted to figure fractions.
+    # Fixed fractions crowd together on a short chart: at 2 bars the figure is
+    # ~3.5in tall and the gold rule cut straight through the subtitle.
+    def _y(inches_from_top):
+        return 1.0 - (inches_from_top / _h)
+    fig.subplots_adjust(left=0.385, right=0.945, top=_y(1.05), bottom=0.115)
 
-    fig.text(0.055, 0.945, title, color=FG, fontsize=21, fontweight='bold', ha='left')
-    fig.text(0.055, 0.897, subtitle, color=MUT, fontsize=12.5, ha='left')
-    fig.add_artist(plt.Line2D([0.055, 0.945], [0.876, 0.876],
+    fig.text(0.055, _y(0.34), title, color=FG, fontsize=21, fontweight='bold',
+             ha='left', va='center')
+    fig.text(0.055, _y(0.64), subtitle, color=MUT, fontsize=12.5,
+             ha='left', va='center')
+    fig.add_artist(plt.Line2D([0.055, 0.945], [_y(0.84), _y(0.84)],
                               color=GOLD, linewidth=1.4, alpha=0.55))
 
     ax = fig.add_subplot(111)
