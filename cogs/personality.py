@@ -1252,6 +1252,30 @@ class PersonalityCog(commands.Cog):
             lines.append(f"`{_fmt(val):>7}`{_extra} {lbl}")
         await interaction.followup.send("\n".join(lines))
 
+    @app_commands.command(name="refresh_manual", description="Repost/refresh the butlers-manual command list (mod only).")
+    async def refresh_manual(self, interaction: discord.Interaction):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            ch = (interaction.guild.get_channel(BUTLERS_MANUAL_CHANNEL_ID)
+                  or await interaction.guild.fetch_channel(BUTLERS_MANUAL_CHANNEL_ID))
+            if not ch:
+                await interaction.followup.send("Couldn't find the butlers-manual channel.", ephemeral=True)
+                return
+            embed = build_manual_embed()
+            # Edit the bot's existing manual message if there is one, else post fresh.
+            async for msg in ch.history(limit=15):
+                if msg.author == interaction.guild.me and msg.embeds:
+                    await msg.edit(content=None, embed=embed)
+                    await interaction.followup.send("Manual refreshed.", ephemeral=True)
+                    return
+            await ch.send(embed=embed)
+            await interaction.followup.send("Manual posted.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
     async def health(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):

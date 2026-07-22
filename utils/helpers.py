@@ -614,37 +614,48 @@ def build_manual_embed():
     )
 
     embed.add_field(
-        name="📊 Stats & Rankings",
+        name="🧾 Start here",
         value=(
-            "`/stats` — Your title standings and weapon rank progress. Use `/stats [name]` for any player.\n"
-            "`/rank` — Top 10 for any weapon board. e.g. `/rank Messer`\n"
-            "`/title_standings` — Who leads each all-time title (Grand Marshal, Weapons Master, Campaign Master), with the board-count + average-placement tiebreak shown.\n"
-            "`/butlers_report` — Your current-standings snapshot (season champions, records, all-time titles)."
+            "`/help` — Every command you can run, grouped by what it does.\n"
+            "`/rules` — The Cigar Lounge challenge rules."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📊 Your stats",
+        value=(
+            "`/playerstats` — Your all-time profile: title, weapon ranks and marks. `/playerstats [name]` for anyone.\n"
+            "`/season` — Your season GP: rank, where each point came from, and how far off the next place.\n"
+            "`/refreshcard` — Refresh your registry card in Butler's Archive."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🏆 Rankings & the season",
+        value=(
+            "`/top` — Top 10 for any weapon or class board. e.g. `/top Messer`\n"
+            "`/standings` — Live standings for the current season.\n"
+            "`/titles` — Who leads each all-time title (Grand Marshal, Weapons Master, Campaign Master).\n"
+            "`/report` — Current-standings snapshot: season champions, records, all-time titles."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📈 Explore the data (charts)",
+        value=(
+            "`/serverstats` — Server activity dashboard over 24h / 7d / 30d.\n"
+            "`/explore` — Any metric (runs, lethality, kill share, warlord, totals, best run) grouped any "
+            "way (weapon, player, map, subclass, feat), filtered by feat or season. e.g. 100 Kills by weapon.\n"
+            "`/aliases` — Who has the most in-game names (the witness-protection board)."
         ),
         inline=False,
     )
     embed.add_field(
         name="🏹 Bounty",
-        value=(
-            "`/bounty status` — The active bounty card and your personal progress.\n"
-            "`/bounty hunt` — Top 5 hunters for the active bounty.\n"
-            "`/season_standings` — Live standings for the current season (this bounty cycle)."
-        ),
+        value="`/bounty status` — The active bounty card and your personal progress.",
         inline=False,
     )
-    embed.add_field(
-        name="📋 Registry",
-        value=(
-            "`/refresh_card` — Refresh your registry card in Butler's Archive."
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="⚖️ Rules",
-        value="`/rules` — Show the Cigar Lounge challenge rules.",
-        inline=False,
-    )
-    embed.set_footer(text="Use the bot's slash commands anywhere.")
+    embed.set_footer(text="Run /help anywhere to see the commands available to you.")
     return embed
 
 

@@ -494,13 +494,19 @@ SUBCLASS_ALIASES = {
 
 # ── Player commands list (for butlers-manual) ─────────────────────────────────
 PLAYER_COMMANDS = [
-    ("/rules",          "Show the Cigar Lounge challenge rules."),
-    ("/rank",           "Show the top 10 for any weapon leaderboard e.g. /rank Messer."),
-    ("/stats",          "Show your title standings and weapon rank progress. Use /stats [name] for any player."),
-    ("/refresh_card",   "Refresh your registry card in butlers-archive."),
-        ("/butlers_report", "Summon the Butler's Favourites report."),
-    ("/bounty_status",  "Show the current active bounty card and your personal progress."),
-    ("/bounty_hunt",    "Show the top 5 hunters for the active bounty."),
+    ("/help",         "Every command you can run, grouped by what it does."),
+    ("/rules",        "Show the Cigar Lounge challenge rules."),
+    ("/playerstats",  "Your all-time profile: title, weapon ranks and marks. /playerstats [name] for anyone."),
+    ("/season",       "Your season GP: rank, where each point came from, and how far off the next place."),
+    ("/refreshcard",  "Refresh your registry card in butlers-archive."),
+    ("/top",          "Top 10 for any weapon or class board e.g. /top Messer."),
+    ("/standings",    "Live standings for the current season."),
+    ("/titles",       "Who leads each all-time title, with the tiebreak shown."),
+    ("/report",       "Current-standings snapshot: season champions, records, all-time titles."),
+    ("/serverstats",  "Server activity dashboard over 24h / 7d / 30d."),
+    ("/explore",      "Any metric grouped any way, filtered by feat or season, as a chart."),
+    ("/aliases",      "Who has the most in-game names."),
+    ("/bounty status", "The active bounty card and your personal progress."),
 ]
 
 # Leaderboard display-name overrides. Keys may be a discord_id (all digits) or an
