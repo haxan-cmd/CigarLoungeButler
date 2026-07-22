@@ -1120,6 +1120,8 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
 
     args, n = [], 0
     where = ["feats NOT ILIKE '%Resubmit%'", "feats NOT ILIKE '%Unlisted%'"]
+    _player_join = False
+    _group_expr = None   # player grouping sets this to a separate key expression
 
     # Grouping column, or the derived orientation expression.
     if group_by == 'orientation':
@@ -1127,6 +1129,17 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         n -= 1  # _orientation_sql returns the NEXT free slot
         args.extend(_oargs)
         where.append(f"({col}) IS NOT NULL")
+    elif group_by == 'player':
+        # Collapse renames. GROUP BY a stable identity (discord_id when present,
+        # else the lowercased name for legacy rows), and take the label as an
+        # AGGREGATE — pl.player_name is constant within an id group, so MAX just
+        # picks it; for id-less legacy rows MAX(s.player_name) is stable enough.
+        # Group key and label are kept separate so no correlated subquery lands
+        # in GROUP BY (that can error at runtime).
+        col = "COALESCE(MAX(pl.player_name), MAX(s.player_name))"
+        _group_expr = "COALESCE(NULLIF(s.discord_id, ''), 'name:' || LOWER(s.player_name))"
+        _player_join = True
+        where.append("COALESCE(s.player_name, '') <> ''")
     else:
         col = _BREAKDOWN_COLUMNS.get(group_by)
         if not col:
@@ -1153,12 +1166,14 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
 
     having = f"HAVING COUNT(*) >= {int(min_runs)}" if needs_min else ""
     n += 1; args.append(int(limit))
+    _from = "submissions s LEFT JOIN players pl ON pl.discord_id = s.discord_id" if _player_join else "submissions s"
+    _grp = _group_expr or col
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {col} AS label, {agg} AS value, COUNT(*) AS n FROM submissions "
+            f"SELECT {col} AS label, {agg} AS value, COUNT(*) AS n FROM {_from} "
             f"WHERE {' AND '.join(where)} "
-            f"GROUP BY {col} {having} "
+            f"GROUP BY {_grp} {having} "
             f"ORDER BY value DESC NULLS LAST, label ASC LIMIT ${n}",
             *args)
     return [[r['label'], float(r['value']) if r['value'] is not None else 0.0,
