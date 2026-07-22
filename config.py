@@ -226,6 +226,12 @@ FEATURED_MIN_RUNS = 15
 # first 5 (longest names first) got linked.
 BUTLER_MAX_LINKS = 14
 
+# Minimum runs before a bar appears on an /explore RATE chart (lethality, kill
+# share, warlord, avg TD/kills). At 3, three-run outliers topped the boards --
+# a junk "Other" subclass led avg lethality on 3 runs. Volume metrics (run
+# count, totals, best run) are unaffected: those are honest at any sample size.
+EXPLORE_MIN_RUNS = 8
+
 VIP_MAPS = {
     ("Trayan Citadel",    "Agatha"),
     ("Trayan Citadel",    "Mason"),

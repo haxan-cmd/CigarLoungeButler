@@ -1123,7 +1123,13 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         where.append(f"COALESCE({col}, '') <> ''")
 
     if feat:
-        n += 1; args.append(feat); where.append(f"feats ILIKE '%' || ${n} || '%'")
+        # Pacifist is DERIVED, never written to feats (submissions.py computes it
+        # as kills==0 and td<=10 at render time), so a feats LIKE can never match
+        # it. Express the condition instead.
+        if feat == 'Pacifist':
+            where.append("COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10")
+        else:
+            n += 1; args.append(feat); where.append(f"feats ILIKE '%' || ${n} || '%'")
     if season_start is not None:
         n += 1; args.append(season_start); where.append(f"submitted_at >= ${n}")
     if orientation in ('Attack', 'Defense'):
@@ -1163,9 +1169,14 @@ async def get_explore_by_feat(metric: str, *, feat_names: list,
     out = []
     async with pool.acquire() as conn:
         for _f in feat_names:
-            _v = await conn.fetchval(
-                f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
-                f"AND feats ILIKE '%' || ${n + 1} || '%'", *args, _f)
+            if _f == 'Pacifist':      # derived, not stored — see get_explore
+                _v = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
+                    "AND COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10", *args)
+            else:
+                _v = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
+                    f"AND feats ILIKE '%' || ${n + 1} || '%'", *args, _f)
             if _v:
                 out.append([_f, float(_v), int(_v)])
     out.sort(key=lambda r: -r[1])

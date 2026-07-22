@@ -1242,7 +1242,8 @@ class PersonalityCog(commands.Cog):
             else:
                 rows = await _db.get_explore(
                     _metric, _by, feat=_feat, season_start=_season_start,
-                    orientation=_side, limit=12)
+                    orientation=_side,
+                    min_runs=getattr(config, 'EXPLORE_MIN_RUNS', 8), limit=12)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
@@ -1279,7 +1280,9 @@ class PersonalityCog(commands.Cog):
             _bits.append(_side_label.lower())
         _bits.append(_win_label)
         _subtitle = " · ".join(_bits)
-        _footer = (f"min 3 runs per bar · {_win_label}" if _is_rate else f"{len(_pairs)} shown · {_win_label}")
+        _min_runs = getattr(config, 'EXPLORE_MIN_RUNS', 8)
+        _footer = (f"min {_min_runs} runs per bar · {_win_label}" if _is_rate
+                   else f"{len(_pairs)} shown · {_win_label}")
 
         try:
             import utils.charts as _charts
