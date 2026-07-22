@@ -1125,9 +1125,30 @@ class PersonalityCog(commands.Cog):
         embed.set_footer(text=f"{len(_rows)} commands available to you")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="explore", description="Break a feat down across weapons, players, maps and more.")
-    @app_commands.describe(feat="Which feat to break down", by="Group the results by")
+    @app_commands.command(name="explore", description="Explore the stats: any metric, grouped any way, filtered by feat or season.")
+    @app_commands.describe(
+        metric="What to measure", by="Group the results by",
+        feat="Only count runs with this feat (optional)",
+        window="All-time or just this season")
     @app_commands.choices(
+        metric=[
+            app_commands.Choice(name="Run count", value="runs"),
+            app_commands.Choice(name="Avg lethality (K/TD)", value="lethality"),
+            app_commands.Choice(name="Avg kill share", value="kill_share"),
+            app_commands.Choice(name="Avg warlord", value="warlord"),
+            app_commands.Choice(name="Total takedowns", value="total_td"),
+            app_commands.Choice(name="Total kills", value="total_kills"),
+            app_commands.Choice(name="Best single run (TD)", value="best_td"),
+            app_commands.Choice(name="Best single run (K)", value="best_kills"),
+        ],
+        by=[
+            app_commands.Choice(name="Weapon", value="weapon"),
+            app_commands.Choice(name="Player", value="player"),
+            app_commands.Choice(name="Map", value="map"),
+            app_commands.Choice(name="Subclass", value="subclass"),
+            app_commands.Choice(name="Faction", value="faction"),
+            app_commands.Choice(name="Feat", value="feat"),
+        ],
         feat=[
             app_commands.Choice(name="100 Kills", value="100 Kills"),
             app_commands.Choice(name="200 Takedowns", value="200 Takedowns"),
@@ -1138,47 +1159,97 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="High Score", value="High Score"),
             app_commands.Choice(name="Brutal lobby", value="Brutal"),
         ],
-        by=[
-            app_commands.Choice(name="Weapon", value="weapon"),
-            app_commands.Choice(name="Player", value="player"),
-            app_commands.Choice(name="Map", value="map"),
-            app_commands.Choice(name="Subclass", value="subclass"),
+        window=[
+            app_commands.Choice(name="All time", value="all"),
+            app_commands.Choice(name="This season", value="season"),
         ],
     )
     async def explore(self, interaction: discord.Interaction,
-                      feat: app_commands.Choice[str],
-                      by: app_commands.Choice[str] = None):
+                      by: app_commands.Choice[str] = None,
+                      metric: app_commands.Choice[str] = None,
+                      feat: app_commands.Choice[str] = None,
+                      window: app_commands.Choice[str] = None):
         await interaction.response.defer()
         _by = by.value if by else "weapon"
-        _by_label = (by.name if by else "Weapon")
+        _by_label = by.name if by else "Weapon"
+        _metric = metric.value if metric else "runs"
+        _metric_label = metric.name if metric else "Run count"
+        _feat = feat.value if feat else None
+        _feat_label = feat.name if feat else None
+        _season_only = bool(window and window.value == "season")
+
+        # Grouping by feat only makes sense as a run count, and can't ALSO filter
+        # by a feat (that's just that one feat). Guard both.
+        _FEATS = ["100 Kills", "200 Takedowns", "Triple", "Predator",
+                  "Flawless", "Pacifist", "High Score", "Brutal"]
+
+        _season_start = None
+        _win_label = "all time"
+        if _season_only:
+            try:
+                _s = await _db.get_current_season()
+                if _s and _s.get("started_at"):
+                    _sa = _s["started_at"]
+                    _season_start = _sa.replace(tzinfo=None) if getattr(_sa, 'tzinfo', None) else _sa
+                    _win_label = _s.get("label") or "this season"
+            except Exception as _we:
+                print(f"[EXPLORE] season window lookup failed: {_we}")
+
         try:
-            pairs = await _db.get_feat_breakdown(feat.value, _by, limit=12)
-            total = await _db.get_feat_total(feat.value)
+            if _by == "feat":
+                rows = await _db.get_explore_by_feat(
+                    "runs", feat_names=_FEATS, season_start=_season_start, limit=12)
+                _metric, _metric_label = "runs", "Run count"
+            else:
+                rows = await _db.get_explore(
+                    _metric, _by, feat=_feat, season_start=_season_start, limit=12)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
 
-        if not pairs:
-            await interaction.followup.send(
-                f"No **{feat.name}** runs on record yet.")
+        if not rows:
+            await interaction.followup.send("No runs match that view yet. Try a wider window or a different feat.")
             return
 
-        _sub = f"{total} run{'s' if total != 1 else ''} · grouped by {_by_label.lower()}"
-        _footer = f"{len(pairs)} {_by_label.lower()}{'s' if len(pairs) != 1 else ''} shown · Cigar Lounge"
+        # Value formatting + axis unit per metric.
+        _is_rate = _metric in ("lethality", "kill_share", "warlord")
+        if _is_rate:
+            _fmt = lambda v: f"{v:.1f}%"
+            _unit = {"lethality": "% lethality", "kill_share": "% kill share",
+                     "warlord": "% warlord"}[_metric]
+        else:
+            _fmt = lambda v: str(int(round(v)))
+            _unit = {"runs": "runs", "total_td": "takedowns", "total_kills": "kills",
+                     "best_td": "takedowns", "best_kills": "kills"}.get(_metric, "")
+
+        _pairs = [(r[0], r[1]) for r in rows]
+        _samples = [r[2] for r in rows] if _is_rate else None
+
+        _title = f"{_metric_label} — by {_by_label}"
+        _bits = []
+        if _feat_label and _by != "feat":
+            _bits.append(f"feat: {_feat_label}")
+        _bits.append(_win_label)
+        _subtitle = " · ".join(_bits)
+        _footer = (f"min 3 runs per bar · {_win_label}" if _is_rate else f"{len(_pairs)} shown · {_win_label}")
+
         try:
             import utils.charts as _charts
             _png = await _charts.render_async(
                 _charts.render_breakdown,
-                title=f"{feat.name} — by {_by_label}",
-                subtitle=_sub, pairs=pairs, value_label="runs", footer=_footer)
+                title=_title, subtitle=_subtitle, pairs=_pairs,
+                value_label=_unit, footer=_footer,
+                value_fmt=_fmt, samples=_samples)
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(_png), filename="explore.png"))
             return
         except Exception as _ce:
             print(f"[EXPLORE] chart render failed, text fallback: {_ce}")
 
-        lines = [f"**{feat.name} — by {_by_label}**", f"*{_sub}*", ""]
-        lines += [f"`{c:>3}` {lbl}" for lbl, c in pairs]
+        lines = [f"**{_title}**", f"*{_subtitle}*", ""]
+        for i, (lbl, val) in enumerate(_pairs):
+            _extra = f"  ({_samples[i]})" if _samples else ""
+            lines.append(f"`{_fmt(val):>7}`{_extra} {lbl}")
         await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")

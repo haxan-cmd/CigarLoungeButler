@@ -104,25 +104,47 @@ def render_activity_dashboard(*, title, subtitle, series_labels, series_counts,
     return buf.getvalue()
 
 
-def render_breakdown(*, title, subtitle, pairs, value_label, footer) -> bytes:
-    """A single horizontal-bar breakdown, e.g. 100 Kills grouped by weapon.
+def render_breakdown(*, title, subtitle, pairs, value_label, footer,
+                     value_fmt=None, samples=None) -> bytes:
+    """A single horizontal-bar breakdown.
 
-    pairs: [(label, count), ...] sorted desc. Returns PNG bytes. BLOCKING.
+    pairs:     [(label, value), ...] sorted desc.
+    value_fmt: callable(value)->str for the bar end label (default int).
+    samples:   optional [n, ...] parallel to pairs; shown as "(n)" after the
+               value, so a rate metric's sample size is visible.
+    Returns PNG bytes. BLOCKING.
     """
-    # Height grows with the number of bars so labels never crush together.
     _n = max(1, len(pairs))
     plt, fig = _new_figure((10, 2.2 + _n * 0.46))
-    fig.subplots_adjust(left=0.28, right=0.95, top=0.82, bottom=0.10)
+    fig.subplots_adjust(left=0.30, right=0.94, top=0.82, bottom=0.10)
 
     fig.text(0.055, 0.945, title, color=FG, fontsize=19, fontweight='bold', ha='left')
     fig.text(0.055, 0.895, subtitle, color=MUT, fontsize=12, ha='left')
 
     ax = fig.add_subplot(111)
     _style_axis(ax, grid_axis='x')
-    _draw_hbar(ax, pairs, '')
+
+    if not pairs:
+        ax.text(0.5, 0.5, 'no data', color=MUT, fontsize=12, ha='center', va='center')
+        ax.set_xticks([]); ax.set_yticks([])
+    else:
+        _fmt = value_fmt or (lambda v: str(int(round(v))))
+        labels = [p[0] for p in pairs][::-1]
+        vals = [p[1] for p in pairs][::-1]
+        _samp = list(samples)[::-1] if samples else [None] * len(vals)
+        colours = [ACCENTS[i % len(ACCENTS)] for i in range(len(vals))][::-1]
+        y = range(len(vals))
+        ax.barh(list(y), vals, color=colours, height=0.62)
+        ax.set_yticks(list(y))
+        ax.set_yticklabels(labels, color=FG, fontsize=9)
+        _mx = max(vals) or 1
+        for i, v in enumerate(vals):
+            _txt = _fmt(v) + (f"  ({_samp[i]})" if _samp[i] is not None else "")
+            ax.text(v + _mx * 0.02, i, _txt, color=MUT, fontsize=9, va='center')
+        ax.set_xlim(right=_mx * 1.18)
     ax.set_xlabel(value_label, color=MUT, fontsize=10)
 
-    fig.text(0.95, 0.02, footer, color=MUT, fontsize=8, ha='right')
+    fig.text(0.94, 0.02, footer, color=MUT, fontsize=8, ha='right')
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=120, facecolor=BG, bbox_inches='tight')
     plt.close(fig)

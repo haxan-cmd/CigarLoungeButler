@@ -1033,29 +1033,94 @@ _BREAKDOWN_COLUMNS = {
 }
 
 
-async def get_feat_breakdown(feat: str, group_by: str,
-                             min_count: int = 1, limit: int = 12) -> list[list]:
-    """Count runs carrying `feat`, grouped by a whitelisted column.
+# metric -> (SQL aggregate over the group, is_rate, unit, needs_min_sample).
+# Rate metrics get a HAVING floor so one lucky game can't top the chart.
+_EXPLORE_METRICS = {
+    'runs':        ("COUNT(*)",                                          False, "runs",  False),
+    'lethality':   ("AVG(kills::float / NULLIF(takedowns,0)) * 100",     True,  "% lethality", True),
+    'kill_share':  ("AVG(team_kill_share)",                              True,  "% kill share", True),
+    'warlord':     ("AVG(takedowns * team_kill_share / NULLIF(kills,0))", True, "% warlord", True),
+    'total_td':    ("SUM(takedowns)",                                    False, "takedowns", False),
+    'total_kills': ("SUM(kills)",                                        False, "kills", False),
+    'best_td':     ("MAX(takedowns)",                                    False, "best TD", False),
+    'best_kills':  ("MAX(kills)",                                        False, "best K", False),
+}
 
-    e.g. get_feat_breakdown('100 Kills', 'weapon') -> which weapons players have
-    logged a 100-kill run with, most first. Resubmit/Unlisted excluded so the
-    view matches the boards. Returns [[label, count], ...].
+
+async def get_explore(metric: str, group_by: str, *, feat: str = None,
+                      season_start=None, min_runs: int = 3, limit: int = 12) -> list[list]:
+    """General breakdown engine behind /explore.
+
+    metric      one of _EXPLORE_METRICS
+    group_by    one of _BREAKDOWN_COLUMNS (weapon/player/map/subclass/faction/feat*)
+    feat        optional: only runs carrying this feat
+    season_start optional datetime: only runs since then (this-season view)
+    Returns [[label, value], ...] sorted desc. Resubmit/Unlisted always excluded.
+
+    *group_by='feat' is special-cased by the caller (a run can carry several
+     feats), so it is NOT handled here.
     """
     col = _BREAKDOWN_COLUMNS.get(group_by)
     if not col:
         raise ValueError(f"group_by {group_by!r} not allowed")
+    agg, is_rate, _unit, needs_min = _EXPLORE_METRICS.get(metric, (None,) * 4)
+    if not agg:
+        raise ValueError(f"metric {metric!r} not allowed")
+
+    where = ["feats NOT ILIKE '%Resubmit%'", "feats NOT ILIKE '%Unlisted%'",
+             f"COALESCE({col}, '') <> ''"]
+    args, n = [], 0
+    if feat:
+        n += 1; args.append(feat); where.append(f"feats ILIKE '%' || ${n} || '%'")
+    if season_start is not None:
+        n += 1; args.append(season_start); where.append(f"submitted_at >= ${n}")
+    if is_rate:
+        where.append("takedowns > 0 AND kills > 0")
+
+    having = f"HAVING COUNT(*) >= {int(min_runs)}" if needs_min else ""
+    n += 1; args.append(int(limit))
     pool = _pool_check()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {col} AS label, COUNT(*) AS n FROM submissions "
-            "WHERE feats ILIKE '%' || $1 || '%' "
-            "  AND feats NOT ILIKE '%Resubmit%' "
-            "  AND feats NOT ILIKE '%Unlisted%' "
-            f"  AND COALESCE({col}, '') <> '' "
-            f"GROUP BY {col} HAVING COUNT(*) >= $2 "
-            "ORDER BY n DESC, label ASC LIMIT $3",
-            feat, int(min_count), int(limit))
-    return [[r['label'], int(r['n'])] for r in rows]
+            f"SELECT {col} AS label, {agg} AS value, COUNT(*) AS n FROM submissions "
+            f"WHERE {' AND '.join(where)} "
+            f"GROUP BY {col} {having} "
+            f"ORDER BY value DESC NULLS LAST, label ASC LIMIT ${n}",
+            *args)
+    return [[r['label'], float(r['value']) if r['value'] is not None else 0.0,
+             int(r['n'])] for r in rows]
+
+
+async def get_explore_by_feat(metric: str, *, feat_names: list,
+                              season_start=None, limit: int = 12) -> list[list]:
+    """group_by='feat': one bar per feat. A run carries several feats, so this
+    counts each feat separately rather than grouping on a single column."""
+    agg, _is_rate, _unit, _nm = _EXPLORE_METRICS.get(metric, (None,) * 4)
+    if not agg or metric != 'runs':
+        # Only run-count makes sense per-feat (a rate 'per feat' isn't meaningful).
+        metric = 'runs'
+    base = ["feats NOT ILIKE '%Resubmit%'", "feats NOT ILIKE '%Unlisted%'"]
+    args, n = [], 0
+    if season_start is not None:
+        n += 1; args.append(season_start); base.append(f"submitted_at >= ${n}")
+    pool = _pool_check()
+    out = []
+    async with pool.acquire() as conn:
+        for _f in feat_names:
+            _v = await conn.fetchval(
+                f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
+                f"AND feats ILIKE '%' || ${n + 1} || '%'", *args, _f)
+            if _v:
+                out.append([_f, float(_v), int(_v)])
+    out.sort(key=lambda r: -r[1])
+    return out[:limit]
+
+
+async def get_feat_breakdown(feat: str, group_by: str,
+                             min_count: int = 1, limit: int = 12) -> list[list]:
+    """Back-compat wrapper: runs carrying `feat`, grouped, as [[label, count], ...]."""
+    rows = await get_explore('runs', group_by, feat=feat, limit=limit)
+    return [[r[0], int(r[1])] for r in rows if r[1] >= min_count]
 
 
 async def get_feat_total(feat: str) -> int:
