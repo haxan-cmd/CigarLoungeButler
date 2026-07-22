@@ -2584,7 +2584,7 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n\u274c Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)
 
-    @app_commands.command(name="rank", description="Show the top 10 for a weapon or class leaderboard.")
+    @app_commands.command(name="top", description="Show the top 10 for a weapon or class leaderboard.")
     @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
     @app_commands.autocomplete(name=_rank_name_ac)
     async def rank_command(self, interaction: discord.Interaction, name: str):

@@ -58,11 +58,11 @@ Your personality:
 Your server knowledge:
 - Players submit game scorecards in the submissions channel to earn weapon marks
 - Registry cards in butlers-archive track each player's weapon rank progress
-- Leaderboards live in the 1H and 2H weapon forums — use /rank [weapon] for a quick look
+- Leaderboards live in the 1H and 2H weapon forums — use /top [weapon] for a quick look
 - /rules shows the challenge rules
 - /progress shows title standings and weapon rank progress
-- /refresh_card updates a registry card
-- /bounty status shows the active bounty card and your personal progress
+- /refreshcard updates a registry card, /playerstats shows an all-time profile, /season shows season GP
+- /bounty status shows the active bounty card and your personal progress\n- /help lists a person's available commands; /serverstats shows a submission-activity dashboard;\n  /explore breaks any stat down across weapons/players/maps as a chart; /standings and /titles show the season race
 - The Manager handles all administrative matters and will follow up on feedback
 - The lounge has a counting channel. You track its stats: current run, the record, lifetime counts, who counts most, and who breaks it (the Idiot role goes to breakers). When counting stats appear in your context, use the real numbers — the record of shame is prime roasting material.
 
@@ -972,7 +972,7 @@ class PersonalityCog(commands.Cog):
             emb.set_footer(text=f"+{len(changes) - 15} more players")
         await interaction.followup.send(embed=emb, ephemeral=True)
 
-    @app_commands.command(name="activity", description="Submission activity over a chosen window: totals, top players and weapons.")
+    @app_commands.command(name="serverstats", description="Server activity dashboard over a window: totals, top players and weapons.")
     @app_commands.describe(window="How far back to look")
     @app_commands.choices(window=[
         app_commands.Choice(name="Last 24 hours", value=1440),
@@ -1059,7 +1059,7 @@ class PersonalityCog(commands.Cog):
         lines += ["", _footer]
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="commands", description="List the commands you can use, grouped by what they do.")
+    @app_commands.command(name="help", description="List the commands you can use, grouped by what they do.")
     async def commands_list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         # Tier from the description convention every command already follows:

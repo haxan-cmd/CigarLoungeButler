@@ -1170,7 +1170,7 @@ class FavouritesCog(commands.Cog):
         await interaction.followup.send(
             f"Season **{label}** now starts **{date}** — the report and standings include everything from then.", ephemeral=True)
 
-    @app_commands.command(name="season_standings", description="Live standings for the current season (this bounty cycle).")
+    @app_commands.command(name="standings", description="Live standings for the current season (this bounty cycle).")
     async def season_standings(self, interaction: discord.Interaction):
         await interaction.response.defer()
         season = await _db.get_current_season()
@@ -1187,7 +1187,7 @@ class FavouritesCog(commands.Cog):
             lines.append(f"`{i:>2}.` **{nm}** — {pts} pts")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="my_season", description="Your season GP: where the points came from and what's closest to gaining more.")
+    @app_commands.command(name="season", description="Your season GP: where the points came from and what's closest to gaining more.")
     @app_commands.describe(player="Whose season to show (defaults to you)")
     async def my_season(self, interaction: discord.Interaction, player: discord.Member = None):
         await interaction.response.defer()
@@ -1259,7 +1259,7 @@ class FavouritesCog(commands.Cog):
 
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="title_standings", description="Board count + average placement for the all-time titles (the tiebreak).")
+    @app_commands.command(name="titles", description="Board count + average placement for the all-time titles (the tiebreak).")
     async def title_standings(self, interaction: discord.Interaction):
         await interaction.response.defer()
         stats = await calculate_butler_stats()  # all-time (no window)
@@ -1356,7 +1356,7 @@ class FavouritesCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"\u274c Report refresh failed: {e}", ephemeral=True)
 
-    @app_commands.command(name="butlers_report", description="Summon the Butler Monthly report")
+    @app_commands.command(name="report", description="Summon the Butler Monthly report")
     async def butlers_report(self, interaction: discord.Interaction):
         import time
 

@@ -1390,7 +1390,7 @@ async def update_archive_index(guild):
         await asyncio.sleep(0.5)
         readme = (
             "📌 **How Your Registry Card Works**\n\n"
-            "Your card is built from your submitted runs. If something looks missing or outdated, run `/refresh_card` to regenerate it.\n\n"
+            "Your card is built from your submitted runs. If something looks missing or outdated, run `/refreshcard` to regenerate it.\n\n"
             "**Common reasons data may be missing:**\n"
             "• Your run was never reacted to by a mod — unreacted posts are not logged\n"
             "• You submitted before the bot was tracking that stat\n"
@@ -1908,7 +1908,7 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="refresh_card", description="Refresh your registry card.")
+    @app_commands.command(name="refreshcard", description="Refresh your registry card.")
     @discord.app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
     async def refresh_card(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -2324,7 +2324,7 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="stats", description="Show a player's title standings and weapon ranks.")
+    @app_commands.command(name="playerstats", description="Your all-time profile: title, weapon ranks and marks.")
     @app_commands.describe(player="Player name (leave blank for your own)")
     @app_commands.autocomplete(player=_player_name_ac)
     async def progress_command(self, interaction: discord.Interaction, player: str = None):

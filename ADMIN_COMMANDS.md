@@ -2,7 +2,9 @@
 
 `[Admin]` = server administrator · `[Mod]` = mod role · everything else below is usable by anyone.
 
-**New this update:** `/commands` (everyone — lists the commands you can run) · `/activity` (submission dashboard over 24h / 7d / 30d) · `/explore` (break a feat down across weapons, players, maps) · `/my_season` (your personal season GP breakdown). Player titles are now the lounge ladder: Lounger → Insider → Regular → Made Man → High Roller → Kingpin → Legend, by total bounties completed.
+**Renamed this update (Source-server style):** `/stats`→`/playerstats` · `/my_season`→`/season` · `/rank`→`/top` · `/season_standings`→`/standings` · `/title_standings`→`/titles` · `/activity`→`/serverstats` · `/commands`→`/help` · `/butlers_report`→`/report` · `/refresh_card`→`/refreshcard`. Old names no longer work — use `/help` to see the current list.
+
+**Also new:** `/explore` (any metric grouped any way, filtered by feat or season, as a chart). Player titles are now the lounge ladder: Lounger → Insider → Regular → Made Man → High Roller → Kingpin → Legend, by total bounties completed.
 
 ---
 
@@ -42,7 +44,6 @@
 - `/alltime_refresh` **[Admin]** — Refresh the all-time archive (legacy).
 
 ## Registry Cards
-- `/refresh_card` — Refresh your own registry card.
 - `/create_card` **[Admin]** — Create or refresh a specific player's card.
 - `/bulk_refresh_cards` **[Admin]** — Refresh all player cards in place.
 - `/purge_blank_cards` **[Admin]** — Delete cards for players with no marks (cleanup for blank cards).
@@ -55,18 +56,21 @@
 - `/set_feat_count` **[Mod]** — Set a player's 100 Kills / 200 Takedowns / Triple count.
 - `/remove_submission` **[Admin]** — Remove a fake/erroneous submission and roll back all tables.
 
-## Player Stats & Visuals
-- `/commands` — List the commands you can use, grouped by what they do.
-- `/activity` — Submission dashboard over a chosen window (24h / 7d / 30d): totals, top players and weapons, as a chart.
-- `/explore` — Break a feat (100 Kills, Triple, Predator…) down across weapons, players, maps or subclass, as a chart.
-- `/my_season` — Your personal season GP: rank, where each point came from, and how far off the next scoring place.
-- `/stats` — Show a player's title standings and weapon ranks.
-- `/rank` — Show the top 10 for a weapon or class board.
+## Player Commands (everyone)
+- `/help` — List the commands you can use, grouped by what they do.
+- `/playerstats` — Your all-time profile: title, weapon ranks and marks.
+- `/season` — Your season GP: rank, where each point came from, and how far off the next scoring place.
+- `/serverstats` — Server activity dashboard over a window (24h / 7d / 30d): totals, top players and weapons, as a chart.
+- `/explore` — Any metric (runs, lethality, kill share, warlord, totals, best run) grouped any way (weapon, player, map, subclass, faction, feat), filtered by feat or season — as a chart.
+- `/top` — Show the top 10 for a weapon or class board.
+- `/standings` — Live standings for the current season.
+- `/titles` — Board count + average placement for the all-time titles.
+- `/report` — Summon the Butler Monthly report.
+- `/refreshcard` — Refresh your own registry card.
+- `/rules` — Show the challenge rules.
+- `/aliases` — Who has the most in-game names (the witness-protection board).
 
-## Butler Monthly, Reports & Titles
-- `/butlers_report` — Summon the Butler Monthly report.
-- `/season_standings` — Live standings for the current season.
-- `/title_standings` — Board count + average placement for the all-time titles.
+## Butler Monthly & Titles (mod)
 - `/refresh_titles` **[Mod]** — Recalculate Butler Monthly titles + reassign roles.
 - `/title_guide` **[Admin]** — Post the Butler Monthly title guide.
 
