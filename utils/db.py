@@ -1089,6 +1089,17 @@ _EXPLORE_METRICS = {
 }
 
 
+# Feats whose membership is decided by RAW STATS, not the feats string. The
+# feats column is deliberately exclusive (a Triple is tagged Triple instead of
+# 100 Kills / 200 Takedowns), but the boards count inclusively — these keep
+# /explore consistent with the boards. Pacifist is never written at all.
+_FEAT_STAT_CONDITION = {
+    "100 Kills":     "COALESCE(kills,0) >= 100",
+    "200 Takedowns": "COALESCE(takedowns,0) >= 200",
+    "Pacifist":      "COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10",
+}
+
+
 async def get_explore(metric: str, group_by: str, *, feat: str = None,
                       season_start=None, orientation: str = None,
                       min_runs: int = 3, limit: int = 12) -> list[list]:
@@ -1126,8 +1137,9 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         # Pacifist is DERIVED, never written to feats (submissions.py computes it
         # as kills==0 and td<=10 at render time), so a feats LIKE can never match
         # it. Express the condition instead.
-        if feat == 'Pacifist':
-            where.append("COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10")
+        _cond = _FEAT_STAT_CONDITION.get(feat)
+        if _cond:
+            where.append(f"({_cond})")
         else:
             n += 1; args.append(feat); where.append(f"feats ILIKE '%' || ${n} || '%'")
     if season_start is not None:
@@ -1169,10 +1181,16 @@ async def get_explore_by_feat(metric: str, *, feat_names: list,
     out = []
     async with pool.acquire() as conn:
         for _f in feat_names:
-            if _f == 'Pacifist':      # derived, not stored — see get_explore
+            # Count the way the BOARDS do (leaderboards.py: "Triples also qualify
+            # for 100 Kills / 200 Takedowns boards if stats meet threshold").
+            # The feats column is exclusive — a Triple is tagged Triple INSTEAD of
+            # 100 Kills — which made Triple out-count 100 Kills on the chart even
+            # though every Triple is a 100-kill game. Count on raw stats instead.
+            _extra = _FEAT_STAT_CONDITION.get(_f)
+            if _extra:
                 _v = await conn.fetchval(
                     f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
-                    "AND COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10", *args)
+                    f"AND ({_extra})", *args)
             else:
                 _v = await conn.fetchval(
                     f"SELECT COUNT(*) FROM submissions WHERE {' AND '.join(base)} "
