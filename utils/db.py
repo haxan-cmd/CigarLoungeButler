@@ -1078,6 +1078,12 @@ _EXPLORE_METRICS = {
     'warlord':     ("AVG(takedowns * team_kill_share / NULLIF(kills,0))", True, "% warlord", True),
     'total_td':    ("SUM(takedowns)",                                    False, "takedowns", False),
     'total_kills': ("SUM(kills)",                                        False, "kills", False),
+    # Per-run averages. SUM metrics conflate volume with performance (attack
+    # "leads" total takedowns only because more attack runs get submitted), so
+    # these are the honest "how good is it" numbers. Rate-style: they get the
+    # min-runs floor and the sample-size display.
+    'avg_td':      ("AVG(takedowns)",                                    True,  "avg takedowns", True),
+    'avg_kills':   ("AVG(kills)",                                        True,  "avg kills", True),
     'best_td':     ("MAX(takedowns)",                                    False, "best TD", False),
     'best_kills':  ("MAX(kills)",                                        False, "best K", False),
 }
