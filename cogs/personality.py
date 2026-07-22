@@ -2,6 +2,7 @@
 cogs/personality.py — Butler AI, on_message handler, task loops, on_ready.
 """
 import asyncio
+import io
 import time
 import re
 import json
