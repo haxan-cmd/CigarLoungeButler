@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import traceback
 import os
@@ -49,7 +50,10 @@ async def run_healthcheck():
         if not token:
             return web.Response(status=503, text="export disabled")
         auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {token}":
+        # compare_digest, not ==: string equality short-circuits on the first
+        # differing byte, which leaks the token a byte at a time to anyone who
+        # can measure response times.
+        if not hmac.compare_digest(auth, f"Bearer {token}"):
             return web.Response(status=403, text="forbidden")
         try:
             after_id = int(request.query.get("after_id", 0))

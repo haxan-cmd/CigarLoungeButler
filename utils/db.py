@@ -11,6 +11,8 @@ import asyncpg
 import time as _time
 from datetime import datetime
 
+import config  # dependency-free by design, so no import cycle
+
 _pool: asyncpg.Pool | None = None
 
 
@@ -1040,6 +1042,27 @@ async def get_all_bounties() -> list[list]:
 # Columns a breakdown may group by. Whitelisted because the name is interpolated
 # into SQL (asyncpg can't parameterise an identifier). Never widen this from user
 # input without adding the value here.
+def _orientation_sql(next_param: int):
+    """(sql_expression, params, next_param) for attack/defense.
+
+    Orientation is not a column: it is (map, faction) resolved through
+    config.MAP_ATTACK_DEFENSE, which is the one place that mapping lives. Built
+    as parameterised arrays rather than interpolated literals so map names can
+    never reach the query as SQL text.
+    """
+    am, af, dm, df = [], [], [], []
+    for _map, _pair in (getattr(config, 'MAP_ATTACK_DEFENSE', {}) or {}).items():
+        if not _pair or len(_pair) < 2:
+            continue
+        am.append(_map); af.append(_pair[0])
+        dm.append(_map); df.append(_pair[1])
+    i = next_param
+    expr = (f"CASE WHEN (map, faction) IN (SELECT m, f FROM unnest(${i}::text[], ${i+1}::text[]) AS _a(m, f)) THEN 'Attack' "
+            f"     WHEN (map, faction) IN (SELECT m, f FROM unnest(${i+2}::text[], ${i+3}::text[]) AS _d(m, f)) THEN 'Defense' "
+            f"     ELSE NULL END")
+    return expr, [am, af, dm, df], i + 4
+
+
 _BREAKDOWN_COLUMNS = {
     'weapon': 'weapon', 'player': 'player_name', 'map': 'map',
     'subclass': 'subclass', 'faction': 'faction',
@@ -1061,7 +1084,8 @@ _EXPLORE_METRICS = {
 
 
 async def get_explore(metric: str, group_by: str, *, feat: str = None,
-                      season_start=None, min_runs: int = 3, limit: int = 12) -> list[list]:
+                      season_start=None, orientation: str = None,
+                      min_runs: int = 3, limit: int = 12) -> list[list]:
     """General breakdown engine behind /explore.
 
     metric      one of _EXPLORE_METRICS
@@ -1073,20 +1097,33 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
     *group_by='feat' is special-cased by the caller (a run can carry several
      feats), so it is NOT handled here.
     """
-    col = _BREAKDOWN_COLUMNS.get(group_by)
-    if not col:
-        raise ValueError(f"group_by {group_by!r} not allowed")
     agg, is_rate, _unit, needs_min = _EXPLORE_METRICS.get(metric, (None,) * 4)
     if not agg:
         raise ValueError(f"metric {metric!r} not allowed")
 
-    where = ["feats NOT ILIKE '%Resubmit%'", "feats NOT ILIKE '%Unlisted%'",
-             f"COALESCE({col}, '') <> ''"]
     args, n = [], 0
+    where = ["feats NOT ILIKE '%Resubmit%'", "feats NOT ILIKE '%Unlisted%'"]
+
+    # Grouping column, or the derived orientation expression.
+    if group_by == 'orientation':
+        col, _oargs, n = _orientation_sql(n + 1)
+        n -= 1  # _orientation_sql returns the NEXT free slot
+        args.extend(_oargs)
+        where.append(f"({col}) IS NOT NULL")
+    else:
+        col = _BREAKDOWN_COLUMNS.get(group_by)
+        if not col:
+            raise ValueError(f"group_by {group_by!r} not allowed")
+        where.append(f"COALESCE({col}, '') <> ''")
+
     if feat:
         n += 1; args.append(feat); where.append(f"feats ILIKE '%' || ${n} || '%'")
     if season_start is not None:
         n += 1; args.append(season_start); where.append(f"submitted_at >= ${n}")
+    if orientation in ('Attack', 'Defense'):
+        _oexpr, _oargs2, n2 = _orientation_sql(n + 1)
+        args.extend(_oargs2); n = n2 - 1
+        n += 1; args.append(orientation); where.append(f"({_oexpr}) = ${n}")
     if is_rate:
         where.append("takedowns > 0 AND kills > 0")
 

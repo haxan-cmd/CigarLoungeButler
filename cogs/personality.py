@@ -1129,7 +1129,8 @@ class PersonalityCog(commands.Cog):
     @app_commands.describe(
         metric="What to measure", by="Group the results by",
         feat="Only count runs with this feat (optional)",
-        window="All-time or just this season")
+        window="All-time or just this season",
+        side="Only count runs attacking, or defending (optional)")
     @app_commands.choices(
         metric=[
             app_commands.Choice(name="Run count", value="runs"),
@@ -1147,6 +1148,7 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Map", value="map"),
             app_commands.Choice(name="Subclass", value="subclass"),
             app_commands.Choice(name="Faction", value="faction"),
+            app_commands.Choice(name="Attack / Defense", value="orientation"),
             app_commands.Choice(name="Feat", value="feat"),
         ],
         feat=[
@@ -1163,12 +1165,17 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="All time", value="all"),
             app_commands.Choice(name="This season", value="season"),
         ],
+        side=[
+            app_commands.Choice(name="Attacking only", value="Attack"),
+            app_commands.Choice(name="Defending only", value="Defense"),
+        ],
     )
     async def explore(self, interaction: discord.Interaction,
                       by: app_commands.Choice[str] = None,
                       metric: app_commands.Choice[str] = None,
                       feat: app_commands.Choice[str] = None,
-                      window: app_commands.Choice[str] = None):
+                      window: app_commands.Choice[str] = None,
+                      side: app_commands.Choice[str] = None):
         await interaction.response.defer()
         _by = by.value if by else "weapon"
         _by_label = by.name if by else "Weapon"
@@ -1176,6 +1183,8 @@ class PersonalityCog(commands.Cog):
         _metric_label = metric.name if metric else "Run count"
         _feat = feat.value if feat else None
         _feat_label = feat.name if feat else None
+        _side = side.value if side else None
+        _side_label = side.name if side else None
         _season_only = bool(window and window.value == "season")
 
         # Grouping by feat only makes sense as a run count, and can't ALSO filter
@@ -1202,7 +1211,8 @@ class PersonalityCog(commands.Cog):
                 _metric, _metric_label = "runs", "Run count"
             else:
                 rows = await _db.get_explore(
-                    _metric, _by, feat=_feat, season_start=_season_start, limit=12)
+                    _metric, _by, feat=_feat, season_start=_season_start,
+                    orientation=_side, limit=12)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
@@ -1229,6 +1239,8 @@ class PersonalityCog(commands.Cog):
         _bits = []
         if _feat_label and _by != "feat":
             _bits.append(f"feat: {_feat_label}")
+        if _side_label:
+            _bits.append(_side_label.lower())
         _bits.append(_win_label)
         _subtitle = " · ".join(_bits)
         _footer = (f"min 3 runs per bar · {_win_label}" if _is_rate else f"{len(_pairs)} shown · {_win_label}")
