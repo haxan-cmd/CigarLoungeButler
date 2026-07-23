@@ -376,6 +376,7 @@ FEAT_EMOJIS = {
     "Predator":      "<a:predator:1366794896081555567>",
     "Flawless":      "<a:flawless:1360358300834599062>",
     "Pacifist":      "<a:passive:1365531248268673086>",
+    "Hybrid":        "🔀",
 }
 
 SPECIAL_OPS_EMOJIS = {

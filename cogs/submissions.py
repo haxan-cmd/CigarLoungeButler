@@ -1800,6 +1800,7 @@ async def _apply_edit(interaction, ev):
         "100 Kills": "<a:100kill:1361412390339608686>", "200 Takedowns": "<a:200tkd:1363648828414230538>",
         "Triple": "<a:triple:1365532698260668466>", "TUFF": "<a:TUFF2:1520779243879927898>",
         "Flawless": "<a:flawless:1360358300834599062>", "Mallet": "🔨", "Knife": "🗡️",
+        "Hybrid": "🔀",
     }
     _lb_tmap = {}
     try:
@@ -2495,8 +2496,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # Build marks breakdown. A pacifist run (0 TD / 0 K) earns no weapon mark.
     _is_pacifist = (kills == 0 and takedowns <= 10)
-    marks_earned = 0 if _is_pacifist else 1
-    marks_lines = [] if _is_pacifist else ["<:cigar:1444893851427803298> *+1 Submission*"]
+    _is_hybrid = (str(selected_weapon).strip() == "Hybrid")
+    marks_earned = 0 if (_is_pacifist or _is_hybrid) else 1
+    marks_lines = [] if (_is_pacifist or _is_hybrid) else ["<:cigar:1444893851427803298> *+1 Submission*"]
     if '200 Takedowns' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:200tkd:1363648828414230538> +1*")
@@ -2509,7 +2511,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Brutal' in feats:
         marks_earned += 1
         marks_lines.append("*🔴 +1 Brutal lobby*")
-    if _is_pacifist and marks_earned == 0:
+    if _is_hybrid:
+        marks_summary = ("\n\n🔀 **Hybrid run** — a weapon-swap game. No weapon marks, "
+                         "but it lands on the **Hybrid** board (ranked by takedowns).")
+    elif _is_pacifist and marks_earned == 0:
         _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
         marks_summary = f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
     else:
@@ -2799,6 +2804,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             react_later("<a:TUFF2:1520779243879927898>")
         if any(lb == "Pacifist" for lb, _ in placements):
             react_later("<a:passive:1365531248268673086>")
+        if any(lb == "Hybrid" for lb, _ in placements):
+            react_later("🔀")   # 🔀 twisted arrows — the Hybrid feat
 
         # Bounty check (skip for ranged submissions, and for resubmits — an old
         # re-uploaded run shouldn't advance the current monthly bounty or trigger
@@ -2982,6 +2989,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 "Flawless":      "<a:flawless:1360358300834599062>",
                 "Mallet":        "🔨",
                 "Knife":         "🗡️",
+                "Hybrid":        "🔀",
             }
             # Board thread map — used to hyperlink the board-record line to its board.
             _lb_thread_map = {}
