@@ -2936,8 +2936,9 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary)
 
-    @app_commands.command(name="scan_leaderboard_duplicates", description="Scan all leaderboard threads for stale duplicate messages (mod only, read-only).")
-    async def scan_leaderboard_duplicates(self, interaction: discord.Interaction):
+    @app_commands.command(name="scan_leaderboard_duplicates", description="Find (and optionally delete) stale duplicate leaderboard messages (mod only).")
+    @app_commands.describe(confirm="Set True to DELETE the stray messages. Leave blank for a read-only audit.")
+    async def scan_leaderboard_duplicates(self, interaction: discord.Interaction, confirm: bool = False):
         """Read-only audit: each leaderboard board tracks its current Discord message
         ID(s) in the DB. If a message edit ever fails (rate limit, transient API
         error, etc.), the old code path silently posted a brand-new message and
@@ -3004,9 +3005,20 @@ class LeaderboardsCog(commands.Cog):
                         continue
                     extra.append(msg)
                 if extra:
-                    links = ", ".join(f"[msg]({m.jump_url})" for m in extra)
                     label = " / ".join(board_names)
-                    findings.append(f"\u2022 **{label}** \u2014 {len(extra)} untracked embed message(s): {links}")
+                    if confirm:
+                        _del = 0
+                        for _m in extra:
+                            try:
+                                await _m.delete()
+                                _del += 1
+                                await asyncio.sleep(0.35)
+                            except Exception as _de:
+                                errors.append(f"{label}: delete failed ({_de})")
+                        findings.append(f"\u2022 **{label}** \u2014 deleted {_del} stray message(s)")
+                    else:
+                        links = ", ".join(f"[msg]({m.jump_url})" for m in extra)
+                        findings.append(f"\u2022 **{label}** \u2014 {len(extra)} untracked embed message(s): {links}")
             except Exception as e:
                 errors.append(f"{', '.join(board_names)}: history scan failed ({e})")
             await asyncio.sleep(0.2)
@@ -3014,10 +3026,12 @@ class LeaderboardsCog(commands.Cog):
         if not findings:
             summary = f"\u2705 Scanned **{checked}** thread(s) \u2014 no stray/duplicate leaderboard messages found."
         else:
-            summary = f"\u26a0\ufe0f Found possible duplicates in **{len(findings)}** of {checked} thread(s):\n" + "\n".join(findings[:15])
+            _verb = "Cleaned up" if confirm else "Found possible"
+            summary = f"\u26a0\ufe0f {_verb} duplicates in **{len(findings)}** of {checked} thread(s):\n" + "\n".join(findings[:15])
             if len(findings) > 15:
                 summary += f"\n*...and {len(findings) - 15} more*"
-            summary += "\n\nThis is read-only \u2014 nothing was deleted. Verify each link manually before removing it."
+            if not confirm:
+                summary += "\n\nRead-only \u2014 nothing deleted. Re-run with `confirm: True` to remove them (verify a couple of links first)."
 
         if errors:
             summary += f"\n\n\u26a0\ufe0f Errors ({len(errors)}):\n" + "\n".join(errors[:5])
