@@ -49,6 +49,28 @@ LEDGER_ENTRANCE_CHANNEL_ID  = 1520290658387099648
 COUNTING_CHANNEL_ID         = 1510068548775579868  # counting channel: stats tracker + Idiot-role insults
 COUNTING_BOT_ID             = 510016054391734273   # the "counting" bot: its ✅ react + RUINED messages are the source of truth
 CLOWN_TARGET_USER_ID        = 694099959066132531  # Butler clown-reacts this user often (not every post)
+
+# The "99" channel: people post 90-99 TD games that just missed the 100 cutoff.
+# The Butler occasionally pops in to sardonically commiserate — a 🍼 react or a
+# dry one-liner. Rare by design (chance + cooldown), so it never spams. Set the
+# channel ID (env-overridable) to enable; 0 = off.
+import os as _os
+NINETY_NINE_CHANNEL_ID   = int(_os.getenv('NINETY_NINE_CHANNEL_ID', '0'))
+NINETY_NINE_REACT_CHANCE = float(_os.getenv('NINETY_NINE_CHANCE', '0.30'))
+NINETY_NINE_COOLDOWN     = int(_os.getenv('NINETY_NINE_COOLDOWN', '240'))  # sec, per channel
+# Weighted toward a 🍼 react; a dry quip fires less often.
+NINETY_NINE_QUIPS = [
+    "lol",
+    "aw, nice try.",
+    "so close. anyway.",
+    "99. a fine number. not the one that counts, but fine.",
+    "the board doesn't grade on effort, sir.",
+    "almost is carrying a great deal of weight in that sentence.",
+    "one short. how poetic.",
+    "tragic. i'll alert the historians.",
+    "and yet.",
+    "there's always next game. probably.",
+]
 REACT_BLOCKED_USER_ID       = 694099959066132531  # this user's reactions are auto-removed in main (can still talk)
 REGISTRY_INDEX_THREAD_ID    = 1519508672181571798
 INDEX_THREAD_2H             = 1519531444064489592

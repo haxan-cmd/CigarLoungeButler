@@ -29,6 +29,10 @@ REACT_BLOCKED_USER_ID       = config.REACT_BLOCKED_USER_ID
 CLOWN_REACT_CHANCE          = 0.4  # roll per eligible message
 CLOWN_REACT_COOLDOWN        = 300  # min seconds between clowns for the same user (keeps it organic)
 CLOWN_REACT_COOLDOWNS       = {}
+NINETY_NINE_CHANNEL_ID      = config.NINETY_NINE_CHANNEL_ID
+NINETY_NINE_REACT_CHANCE    = config.NINETY_NINE_REACT_CHANCE
+NINETY_NINE_COOLDOWN        = config.NINETY_NINE_COOLDOWN
+_99_LAST = 0.0  # per-channel cooldown timestamp
 NERVE_CENTER_CHANNEL_ID     = config.NERVE_CENTER_CHANNEL_ID
 BUTLERS_FAVOURITES_CHANNEL_ID = config.BUTLERS_FAVOURITES_CHANNEL_ID
 BUTLERS_MANUAL_CHANNEL_ID   = config.BUTLERS_MANUAL_CHANNEL_ID
@@ -1617,6 +1621,28 @@ class PersonalityCog(commands.Cog):
                     await message.add_reaction('\U0001f921')
                 except Exception:
                     pass
+
+        # The 99 channel: sardonically commiserate a near-miss, rarely. A lament
+        # (keywords, or a 90-99 number in the text) raises the odds; otherwise a
+        # low base chance so the Butler isn't silent but isn't a pest either.
+        if NINETY_NINE_CHANNEL_ID and message.channel.id == NINETY_NINE_CHANNEL_ID:
+            global _99_LAST
+            _now99 = time.time()
+            if _now99 - _99_LAST > NINETY_NINE_COOLDOWN:
+                _txt99 = (message.content or '').lower()
+                _lament = any(w in _txt99 for w in (
+                    'so close', 'almost', 'one more', 'barely', 'damn', 'ugh',
+                    'fml', 'bruh', 'cmon', "c'mon", 'missed', 'nooo', 'agony',
+                    'robbed', 'just needed', 'this close')) or bool(
+                    re.search(r'\b9[0-9]\b', _txt99))
+                _chance = NINETY_NINE_REACT_CHANCE * (2.2 if _lament else 1.0)
+                if random.random() < _chance:
+                    _99_LAST = _now99
+                    try:
+                        await message.reply(random.choice(config.NINETY_NINE_QUIPS),
+                                            mention_author=False)
+                    except Exception as _99e:
+                        print(f"[99] quip error: {_99e}")
 
         # Middle finger at the bot = middle finger back
         if self.bot.user in message.mentions and '\U0001f595' in message.content:
