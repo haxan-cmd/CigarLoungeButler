@@ -1371,7 +1371,7 @@ def _lb_title(lb_name, show_title, cont=False):
         base = lb_name
     return f"{base} (cont.)" if cont else base
 
-async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None):
+async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals=None, window_start=None, return_kill_share=False):
     """Peak best-5-consecutive-game Lethality (kills/TD) and Warlord (takedowns as a share of your team's
     total kills) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
     window a player has ever posted with that weapon/map. Minimum 5 games for
@@ -1438,6 +1438,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         pass
 
     leth, warl = {}, {}
+    ks = {}   # kill-share rating (Hybrid board wants all three)
     names = {}  # key -> display name to show
     for row in subs:
         if len(row) < 9:
@@ -1488,6 +1489,8 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
                 _tks = None
             if _tks and 0 < _tks <= 100 and kills > 0 and td > 0:
                 warl.setdefault(key, []).append((ts, td * _tks / kills))
+                if return_kill_share:
+                    ks.setdefault(key, []).append((ts, _tks))
 
     def _peak(dct):
         out = []
@@ -1501,6 +1504,8 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         out.sort(key=lambda t: -t[1])
         return out
 
+    if return_kill_share:
+        return _peak(leth), _peak(warl), _peak(ks), min_games
     return _peak(leth), _peak(warl), min_games
 
 
@@ -1527,8 +1532,14 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
                 _want_leth = False               # Lethality lives on the Kills board below
         except Exception as e:
             print(f"[BOARD] ratings-placement check error for {lb_name}: {e}")
+    _ksr = None
+    _is_hybrid = (lb_name == "Hybrid")
     try:
-        lr, wr, rmin = await compute_board_ratings(_ratings_source, is_map, all_subs)
+        if _is_hybrid:
+            lr, wr, _ksr, rmin = await compute_board_ratings(
+                _ratings_source, is_map, all_subs, return_kill_share=True)
+        else:
+            lr, wr, rmin = await compute_board_ratings(_ratings_source, is_map, all_subs)
     except Exception as e:
         print(f"[BOARD] rating compute error for {lb_name}: {e}")
     if not _want_leth:
@@ -1536,7 +1547,8 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     if not _want_war:
         wr = None
     _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
-                                      lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map)
+                                      lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
+                                      kill_share_rows=_ksr)
     # Kills boards close the thread's decorative frame themselves: the bottom
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
@@ -1546,8 +1558,8 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     return _embs
 
 
-def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False):
-    if not embeds or (not lethality_rows and not warlord_rows):
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None):
+    if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
     def _fld(rows, fmt):
@@ -1570,6 +1582,12 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     if warlord_rows is not None:
         tail.add_field(name=f"{_we} Warlord",
                        value=_fld(warlord_rows, lambda s: f"{s:.0f}%"), inline=False)
+    # Kill Share as a THIRD rating — currently only the Hybrid board passes it, so
+    # a weapon-swap run shows Lethality + Warlord + Kill Share together.
+    if kill_share_rows is not None:
+        _kse = te.get('Lethality', '🧪')
+        tail.add_field(name=f"{_kse} Kill Share",
+                       value=_fld(kill_share_rows, lambda s: f"{s:.0f}%"), inline=False)
     _min_txt = f"{rating_min}+ games"
     tail.add_field(
         name="\u200b",
@@ -1580,14 +1598,14 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     )
 
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False):
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
-        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
         return [e]
 
     lines = []
@@ -1623,7 +1641,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
-    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
     return embeds
 
 
