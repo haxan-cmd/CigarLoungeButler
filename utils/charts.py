@@ -434,3 +434,54 @@ def render_tilt_curve(*, tilts, lean, stomp, n_games) -> bytes:
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight', pad_inches=0.22)
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_tilt_ladder(*, counts, n_games) -> bytes:
+    """The orientation-adjusted difficulty ladder as horizontal bars, one per
+    config.TILT_BANDS row, hardest at top. `counts` is {band_name: n}. Bands that
+    pay valor marks are annotated. BLOCKING: call via render_async."""
+    import io as _io
+    import config
+    from matplotlib.patches import FancyBboxPatch as _FBP, Ellipse as _Ell
+    plt, fig = _new_figure((10.4, 7.2))
+    # colour per band emoji family (hardest -> easiest)
+    COLW = {'Brutal': '#c0392b', 'Outmatched': '#d85a30', 'Slightly Uphill': '#d88a30',
+            'Even': '#d9c24f', 'Slightly Favoured': '#8bbf6a', 'Favoured': '#57b36a',
+            'Training Grounds': '#7ea6d6'}
+    rows = list(reversed(config.TILT_BANDS))  # hardest first
+    n = max(1, n_games)
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(0, 100); ax.axis('off')
+
+    def _t(x, y, s, size=13, color=FG, weight='normal', ha='left', va='center'):
+        ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va)
+
+    _t(5, 94, 'Difficulty ladder', size=23, color=GOLD, weight='bold')
+    _t(5, 88.8, f'{n_games} games, tilt centred on your role. Hard tail pays valor marks.',
+       size=11.5, color=MUT)
+    maxp = max([100.0 * counts.get(nm, 0) / n for (_lo, nm, _e, _m, _tg) in rows] + [1.0])
+    x0, xw = 40.0, 40.0
+    y, rh = 80, 10.4
+    for (_lo, nm, emoji, marks, tag) in rows:
+        c = COLW.get(nm, MUT)
+        pct = 100.0 * counts.get(nm, 0) / n
+        ax.add_patch(_Ell((6.5, y), 1.5, 1.95, color=c, zorder=3))
+        _t(9, y, nm, size=14, color=FG, weight='bold')
+        if marks:
+            _t(9, y - 2.7, f'+{marks} mark{"s" if marks != 1 else ""}',
+               size=10.5, color='#e6b45a', weight='bold')
+        elif nm == 'Training Grounds':
+            _t(9, y - 2.7, 'roast only, no marks', size=10.5, color=MUT)
+        ax.add_patch(_FBP((x0, y - 1.7), xw, 3.4, boxstyle="round,pad=0,rounding_size=1",
+                          fc=PANEL, ec='none', zorder=1))
+        w = max(0.5, xw * pct / maxp)
+        ax.add_patch(_FBP((x0, y - 1.7), w, 3.4, boxstyle="round,pad=0,rounding_size=1",
+                          fc=c, ec='none', zorder=2))
+        _t(x0 + xw + 2, y, f'{pct:.1f}%  ({counts.get(nm, 0)})', size=12.5, color=c, weight='bold')
+        y -= rh
+    ax.add_patch(plt.Rectangle((5, 3), 90, 6.5, color='#2f3138', zorder=0))
+    _t(8, 6.2, 'Rolled on defence and still dropped 100? You land in the hard tail. Raw % would call it Even and pay nothing.',
+       size=10.6, color=FG)
+    buf = _io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight', pad_inches=0.22)
+    plt.close(fig)
+    return buf.getvalue()

@@ -352,7 +352,7 @@ async def get_submissions_after(after_id: int, limit: int = 500) -> list[dict]:
 
 
 async def get_tilt_games() -> list:
-    """Per-lobby (team_total_kills, enemy_total_kills) for the lobby-tilt
+    """Per-lobby (team_total_kills, enemy_total_kills, map, faction) for the lobby-tilt
     distribution. DISTINCT ON collapses the several submissions from one game
     (same map + both banner totals + day) down to a single lobby, so the spread
     describes games, not submissions. Resubmits (old runs re-uploaded) are
@@ -362,11 +362,11 @@ async def get_tilt_games() -> list:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT DISTINCT ON (map, team_total_kills, enemy_total_kills, DATE(submitted_at)) "
-            "team_total_kills AS t, enemy_total_kills AS e "
+            "team_total_kills AS t, enemy_total_kills AS e, map, faction "
             "FROM submissions "
             "WHERE team_total_kills > 0 AND enemy_total_kills > 0 "
             "AND COALESCE(feats,'') NOT LIKE '%Resubmit%'")
-    return [(int(r['t']), int(r['e'])) for r in rows]
+    return [(int(r['t']), int(r['e']), r['map'], r['faction']) for r in rows]
 
 
 async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:

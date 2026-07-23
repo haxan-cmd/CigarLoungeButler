@@ -1064,7 +1064,7 @@ class PersonalityCog(commands.Cog):
         lines += ["", _footer]
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="tilt_stats", description="The lobby-tilt distribution across every logged game (the de-biased curve).")
+    @app_commands.command(name="tilt_stats", description="The orientation-adjusted difficulty ladder across every logged game.")
     async def tilt_stats(self, interaction: discord.Interaction):
         await interaction.response.defer()
         try:
@@ -1076,41 +1076,34 @@ class PersonalityCog(commands.Cog):
             await interaction.followup.send("No games with team totals logged yet.")
             return
 
-        # Signed tilt per lobby, then mirror to both team POVs so the "people
-        # only post their wins" skew cancels and the split is symmetric.
-        tilts = [round((t - e) / min(t, e) * 100) for t, e in games]
-        _L = int(getattr(config, 'LOBBY_TILT_LEAN', 18))
-        _T = int(getattr(config, 'LOBBY_TILT_STOMP', 75))
-        import statistics as _st
-        _median = round(_st.median(abs(x) for x in tilts))
-
+        # Orientation-adjusted difficulty per lobby: subtract the role baseline,
+        # then band via the live config ladder (utils/tilt.py is the source).
+        import utils.tilt as _tiltmod
         from collections import Counter
-        mir = [v for x in tilts for v in (x, -x)]
-
-        def _bnd(x):
-            if x >= _T: return '🍼 Training Grounds'
-            if x >= _L: return '🟢 Favoured'
-            if x > -_L: return '🟡 Even'
-            if x > -_T: return '🟠 Uphill'
-            return '🔴 Brutal'
-        cc = Counter(_bnd(x) for x in mir); _N = len(mir)
+        cc = Counter()
+        for _t, _e, _mp, _fac in games:
+            _raw = _tiltmod.raw_tilt(_t, _e)
+            if _raw is None:
+                continue
+            cc[_tiltmod.band(_tiltmod.adjusted(_raw, _mp, _fac))['name']] += 1
+        _N = sum(cc.values()) or 1
 
         try:
             import utils.charts as _charts
             _png = await _charts.render_async(
-                _charts.render_tilt_curve,
-                tilts=tilts, lean=_L, stomp=_T, n_games=len(games))
+                _charts.render_tilt_ladder, counts=dict(cc), n_games=_N)
             await interaction.followup.send(
-                content=(f"**Lobby tilt** · {len(games)} games · median gap {_median}% · "
-                         f"bands at ±{_L}% / ±{_T}%"),
+                content=f"**Difficulty ladder** · {_N} games · role-adjusted (attack "
+                        f"{config.TILT_BASELINE_ATTACK}% / defence {config.TILT_BASELINE_DEFENSE}% baseline)",
                 file=discord.File(io.BytesIO(_png), filename="tilt.png"))
             return
         except Exception as _ce:
             print(f"[TILT_STATS] chart render failed, text fallback: {_ce}")
 
-        order = ['🍼 Training Grounds', '🟢 Favoured', '🟡 Even', '🟠 Uphill', '🔴 Brutal']
-        lines = [f"**Lobby tilt** — {len(games)} games, both POVs (median gap {_median}%):"]
-        lines += [f"{k}: {round(100 * cc[k] / _N, 1)}% ({cc[k]})" for k in order]
+        lines = [f"**Difficulty ladder** — {_N} games (orientation-adjusted):"]
+        for (_lo, _nm, _em, _mk, _tg) in config.TILT_BANDS:
+            _mkstr = f"  (+{_mk})" if _mk else ""
+            lines.append(f"{_em} {_nm}: {round(100 * cc.get(_nm, 0) / _N, 1)}% ({cc.get(_nm, 0)}){_mkstr}")
         await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="help", description="List the commands you can use, grouped by what they do.")

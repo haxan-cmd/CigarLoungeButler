@@ -16,6 +16,7 @@ from config import (
     MAP_RECORDS_FORUM_ID, FEATS_FORUM_ID, BOUNTY_CARDS_FORUM_ID,
 )
 import utils.db as _db
+import utils.tilt as _tiltmod
 from utils.helpers import format_weapon_marks, nerve_log_error
 
 
@@ -100,8 +101,12 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                 marks += 1
             if 'High Score' in feats:
                 marks += 1
-            if 'Brutal' in feats:
-                marks += 1
+            # Difficulty valor: Slightly Uphill +1, Outmatched +2, Brutal +3
+            # (orientation-adjusted band, tagged at submission time). One tag max.
+            for _dtag, _dm in _tiltmod.tag_marks().items():
+                if _dtag in feats:
+                    marks += _dm
+                    break
 
         # Use submitted subclass to disambiguate shared weapons (e.g. Messer in Raider vs Crusader)
         # Key: (weapon, subclass) if subclass known, else plain weapon name
@@ -615,6 +620,8 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
     lethalities = []  # kills / TD as a % — weapon-board lethality
     kill_shares = []  # kills / team kills — Kill Share
     warlord_vals = [] # takedowns / team kills — Warlord
+    _diff = {}        # difficulty-badge counts: tag -> n (Outmatched, Brutal)
+    _badge_tags = [_bt for _bt, _be in _tiltmod.card_badges()]
     for row in subs:
         if not row or row[2].strip() != discord_id_str:
             continue
@@ -641,7 +648,14 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
                     warlord_vals.append(_ltd * _tks / _lk)
         except (ValueError, TypeError):
             pass
-    if not td_shares and not lethalities and not kill_shares:
+        try:
+            _rf = [f.strip() for f in (row[11] or '').split(',')] if len(row) > 11 else []
+            for _bt in _badge_tags:
+                if _bt in _rf:
+                    _diff[_bt] = _diff.get(_bt, 0) + 1
+        except (ValueError, TypeError, IndexError):
+            pass
+    if not td_shares and not lethalities and not kill_shares and not _diff:
         return None
     return {
         'avg_td_share':   (sum(td_shares) / len(td_shares)) if td_shares else None,
@@ -649,6 +663,7 @@ async def get_lobby_stats_for_player(discord_id, cached_data=None):
         'avg_kill_share': (sum(kill_shares) / len(kill_shares)) if kill_shares else None,
         'avg_warlord':    (sum(warlord_vals) / len(warlord_vals)) if warlord_vals else None,
         'games':          max(len(td_shares), len(lethalities), len(kill_shares)),
+        'difficulty':     _diff,
     }
 
 
@@ -1065,9 +1080,14 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
     _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link)
-    if _fol_lines:
+    # Difficulty badges (Outmatched / Brutal hard carries) sit in the same section.
+    _dbadges = (lobby_stats or {}).get('difficulty') or {}
+    _dline = "  ".join(f"{_be} x{_dbadges[_bt]}" for _bt, _be in _tiltmod.card_badges() if _dbadges.get(_bt))
+    if _fol_lines or _dline:
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
+        if _dline:
+            lines.append(f"\u2022 {_dline} \u2014 hard carries against the odds")
         lines.append("")
 
     if best_placements:
@@ -2738,7 +2758,12 @@ class RegistryCog(commands.Cog):
         avg_td = round(sum(td_list) / len(td_list)) if td_list else 0
         avg_k = round(sum(kill_list) / len(kill_list)) if kill_list else 0
         kill_rate = round(avg_k / avg_td * 100) if avg_td else 0
-        brutal_count = sum(1 for r in player_subs if len(r) > 11 and 'Brutal' in (r[11] or ''))
+        _diff_badges = []
+        for _btag, _bemoji in _tiltmod.card_badges():
+            _bn = sum(1 for r in player_subs if len(r) > 11
+                      and _btag in [f.strip() for f in (r[11] or '').split(',')])
+            if _bn:
+                _diff_badges.append(f"{_bemoji} x{_bn}")
         tuff_count = sum(1 for ld_r in ld_all
                          if len(ld_r) > 1 and ld_r[0].strip() == 'TUFF'
                          and ld_r[1].strip() == resolved_name)
@@ -2794,8 +2819,8 @@ class RegistryCog(commands.Cog):
             record_lines.append(f"│ 📊 avg {avg_td} TD / {avg_k} K per run ({kill_rate}% kill rate)")
         if tuff_count:
             record_lines.append(f"│ <a:TUFF2:1520779243879927898> {tuff_count} TUFF entr{'y' if tuff_count == 1 else 'ies'}")
-        if brutal_count:
-            record_lines.append(f"│ 🔴 {brutal_count} Brutal lobb{'y' if brutal_count == 1 else 'ies'} survived")
+        if _diff_badges:
+            record_lines.append("│ " + "  ".join(_diff_badges) + " hard carries against the odds")
         if counting_line:
             record_lines.append(f"│ {counting_line}")
         if record_lines:

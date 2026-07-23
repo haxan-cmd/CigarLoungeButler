@@ -327,6 +327,35 @@ LOBBY_TILT_STOMP        = 75    # percent
 LOBBY_TILT_LEAN         = 18    # percent
 STOMP_STICKER_NAME      = "traininggrounds"
 
+# --- Orientation-adjusted difficulty ladder ------------------------------------
+# Raw tilt (above) conflates lobby balance with your ROLE: a big game is far
+# easier on attack (target-rich) than defence, so 67% of posted 100-TD runs are
+# attackers and they sit at a +23% median gap vs +8% for defenders. We subtract
+# your role's baseline first: "adjusted tilt" = raw kill gap minus the median a
+# posted run shows on that side. Difficulty then reads as how far BELOW your
+# side's norm the lobby was. Calibrated on 292 logged games (2026-07-23).
+TILT_BASELINE_ATTACK  = 23    # median kill-gap % of a posted attack run
+TILT_BASELINE_DEFENSE = 8     # ... and of a posted defence run
+
+# 7-band ladder on ADJUSTED tilt, hardest -> easiest. Each row:
+#   (low_edge_inclusive, name, emoji, bonus_marks, feat_tag)
+# A run lands in the first band (scanning top to bottom) whose low_edge it
+# clears. The hard tail pays valor marks and is tagged on the feats column so
+# the mark math and edits see it; the easy tail is label-only. Training Grounds
+# keeps its baby-bottle roast and earns nothing.
+TILT_BANDS = [
+    ( 50,  "Training Grounds",  "🍼", 0, None),
+    ( 30,  "Favoured",          "🟢", 0, None),
+    ( 15,  "Slightly Favoured", "🟢", 0, None),
+    (-15,  "Even",              "🟡", 0, None),
+    (-30,  "Slightly Uphill",   "🟠", 1, "Uphill"),
+    (-50,  "Outmatched",        "🟠", 2, "Outmatched"),
+    (-999, "Brutal",            "🔴", 3, "Brutal"),
+]
+# Difficulty tags that earn a counting badge (emoji xN) on the player card.
+# Slightly Uphill pays a mark but is common, so it stays off the card.
+TILT_CARD_BADGES = ("Outmatched", "Brutal")
+
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji

@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
+import utils.tilt as _tilt_mod
 
 # ── Submission queue / lock (was in utils.sheets, now local) ──────────────────
 _submission_queues: dict  = {}
@@ -1635,7 +1636,7 @@ async def _apply_edit(interaction, ev):
         _old_f = ev.feats if isinstance(ev.feats, list) else \
             [f.strip() for f in str(ev.feats or '').split(',') if f.strip() and f.strip() != 'None']
         # 'Brutal' is a lobby constant (banner totals), not stat-derived — survives edits
-        _KEEP = {'Resubmit', 'Unlisted', 'High Score', 'Brutal'}
+        _KEEP = {'Resubmit', 'Unlisted', 'High Score', 'Brutal', 'Outmatched', 'Uphill'}
         _nf = [f for f in _old_f if f in _KEEP]
         _was_triple = 'Triple' in _old_f
         _sc = ev.score if isinstance(ev.score, int) else None
@@ -1910,7 +1911,9 @@ async def _apply_edit(interaction, ev):
         _kp = next((p for lb, p in _edit_placements if lb == "100 Kills"), None)
         _ml.append(f"*<a:100kill:1361412390339608686> +1{(' — ' + _rlink('100 Kills', _kp)) if _kp else ''}*")
     if 'Triple' in _feats: _me += 1; _ml.append("*<a:triple:1365532698260668466> +1 Triple*")
-    if 'Brutal' in _feats: _me += 1; _ml.append("*🔴 +1 Brutal lobby*")
+    for _dlo, _dnm, _dem, _dmk, _dtg in config.TILT_BANDS:
+        if _dtg and _dtg in _feats:
+            _me += _dmk; _ml.append(f"*{_dem} +{_dmk} {_dnm} lobby*"); break
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
     if _is_pac:
         new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
@@ -2367,40 +2370,35 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[LETHALITY] weapon-avg lookup failed: {_le}")
         blurb_parts.append(_leth_line)
 
-    # --- Lobby tilt: red→green difficulty marker from the faction banner totals ---
-    _tilt = None
+    # --- Lobby tilt: orientation-adjusted difficulty marker from banner totals ---
+    # Raw kill gap conflates lobby balance with your role (attack farms kills,
+    # defence doesn't), so we subtract the role baseline before banding. The blurb
+    # still shows the raw, verifiable gap; the label + valor come off the adjusted
+    # band. utils/tilt.py is the single source both this and the mark calc read.
+    _tilt = None            # raw kill-gap %, shown in the blurb
+    _tilt_band = None       # adjusted band dict: name / emoji / marks / tag
     _ett = vd.get('enemy_total_kills')
-    if (isinstance(_vd_team_total, int) and isinstance(_ett, int)
-            and 0 < _vd_team_total <= 3000 and 0 < _ett <= 3000):
-        # Percentage gap relative to the SMALLER team: +50% and -50% describe the
-        # same imbalance from opposite sides (raw diff misread long games as stomps)
-        _tilt = round((_vd_team_total - _ett) / min(_vd_team_total, _ett) * 100)
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 75)
-        _L = getattr(config, 'LOBBY_TILT_LEAN', 25)
-        # Result-agnostic by design: the kill gap is the story, win or lose
-        if _tilt >= _T:
-            _tm = ('🍼', 'Training Grounds')
-        elif _tilt >= _L:
-            _tm = ('🟢', 'Favoured')
-        elif _tilt > -_L:
-            _tm = ('🟡', 'Even')
-        elif _tilt > -_T:
-            _tm = ('🟠', 'Uphill')
-        else:
-            _tm = ('🔴', 'Brutal')
-        blurb_parts.append(f"{_tm[0]} {_tm[1]} lobby ({_tilt:+d}%)")
-        # Brutal-lobby valor: surviving a 75%+ enemy kill lead earns +1 mark.
-        # Tagged on the feats column so the mark math and edits see it.
-        if _tilt <= -_T and not (kills == 0 and takedowns <= 10):
-            feats.append('Brutal')
+    _raw = _tilt_mod.raw_tilt(_vd_team_total, _ett)
+    if _raw is not None:
+        _tilt = _raw
+        _orient = _tilt_mod.orientation(vd.get('map'), vd.get('faction'))
+        _adj = _tilt_mod.adjusted(_raw, vd.get('map'), vd.get('faction'))
+        _tilt_band = _tilt_mod.band(_adj)
+        _osfx = {'Attack': ' · atk', 'Defense': ' · def'}.get(_orient, '')
+        blurb_parts.append(f"{_tilt_band['emoji']} {_tilt_band['name']} lobby ({_tilt:+d}%{_osfx})")
+        # Difficulty valor: the hard tail earns tiered marks (Slightly Uphill +1,
+        # Outmatched +2, Brutal +3), tagged on the feats column so the mark math
+        # and edits see it. Pacifist-ish runs (0 K / <=10 TD) earn nothing.
+        _dtag = _tilt_band.get('tag')
+        if _dtag and _tilt_band['marks'] > 0 and not (kills == 0 and takedowns <= 10):
+            feats.append(_dtag)
             feats_str = ", ".join(feats) if feats else None
 
     # Tilt reaction/sticker: mock the stomp (a receiving-end valor react was
     # considered and parked — see the 2026-07-15 idea thread if it resurfaces)
     try:
-        _T = getattr(config, 'LOBBY_TILT_STOMP', 75)
         _tilt_sticker = None
-        if _tilt is not None and _tilt >= _T:
+        if _tilt_band is not None and _tilt_band['name'] == 'Training Grounds':
             await safe_react('🍼')
             _tilt_sticker = getattr(config, 'STOMP_STICKER_NAME', '') or ''
         if _tilt_sticker:
@@ -2542,9 +2540,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
-    if 'Brutal' in feats:
-        marks_earned += 1
-        marks_lines.append("*🔴 +1 Brutal lobby*")
+    for _dlo, _dnm, _dem, _dmk, _dtg in config.TILT_BANDS:
+        if _dtg and _dtg in feats:
+            marks_earned += _dmk
+            marks_lines.append(f"*{_dem} +{_dmk} {_dnm} lobby*")
+            break
     if _is_hybrid:
         marks_summary = ("\n\n🔀 **Hybrid run** — a weapon-swap game. No weapon marks, "
                          "but it lands on the **Hybrid** board (ranked by takedowns).")
