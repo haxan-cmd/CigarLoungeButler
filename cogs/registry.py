@@ -487,6 +487,12 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 feats.append((FEAT_EMOJIS['Pacifist'], link))
         except (ValueError, IndexError):
             pass
+        # Hybrid run: a weapon-swap game. Stacks as its own feat, like Pacifist.
+        try:
+            if (row[3] or '').strip() == 'Hybrid' and 'Hybrid' in FEAT_EMOJIS:
+                feats.append((FEAT_EMOJIS['Hybrid'], link))
+        except (ValueError, IndexError):
+            pass
 
     # Also pull legacy feat entries from LeaderboardData
     FEAT_BOARD_EMOJIS = {
@@ -917,6 +923,7 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
 
     _e = FEAT_EMOJIS
     FEAT_LABELS = {
+        ''.join(sorted([_e['Hybrid']])) if 'Hybrid' in _e else '\x00hybrid':            "Hybrid",
         ''.join(sorted([_e['Pacifist']])):                                               "Pacifist",
         ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
         ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",

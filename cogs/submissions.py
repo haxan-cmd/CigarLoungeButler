@@ -926,7 +926,10 @@ class ClassSearchModal(discord.ui.Modal, title="Class Search"):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("Not your submission.", ephemeral=True)
             return
-        matches = _fuzzy_match(self.query.value, self.classes)
+        _pool = list(self.classes)
+        if self.category == "all" and not self.pre_detected_weapon and "Hybrid" not in _pool:
+            _pool.append("Hybrid")
+        matches = _fuzzy_match(self.query.value, _pool)
         if not matches:
             await interaction.response.send_message(
                 f"No class matching **{self.query.value}**. Try again.", ephemeral=True)
@@ -934,6 +937,12 @@ class ClassSearchModal(discord.ui.Modal, title="Class Search"):
         if len(matches) == 1:
             selected_class = matches[0]
             vd = {**self.vision_data, 'subclass': selected_class}
+            if selected_class == "Hybrid":
+                vd['subclass'] = "Hybrid"
+                view = MapSelectView(self.original_message, self.prompt_msg, "Hybrid", "Hybrid", vision_data=vd)
+                await interaction.response.edit_message(
+                    content="Class: `Hybrid` (weapon swap). Which map?", view=view)
+                return
             if self.pre_detected_weapon:
                 view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
                 await interaction.response.edit_message(
@@ -963,7 +972,12 @@ class ClassSelectView(discord.ui.View):
         if classes:
             CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
             sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:25]]
+            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:24]]
+            # Hybrid: weapon-swap games. Only on the top-level picker ("all"), and
+            # only when a weapon isn't already locked in.
+            if category == "all" and not pre_detected_weapon:
+                options.append(discord.SelectOption(
+                    label="Hybrid", description="Swapped weapons — no single one", emoji="🔀"))
             self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon, vision_data, options))
 
     @discord.ui.button(label="Search Class", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
@@ -987,12 +1001,7 @@ class ClassSelect(discord.ui.Select):
         if options is None:
             CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
             sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:24]]
-            # Hybrid: for players who swap weapons mid-game and never commit to one.
-            # Its own board, no weapon marks. Only offered on the top-level picker.
-            if category == "all":
-                options.append(discord.SelectOption(
-                    label="Hybrid", description="Swapped weapons — no single one"))
+            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:25]]
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
