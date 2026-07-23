@@ -266,10 +266,10 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
         _draw_icons(fig, ax, labels, size=0.052)
     ax.set_xlabel(value_label, color=MUT, fontsize=10.5, labelpad=8)
 
-    # Footer in inches from the bottom, same reason as the header: on a 1-2 bar
-    # chart a fixed fraction put it on top of the x-axis label.
-    fig.text(0.945, (0.16 / _h), footer, color=MUT, fontsize=8.5,
-             ha='right', va='bottom')
+    # Footer sits top-right on the subtitle line, not at the bottom: a bottom
+    # footer collided with the (centered) x-axis label. Up here it never does.
+    fig.text(0.945, _y(0.64), footer, color=MUT, fontsize=8.5,
+             ha='right', va='center')
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
     plt.close(fig)

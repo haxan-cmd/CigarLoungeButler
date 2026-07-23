@@ -1272,7 +1272,7 @@ class PersonalityCog(commands.Cog):
                      "avg_kills": "avg kills per run"}[_metric]
         elif _is_signed:
             _fmt = lambda v: f"{v:+.1f}"      # +8.2 / -3.1
-            _unit = "points vs the weapon's average lethality"
+            _unit = "points vs weapon average"
         else:
             _fmt = lambda v: f"{int(round(v)):,}"
             _unit = {"runs": "runs", "total_td": "takedowns", "total_kills": "kills",
