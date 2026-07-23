@@ -512,16 +512,18 @@ def render_lethality_charge(weapon, delta, dmax=15.0) -> bytes:
     t = max(0.0, min(1.0, (delta or 0) / dmax))
     grey = (150, 152, 158)
     green = (70, 205, 100)
-    tr = int(grey[0] + (green[0] - grey[0]) * t)
-    tg = int(grey[1] + (green[1] - grey[1]) * t)
-    tb = int(grey[2] + (green[2] - grey[2]) * t)
+    col = (int(grey[0] + (green[0] - grey[0]) * t),
+           int(grey[1] + (green[1] - grey[1]) * t),
+           int(grey[2] + (green[2] - grey[2]) * t))
     px = im.load()
     w, h = im.size
     for x in range(w):
         for y in range(h):
             a = px[x, y][3]
             if a:
-                px[x, y] = (tr, tg, tb, a)
+                px[x, y] = col + (a,)
+    # No edge feathering: the source outlines are already anti-aliased, so a blur
+    # only adds an outward halo rather than smoothing anything.
     buf = _io.BytesIO()
     im.save(buf, format='PNG')
     return buf.getvalue()

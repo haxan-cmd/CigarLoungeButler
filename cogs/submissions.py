@@ -75,13 +75,18 @@ def _blurb_desc(msg):
 async def _blurb_edit(msg, desc, edited=False, view=None):
     # content='' clears the plain text (also wipes the old-format blurb text
     # when an edit upgrades a pre-embed message)
-    # Keep the lethality-charge thumbnail across edits: the attachment stays on
-    # the message (we never pass attachments=[]), so re-referencing its URL keeps
-    # it visible; a plain _blurb_embed would drop it.
+    # Keep the lethality-charge thumbnail across edits. The attachment stays on
+    # the message (we never pass attachments=[]), so we must re-reference it as
+    # attachment://lethality.png, NOT the resolved CDN url: re-setting the CDN
+    # url de-links the file from the embed and Discord then shows it BOTH as a
+    # standalone image and as the thumbnail. The attachment:// form keeps it
+    # "consumed" by the embed, so only the thumbnail renders.
     _thumb = None
     try:
-        if msg.embeds and msg.embeds[0].thumbnail:
-            _thumb = msg.embeds[0].thumbnail.url
+        for _att in (msg.attachments or []):
+            if _att.filename == 'lethality.png':
+                _thumb = 'attachment://lethality.png'
+                break
     except Exception:
         _thumb = None
     kwargs = {'content': '', 'embed': _blurb_embed(desc, edited=edited, thumb=_thumb)}
