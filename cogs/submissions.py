@@ -1855,7 +1855,7 @@ async def _apply_edit(interaction, ev):
                 _ewavg, _ewn = await _db.get_weapon_avg_lethality(ev.weapon)
                 if _ewavg is not None:
                     _ediff = _el - _ewavg
-                    if abs(_ediff) >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
+                    if _ediff >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
                         _el_line += f"  ·  {_ediff:+.1f} vs {ev.weapon} avg"
             except Exception as _ele:
                 print(f"[LETHALITY] edit weapon-avg lookup failed: {_ele}")
@@ -2358,8 +2358,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _wavg, _wn = await _db.get_weapon_avg_lethality(selected_weapon)
             if _wavg is not None:
                 _diff = _leth_g - _wavg
-                # Only annotate real outliers; near-average is noise.
-                if abs(_diff) >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
+                # Only celebrate standout runs — well ABOVE the weapon's average.
+                # Below-average and near-average just show raw lethality (no
+                # calling people out for an off game).
+                if _diff >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
                     _leth_line += f"  ·  {_diff:+.1f} vs {selected_weapon} avg"
         except Exception as _le:
             print(f"[LETHALITY] weapon-avg lookup failed: {_le}")
