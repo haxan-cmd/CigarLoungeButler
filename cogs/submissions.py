@@ -305,19 +305,16 @@ class HealingScoreView(discord.ui.View):
 
 class SubmitView(discord.ui.View):
     def __init__(self, original_message, prompt_msg=None):
-        super().__init__(timeout=300)
+        super().__init__(timeout=180)   # 3 min, then the ignored prompt self-deletes
         self.original_message = original_message
         self.prompt_msg = prompt_msg
 
     async def on_timeout(self):
+        # Ephemeral isn't possible for a message-triggered prompt, so the next
+        # best thing: an ABANDONED prompt cleans itself up instead of lingering.
+        # (A clicked prompt is already deleted in the finalise path.)
         try:
-            expired_embed = discord.Embed(
-                title="Window Expired",
-                description="Post your screenshot again to open a new submission.",
-                color=0x36393f,
-            )
-            expired_embed.set_footer(text="Cigar Lounge Butler")
-            await self.prompt_msg.edit(content=None, embed=expired_embed, view=None)
+            await self.prompt_msg.delete()
         except Exception:
             pass
         self.stop()
