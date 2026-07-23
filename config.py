@@ -344,12 +344,12 @@ TILT_BASELINE_DEFENSE = 8     # ... and of a posted defence run
 # the mark math and edits see it; the easy tail is label-only. Training Grounds
 # keeps its baby-bottle roast and earns nothing.
 TILT_BANDS = [
-    ( 50,  "Training Grounds",  "🍼", 0, None),
-    ( 30,  "Favoured",          "🟢", 0, None),
-    ( 15,  "Slightly Favoured", "🟢", 0, None),
-    (-15,  "Even",              "🟡", 0, None),
-    (-30,  "Slightly Uphill",   "🟠", 1, "Uphill"),
-    (-50,  "Outmatched",        "🟠", 2, "Outmatched"),
+    ( 40,  "Training Grounds",  "🍼", 0, None),
+    ( 22,  "Favoured",          "🟢", 0, None),
+    ( 10,  "Slightly Favoured", "🟢", 0, None),
+    (-10,  "Even",              "🟡", 0, None),
+    (-22,  "Slightly Uphill",   "🟠", 1, "Uphill"),
+    (-40,  "Outmatched",        "🟠", 2, "Outmatched"),
     (-999, "Brutal",            "🔴", 3, "Brutal"),
 ]
 # Difficulty tags that earn a counting badge (emoji xN) on the player card.

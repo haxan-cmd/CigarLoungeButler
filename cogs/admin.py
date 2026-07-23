@@ -78,7 +78,7 @@ def build_challenge_rules_embeds():
         "<a:100kill:1361412390339608686> +1 for 100 Kills\n"
         "<a:triple:1365532698260668466> +1 for Triple\n"
         "<a:highscore:1360312918545269057> +1 for Leaderboard High Score\n"
-        "🔴 +1 for a Brutal Lobby"
+        "🟠 +1 to +3 for a hard lobby (see Lobby Difficulty)"
     ), inline=False)
     e.add_field(name="Note", value="Goedendag counts for Polearms **and** Engineer (Footman).", inline=False)
     embeds.append(e)
@@ -88,17 +88,25 @@ def build_challenge_rules_embeds():
         title="⚖️  Lobby Difficulty",
         description=(
             "Every submission is graded by the kill gap between the two teams, read "
-            "from the scoreboard banners and measured against the smaller team's total. "
-            "The marker appears on your submission blurb."
+            "from the scoreboard banners relative to the smaller side. A big game is "
+            "far easier on attack (target-rich) than on defence, so we subtract your "
+            "role's baseline first: the grade reflects how hard YOUR lobby was, not "
+            "just which side you were on. The marker shows on your blurb, and the hard "
+            "tail pays valor marks."
         ),
         colour=C("#992d2d"),
     )
-    e.add_field(name="The gradient", value=(
-        "🍼 **Training Grounds** — your team up 75% or more. The playpen. Expect mockery.\n"
-        "🟢 **Favoured** — up 25–74%\n"
-        "🟡 **Even** — within ±25%\n"
-        "🟠 **Uphill** — down 25–74%\n"
-        "🔴 **Brutal** — down 75% or more. Surviving it pays **+1 mark**. Valor pay."
+    e.add_field(name="The ladder (adjusted gap vs your role's norm)", value=(
+        "🔴 **Brutal** (≤ −40%) — pays **+3 marks**. Valor.\n"
+        "🟠 **Outmatched** (−40 to −22%) — pays **+2 marks**.\n"
+        "🟠 **Slightly Uphill** (−22 to −10%) — pays **+1 mark**.\n"
+        "🟡 **Even** (−10 to +10%) — a typical game for your side. No marks.\n"
+        "🟢 **Slightly Favoured / Favoured** (+10 to +40%) — ahead of your norm.\n"
+        "🍼 **Training Grounds** (≥ +40%) — a runaway. The playpen. Mockery, no marks."
+    ), inline=False)
+    e.add_field(name="Hard carries", value=(
+        "Outmatched and Brutal runs stack on your registry card as counting badges "
+        "(🟠 xN · 🔴 xN) — a tally of the lobbies you carried against the odds."
     ), inline=False)
     embeds.append(e)
 

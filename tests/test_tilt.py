@@ -52,34 +52,34 @@ def test_adjusted_centres_on_role():
 
 
 def test_band_boundaries_and_tags():
-    # Deep hard tail.
+    # Deep hard tail (Brutal: <= -40).
     assert tilt.band(-60)["name"] == "Brutal"
     assert tilt.band(-60)["marks"] == 3
     assert tilt.band(-60)["tag"] == "Brutal"
-    # Outmatched: -50..-30.
-    assert tilt.band(-40)["name"] == "Outmatched"
-    assert tilt.band(-40)["marks"] == 2
-    # Slightly Uphill: -30..-15, +1 mark.
-    assert tilt.band(-20)["name"] == "Slightly Uphill"
-    assert tilt.band(-20)["marks"] == 1
-    assert tilt.band(-20)["tag"] == "Uphill"
-    # Even core pays nothing.
+    # Outmatched: -40..-22.
+    assert tilt.band(-30)["name"] == "Outmatched"
+    assert tilt.band(-30)["marks"] == 2
+    # Slightly Uphill: -22..-10, +1 mark.
+    assert tilt.band(-15)["name"] == "Slightly Uphill"
+    assert tilt.band(-15)["marks"] == 1
+    assert tilt.band(-15)["tag"] == "Uphill"
+    # Even core (-10..+10) pays nothing.
     assert tilt.band(0)["name"] == "Even"
     assert tilt.band(0)["marks"] == 0
     assert tilt.band(0)["tag"] is None
     # Easy tail.
-    assert tilt.band(40)["name"] == "Favoured"
-    assert tilt.band(80)["name"] == "Training Grounds"
-    assert tilt.band(80)["marks"] == 0
+    assert tilt.band(30)["name"] == "Favoured"
+    assert tilt.band(60)["name"] == "Training Grounds"
+    assert tilt.band(60)["marks"] == 0
 
 
 def test_band_edges_are_inclusive_low():
     # Exactly on an edge lands in the higher (easier) band.
-    assert tilt.band(-50)["name"] == "Outmatched"   # -50 is Outmatched's low edge
-    assert tilt.band(-30)["name"] == "Slightly Uphill"
-    assert tilt.band(-15)["name"] == "Even"
-    assert tilt.band(15)["name"] == "Slightly Favoured"
-    assert tilt.band(50)["name"] == "Training Grounds"
+    assert tilt.band(-40)["name"] == "Outmatched"   # -40 is Outmatched's low edge
+    assert tilt.band(-22)["name"] == "Slightly Uphill"
+    assert tilt.band(-10)["name"] == "Even"
+    assert tilt.band(10)["name"] == "Slightly Favoured"
+    assert tilt.band(40)["name"] == "Training Grounds"
 
 
 def test_tag_marks_map():
