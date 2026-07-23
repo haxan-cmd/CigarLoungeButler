@@ -67,12 +67,14 @@ Your server knowledge:
 - /rules shows the challenge rules
 - /progress shows title standings and weapon rank progress
 - /refreshcard updates a registry card, /playerstats shows an all-time profile, /season shows season GP
-- /bounty status shows the active bounty card and your personal progress\n- /help lists a person's available commands; /serverstats shows a submission-activity dashboard;\n  /explore breaks any stat down across weapons/players/maps as a chart; /standings and /titles show the season race
+- /bounty status shows the active bounty card and your personal progress\n- /help lists a person's available commands; /serverstats shows a submission-activity dashboard;\n  /explore breaks any stat down across weapons/players/maps as a chart; /tilt_stats shows the lobby-difficulty ladder across all games; /standings and /titles show the season race
 - The Manager handles all administrative matters and will follow up on feedback
 - The lounge has a counting channel. You track its stats: current run, the record, lifetime counts, who counts most, and who breaks it (the Idiot role goes to breakers). When counting stats appear in your context, use the real numbers — the record of shame is prime roasting material.
 
 How the systems work (answer players' questions about these accurately and specifically):
 - Weapon marks: 1 mark per valid 100-takedown submission. Bonus marks: +1 for 200 takedowns, +1 for 100 kills, +1 for a Triple (150 TD, 100 kills, and 20,000 points), +1 for a leaderboard High Score (beating your own best on any board), +1 to +3 for a hard lobby, graded on the kill gap adjusted for your role (attack farms kills, defence does not): Slightly Uphill +1, Outmatched +2, Brutal +3. Valor pay.
+- Lobby difficulty: every run is graded on the kill gap between the two teams, adjusted for your role. A big lead is easy on attack (target-rich) and hard on defence, so your side's normal is subtracted first: the grade is how far the lobby sat above or below your role's usual. Bands hardest to easiest: Brutal, Outmatched, Slightly Uphill, Even, Slightly Favoured, Favoured, Training Grounds. The hard tail pays the valor marks above; Training Grounds is a runaway that earns nothing but a baby bottle. Outmatched and Brutal runs stack as counting badges (orange and red circles) on the registry card, a tally of lobbies carried against the odds. /tilt_stats shows the whole distribution.
+- Weapon-relative lethality: a run's blurb compares its lethality (kills per takedown) against that weapon's community average, since some weapons finish and others only poke. Beating the weapon's average lights it green on the blurb, greener the further above.
 - Weapon ranks (marks per weapon): Bronze 1, Silver 5, Gold 12, Emerald 25, Diamond 40, Crimson 60, then Prestige Bronze 80, Prestige Silver 100, Prestige Gold 115, Prestige Emerald 125, Prestige Diamond 133, Prestige Crimson 141, and Iridescent 150 (the top rank).
 - Mastery: 100 qualifying runs with a weapon makes it Mastered, 250 makes it Virtuoso. Counts across every class that wields the weapon.
 - Subclass and class ranks: each weapon rank-up gives a subclass mark, filling a subclass meter gives a class mark. Subclass ranks go Initiate, Veteran, Master, Grandmaster, Champion, Paragon, Apex. Class ranks go Sworn, Trusted, Proven, Honored, Esteemed, Exalted, Ascended.
@@ -1983,6 +1985,31 @@ class PersonalityCog(commands.Cog):
                                     )
                             except Exception as _e:
                                 print(f"[BUTLER] ctx lethality error: {_e}")
+
+                            # Difficulty profile: hard-lobby valor carries (100-TD runs
+                            # posted while the player's team was outkilled, role-adjusted).
+                            # Genuine credit if they have them; a jab if they only farm.
+                            try:
+                                _dc = {'Uphill': 0, 'Outmatched': 0, 'Brutal': 0}
+                                for _dr in player_subs_pb:
+                                    _df = [f.strip() for f in (_dr[11] or '').split(',')] if len(_dr) > 11 else []
+                                    for _dk in _dc:
+                                        if _dk in _df:
+                                            _dc[_dk] += 1
+                                if _dc['Outmatched'] or _dc['Brutal'] or _dc['Uphill']:
+                                    player_stats_ctx += (
+                                        f"\n(Background info, do not quote verbatim.) Hard-lobby carries, "
+                                        f"strong games logged while their side was being outkilled (adjusted "
+                                        f"for role, genuinely hard and worth crediting): "
+                                        f"{_dc['Brutal']} Brutal, {_dc['Outmatched']} Outmatched, "
+                                        f"{_dc['Uphill']} Slightly Uphill.")
+                                else:
+                                    player_stats_ctx += (
+                                        "\n(Background info, do not quote verbatim.) Hard-lobby carries: none. "
+                                        "Every logged game came in an even or favourable lobby; they have never "
+                                        "put up a strong game while their side was losing the kill war. Fair to needle.")
+                            except Exception as _e:
+                                print(f"[BUTLER] ctx difficulty error: {_e}")
 
                             # Build explicit leaderboard standings for this player.
                             # Group all LD entries by weapon, sort each board by score,
