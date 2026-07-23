@@ -602,6 +602,9 @@ class VisionConfirmView(discord.ui.View):
     async def _proceed(self, interaction):
         """Route to whatever is still missing, or straight to finalise."""
         p = self.parsed
+        # A Hybrid run has no single weapon: fill it so the weapon step is skipped.
+        if str(p.get('subclass') or '').strip() == 'Hybrid' and not p.get('weapon'):
+            p['weapon'] = 'Hybrid'
         # Work through missing fields in order: subclass → weapon → map → faction → stats
         if not p.get('subclass'):
             all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
