@@ -1849,7 +1849,17 @@ async def _apply_edit(interaction, ev):
                 _stat_lines.append(f"<a:mostlethal:1520490418817601658> {_ks}% Kill Share")
                 _stat_lines.append(f"<:warlord:1520490364039860347> {_wl}% Warlord")
         if ev.kills is not None and ev.takedowns:
-            _stat_lines.append(f"🩸 {round(ev.kills / ev.takedowns * 100, 1)}% Lethality")
+            _el = round(ev.kills / ev.takedowns * 100, 1)
+            _el_line = f"🩸 {_el}% Lethality"
+            try:
+                _ewavg, _ewn = await _db.get_weapon_avg_lethality(ev.weapon)
+                if _ewavg is not None:
+                    _ediff = _el - _ewavg
+                    if abs(_ediff) >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
+                        _el_line += f"  ·  {_ediff:+.1f} vs {ev.weapon} avg"
+            except Exception as _ele:
+                print(f"[LETHALITY] edit weapon-avg lookup failed: {_ele}")
+            _stat_lines.append(_el_line)
         try:
             _cur_msg = await ev._message.channel.fetch_message(ev._message.id)
             _cur_desc = _blurb_desc(_cur_msg)
@@ -2340,7 +2350,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if (kills is not None and takedowns and takedowns > 0
             and not (kills == 0 and takedowns <= 10)):
         _leth_g = round(kills / takedowns * 100, 1)
-        blurb_parts.append(f"🩸 {_leth_g}% Lethality")
+        _leth_line = f"🩸 {_leth_g}% Lethality"
+        # Weapon-relative context (Llama's Lethality Score): how this run did vs
+        # the weapon's average. Skipped for thin-sample weapons and Hybrid (no
+        # single weapon) — get_weapon_avg_lethality returns None there.
+        try:
+            _wavg, _wn = await _db.get_weapon_avg_lethality(selected_weapon)
+            if _wavg is not None:
+                _diff = _leth_g - _wavg
+                # Only annotate real outliers; near-average is noise.
+                if abs(_diff) >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
+                    _leth_line += f"  ·  {_diff:+.1f} vs {selected_weapon} avg"
+        except Exception as _le:
+            print(f"[LETHALITY] weapon-avg lookup failed: {_le}")
+        blurb_parts.append(_leth_line)
 
     # --- Lobby tilt: red→green difficulty marker from the faction banner totals ---
     _tilt = None

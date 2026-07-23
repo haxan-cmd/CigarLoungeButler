@@ -1245,6 +1245,32 @@ async def get_feat_total(feat: str) -> int:
             feat) or 0)
 
 
+async def get_weapon_avg_lethality(weapon: str, min_runs: int = 15):
+    """Average lethality (kills/takedowns %) for a weapon across all players.
+
+    Returns (avg, n) or (None, n) when there aren't enough runs to be meaningful
+    (or the weapon has none). Used to annotate the submission blurb with how a run
+    compares to par for its weapon (Llama's Lethality Score). Resubmit/Unlisted
+    excluded so it matches the boards and /explore. Baseline INCLUDES the player;
+    bias is negligible at this volume and keeps the blurb consistent with the
+    /explore chart.
+    """
+    if not weapon or str(weapon).strip() in ('', 'Hybrid', 'Multiple Weapons', 'Other'):
+        return None, 0
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT AVG(kills::numeric / NULLIF(takedowns,0) * 100) AS avg, "
+            "       COUNT(*) AS n FROM submissions "
+            "WHERE weapon = $1 AND takedowns > 0 AND kills > 0 "
+            "  AND feats NOT ILIKE '%Resubmit%' AND feats NOT ILIKE '%Unlisted%'",
+            weapon)
+    _n = int(row['n']) if row and row['n'] is not None else 0
+    if _n < int(min_runs) or row['avg'] is None:
+        return None, _n
+    return float(row['avg']), _n
+
+
 async def get_submissions_since(minutes: int = 60) -> list[list]:
     """Submissions logged in the last N minutes, newest first.
 

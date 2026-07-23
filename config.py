@@ -301,6 +301,11 @@ VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 LETHALITY_STICKER_NAME = "lethality"   # exact sticker name in the server ("" to disable)
 LETHALITY_STICKER_THRESHOLD = 60
 
+# Submission blurb only shows the "vs weapon avg" lethality note when a run is a
+# real OUTLIER — this many points above/below the weapon's average. Inside the
+# band (near par) it's noise, so only raw lethality shows. Bigger = fewer notes.
+LETHALITY_BLURB_MIN_DELTA = 5.0
+
 # "Died a lot" sticker — the bot replies with this sticker when a run's DEATHS are at or
 # above the threshold. Set NAME to the exact sticker name as it appears in the server
 # (Server Settings -> Stickers). Leave "" to disable.
