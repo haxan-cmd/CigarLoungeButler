@@ -2276,10 +2276,8 @@ class RegistryCog(commands.Cog):
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     @app_commands.command(name="populate_butlers_archive", description="Pre-populate ButlersArchive sheet for all players (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
     async def populate_butlers_archive(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
-            return
         await interaction.response.defer(ephemeral=True)
         try:
             players = await _db.get_all_players()

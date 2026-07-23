@@ -2739,7 +2739,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         score=_score,
                     )
             except Exception as e:
-                print(f"Leaderboard update error: {e}")
+                # This except once hid a NameError that silently broke ALL board
+                # updates for every submission (2026-07-22). Board failures must
+                # be LOUD — surface to the nerve centre, not just stdout.
+                import traceback as _tb
+                print(f"Leaderboard update error: {e}\n{_tb.format_exc()}")
+                try:
+                    from utils.helpers import nerve_alert
+                    await nerve_alert(interaction.client, "board update", e)
+                except Exception:
+                    pass
 
         # A pacifist run only lands on the Pacifist board (an unlimited feat board),
         # which flips any_updated True. That must NOT fire the weapon/map High Score

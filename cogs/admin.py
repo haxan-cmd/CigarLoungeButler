@@ -910,7 +910,8 @@ class AdminCog(commands.Cog):
         card_status = "and refreshed their card"
         try:
             from cogs.registry import create_or_update_registry_card
-            await create_or_update_registry_card(interaction.guild, str(player.id), _canonical_name)
+            # display name is fine: renderer applies the name override by discord_id.
+            await create_or_update_registry_card(interaction.guild, str(player.id), player.display_name)
         except Exception as e:
             card_status = f"but card refresh failed: {e}"
             print(f"[SET_FEAT] card refresh error for {player.display_name}: {e}")
