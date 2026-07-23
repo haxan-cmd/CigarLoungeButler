@@ -91,7 +91,7 @@ Special instructions:
 - "Bald Female" the WARRIOR is a separate lore entity — a Chivalry 2 legend on a battlefield somewhere, entirely unaware of Discord or this server. When OTHER players mention "bald female" or "bald woman", riff on her whereabouts with a dry in-universe line: chopping heads, storming a castle, running through trebuchet fields. The Manager may have a vague idea of where she is (she is, after all, a client). Never repeat the same phrasing twice.
 - If anyone mentions "bald" or "shiny head" in passing (not referring to Bald Female the warrior), make a dry remark about the shine. Vary it each time.
 - Only escalate to the Manager for genuine server policy decisions or account disputes — not for questions you can answer yourself with the data you have.
-- You have direct access to live server data from the database. Answer questions about stats, rankings, and history yourself with confidence. Do not deflect data questions to anyone.
+- You have direct access to live server data from the database. Answer questions about stats, rankings, and history yourself with confidence. Do not deflect data questions to anyone.\n- You know the Chivalry 2 world lore — Agatha, the Mason Order, Tenosia, their kings and their history. When a lore reference is supplied in the message, answer world or character questions from it, in character and briefly; never quote it verbatim.
 - Player names (aliases) are fair game for dry wordplay. If a name is punnable, absurd, or self-important, you may acknowledge it once with a dry remark — keep it brief and in character.
 - If the message is not a question, request for help, or something worth acknowledging — respond with exactly the word: SKIP
 - Never repeat a response you have given before in this conversation. Vary your phrasing every time.
@@ -258,6 +258,93 @@ def _looks_like_rules_question(text):
     return has_kw and has_q
 
 
+# ── Chivalry 2 lore (world/characters), injected only on lore questions ──────────
+_LORE_DB = None
+_LORE_KEYS = {
+    'argon i': 'King Argon I', 'argon the first': 'King Argon I', 'argon 1': 'King Argon I',
+    'argon ii': 'King Argon II', 'argon the second': 'King Argon II', 'argon 2': 'King Argon II',
+    'feydrid': 'Feydrid Kearn', 'kearn': 'Feydrid Kearn',
+    'barek': 'Barek Thorne', 'thorne': 'Barek Thorne',
+    'gyeoff': 'Arch Precept Gyeoff', 'arch precept': 'Arch Precept Gyeoff',
+    'royal council': 'Agathian Royal Council', 'agathian council': 'Agathian Royal Council',
+    'malric': 'King Malric',
+    'valen': 'Valen Tray', 'mason heir': 'Valen Tray',
+    'soree': 'Soree Argon', 'olar': 'Olar the Wise', 'high forge': 'The High Forge',
+    'myah': 'Myah Vane', 'tigress': 'Myah Vane',
+    'tahar': 'Tahar Rahman', 'rahman': 'Tahar Rahman', 'curved blades': 'Tahar Rahman',
+    'trayan citadel': 'World Map', 'baudwyn': 'World Map', 'galencourt': 'World Map',
+    'stoneshill': 'World Map', 'world map': 'World Map',
+}
+_LORE_FACTION_KEYS = {'agatha': 'Agatha', 'agathian': 'Agatha', 'mason order': 'Mason Order',
+                      'the masons': 'Mason Order', 'tenosia': 'Tenosia', 'tenosian': 'Tenosia'}
+_LORE_SIGNALS = ('lore', 'who is', 'who was', 'who are', 'tell me about', 'story of', 'the story',
+                 'history', 'backstory', 'canon', 'what is the', 'whats the', "what's the", 'why did')
+
+
+def _lore_db():
+    """Parse lore/chiv2_lore.md once into {section_title: body}. World/Overview
+    sections get faction-prefixed keys so the duplicate titles don't collide."""
+    global _LORE_DB
+    if _LORE_DB is not None:
+        return _LORE_DB
+    _LORE_DB = {}
+    try:
+        import os as _os, re as _re
+        _p = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                           'lore', 'chiv2_lore.md')
+        raw = open(_p, encoding='utf-8').read()
+        faction = None
+        for m in _re.finditer(r'\n(#{2,3})\s+([^\n]+)\n(.*?)(?=\n#{2,3}\s+|\Z)', '\n' + raw, _re.S):
+            hashes, title, body = m.group(1), m.group(2).strip(), m.group(3).strip()
+            if hashes == '##':
+                faction = title
+                if body:
+                    _LORE_DB[title] = body
+                continue
+            key = title
+            if title.lower().startswith('world') or 'overview' in title.lower():
+                key = f"{faction} :: {title}" if faction else title
+            if body:
+                _LORE_DB[key] = body
+    except Exception as _e:
+        print(f"[LORE] load failed: {_e}")
+    return _LORE_DB
+
+
+def _lore_context(text, max_sections=2, cap=950):
+    """Relevant lore for a message, or '' — matched by character/place names, and
+    faction overviews only when the message also reads like a lore question."""
+    import re as _re
+    t = (text or '').lower()
+    db = _lore_db()
+    if not db:
+        return ''
+    def _has(kw):
+        # word-boundary match so "argon i" doesn't fire inside "argon ii", etc.
+        return _re.search(r'\b' + _re.escape(kw) + r'\b', t) is not None
+    wanted = []
+    def _add(sub):
+        subl = sub.lower()
+        for title, body in db.items():
+            if subl in title.lower() and title not in [w[0] for w in wanted]:
+                wanted.append((title, body))
+                return
+    for kw, sub in _LORE_KEYS.items():
+        if _has(kw):
+            _add(sub)
+    if any(s in t for s in _LORE_SIGNALS):
+        for kw, sub in _LORE_FACTION_KEYS.items():
+            if _has(kw):
+                _add(sub)
+    if not wanted:
+        return ''
+    out = []
+    for title, body in wanted[:max_sections]:
+        b = body if len(body) <= cap else body[:cap].rsplit(' ', 1)[0] + '…'
+        out.append(f"{title.split(' :: ')[-1]}: {b}")
+    return '\n\n'.join(out)
+
+
 async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=None, player_name_ref=''):
     """Find a recent submission matching the given stats. Returns context string or empty."""
     try:
@@ -353,6 +440,10 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
             '[redacted]', sanitized
         )
         truncated_msg = sanitized[:300]
+        _lore_ctx = _lore_context(truncated_msg)
+        lore_note = (("\n\n[Lore reference (Chivalry 2 world/characters) — answer in "
+                      "character, dry and brief; do NOT quote it verbatim or dump it all:\n"
+                      f"{_lore_ctx}\n]") if _lore_ctx else '')
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
         _is_data = _looks_like_data_question(user_message)
@@ -382,6 +473,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                              'stay to one or two sentences as usual.]')
             user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
+        user_prompt += lore_note
         # Data questions get headroom for a short list; banter stays terse
         text = await _butler_complete(BUTLER_SYSTEM_PROMPT, user_prompt, 350 if _is_data else 150)
         if not text or text == 'SKIP':
