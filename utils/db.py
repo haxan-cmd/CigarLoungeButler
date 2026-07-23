@@ -351,6 +351,24 @@ async def get_submissions_after(after_id: int, limit: int = 500) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def get_tilt_games() -> list:
+    """Per-lobby (team_total_kills, enemy_total_kills) for the lobby-tilt
+    distribution. DISTINCT ON collapses the several submissions from one game
+    (same map + both banner totals + day) down to a single lobby, so the spread
+    describes games, not submissions. Resubmits (old runs re-uploaded) are
+    excluded so a backfill can't skew the shape. Uncached: /tilt_stats is rare
+    and wants live numbers."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT ON (map, team_total_kills, enemy_total_kills, DATE(submitted_at)) "
+            "team_total_kills AS t, enemy_total_kills AS e "
+            "FROM submissions "
+            "WHERE team_total_kills > 0 AND enemy_total_kills > 0 "
+            "AND COALESCE(feats,'') NOT LIKE '%Resubmit%'")
+    return [(int(r['t']), int(r['e'])) for r in rows]
+
+
 async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:
     """Targeted fetch: one player's submissions, newest first — uses the
     submissions(discord_id) index instead of scanning the whole table.

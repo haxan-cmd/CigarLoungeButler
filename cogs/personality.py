@@ -1064,6 +1064,55 @@ class PersonalityCog(commands.Cog):
         lines += ["", _footer]
         await interaction.followup.send("\n".join(lines))
 
+    @app_commands.command(name="tilt_stats", description="The lobby-tilt distribution across every logged game (the de-biased curve).")
+    async def tilt_stats(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        try:
+            games = await _db.get_tilt_games()
+        except Exception as _te:
+            await interaction.followup.send(f"Couldn't read tilt data: {_te}")
+            return
+        if not games:
+            await interaction.followup.send("No games with team totals logged yet.")
+            return
+
+        # Signed tilt per lobby, then mirror to both team POVs so the "people
+        # only post their wins" skew cancels and the split is symmetric.
+        tilts = [round((t - e) / min(t, e) * 100) for t, e in games]
+        _L = int(getattr(config, 'LOBBY_TILT_LEAN', 18))
+        _T = int(getattr(config, 'LOBBY_TILT_STOMP', 75))
+        import statistics as _st
+        _median = round(_st.median(abs(x) for x in tilts))
+
+        from collections import Counter
+        mir = [v for x in tilts for v in (x, -x)]
+
+        def _bnd(x):
+            if x >= _T: return '🍼 Training Grounds'
+            if x >= _L: return '🟢 Favoured'
+            if x > -_L: return '🟡 Even'
+            if x > -_T: return '🟠 Uphill'
+            return '🔴 Brutal'
+        cc = Counter(_bnd(x) for x in mir); _N = len(mir)
+
+        try:
+            import utils.charts as _charts
+            _png = await _charts.render_async(
+                _charts.render_tilt_curve,
+                tilts=tilts, lean=_L, stomp=_T, n_games=len(games))
+            await interaction.followup.send(
+                content=(f"**Lobby tilt** · {len(games)} games · median gap {_median}% · "
+                         f"bands at ±{_L}% / ±{_T}%"),
+                file=discord.File(io.BytesIO(_png), filename="tilt.png"))
+            return
+        except Exception as _ce:
+            print(f"[TILT_STATS] chart render failed, text fallback: {_ce}")
+
+        order = ['🍼 Training Grounds', '🟢 Favoured', '🟡 Even', '🟠 Uphill', '🔴 Brutal']
+        lines = [f"**Lobby tilt** — {len(games)} games, both POVs (median gap {_median}%):"]
+        lines += [f"{k}: {round(100 * cc[k] / _N, 1)}% ({cc[k]})" for k in order]
+        await interaction.followup.send("\n".join(lines))
+
     @app_commands.command(name="help", description="List the commands you can use, grouped by what they do.")
     async def commands_list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

@@ -370,3 +370,67 @@ def _draw_hbar(ax, pairs, title):
     for i, v in enumerate(vals):
         ax.text(v + _mx * 0.025, i, str(v), color=FG, fontsize=9.5, va='center')
     ax.set_xlim(right=_mx * 1.18)
+
+
+def render_tilt_curve(*, tilts, lean, stomp, n_games) -> bytes:
+    """De-biased lobby-tilt distribution. Every game is scored from BOTH teams'
+    sides (winner +x, loser -x) so the poster-POV skew (people log their wins)
+    cancels and the curve is symmetric by construction. Band zones are drawn
+    from the live config thresholds, not hard-coded. BLOCKING: call via
+    render_async."""
+    import io as _io
+    import numpy as _np
+    from collections import Counter as _Counter
+    plt, fig = _new_figure((10.2, 6.8))
+    L, T = int(lean), int(stomp)
+    mir = _np.array([v for x in tilts for v in (x, -x)]) if tilts else _np.array([0])
+    COLB = {'TG': '#7ea6d6', 'Fav': '#57b36a', 'Even': '#d9c24f',
+            'Up': '#d88a30', 'Bru': '#c0392b'}
+
+    def _band(x):
+        if x >= T: return 'TG'
+        if x >= L: return 'Fav'
+        if x > -L: return 'Even'
+        if x > -T: return 'Up'
+        return 'Bru'
+
+    c = _Counter(_band(x) for x in mir)
+    N = max(1, len(mir))
+    ax = fig.add_axes([0.06, 0.18, 0.90, 0.55])
+    ax.set_facecolor(BG)
+    hi = max(90, int(_np.abs(mir).max()) + 15)
+    edges = _np.arange(-hi - 5, hi + 6, 10)
+    counts, _ = _np.histogram(mir, bins=edges)
+    centers = (edges[:-1] + edges[1:]) / 2
+    ax.bar(centers, counts, width=9, color=[COLB[_band(cx)] for cx in centers], zorder=3)
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.tick_params(colors=MUT, labelsize=10)
+    ax.set_yticks([])
+    ticks = sorted({tk for tk in [-150, -100, -T, -50, -L, 0, L, 50, T, 100, 150]
+                    if -hi <= tk <= hi})
+    ax.set_xticks(ticks)
+    ax.set_xlim(-hi, hi)
+    for xv in (-T, -L, L, T):
+        ax.axvline(xv, color='#4a4d57', lw=1, ls=(0, (4, 3)), zorder=2)
+    ymax = max(1, counts.max())
+    ax.set_ylim(0, ymax * 1.30)
+    mid = (L + T) / 2
+    lab = [('Brutal', -(T + 30), 'Bru'), ('Uphill', -mid, 'Up'), ('Even', 0, 'Even'),
+           ('Favoured', mid, 'Fav'), ('Training Grounds', T + 55, 'TG')]
+    for name, x, k in lab:
+        ax.text(x, ymax * 1.25, name, ha='center', color=COLB[k], fontsize=12.5, fontweight='bold')
+        ax.text(x, ymax * 1.16, f'{round(100 * c[k] / N, 1)}%', ha='center', color=MUT, fontsize=11)
+    ax.set_xlabel('Team kill-gap %   (– your side outkilled     + you outkilled them)',
+                  color=MUT, fontsize=11, labelpad=8)
+    fig.text(0.06, 0.915, 'Lobby Tilt distribution', fontsize=24, color=GOLD, fontweight='bold')
+    fig.text(0.06, 0.865,
+             f'{n_games} logged games scored from both sides = {N} points. '
+             f'Bands from live config ({L}% / {T}%).', fontsize=12, color=MUT)
+    fig.text(0.06, 0.03,
+             'De-biased: both team POVs, so the "people post their wins" skew cancels out.',
+             fontsize=10.8, color=FG)
+    buf = _io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight', pad_inches=0.22)
+    plt.close(fig)
+    return buf.getvalue()

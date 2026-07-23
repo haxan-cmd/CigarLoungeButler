@@ -317,12 +317,14 @@ DEATHS_STICKER_THRESHOLD = 30
 # Positive = your team led. Percentage instead of raw diff so long games and
 # big lobbies don't read as stomps (Sylveon's suggestion, 2026-07-15). Drives
 # the red-to-green marker on the blurb + a 🍼 react/sticker at STOMP or more.
-# Calibrated from 94 logged games: ~69% land Even at LEAN=25. STOMP=75 keeps
-# the baby bottle for true massacres only (top ~5%; a 600-400 game at +50% is
-# a solid win, not a playpen — raised from 50 on 2026-07-16). Max seen: +104%.
+# Recalibrated on 292 logged games (2026-07-23): LEAN set to the 18% median
+# kill gap, so Even is the central ~45% (de-biased across both team POVs)
+# instead of a two-thirds catch-all. Favoured/Uphill now carry ~25% each.
+# STOMP=75 keeps the baby bottle for true massacres only (top ~2-3% per side;
+# raised from 50 on 2026-07-16). Max seen: +173%.
 # Sticker name as it appears in Server Settings -> Stickers; "" disables.
 LOBBY_TILT_STOMP        = 75    # percent
-LOBBY_TILT_LEAN         = 25    # percent
+LOBBY_TILT_LEAN         = 18    # percent
 STOMP_STICKER_NAME      = "traininggrounds"
 
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
