@@ -249,10 +249,18 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
                 ax.text(v + _pad, i, _txt, color=FG, fontsize=9.5, va='center', ha='left')
             else:
                 ax.text(v - _pad, i, _txt, color=FG, fontsize=9.5, va='center', ha='right')
-        _lo = min(0, _mn) - _span * 0.28
-        _hi = max(0, _mx) + _span * 0.28
+        # Only extend left of zero when there are ACTUAL negative bars. For the
+        # common all-positive chart, the axis starts at 0 so bars fill the width
+        # instead of bunching against a pointless negative gap. Right pad leaves
+        # room for the value label.
+        _has_neg = _mn < 0
+        _label_pad = _span * 0.22   # room for "127.3  (19)" past the longest bar
+        # Negative bars label to their LEFT, so the axis needs room for the label
+        # width or it collides with the y-tick names (BallsMajoney / -2.7 overlap).
+        _lo = (_mn - _label_pad) if _has_neg else 0
+        _hi = max(0, _mx) + _label_pad
         ax.set_xlim(left=_lo, right=_hi)
-        if _mn < 0 < _mx:
+        if _has_neg and _mx > 0:
             ax.axvline(0, color=MUT, linewidth=0.8, alpha=0.5)  # zero reference
         _draw_icons(fig, ax, labels, size=0.052)
     ax.set_xlabel(value_label, color=MUT, fontsize=10.5, labelpad=8)

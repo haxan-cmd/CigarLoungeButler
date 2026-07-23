@@ -682,7 +682,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     # map (that's what produced "None - Agatha" and blank weapon boards).
     if (not vip and selected_weapon and str(selected_weapon).strip()
             and str(selected_weapon).strip().lower() != 'none' and takedowns > 0
-            and not is_pacifist):
+            and not is_pacifist
+            and str(selected_weapon).strip() != "Hybrid"):   # Hybrid has its OWN board, not a weapon board
         updates.append((selected_weapon, takedowns, True, True, False))
         # Companion Highest Kills board, rendered below the TD board in the same
         # thread. Only exists once /setup_kills_boards has created its row.
