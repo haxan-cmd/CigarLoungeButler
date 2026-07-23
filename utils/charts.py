@@ -255,9 +255,10 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
         # room for the value label.
         _has_neg = _mn < 0
         _label_pad = _span * 0.22   # room for "127.3  (19)" past the longest bar
-        # Negative bars label to their LEFT, so the axis needs room for the label
-        # width or it collides with the y-tick names (BallsMajoney / -2.7 overlap).
-        _lo = (_mn - _label_pad) if _has_neg else 0
+        # Left needs MORE room than right: a right overflow lands in empty chart,
+        # but a left overflow hits the y-tick names. So pad the negative side
+        # wider (Officer / -2.4 overlap).
+        _lo = (_mn - _span * 0.45) if _has_neg else 0
         _hi = max(0, _mx) + _label_pad
         ax.set_xlim(left=_lo, right=_hi)
         if _has_neg and _mx > 0:
