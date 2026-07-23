@@ -2013,9 +2013,16 @@ async def health_report(recent_n: int = 100) -> dict:
             len(_bb) > 0, "")
 
         # Players with submissions but zero marks — usually a marks-calc drift.
+        # BUT Hybrid and Pacifist runs earn no weapon marks by design, so a player
+        # whose runs are ALL exempt legitimately has 0 marks. Only flag drift when
+        # they have at least one run that SHOULD have scored a mark.
         _drift = await conn.fetchval(
-            "SELECT COUNT(*) FROM players WHERE COALESCE(total_marks,0) = 0 "
-            "AND COALESCE(submission_count,0) > 3")
+            "SELECT COUNT(*) FROM players p WHERE COALESCE(p.total_marks,0) = 0 "
+            "AND COALESCE(p.submission_count,0) > 3 "
+            "AND EXISTS (SELECT 1 FROM submissions s WHERE s.discord_id = p.discord_id "
+            "  AND COALESCE(s.weapon,'') NOT IN ('', 'Hybrid', 'Multiple Weapons', 'Other') "
+            "  AND NOT (COALESCE(s.kills,0) = 0 AND COALESCE(s.takedowns,0) <= 10) "
+            "  AND s.feats NOT ILIKE '%Resubmit%' AND s.feats NOT ILIKE '%Unlisted%')")
         out['marks_drift'] = (f"{_drift} active players show 0 marks", _drift > 0, "")
 
         # Butler feedback loop — is it collecting anything?
