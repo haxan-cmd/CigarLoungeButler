@@ -79,7 +79,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
         submitted_class = row[4].strip() if len(row) > 4 else ''
         feats_str = row[11].strip() if len(row) > 11 else ''
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
-        if not weapon or weapon in ('Other', 'Multiple Weapons'):
+        if not weapon or weapon in ('Other', 'Multiple Weapons', 'Hybrid'):
             continue
         # A pacifist run (0 kills and <=10 takedowns) is a scoreboard feat, not a
         # takedown game — no weapon marks, and ignore any feats stored on it.
@@ -127,7 +127,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             if row[2].strip() != discord_id_str:
                 continue
             weapon = row[5].strip() if len(row) > 5 else ''
-            if not weapon or weapon in ('Other', 'Multiple Weapons'):
+            if not weapon or weapon in ('Other', 'Multiple Weapons', 'Hybrid'):
                 continue
             # Skip plain key if any subclass-keyed entry exists for this weapon
             has_subclass_key = any(
@@ -596,7 +596,7 @@ async def get_mastered_weapons_for_player(discord_id, cached_data=None):
     flat = {}
     for k, v in marks.items():
         w = k[0] if isinstance(k, tuple) else k
-        if not w or w in ('Other', 'Multiple Weapons'):
+        if not w or w in ('Other', 'Multiple Weapons', 'Hybrid'):
             continue
         flat[w] = flat.get(w, 0) + v
     return {w: c for w, c in flat.items() if c >= config.MASTERY_THRESHOLD}

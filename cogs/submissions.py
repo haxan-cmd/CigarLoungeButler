@@ -987,7 +987,12 @@ class ClassSelect(discord.ui.Select):
         if options is None:
             CLASS_ORDER = ["Knight", "Vanguard", "Footman", "Archer"]
             sorted_classes = sorted(classes, key=lambda c: (CLASS_ORDER.index(SUBCLASS_PARENT.get(c, "")) if SUBCLASS_PARENT.get(c) in CLASS_ORDER else 99, c))
-            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:25]]
+            options = [discord.SelectOption(label=c, description=SUBCLASS_PARENT.get(c)) for c in sorted_classes[:24]]
+            # Hybrid: for players who swap weapons mid-game and never commit to one.
+            # Its own board, no weapon marks. Only offered on the top-level picker.
+            if category == "all":
+                options.append(discord.SelectOption(
+                    label="Hybrid", description="Swapped weapons — no single one"))
         super().__init__(placeholder="Choose your class...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -996,6 +1001,14 @@ class ClassSelect(discord.ui.Select):
             return
         selected_class = self.values[0]
         vd = {**self.vision_data, 'subclass': selected_class}
+        if selected_class == "Hybrid":
+            # No weapon to pick — a Hybrid run isn't tied to one. Store weapon and
+            # subclass both as "Hybrid" and go straight to the map.
+            vd['subclass'] = "Hybrid"
+            view = MapSelectView(self.original_message, self.prompt_msg, "Hybrid", "Hybrid", vision_data=vd)
+            await interaction.response.edit_message(
+                content="Class: `Hybrid` (weapon swap). Which map?", view=view)
+            return
         if self.pre_detected_weapon:
             view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
             await interaction.response.edit_message(

@@ -720,6 +720,11 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     if is_pacifist and score and score > 0:
         updates.append(("Pacifist", score, False, False, True))
 
+    # Hybrid: a weapon-swap run (no single weapon). Its own board, ranked by
+    # takedowns, one row per player. Excluded from weapon marks/boards elsewhere.
+    if str(weapon).strip() == "Hybrid" and takedowns:
+        updates.append(("Hybrid", takedowns, False, True, False))
+
     # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
     # inside the loop via the indexed get_leaderboard_by_board — no full-table scan.
     all_lb_rows = await _get_lb_records()
@@ -858,7 +863,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 # /backfill_feat_boards, NOT by the weapon/map rebuild below.
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
-    "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist",
+    "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
 
@@ -926,6 +931,18 @@ async def _sort_board_entries(lb_name, entries):
     takedowns are pulled from each entry's linked submission and stashed on 'td' for
     the '{td} TD · {score}' display. Every other board ranks by score descending.
     Shared by _render_board and the /refresh commands so ordering can't drift."""
+    if lb_name == "Hybrid":
+        # One row per player, best takedowns; ties by score.
+        best = {}
+        for e in entries:
+            did = e.get('discord_id') or ('name:' + (e.get('player_name') or '').lower())
+            try:
+                _sc = int(e.get('score') or 0)
+            except (ValueError, TypeError):
+                _sc = 0
+            if did not in best or _sc > int(best[did].get('score') or 0):
+                best[did] = e
+        return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))
     if lb_name != "Pacifist":
         return sorted(entries, key=lambda x: x['score'], reverse=True)
     subs = await _db.get_all_submissions()
@@ -3365,6 +3382,35 @@ class LeaderboardsCog(commands.Cog):
             f"✅ Created **{lb_name}** board: {thread.mention}. "
             f"Players submit with a HEALING popup screenshot captioned `banner`.", ephemeral=True)
 
+    @app_commands.command(name="setup_hybrid_board", description="Create the Hybrid (weapon-swap) board thread in the feats forum (mod only).")
+    async def setup_hybrid_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        lb_name = "Hybrid"
+        recs = await _get_lb_records()
+        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
+            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
+            return
+        # Classify like the Pacifist board (a feat-style personal-best board).
+        pac = next((r for r in recs if r['Leaderboard Name'] == "Pacifist"), None)
+        board_type = (pac.get('Type', '') if pac else '') or 'feat'
+        try:
+            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
+                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            embeds = await _rated_embeds(lb_name, [], False, None, 0, False, "", True)
+            result = await forum.create_thread(name=lb_name, embeds=embeds)
+            thread, first_msg = result.thread, result.message
+            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), board_type)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Created **{lb_name}** board: {thread.mention}. "
+            f"Players log it by picking **Hybrid** as their class on submission. "
+            f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
+
     @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -3733,7 +3779,7 @@ class LeaderboardsCog(commands.Cog):
             _agg = {}
             for _row in subs:
                 _w = (_row[3] or "").strip() if len(_row) > 3 else ""
-                if not _w or _w in ("None", "Other", "Multiple Weapons"):
+                if not _w or _w in ("None", "Other", "Multiple Weapons", "Hybrid"):
                     continue
                 _ff = (_row[11] if len(_row) > 11 else "") or ""
                 if "resubmit" in _ff.lower():
@@ -3786,7 +3832,7 @@ class LeaderboardsCog(commands.Cog):
         counts = {}
         for row in subs:
             w = (row[3] or "").strip() if len(row) > 3 else ""
-            if not w or w in ("None", "Other", "Multiple Weapons"):
+            if not w or w in ("None", "Other", "Multiple Weapons", "Hybrid"):
                 continue
             counts[w] = counts.get(w, 0) + 1
         if not counts:
