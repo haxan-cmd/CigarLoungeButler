@@ -13,6 +13,11 @@ import asyncio
 import io
 import os
 import re
+import warnings
+
+# Missing-glyph warnings are handled by the DejaVu fallback below; anything the
+# fallback can't render (rare emoji in a name) shouldn't spam the nerve centre.
+warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 
 # ── Theme ────────────────────────────────────────────────────────────────────
 BG = '#22242a'          # deeper than Discord's own grey so the embed frames it
@@ -63,7 +68,7 @@ def _new_figure(figsize):
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     fam = _ensure_font()
-    plt.rcParams['font.family'] = fam
+    plt.rcParams['font.family'] = [fam, 'DejaVu Sans'] if fam != 'DejaVu Sans' else ['DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
     fig = plt.figure(figsize=figsize)
     fig.patch.set_facecolor(BG)
