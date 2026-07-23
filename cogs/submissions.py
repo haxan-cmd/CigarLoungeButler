@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
+import io
 import utils.tilt as _tilt_mod
 
 # ── Submission queue / lock (was in utils.sheets, now local) ──────────────────
@@ -57,9 +58,12 @@ def _ordinal(n):
 # keeps working on the embed description.
 _BLURB_GOLD = 0xC9A24B
 
-def _blurb_embed(desc, edited=False):
-    return discord.Embed(title="Run Submitted" + (" (edited)" if edited else ""),
-                         description=desc, colour=_BLURB_GOLD)
+def _blurb_embed(desc, edited=False, thumb=None):
+    e = discord.Embed(title="Run Submitted" + (" (edited)" if edited else ""),
+                      description=desc, colour=_BLURB_GOLD)
+    if thumb:
+        e.set_thumbnail(url=thumb)
+    return e
 
 def _blurb_desc(msg):
     """Blurb text of a summary message: embed description, or plain content for
@@ -71,7 +75,16 @@ def _blurb_desc(msg):
 async def _blurb_edit(msg, desc, edited=False, view=None):
     # content='' clears the plain text (also wipes the old-format blurb text
     # when an edit upgrades a pre-embed message)
-    kwargs = {'content': '', 'embed': _blurb_embed(desc, edited=edited)}
+    # Keep the lethality-charge thumbnail across edits: the attachment stays on
+    # the message (we never pass attachments=[]), so re-referencing its URL keeps
+    # it visible; a plain _blurb_embed would drop it.
+    _thumb = None
+    try:
+        if msg.embeds and msg.embeds[0].thumbnail:
+            _thumb = msg.embeds[0].thumbnail.url
+    except Exception:
+        _thumb = None
+    kwargs = {'content': '', 'embed': _blurb_embed(desc, edited=edited, thumb=_thumb)}
     if view is not None:
         kwargs['view'] = view
     await msg.edit(**kwargs)
@@ -2350,6 +2363,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
     # Pacifist runs are support play: a 0.0% Lethality line is noise, not a stat
+    _leth_delta = None  # this run's lethality minus the weapon avg; feeds the blurb weapon-charge thumbnail
     if (kills is not None and takedowns and takedowns > 0
             and not (kills == 0 and takedowns <= 10)):
         _leth_g = round(kills / takedowns * 100, 1)
@@ -2361,6 +2375,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _wavg, _wn = await _db.get_weapon_avg_lethality(selected_weapon)
             if _wavg is not None:
                 _diff = _leth_g - _wavg
+                _leth_delta = _diff
                 # Only celebrate standout runs — well ABOVE the weapon's average.
                 # Below-average and near-average just show raw lethality (no
                 # calling people out for an off game).
@@ -2680,9 +2695,27 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         selected_map, faction, takedowns, kills, deaths, vip, feats, message_link,
         _second_place_td, _score
     )
-    summary_reply = await original_message.reply(
-        embed=_blurb_embed(summary + marks_summary),
+    # Lethality weapon-charge: a grey->green weapon silhouette as the blurb
+    # thumbnail, greener the further this run's lethality beat the weapon avg.
+    _leth_file = None
+    _leth_thumb = None
+    try:
+        _lmin = getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0)
+        if _leth_delta is not None and _leth_delta >= _lmin:
+            import utils.charts as _charts
+            _lpng = await _charts.render_async(
+                _charts.render_lethality_charge, selected_weapon, _leth_delta)
+            if _lpng:
+                _leth_file = discord.File(io.BytesIO(_lpng), filename="lethality.png")
+                _leth_thumb = "attachment://lethality.png"
+    except Exception as _lce:
+        print(f"[LETHALITY] charge render failed: {_lce}")
+    _reply_kwargs = dict(
+        embed=_blurb_embed(summary + marks_summary, thumb=_leth_thumb),
         mention_author=False, view=edit_view)
+    if _leth_file is not None:
+        _reply_kwargs['file'] = _leth_file
+    summary_reply = await original_message.reply(**_reply_kwargs)
     edit_view._message = summary_reply
 
     # The blurb below was edited up to five times in a row, each with its own

@@ -485,3 +485,43 @@ def render_tilt_ladder(*, counts, n_games) -> bytes:
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight', pad_inches=0.22)
     plt.close(fig)
     return buf.getvalue()
+
+
+_OUTLINE_DIR = os.path.join(_ASSETS, 'weapon_outlines')
+
+
+def render_lethality_charge(weapon, delta, dmax=15.0) -> bytes:
+    """Weapon silhouette tinted grey -> green by how far a run's lethality sits
+    ABOVE that weapon's average (delta, in percentage points). At or below the
+    average it stays uncoloured grey; it reaches full green at delta >= dmax.
+    Returns a transparent PNG for use as an embed thumbnail, or b'' when the
+    weapon has no vendored outline (caller falls back to text). BLOCKING."""
+    import io as _io
+    try:
+        from PIL import Image as _Img
+    except Exception:
+        return b''
+    key = re.sub(r'[^a-z0-9]', '', str(weapon or '').lower())
+    p = os.path.join(_OUTLINE_DIR, key + '.webp')
+    if not key or not os.path.exists(p):
+        return b''
+    try:
+        im = _Img.open(p).convert('RGBA')
+    except Exception:
+        return b''
+    t = max(0.0, min(1.0, (delta or 0) / dmax))
+    grey = (150, 152, 158)
+    green = (70, 205, 100)
+    tr = int(grey[0] + (green[0] - grey[0]) * t)
+    tg = int(grey[1] + (green[1] - grey[1]) * t)
+    tb = int(grey[2] + (green[2] - grey[2]) * t)
+    px = im.load()
+    w, h = im.size
+    for x in range(w):
+        for y in range(h):
+            a = px[x, y][3]
+            if a:
+                px[x, y] = (tr, tg, tb, a)
+    buf = _io.BytesIO()
+    im.save(buf, format='PNG')
+    return buf.getvalue()
