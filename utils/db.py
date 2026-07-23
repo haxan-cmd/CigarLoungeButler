@@ -1084,6 +1084,17 @@ _EXPLORE_METRICS = {
     # min-runs floor and the sample-size display.
     'avg_td':      ("AVG(takedowns)",                                    True,  "avg takedowns", True),
     'avg_kills':   ("AVG(kills)",                                        True,  "avg kills", True),
+    # Weapon-relative lethality: your lethality minus that weapon's average,
+    # averaged over your games. +8 means "8 points above par for the weapons you
+    # played". This is Llama's Lethality Score. The baseline currently INCLUDES
+    # the player (small bias with many players per weapon); noted for later.
+    'leth_vs_avg': (
+        "AVG((kills::numeric / NULLIF(takedowns,0) * 100) - ("
+        "  SELECT AVG(w2.kills::numeric / NULLIF(w2.takedowns,0) * 100) "
+        "  FROM submissions w2 WHERE w2.weapon = s.weapon "
+        "    AND w2.takedowns > 0 AND w2.kills > 0 "
+        "    AND w2.feats NOT ILIKE '%Resubmit%' AND w2.feats NOT ILIKE '%Unlisted%'))",
+        True, "pts vs weapon avg", True),
     'best_td':     ("MAX(takedowns)",                                    False, "best TD", False),
     'best_kills':  ("MAX(kills)",                                        False, "best K", False),
 }

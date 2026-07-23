@@ -1165,6 +1165,7 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Avg lethality (K/TD)", value="lethality"),
             app_commands.Choice(name="Avg kill share", value="kill_share"),
             app_commands.Choice(name="Avg warlord", value="warlord"),
+            app_commands.Choice(name="Lethality vs weapon avg", value="leth_vs_avg"),
             app_commands.Choice(name="Avg takedowns per run", value="avg_td"),
             app_commands.Choice(name="Avg kills per run", value="avg_kills"),
             app_commands.Choice(name="Total takedowns", value="total_td"),
@@ -1255,7 +1256,8 @@ class PersonalityCog(commands.Cog):
         # Value formatting + axis unit per metric.
         _is_pct = _metric in ("lethality", "kill_share", "warlord")
         _is_avg = _metric in ("avg_td", "avg_kills")
-        _is_rate = _is_pct or _is_avg      # drives the min-runs note + sample sizes
+        _is_signed = _metric == "leth_vs_avg"
+        _is_rate = _is_pct or _is_avg or _is_signed   # min-runs note + sample sizes
         if _is_pct:
             _fmt = lambda v: f"{v:.1f}%"
             _unit = {"lethality": "% lethality", "kill_share": "% kill share",
@@ -1264,6 +1266,9 @@ class PersonalityCog(commands.Cog):
             _fmt = lambda v: f"{v:.1f}"
             _unit = {"avg_td": "avg takedowns per run",
                      "avg_kills": "avg kills per run"}[_metric]
+        elif _is_signed:
+            _fmt = lambda v: f"{v:+.1f}"      # +8.2 / -3.1
+            _unit = "points vs the weapon's average lethality"
         else:
             _fmt = lambda v: f"{int(round(v)):,}"
             _unit = {"runs": "runs", "total_td": "takedowns", "total_kills": "kills",

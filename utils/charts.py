@@ -233,11 +233,22 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
         ax.barh(y, vals, color=colours, height=0.66)
         ax.set_yticks(y)
         ax.set_yticklabels(labels, color=FG, fontsize=10)
-        _mx = max(vals) or 1
+        # Values can be negative (e.g. lethality vs weapon average), so scale on
+        # the full span and label each bar on the side it points.
+        _mx = max(vals); _mn = min(vals)
+        _span = (max(abs(_mx), abs(_mn)) or 1)
+        _pad = _span * 0.028
         for i, v in enumerate(vals):
             _txt = _fmt(v) + (f"   ({_samp[i]})" if _samp[i] is not None else "")
-            ax.text(v + _mx * 0.022, i, _txt, color=FG, fontsize=9.5, va='center')
-        ax.set_xlim(right=_mx * 1.20)
+            if v >= 0:
+                ax.text(v + _pad, i, _txt, color=FG, fontsize=9.5, va='center', ha='left')
+            else:
+                ax.text(v - _pad, i, _txt, color=FG, fontsize=9.5, va='center', ha='right')
+        _lo = min(0, _mn) - _span * 0.28
+        _hi = max(0, _mx) + _span * 0.28
+        ax.set_xlim(left=_lo, right=_hi)
+        if _mn < 0 < _mx:
+            ax.axvline(0, color=MUT, linewidth=0.8, alpha=0.5)  # zero reference
         _draw_icons(fig, ax, labels, size=0.052)
     ax.set_xlabel(value_label, color=MUT, fontsize=10.5, labelpad=8)
 
