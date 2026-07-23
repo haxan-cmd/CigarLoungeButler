@@ -1446,7 +1446,17 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
     # erroneous one: skip creation, and delete any blank card that already slipped in.
     try:
         _wm = await calculate_weapon_marks_for_player(discord_id, cached_data)
-        _no_marks = not any(v for v in (_wm or {}).values())
+        _has_marks = any(v for v in (_wm or {}).values())
+        if _has_marks:
+            _no_marks = False
+        else:
+            # Zero WEAPON marks isn't the same as "never submitted": Hybrid and
+            # Pacifist runs earn no weapon marks but still deserve a card (feats,
+            # board placements). Only skip when there are truly no submissions.
+            # Targeted, indexed query (limit 1) — NOT the shared cache, which holds
+            # every player's rows and would create a card for the whole roster.
+            _mine = await _db.get_submissions_by_player(str(discord_id), limit=1)
+            _no_marks = not bool(_mine)
     except Exception:
         _no_marks = False
     if _no_marks:
