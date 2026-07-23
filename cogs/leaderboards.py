@@ -722,7 +722,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
     # Hybrid: a weapon-swap run (no single weapon). Its own board, ranked by
     # takedowns, one row per player. Excluded from weapon marks/boards elsewhere.
-    if str(weapon).strip() == "Hybrid" and takedowns:
+    if str(selected_weapon).strip() == "Hybrid" and takedowns:
         updates.append(("Hybrid", takedowns, False, True, False))
 
     # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
