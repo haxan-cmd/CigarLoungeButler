@@ -79,11 +79,19 @@ class KofiCog(commands.Cog, name="KofiCog"):
 
             payload = json.loads(raw)
 
-            # Verify token
-            expected = os.environ.get("KOFI_TOKEN", "")
-            if expected and payload.get("verification_token") != expected:
-                log.warning("[KOFI] Invalid verification token")
-                return web.Response(status=403, text="forbidden")
+            # Verify token. Accept either env-var spelling — the Railway var was
+            # created as KOFI-TOKEN (hyphen) while the code read KOFI_TOKEN, so
+            # verification was silently skipped (expected="" short-circuits).
+            import hmac as _hmac
+            expected = (os.environ.get("KOFI_TOKEN")
+                        or os.environ.get("KOFI-TOKEN") or "")
+            if expected:
+                _got = payload.get("verification_token") or ""
+                if not _hmac.compare_digest(_got, expected):
+                    log.warning("[KOFI] Invalid verification token")
+                    return web.Response(status=403, text="forbidden")
+            else:
+                log.warning("[KOFI] No KOFI_TOKEN set — webhook is UNVERIFIED")
 
             # Only handle donations (not shop orders etc.)
             if payload.get("type") not in ("Donation", "Subscription"):
