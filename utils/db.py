@@ -1216,7 +1216,7 @@ _EXPLORE_METRICS = {
     # group tends to play HARDER lobbies. hard_carries counts Outmatched/Brutal
     # runs (adjusted tilt <= -30), carries against the odds.
     'avg_tilt':    (f"AVG({_ADJ_TILT_SQL})", True, "avg lobby tilt (adj)", True),
-    'hard_carries':(f"COUNT(*) FILTER (WHERE ({_ADJ_TILT_SQL}) <= -30)", False, "hard carries", False),
+    'hard_carries':(f"COUNT(*) FILTER (WHERE ({_ADJ_TILT_SQL}) <= -30)", False, "valor carries", False),
 }
 
 
