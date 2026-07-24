@@ -8,7 +8,7 @@ A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.c
 ![discord.py](https://img.shields.io/badge/discord.py-2.x-5865F2?logo=discord&logoColor=white)
 ![Railway](https://img.shields.io/badge/hosted-Railway-0B0D0E?logo=railway&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/data-PostgreSQL-336791?logo=postgresql&logoColor=white)
-![Claude](https://img.shields.io/badge/AI-Claude_Haiku-D97706)
+![OpenAI](https://img.shields.io/badge/AI-GPT--5.6_Luna-10A37F?logo=openai&logoColor=white)
 ![Gemini](https://img.shields.io/badge/AI-Gemini_Flash-4285F4?logo=google&logoColor=white)
 
 > 📐 System design & data-flow diagrams: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -109,7 +109,7 @@ Hourly summary posted to a private channel covering submissions, milestones, But
 Flags suspicious runs to a private notes channel when stats exceed 2x the server record or a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries; `/unlist_submission` toggles a legit-but-unfair run (lopsided lobby, farm game) off all boards and records while keeping its marks and bounty progress.
 
 ### 🃏 Butler Personality
-Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, and Hundred Handed progress using live database context. Powered by Claude Haiku.
+Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, and Hundred Handed progress using live database context. Powered by OpenAI GPT-5.6 Luna.
 
 ---
 
