@@ -1087,7 +1087,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
         if _dline:
-            lines.append(f"\u2022 {_dline} \u2014 hard carries against the odds")
+            lines.append(f"\u2022 {_dline} \u2014 Outmatched odds")
         lines.append("")
 
     if best_placements:
@@ -2820,7 +2820,7 @@ class RegistryCog(commands.Cog):
         if tuff_count:
             record_lines.append(f"│ <a:TUFF2:1520779243879927898> {tuff_count} TUFF entr{'y' if tuff_count == 1 else 'ies'}")
         if _diff_badges:
-            record_lines.append("│ " + "  ".join(_diff_badges) + " hard carries against the odds")
+            record_lines.append("│ " + "  ".join(_diff_badges) + " Outmatched odds")
         if counting_line:
             record_lines.append(f"│ {counting_line}")
         if record_lines:
