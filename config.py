@@ -356,6 +356,20 @@ TILT_BANDS = [
 # Slightly Uphill pays a mark but is common, so it stays off the card.
 TILT_CARD_BADGES = ("Outmatched", "Brutal")
 
+
+# --- Peasant board -------------------------------------------------------------
+# On the first-stage defence of two maps you spawn as a low-health peasant who
+# picks up whatever weapon is lying around. It's a highscore challenge: just
+# survive to the end. A Peasant Run is its own submission type — no weapon, no
+# marks, no class/mastery progress. It only lands on the Peasant board, split
+# into one section per map, ranked by scoreboard SCORE (one row per player per
+# map, showing score / takedowns / kills).
+PEASANT_BOARD = "Peasant"
+PEASANT_EMOJI = "👨"   # 👨 default man
+# Short map names (as stored) + faction where the peasant stage exists.
+PEASANT_MAP_FACTIONS = [("Coxwell", "Agatha"), ("Bridgetown", "Agatha")]
+PEASANT_MAPS = [m for m, _f in PEASANT_MAP_FACTIONS]
+
 # Per-weapon animated Virtuoso emoji shown on the player card (fallback below).
 # Use the full custom-emoji token: animated = "<a:name:id>", static = "<:name:id>".
 VIRTUOSO_DEFAULT_EMOJI = "\U0001f48e"  # gem, used when a weapon has no custom emoji

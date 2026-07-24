@@ -1000,8 +1000,66 @@ async def _prune_pacifist_board():
     return deleted
 
 
+async def _peasant_embed():
+    """Build the Peasant board embed: one section per map, one row per player per
+    map (best score), showing score / TD / K. Reads the isolated peasant_runs
+    table, so it never touches marks, weapon boards, or mastery."""
+    runs = await _db.get_peasant_runs()
+    emoji = getattr(config, 'PEASANT_EMOJI', '👨')
+    emb = discord.Embed(
+        title=f"{emoji}  Peasant Board",
+        colour=0xC9A24B,
+        description=("First-stage peasant highscores. Spawn as a low-health peasant, grab "
+                     "whatever you can, and survive to the end. Ranked by score; no marks, just glory."))
+    for mp in getattr(config, 'PEASANT_MAPS', ['Coxwell', 'Bridgetown']):
+        best = {}
+        for r in runs:
+            if (r.get('map') or '').strip() != mp:
+                continue
+            pid = (r.get('discord_id') or '').strip() or ('name:' + (r.get('player_name') or '').strip().lower())
+            if pid not in best or (r.get('score') or 0) > (best[pid].get('score') or 0):
+                best[pid] = r
+        rows = sorted(best.values(), key=lambda r: -(r.get('score') or 0))[:15]
+        if rows:
+            lines = []
+            for i, r in enumerate(rows, 1):
+                _sc = r.get('score') or 0
+                _link = (r.get('message_link') or '').strip()
+                _scstr = f"[{_sc:,}]({_link})" if _link else f"{_sc:,}"
+                lines.append(f"`{i}.` `{r.get('player_name')}` — **{_scstr}**  ·  "
+                             f"{r.get('takedowns') or 0} TD  ·  {r.get('kills') or 0} K")
+            val = "\n".join(lines)
+        else:
+            val = "*No runs logged yet.*"
+        emb.add_field(name=f"{mp} · Agatha", value=val[:1024], inline=False)
+    return emb
+
+
+async def render_peasant_board(guild):
+    """Re-render the single Peasant board post from the peasant_runs table."""
+    recs = await _get_lb_records()
+    name = getattr(config, 'PEASANT_BOARD', 'Peasant')
+    rec = next((r for r in recs if (r.get('Leaderboard Name') or '').strip() == name), None)
+    if not rec or not str(rec.get('Thread ID') or '').strip():
+        return
+    try:
+        emb = await _peasant_embed()
+        tid = int(str(rec['Thread ID']).strip())
+        mid = int(str(rec.get('Message ID') or '').split(',')[0].strip())
+        thread = guild.get_channel(tid) or await guild.fetch_channel(tid)
+        msg = await thread.fetch_message(mid)
+        await msg.edit(embed=emb)
+    except Exception as e:
+        print(f"[PEASANT] board render failed: {e}")
+
+
 async def _render_board(guild, lb_row, lb_name):
     """Re-render a single board's Discord messages from its current DB rows."""
+    # Peasant has its own table + two-section renderer; route generic refreshes
+    # to it so a rebuild can't clobber the custom post with an empty normal render.
+    if lb_name == getattr(config, 'PEASANT_BOARD', 'Peasant'):
+        await render_peasant_board(guild)
+        return
     # A board with no thread/message ids was never set up in Discord — skip it
     # rather than crashing the whole rebuild on int('').
     thread_raw = str(lb_row.get('Thread ID') or '').strip()
@@ -3443,6 +3501,32 @@ class LeaderboardsCog(commands.Cog):
             f"✅ Created **{lb_name}** board: {thread.mention}. "
             f"Players log it by picking **Hybrid** as their class on submission. "
             f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
+
+    @app_commands.command(name="setup_peasant_board", description="Create the Peasant highscore board in the feats forum (mod only).")
+    async def setup_peasant_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        lb_name = getattr(config, 'PEASANT_BOARD', 'Peasant')
+        recs = await _get_lb_records()
+        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
+            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
+            return
+        try:
+            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
+                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            emb = await _peasant_embed()
+            result = await forum.create_thread(name="Peasant", embeds=[emb])
+            thread, first_msg = result.thread, result.message
+            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), 'feat')
+        except Exception as e:
+            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Created **Peasant** board: {thread.mention}. Players log it by picking "
+            f"**Peasant Run** as their class (Coxwell or Bridgetown only). Ranked by score, "
+            f"one row per player per map, no marks.", ephemeral=True)
 
     @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):

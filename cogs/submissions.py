@@ -997,6 +997,10 @@ class ClassSelectView(discord.ui.View):
             if category == "all" and not pre_detected_weapon:
                 options.append(discord.SelectOption(
                     label="Hybrid", description="Swapped weapons — no single one", emoji="🔀"))
+                options.append(discord.SelectOption(
+                    label="Peasant Run",
+                    description="Coxwell/Bridgetown peasant highscore — own board",
+                    emoji="👨"))
             self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon, vision_data, options))
 
     @discord.ui.button(label="Search Class", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
@@ -1037,6 +1041,12 @@ class ClassSelect(discord.ui.Select):
             await interaction.response.edit_message(
                 content="Class: `Hybrid` (weapon swap). Which map?", view=view)
             return
+        if selected_class == "Peasant Run":
+            # Own isolated path: restricted map, no weapon, no marks. See _finalise_peasant.
+            view = PeasantMapSelectView(self.original_message, self.prompt_msg)
+            await interaction.response.edit_message(
+                content="Peasant Run (Agatha peasant highscore). Which map?", view=view)
+            return
         if self.pre_detected_weapon:
             view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
             await interaction.response.edit_message(
@@ -1051,6 +1061,105 @@ class ClassSelect(discord.ui.Select):
                                         vision_data=vd, all_classes=self.classes, category=self.category)
                 await interaction.response.edit_message(
                     content=f"Class: `{selected_class}`. Which weapon?", view=view)
+
+
+class PeasantMapSelectView(discord.ui.View):
+    """Restricted map picker for a Peasant Run: only the two Agatha maps that have
+    a playable peasant first stage. Faction is always Agatha, so there is no
+    faction step — the map choice leads straight to the stats modal."""
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.add_item(PeasantMapSelect(original_message, prompt_msg))
+
+
+class PeasantMapSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        opts = [discord.SelectOption(label=m) for m in getattr(config, 'PEASANT_MAPS', [])]
+        super().__init__(placeholder="Which peasant map?", options=opts or [discord.SelectOption(label="Coxwell")])
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            PeasantStatsModal(self.original_message, self.prompt_msg, self.values[0]))
+
+
+class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stats"):
+    def __init__(self, original_message, prompt_msg, selected_map):
+        super().__init__()
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        self.selected_map = selected_map
+        self.score = discord.ui.TextInput(label="Score", placeholder="e.g. 12500", required=True)
+        self.takedowns = discord.ui.TextInput(label="Takedowns", placeholder="e.g. 45", required=True)
+        self.kills = discord.ui.TextInput(label="Kills", placeholder="e.g. 20", required=True)
+        self.deaths = discord.ui.TextInput(label="Deaths", placeholder="e.g. 3", required=True)
+        for _it in (self.score, self.takedowns, self.kills, self.deaths):
+            self.add_item(_it)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            score = int(str(self.score.value).replace(',', '').strip())
+            td = int(self.takedowns.value)
+            k = int(self.kills.value)
+            d = int(self.deaths.value)
+        except ValueError:
+            await interaction.response.send_message(
+                "Those want to be whole numbers, peasant. Start the Peasant Run again.", ephemeral=True)
+            return
+        if min(score, td, k, d) < 0 or k > td:
+            await interaction.response.send_message(
+                "Those numbers aren't possible (kills can't exceed takedowns). Try again.", ephemeral=True)
+            return
+        await _finalise_peasant(interaction, self.original_message, self.prompt_msg,
+                                self.selected_map, score, td, k, d)
+
+
+async def _finalise_peasant(interaction, original_message, prompt_msg, selected_map, score, td, k, d):
+    """Isolated Peasant Run finalise. Logs to the peasant_runs table, posts a 👨
+    blurb, and refreshes the Peasant board. Deliberately touches nothing else — no
+    marks, weapon/map boards, mastery, bounty, or registry card."""
+    try:
+        await interaction.response.edit_message(content="Logged. 👨", view=None)
+    except Exception:
+        try:
+            await interaction.response.defer()
+        except Exception:
+            pass
+    _user = interaction.user
+    _link = original_message.jump_url
+    try:
+        await _db.add_peasant_run(str(_user.id), _user.display_name, selected_map, score, td, k, d, _link)
+    except Exception as _e:
+        print(f"[PEASANT] log failed: {_e}")
+        try:
+            await original_message.reply("Couldn't log that peasant run.", mention_author=False)
+        except Exception:
+            pass
+        return
+    _emoji = getattr(config, 'PEASANT_EMOJI', '👨')
+    _emb = discord.Embed(
+        title="Peasant Run",
+        colour=_BLURB_GOLD,
+        description=(f"{_emoji} **`{_user.display_name}`** survived as a peasant on **{selected_map}**.\n"
+                     f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
+                     f"*No marks — for the Peasant board alone.*"))
+    try:
+        await original_message.reply(embed=_emb, mention_author=False)
+    except Exception as _e:
+        print(f"[PEASANT] blurb failed: {_e}")
+    try:
+        await original_message.add_reaction(_emoji)
+    except Exception:
+        pass
+    try:
+        from cogs.leaderboards import render_peasant_board
+        await render_peasant_board(interaction.guild)
+    except Exception as _e:
+        print(f"[PEASANT] board refresh failed: {_e}")
 
 
 class WeaponSearchModal(discord.ui.Modal, title="Weapon Search"):

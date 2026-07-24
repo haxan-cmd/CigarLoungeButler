@@ -123,6 +123,13 @@ _SCHEMA_STATEMENTS = [
     # both team totals. Used by get_lobbymates to stop false-positive lobby matches.
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS team_total_kills INTEGER",
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS enemy_total_kills INTEGER",
+    # Peasant board: its own isolated table so it never touches marks, weapon
+    # boards, or mastery. One row per logged Peasant Run; the board dedupes to the
+    # best score per player per map at render time.
+    "CREATE TABLE IF NOT EXISTS peasant_runs ("
+    "id SERIAL PRIMARY KEY, submitted_at TIMESTAMP DEFAULT NOW(), "
+    "discord_id TEXT, player_name TEXT, map TEXT NOT NULL, score INTEGER, "
+    "takedowns INTEGER, kills INTEGER, deaths INTEGER, message_link TEXT)",
 ]
 
 
@@ -367,6 +374,27 @@ async def get_tilt_games() -> list:
             "WHERE team_total_kills > 0 AND enemy_total_kills > 0 "
             "AND COALESCE(feats,'') NOT LIKE '%Resubmit%'")
     return [(int(r['t']), int(r['e']), r['map'], r['faction']) for r in rows]
+
+
+async def add_peasant_run(discord_id, player_name, map_name, score, takedowns, kills, deaths, message_link):
+    """Log a Peasant Run into its isolated table (no marks / boards / mastery)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO peasant_runs "
+            "(discord_id, player_name, map, score, takedowns, kills, deaths, message_link) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            str(discord_id), player_name, map_name,
+            int(score), int(takedowns), int(kills), int(deaths), message_link)
+
+
+async def get_peasant_runs():
+    """All logged Peasant Runs as row dicts, highest score first. The board render
+    groups these by map and keeps one row per player per map."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM peasant_runs ORDER BY score DESC NULLS LAST")
+    return [dict(r) for r in rows]
 
 
 async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:
