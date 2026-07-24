@@ -83,13 +83,15 @@ async def _blurb_edit(msg, desc, edited=False, view=None):
     # drift outside the embed after the background edits landed.
     emb = _blurb_embed(desc, edited=edited)
     kwargs = {'content': '', 'embed': emb}
+    # The lethality thumbnail is now a plain CDN url (hosted in the stash channel),
+    # so preserving it across edits is just re-setting that url. No attachment on
+    # the blurb, so nothing detaches.
     try:
-        _att = next((a for a in (msg.attachments or []) if a.filename == 'lethality.png'), None)
+        _th = msg.embeds[0].thumbnail.url if (msg.embeds and msg.embeds[0].thumbnail) else None
     except Exception:
-        _att = None
-    if _att is not None:
-        emb.set_thumbnail(url='attachment://lethality.png')
-        kwargs['attachments'] = [_att]
+        _th = None
+    if _th:
+        emb.set_thumbnail(url=_th)
     if view is not None:
         kwargs['view'] = view
     await msg.edit(**kwargs)
@@ -2809,27 +2811,31 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         selected_map, faction, takedowns, kills, deaths, vip, feats, message_link,
         _second_place_td, _score
     )
-    # Lethality weapon-charge: a grey->green weapon silhouette as the blurb
-    # thumbnail, greener the further this run's lethality beat the weapon avg.
-    _leth_file = None
+    # Lethality weapon-charge: render the grey->green weapon, upload it ONCE to the
+    # stash channel, and use that message's CDN url as the blurb thumbnail. No file
+    # is attached to the blurb, so nothing can detach into a big standalone image
+    # when the blurb is edited (attachment:// thumbnails don't survive edits).
     _leth_thumb = None
     try:
         _lmin = getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0)
-        if _leth_delta is not None and _leth_delta >= _lmin:
+        _stash_id = getattr(config, 'LETHALITY_STASH_CHANNEL_ID', 0)
+        if _leth_delta is not None and _leth_delta >= _lmin and _stash_id:
             import utils.charts as _charts
             _lpng = await _charts.render_async(
                 _charts.render_lethality_charge, selected_weapon, _leth_delta)
             if _lpng:
-                _leth_file = discord.File(io.BytesIO(_lpng), filename="lethality.png")
-                _leth_thumb = "attachment://lethality.png"
+                _stash_ch = (interaction.guild.get_channel(_stash_id)
+                             or await interaction.client.fetch_channel(_stash_id))
+                if _stash_ch:
+                    _smsg = await _stash_ch.send(
+                        file=discord.File(io.BytesIO(_lpng), filename="lethality.png"))
+                    if _smsg.attachments:
+                        _leth_thumb = _smsg.attachments[0].url
     except Exception as _lce:
-        print(f"[LETHALITY] charge render failed: {_lce}")
-    _reply_kwargs = dict(
+        print(f"[LETHALITY] charge stash failed: {_lce}")
+    summary_reply = await original_message.reply(
         embed=_blurb_embed(summary + marks_summary, thumb=_leth_thumb),
         mention_author=False, view=edit_view)
-    if _leth_file is not None:
-        _reply_kwargs['file'] = _leth_file
-    summary_reply = await original_message.reply(**_reply_kwargs)
     edit_view._message = summary_reply
 
     # The blurb below was edited up to five times in a row, each with its own

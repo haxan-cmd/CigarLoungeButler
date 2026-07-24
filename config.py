@@ -56,6 +56,11 @@ CLOWN_TARGET_USER_ID        = 694099959066132531  # Butler clown-reacts this use
 # channel ID (env-overridable) to enable; 0 = off.
 import os as _os
 NINETY_NINE_CHANNEL_ID   = int(_os.getenv('NINETY_NINE_CHANNEL_ID', '0'))
+# Hidden channel that HOSTS the lethality-charge weapon images so the blurb can
+# reference them by URL as a thumbnail. Attachment thumbnails detach from the
+# embed the moment the blurb is edited, so the image is uploaded here once and the
+# blurb points at the resulting CDN url. 0 = feature off (no weapon image shown).
+LETHALITY_STASH_CHANNEL_ID = int(_os.getenv('LETHALITY_STASH_CHANNEL_ID', '1530041618760208514'))  # #lethality-picture-stash-for-embed
 NINETY_NINE_REACT_CHANCE = float(_os.getenv('NINETY_NINE_CHANCE', '0.30'))
 NINETY_NINE_COOLDOWN     = int(_os.getenv('NINETY_NINE_COOLDOWN', '240'))  # sec, per channel
 # Weighted toward a 🍼 react; a dry quip fires less often.
