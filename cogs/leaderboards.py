@@ -1005,12 +1005,23 @@ async def _peasant_embed():
     map (best score), showing score / TD / K. Reads the isolated peasant_runs
     table, so it never touches marks, weapon boards, or mastery."""
     runs = await _db.get_peasant_runs()
+    # Map discord_id -> registry card thread so names can link to profiles.
+    try:
+        _players = await _db.get_all_players()
+        _thread_by_id = {(pr[0] or '').strip(): (str(pr[2]).strip() if len(pr) > 2 and pr[2] else '')
+                         for pr in _players}
+    except Exception:
+        _thread_by_id = {}
+    _gid = getattr(config, 'GUILD_ID', 0)
+
+    def _namelink(did, name):
+        tid = _thread_by_id.get((did or '').strip(), '')
+        if tid and _gid:
+            return f"[{name}](https://discord.com/channels/{_gid}/{tid})"
+        return f"`{name}`"
+
     emoji = getattr(config, 'PEASANT_EMOJI', '👨')
-    emb = discord.Embed(
-        title=f"{emoji}  Peasant Board",
-        colour=0xC9A24B,
-        description=("First-stage peasant highscores. Spawn as a low-health peasant, grab "
-                     "whatever you can, and survive to the end. Ranked by score; no marks, just glory."))
+    emb = discord.Embed(title=f"{emoji}  Peasant Board", colour=0xC9A24B)
     for mp in getattr(config, 'PEASANT_MAPS', ['Coxwell', 'Bridgetown']):
         best = {}
         for r in runs:
@@ -1026,11 +1037,14 @@ async def _peasant_embed():
                 _sc = r.get('score') or 0
                 _link = (r.get('message_link') or '').strip()
                 _scstr = f"[{_sc:,}]({_link})" if _link else f"{_sc:,}"
-                lines.append(f"`{i}.` `{r.get('player_name')}` — **{_scstr}**  ·  "
-                             f"{r.get('takedowns') or 0} TD  ·  {r.get('kills') or 0} K")
+                _nm = _namelink(r.get('discord_id'), r.get('player_name'))
+                lines.append(f"`{i}.` {_nm} — **{_scstr}**  ·  "
+                             f"{r.get('takedowns') or 0} TD  ·  {r.get('kills') or 0} K  ·  "
+                             f"{r.get('deaths') or 0} D")
             val = "\n".join(lines)
         else:
-            val = "*No runs logged yet.*"
+            # Empty state: the row template with placeholder slots.
+            val = "`1.` `———` — **—**  ·  — TD  ·  — K  ·  — D"
         emb.add_field(name=f"{mp} · Agatha", value=val[:1024], inline=False)
     return emb
 
