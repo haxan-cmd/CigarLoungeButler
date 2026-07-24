@@ -402,6 +402,17 @@ async def get_peasant_runs():
     return [dict(r) for r in rows]
 
 
+async def delete_peasant_run_by_link(message_link: str) -> int:
+    """Delete Peasant Run(s) posted from a given scorecard link. Returns the count."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute("DELETE FROM peasant_runs WHERE message_link = $1", message_link)
+    try:
+        return int(res.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def get_submissions_by_player(discord_id, limit: int | None = None) -> list[list]:
     """Targeted fetch: one player's submissions, newest first — uses the
     submissions(discord_id) index instead of scanning the whole table.

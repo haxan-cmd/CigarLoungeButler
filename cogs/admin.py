@@ -618,6 +618,22 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         report = []
+        # Peasant Runs live in their own table, entirely off the normal submissions
+        # pipeline — handle (and short-circuit) them here.
+        try:
+            _pn = await _db.delete_peasant_run_by_link(message_link.strip())
+            if _pn:
+                try:
+                    from cogs.leaderboards import render_peasant_board
+                    await render_peasant_board(guild)
+                except Exception as _pe:
+                    print(f"[PEASANT] board refresh after removal failed: {_pe}")
+                await interaction.followup.send(
+                    f"Removed {_pn} Peasant Run{'s' if _pn != 1 else ''} on that link and "
+                    "refreshed the Peasant board.", ephemeral=True)
+                return
+        except Exception as _pe:
+            print(f"[PEASANT] remove check failed: {_pe}")
 
         try:
             from cogs.bounty import (get_active_bounty, get_player_bounty_progress,
