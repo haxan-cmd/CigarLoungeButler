@@ -1036,18 +1036,14 @@ async def _peasant_embed():
 
 
 async def render_peasant_board(guild):
-    """Re-render the single Peasant board post from the peasant_runs table."""
-    recs = await _get_lb_records()
-    name = getattr(config, 'PEASANT_BOARD', 'Peasant')
-    rec = next((r for r in recs if (r.get('Leaderboard Name') or '').strip() == name), None)
-    if not rec or not str(rec.get('Thread ID') or '').strip():
+    """Re-render the Peasant board at its stored message (any channel/thread)."""
+    ptr = await _db.get_peasant_board()
+    if not ptr or not ptr[0] or not ptr[1]:
         return
     try:
         emb = await _peasant_embed()
-        tid = int(str(rec['Thread ID']).strip())
-        mid = int(str(rec.get('Message ID') or '').split(',')[0].strip())
-        thread = guild.get_channel(tid) or await guild.fetch_channel(tid)
-        msg = await thread.fetch_message(mid)
+        ch = guild.get_channel(int(ptr[0])) or await guild.fetch_channel(int(ptr[0]))
+        msg = await ch.fetch_message(int(ptr[1]))
         await msg.edit(embed=emb)
     except Exception as e:
         print(f"[PEASANT] board render failed: {e}")
@@ -3502,31 +3498,29 @@ class LeaderboardsCog(commands.Cog):
             f"Players log it by picking **Hybrid** as their class on submission. "
             f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
 
-    @app_commands.command(name="setup_peasant_board", description="Create the Peasant highscore board in the feats forum (mod only).")
+    @app_commands.command(name="setup_peasant_board", description="Post the Peasant highscore board in THIS channel or thread (mod only).")
     async def setup_peasant_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        lb_name = getattr(config, 'PEASANT_BOARD', 'Peasant')
-        recs = await _get_lb_records()
-        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
-            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
-            return
+        # Clear any stray "Peasant" leaderboard record left by an earlier attempt so
+        # the generic board renderer stops treating it as a weapon board.
         try:
-            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
-                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            await _db.delete_leaderboard(getattr(config, 'PEASANT_BOARD', 'Peasant'))
+        except Exception:
+            pass
+        try:
             emb = await _peasant_embed()
-            result = await forum.create_thread(name="Peasant", embeds=[emb])
-            thread, first_msg = result.thread, result.message
-            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), 'feat')
+            msg = await interaction.channel.send(embed=emb)
+            await _db.set_peasant_board(interaction.channel_id, msg.id)
         except Exception as e:
-            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Couldn't post the board here: {e}", ephemeral=True)
             return
         await interaction.followup.send(
-            f"✅ Created **Peasant** board: {thread.mention}. Players log it by picking "
-            f"**Peasant Run** as their class (Coxwell or Bridgetown only). Ranked by score, "
-            f"one row per player per map, no marks.", ephemeral=True)
+            "✅ Peasant board posted in this thread. Players log it by picking **Peasant Run** "
+            "as their class (Coxwell or Bridgetown). Re-run this command in another channel or "
+            "thread to move it.", ephemeral=True)
 
     @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):

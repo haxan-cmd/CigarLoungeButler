@@ -130,6 +130,11 @@ _SCHEMA_STATEMENTS = [
     "id SERIAL PRIMARY KEY, submitted_at TIMESTAMP DEFAULT NOW(), "
     "discord_id TEXT, player_name TEXT, map TEXT NOT NULL, score INTEGER, "
     "takedowns INTEGER, kills INTEGER, deaths INTEGER, message_link TEXT)",
+    # The Peasant board lives at a single message the mod chooses (any channel or
+    # thread). Kept OUT of the leaderboards table on purpose, so the generic board
+    # machinery never renders it as a weapon board.
+    "CREATE TABLE IF NOT EXISTS peasant_board ("
+    "id INT PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
 ]
 
 
@@ -947,6 +952,33 @@ async def update_leaderboard_messages(board_name: str, message_ids: str):
             "UPDATE leaderboards SET message_ids=$1 WHERE board_name=$2",
             message_ids, board_name
         )
+
+
+async def delete_leaderboard(board_name: str):
+    """Remove a leaderboard record entirely (used to clear a stray board so the
+    generic renderer stops touching it)."""
+    _cache_invalidate('leaderboards')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM leaderboards WHERE board_name=$1", board_name)
+
+
+async def get_peasant_board():
+    """(channel_id, message_id) strings for the Peasant board post, or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT channel_id, message_id FROM peasant_board WHERE id=1")
+    return (row['channel_id'], row['message_id']) if row else None
+
+
+async def set_peasant_board(channel_id, message_id):
+    """Point the Peasant board at a specific message (any channel/thread)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO peasant_board (id, channel_id, message_id) VALUES (1, $1, $2) "
+            "ON CONFLICT (id) DO UPDATE SET channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id",
+            str(channel_id), str(message_id))
 
 
 # ── LeaderboardData ───────────────────────────────────────────────────────────
