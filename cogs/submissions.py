@@ -75,21 +75,21 @@ def _blurb_desc(msg):
 async def _blurb_edit(msg, desc, edited=False, view=None):
     # content='' clears the plain text (also wipes the old-format blurb text
     # when an edit upgrades a pre-embed message)
-    # Keep the lethality-charge thumbnail across edits. The attachment stays on
-    # the message (we never pass attachments=[]), so we must re-reference it as
-    # attachment://lethality.png, NOT the resolved CDN url: re-setting the CDN
-    # url de-links the file from the embed and Discord then shows it BOTH as a
-    # standalone image and as the thumbnail. The attachment:// form keeps it
-    # "consumed" by the embed, so only the thumbnail renders.
-    _thumb = None
+    # Keep the lethality-charge weapon as the embed THUMBNAIL across edits. Two
+    # things are required, and missing either detaches it into a big standalone
+    # image above the blurb: (1) the embed must re-reference attachment://lethality.png,
+    # and (2) the edit must re-pass the existing Attachment object in `attachments`.
+    # Just re-referencing the URL without re-passing the attachment is what let it
+    # drift outside the embed after the background edits landed.
+    emb = _blurb_embed(desc, edited=edited)
+    kwargs = {'content': '', 'embed': emb}
     try:
-        for _att in (msg.attachments or []):
-            if _att.filename == 'lethality.png':
-                _thumb = 'attachment://lethality.png'
-                break
+        _att = next((a for a in (msg.attachments or []) if a.filename == 'lethality.png'), None)
     except Exception:
-        _thumb = None
-    kwargs = {'content': '', 'embed': _blurb_embed(desc, edited=edited, thumb=_thumb)}
+        _att = None
+    if _att is not None:
+        emb.set_thumbnail(url='attachment://lethality.png')
+        kwargs['attachments'] = [_att]
     if view is not None:
         kwargs['view'] = view
     await msg.edit(**kwargs)
