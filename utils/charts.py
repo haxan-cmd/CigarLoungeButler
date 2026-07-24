@@ -490,7 +490,7 @@ def render_tilt_ladder(*, counts, n_games) -> bytes:
 _OUTLINE_DIR = os.path.join(_ASSETS, 'weapon_outlines')
 
 
-def render_lethality_charge(weapon, delta, dmax=15.0) -> bytes:
+def render_lethality_charge(weapon, delta=0, dmax=15.0, intensity=None) -> bytes:
     """Weapon silhouette tinted grey -> green by how far a run's lethality sits
     ABOVE that weapon's average (delta, in percentage points). At or below the
     average it stays uncoloured grey; it reaches full green at delta >= dmax.
@@ -509,7 +509,10 @@ def render_lethality_charge(weapon, delta, dmax=15.0) -> bytes:
         im = _Img.open(p).convert('RGBA')
     except Exception:
         return b''
-    t = max(0.0, min(1.0, (delta or 0) / dmax))
+    if intensity is not None:
+        t = max(0.0, min(1.0, intensity))
+    else:
+        t = max(0.0, min(1.0, (delta or 0) / dmax))
     grey = (150, 152, 158)
     green = (70, 205, 100)
     col = (int(grey[0] + (green[0] - grey[0]) * t),

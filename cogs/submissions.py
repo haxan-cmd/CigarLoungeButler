@@ -1982,13 +1982,12 @@ async def _apply_edit(interaction, ev):
             _el = round(ev.kills / ev.takedowns * 100, 1)
             _el_line = f"🩸 {_el}% Lethality"
             try:
-                _ewavg, _ewn = await _db.get_weapon_avg_lethality(ev.weapon)
-                if _ewavg is not None:
-                    _ediff = _el - _ewavg
-                    if _ediff >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
-                        _el_line += f"  ·  {_ediff:+.1f} vs {ev.weapon} avg"
+                _efrac, _efn = await _db.get_weapon_lethality_percentile(ev.weapon, _el)
+                if _efrac is not None and _efrac >= 0.60:
+                    _etop = max(1, round((1 - _efrac) * 100))
+                    _el_line += f"  ·  top {_etop}% on {ev.weapon}"
             except Exception as _ele:
-                print(f"[LETHALITY] edit weapon-avg lookup failed: {_ele}")
+                print(f"[LETHALITY] edit percentile lookup failed: {_ele}")
             _stat_lines.append(_el_line)
         try:
             _cur_msg = await ev._message.channel.fetch_message(ev._message.id)
@@ -2479,26 +2478,23 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
     # Pacifist runs are support play: a 0.0% Lethality line is noise, not a stat
-    _leth_delta = None  # this run's lethality minus the weapon avg; feeds the blurb weapon-charge thumbnail
+    _leth_green_t = None  # 0..1 weapon-charge intensity, from percentile above median
     if (kills is not None and takedowns and takedowns > 0
             and not (kills == 0 and takedowns <= 10)):
         _leth_g = round(kills / takedowns * 100, 1)
         _leth_line = f"🩸 {_leth_g}% Lethality"
-        # Weapon-relative context (Llama's Lethality Score): how this run did vs
-        # the weapon's average. Skipped for thin-sample weapons and Hybrid (no
-        # single weapon) — get_weapon_avg_lethality returns None there.
+        # Weapon-relative context: where this run ranks among all runs with the same
+        # weapon. "top X%" reads instantly where a raw "+N vs avg" doesn't. Only
+        # celebrate genuinely above-average runs (top 40%); thin-sample weapons and
+        # Hybrid return None. The same percentile drives the weapon-charge greenness.
         try:
-            _wavg, _wn = await _db.get_weapon_avg_lethality(selected_weapon)
-            if _wavg is not None:
-                _diff = _leth_g - _wavg
-                _leth_delta = _diff
-                # Only celebrate standout runs — well ABOVE the weapon's average.
-                # Below-average and near-average just show raw lethality (no
-                # calling people out for an off game).
-                if _diff >= getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0):
-                    _leth_line += f"  ·  {_diff:+.1f} vs {selected_weapon} avg"
+            _frac, _fn = await _db.get_weapon_lethality_percentile(selected_weapon, _leth_g)
+            if _frac is not None and _frac >= 0.60:
+                _top = max(1, round((1 - _frac) * 100))
+                _leth_line += f"  ·  top {_top}% on {selected_weapon}"
+                _leth_green_t = min(1.0, (_frac - 0.5) * 2)   # median = 0, best = full green
         except Exception as _le:
-            print(f"[LETHALITY] weapon-avg lookup failed: {_le}")
+            print(f"[LETHALITY] percentile lookup failed: {_le}")
         blurb_parts.append(_leth_line)
 
     # --- Lobby tilt: orientation-adjusted difficulty marker from banner totals ---
@@ -2817,12 +2813,11 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # when the blurb is edited (attachment:// thumbnails don't survive edits).
     _leth_thumb = None
     try:
-        _lmin = getattr(config, 'LETHALITY_BLURB_MIN_DELTA', 5.0)
         _stash_id = getattr(config, 'LETHALITY_STASH_CHANNEL_ID', 0)
-        if _leth_delta is not None and _leth_delta >= _lmin and _stash_id:
+        if _leth_green_t is not None and _stash_id:
             import utils.charts as _charts
             _lpng = await _charts.render_async(
-                _charts.render_lethality_charge, selected_weapon, _leth_delta)
+                _charts.render_lethality_charge, selected_weapon, intensity=_leth_green_t)
             if _lpng:
                 _stash_ch = (interaction.guild.get_channel(_stash_id)
                              or await interaction.client.fetch_channel(_stash_id))

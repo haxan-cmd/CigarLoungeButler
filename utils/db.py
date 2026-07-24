@@ -1360,6 +1360,28 @@ async def get_weapon_avg_lethality(weapon: str, min_runs: int = 15):
     return float(row['avg']), _n
 
 
+async def get_weapon_lethality_percentile(weapon: str, lethality: float, min_runs: int = 15):
+    """Fraction of this weapon's runs whose lethality is BELOW `lethality`, plus the
+    sample size. 0.86 means the run beats 86% of that weapon's runs (a top-14% game).
+    Returns (None, n) when the sample is too thin. Same filters as
+    get_weapon_avg_lethality so the two agree."""
+    if not weapon or str(weapon).strip() in ('', 'Hybrid', 'Multiple Weapons', 'Other'):
+        return None, 0
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE kills::numeric / NULLIF(takedowns,0) * 100 < $2) AS below, "
+            "       COUNT(*) AS n FROM submissions "
+            "WHERE weapon = $1 AND takedowns > 0 AND kills > 0 "
+            "  AND feats NOT ILIKE '%Resubmit%' AND feats NOT ILIKE '%Unlisted%'",
+            weapon, float(lethality))
+    _n = int(row['n']) if row and row['n'] is not None else 0
+    if _n < int(min_runs):
+        return None, _n
+    _below = int(row['below']) if row and row['below'] is not None else 0
+    return ((_below / _n) if _n else None), _n
+
+
 async def get_submissions_since(minutes: int = 60) -> list[list]:
     """Submissions logged in the last N minutes, newest first.
 
