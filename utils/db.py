@@ -1184,6 +1184,24 @@ _ADJ_TILT_SQL = ("(100.0 * (team_total_kills - enemy_total_kills)::numeric "
                  + _tilt_baseline_case_inline() + "))")
 
 
+def _valor_marks_case_sql(tilt_expr):
+    """CASE mapping an adjusted-tilt expression to the valor marks it pays, taken
+    straight from config.TILT_BANDS so it tracks any band retune. A run in the
+    hard tail (Slightly Uphill +1, Outmatched +2, Brutal +3) sums its marks; the
+    rest contribute 0."""
+    bands = sorted(getattr(config, 'TILT_BANDS', []), key=lambda b: b[0])  # ascending low edge
+    whens = []
+    for i, b in enumerate(bands):
+        marks = b[3]
+        upper = bands[i + 1][0] if i + 1 < len(bands) else None
+        if marks and marks > 0 and upper is not None:
+            whens.append(f"WHEN {tilt_expr} < {int(upper)} THEN {int(marks)}")
+    return ("CASE " + " ".join(whens) + " ELSE 0 END") if whens else "0"
+
+
+_VALOR_MARKS_SQL = _valor_marks_case_sql(_ADJ_TILT_SQL)
+
+
 # metric -> (SQL aggregate over the group, is_rate, unit, needs_min_sample).
 # Rate metrics get a HAVING floor so one lucky game can't top the chart.
 _EXPLORE_METRICS = {
@@ -1216,7 +1234,7 @@ _EXPLORE_METRICS = {
     # group tends to play HARDER lobbies. hard_carries counts Outmatched/Brutal
     # runs (adjusted tilt <= -30), carries against the odds.
     'avg_tilt':    (f"AVG({_ADJ_TILT_SQL})", True, "avg lobby tilt (adj)", True),
-    'hard_carries':(f"COUNT(*) FILTER (WHERE ({_ADJ_TILT_SQL}) <= -30)", False, "valor carries", False),
+    'valor_marks': (f"SUM({_VALOR_MARKS_SQL})", False, "valor marks", False),
 }
 
 

@@ -1318,7 +1318,7 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Best single run (TD)", value="best_td"),
             app_commands.Choice(name="Best single run (K)", value="best_kills"),
             app_commands.Choice(name="Avg lobby difficulty (tilt)", value="avg_tilt"),
-            app_commands.Choice(name="Valor Carries", value="hard_carries"),
+            app_commands.Choice(name="Valor Marks", value="valor_marks"),
         ],
         by=[
             app_commands.Choice(name="Weapon", value="weapon"),
@@ -1427,7 +1427,7 @@ class PersonalityCog(commands.Cog):
             _fmt = lambda v: f"{int(round(v)):,}"
             _unit = {"runs": "runs", "total_td": "takedowns", "total_kills": "kills",
                      "best_td": "takedowns", "best_kills": "kills",
-                     "hard_carries": "valor carries"}.get(_metric, "")
+                     "valor_marks": "valor marks"}.get(_metric, "")
 
         _pairs = [(r[0], r[1]) for r in rows]
         _samples = [r[2] for r in rows] if _is_rate else None
