@@ -1251,6 +1251,7 @@ _FEAT_STAT_CONDITION = {
 
 async def get_explore(metric: str, group_by: str, *, feat: str = None,
                       season_start=None, orientation: str = None,
+                      player_id: str = None, player_names: list = None,
                       min_runs: int = 3, limit: int = 12) -> list[list]:
     """General breakdown engine behind /explore.
 
@@ -1319,6 +1320,17 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         _oexpr, _oargs2, n2 = _orientation_sql(n + 1)
         args.extend(_oargs2); n = n2 - 1
         n += 1; args.append(orientation); where.append(f"({_oexpr}) = ${n}")
+    if player_id or player_names:
+        # Scope to one player: post-launch runs match by discord_id, legacy
+        # (blank-id) rows match by any known name/IGN. Qualify with s. because
+        # players is join-aliased pl and both carry discord_id/player_name.
+        _pc = []
+        if player_id:
+            n += 1; args.append(str(player_id)); _pc.append(f"s.discord_id = ${n}")
+        if player_names:
+            n += 1; args.append([str(x).lower() for x in player_names])
+            _pc.append(f"LOWER(s.player_name) = ANY(${n}::text[])")
+        where.append("(" + " OR ".join(_pc) + ")")
     if is_rate:
         where.append("takedowns > 0 AND kills > 0")
 
@@ -1342,7 +1354,8 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
 
 
 async def get_explore_by_feat(metric: str, *, feat_names: list,
-                              season_start=None, limit: int = 12) -> list[list]:
+                              season_start=None, player_id: str = None,
+                              player_names: list = None, limit: int = 12) -> list[list]:
     """group_by='feat': one bar per feat. A run carries several feats, so this
     counts each feat separately rather than grouping on a single column."""
     agg, _is_rate, _unit, _nm = _EXPLORE_METRICS.get(metric, (None,) * 4)
@@ -1353,6 +1366,14 @@ async def get_explore_by_feat(metric: str, *, feat_names: list,
     args, n = [], 0
     if season_start is not None:
         n += 1; args.append(season_start); base.append(f"submitted_at >= ${n}")
+    if player_id or player_names:
+        _pc = []
+        if player_id:
+            n += 1; args.append(str(player_id)); _pc.append(f"discord_id = ${n}")
+        if player_names:
+            n += 1; args.append([str(x).lower() for x in player_names])
+            _pc.append(f"LOWER(player_name) = ANY(${n}::text[])")
+        base.append("(" + " OR ".join(_pc) + ")")
     pool = _pool_check()
     out = []
     async with pool.acquire() as conn:

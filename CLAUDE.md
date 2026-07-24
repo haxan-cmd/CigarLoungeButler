@@ -16,12 +16,15 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `utils/helpers.py` | AI clients (OpenAI chat + Gemini vision), `butler_complete` (the single Butler chat call path), vision scorecard parser, nerve-centre logging/alerts, milestone detection, shared shutdown state. |
 | `utils/parsing.py` | Pure caption to (weapon, subclass) parser. Unit-tested. |
 | `utils/ranks.py` | Pure rank/title/Hundred-Handed math. Unit-tested. |
-| `cogs/submissions.py` | The submission pipeline: on_message trigger, vision, confirm UI views, finalise worker, reactions/blurb, background updates. Also the edit flow. |
-| `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, `/rank`, `/refresh*`, `/remove_board_score`. |
-| `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation, `/stats`, `/refresh_card`, legacy imports. |
+| `utils/tilt.py` | Pure lobby-difficulty ladder: raw kill gap to band to tiered valor marks. Single source for the difficulty label and the mark payout, so they cannot drift. Unit-tested. |
+| `utils/challenges.py` | Pure parser for bounty special-challenge strings. Unit-tested. |
+| `utils/charts.py` | Themed matplotlib charts, rendered off the event loop via `render_async`: tilt ladder, weapon-lethality charge, `/explore` breakdown and trend lines, macro season graphs. |
+| `cogs/submissions.py` | The submission pipeline: on_message trigger, vision, confirm UI views, finalise worker, reactions/blurb (incl. the lethality percentile and lobby-difficulty marker), background updates. Also the edit flow and the isolated Peasant Run flow. |
+| `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, the Peasant board, `/top`, `/refresh*`, `/remove_board_score`. |
+| `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation (incl. difficulty valor marks), `/playerstats`, `/refreshcard`, legacy imports. |
 | `cogs/bounty.py` | Monthly bounty: progress tracking, forum cards, completion, `/bounty_*` commands. |
-| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles, seasons/Hall of Fame, `/butlers_report`. |
-| `cogs/personality.py` | Butler AI chat (on_message), task loops (polls, digest, dry-spell, daily cycle), bounty channel placeholders. |
+| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles, seasons/Hall of Fame, `/report`, `/standings`, `/season`, `/titles`. |
+| `cogs/personality.py` | Butler AI chat (on_message, with lore injection), task loops (polls, digest, dry-spell, daily cycle), `/explore`, `/tilt_stats`, `/serverstats`, `/help`, bounty channel placeholders. |
 | `cogs/admin.py` | Mod tooling: `/remove_submission`, `/unlist_submission`, backups, rules posts, `/award_marks`, `/set_feat_count`. |
 | `cogs/kofi.py` | Ko-fi donations: webhook handler (route lives in bot.py), dashboard embed. |
 | `schema.sql` | Canonical table definitions. Post-launch columns/tables are added by `_ensure_schema` in db.py. |
@@ -42,9 +45,11 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 `utils/db.py` returns rows as lists of strings (a holdover from the Google
 Sheets era). Cogs index into them positionally. Key maps:
 
-- submissions: 0 submitted_at · 1 player_name · 2 discord_id · 3 weapon · 4 subclass · 5 map · 6 faction · 7 takedowns · 8 kills · 9 deaths · 10 vip("Yes"/"No") · 11 feats · 12 message_link · 13 lobby_rank · 14 lobby_size · 15 kills_rank · 16 team_rank · 17 team_size · 18 total_lobby_kills · 19 team_td_ratio · 20 team_kill_share · 21 team_td_share · 22 second_place_td · 23 id · 24 score
+- submissions: 0 submitted_at · 1 player_name · 2 discord_id · 3 weapon · 4 subclass · 5 map · 6 faction · 7 takedowns · 8 kills · 9 deaths · 10 vip("Yes"/"No") · 11 feats · 12 message_link · 13 lobby_rank · 14 lobby_size · 15 kills_rank · 16 team_rank · 17 team_size · 18 total_lobby_kills · 19 team_td_ratio · 20 team_kill_share · 21 team_td_share · 22 second_place_td · 23 id · 24 score · 25 team_total_kills · 26 enemy_total_kills
 - leaderboard_data: 0 board_name · 1 player_name · 2 discord_id · 3 score · 4 message_link · 5 weapon
 - players: 0 discord_id · 1 player_name · 2 forum_thread_id · 3 total_marks · 4 submission_count · 5 last_submission · 6 weapon_marks · 7 class_marks · 8-10 manual feat-count overrides (None = auto)
+- peasant_runs (own table, not leaderboard_data): player_name, discord_id, map, faction, score, takedowns, kills, deaths, message_link. One highscore row per player per map.
+- peasant_board (pointer, single row id=1): channel_id, message_id for the posted board message.
 
 ## Conventions and gotchas
 
@@ -83,6 +88,28 @@ Sheets era). Cogs index into them positionally. Key maps:
   passed to Gemini; new IGNs are auto-learned unless they belong to another player.
 - Registry cards are edited in place, never recreated. Thread IDs are
   referenced from blurbs and indexes.
+- Lobby difficulty: `utils/tilt.py` grades the raw kill gap (submissions
+  columns 25/26, `team_total_kills` vs `enemy_total_kills`, signed from the
+  player's OWN side, positive = your team outkilled them) into 7 bands. Graded
+  the same for attack and defence, no role correction: Chiv is imbalanced by
+  design, so we show the honest gap. The hard tail (your team outkilled) pays
+  tiered valor marks, Slightly Uphill +1 / Outmatched +2 / Brutal +3, written as
+  a tag (`Uphill`/`Outmatched`/`Brutal`) on the feats column so the mark math and
+  edits see it. `adjusted()` is a 0-baseline pass-through kept for option value.
+  `/tilt_stats` and `/explore` surface the distribution.
+- Peasant board: an isolated highscore board for the Coxwell / Bridgetown Agatha
+  peasant stage. It has its OWN tables (`peasant_runs` + the `peasant_board`
+  pointer) and its own submit flow, and is deliberately NOT a `leaderboard_data`
+  record, so generic board machinery never touches it. It bypasses weapon/class
+  marks entirely. `/setup_peasant_board` posts it in the current thread.
+- Weapon lethality: the blurb shows a green weapon-silhouette charge and a
+  "top X% on {weapon}" percentile (`get_weapon_lethality_percentile`). The
+  thumbnail PNG is uploaded to `LETHALITY_STASH_CHANNEL_ID` and referenced by its
+  URL, because attachment:// thumbnails detach into standalone images on an
+  edited blurb. Do NOT bulk-delete stash-channel images: it breaks old thumbnails.
+- Butler lore: `lore/chiv2_lore.md` holds the Chiv 2 faction and world lore; it is
+  injected into the Butler chat context on relevant keywords (`personality.py`
+  `_lore_context`), not held permanently in the system prompt.
 
 ## Environment variables
 
@@ -91,7 +118,8 @@ most features need it) · `OPENAI_API_KEY` (Butler chat, GPT-5.6 Luna; optional,
 quips fall back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback) ·
 `KOFI_TOKEN` (webhook verification; optional) · `EXPORT_TOKEN` (bearer token for
 the read-only `GET /export/submissions` cursor export; endpoint off when unset) ·
-`PORT` (healthcheck, default 8080).
+`LETHALITY_STASH_CHANNEL_ID` (channel that hosts the blurb lethality thumbnails;
+falls back to a hardcoded default) · `PORT` (healthcheck, default 8080).
 
 ## Deploy & ops
 
@@ -109,5 +137,7 @@ See `docs/TROUBLESHOOTING.md` for the symptom-to-fix table, and
 
 ## Writing style
 
-House rule, straight from the Butler's own system prompt: no em dashes. Use a
-comma, colon, or period. Applies to docs and comments too.
+House rule, straight from the Butler's own system prompt: no em dashes in the
+Butler's own generated output (chat replies, blurbs, quips). Use a comma, colon,
+or period. This rule is about the Butler's voice; existing code comments and
+docs are not held to it, so do not churn the codebase to strip them.

@@ -61,7 +61,7 @@
 - `/playerstats` — Your all-time profile: title, weapon ranks and marks.
 - `/season` — Your season GP: rank, where each point came from, and how far off the next scoring place.
 - `/serverstats` — Server activity dashboard over a window (24h / 7d / 30d): totals, top players and weapons, as a chart.
-- `/explore` — Any metric (runs, lethality, kill share, warlord, totals, best run) grouped any way (weapon, player, map, subclass, faction, feat), filtered by feat or season — as a chart.
+- `/explore` — Any metric (runs, lethality, kill share, warlord, totals, best run, lobby difficulty, valor marks) grouped any way (weapon, player, map, subclass, faction, side, week/month trend, feat), filtered by feat, season, or side, and optionally scoped to one `player` (their own weapon distribution, maps, etc.) — as a chart.
 - `/top` — Show the top 10 for a weapon or class board.
 - `/standings` — Live standings for the current season.
 - `/titles` — Board count + average placement for the all-time titles.

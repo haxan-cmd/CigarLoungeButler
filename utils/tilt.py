@@ -4,11 +4,13 @@ Single source of truth for the difficulty ladder so the submission blurb label
 and the mark payout can never drift apart. No side effects; unit-tested in
 tests/test_tilt.py.
 
-'Tilt' is the kill gap between the two banner totals, as a percent of the
-smaller team. 'Adjusted tilt' subtracts your role's baseline (attack runs are
-target-rich, defence runs are not), so difficulty reads as how far below your
-side's NORM the lobby was, not a blanket percentage. The hard (negative) tail
-pays valor marks; the easy tail is label-only.
+'Tilt' is the raw kill gap between the two banner totals, as a percent of the
+smaller team, signed from the submitting player's own side (positive = your
+team outkilled them). The ladder grades this raw gap the same for attack and
+defence: Chiv is imbalanced by design, so we show the honest gap rather than
+correcting for role. The role baseline is kept at 0 (adjusted == raw) so the
+plumbing stays in place if we ever revisit it. The hard (negative) tail pays
+valor marks; the easy tail is label-only.
 """
 import config
 

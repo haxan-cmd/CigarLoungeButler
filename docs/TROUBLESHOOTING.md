@@ -19,7 +19,7 @@ Symptom to fix, grouped by area. Full command list: [ADMIN_COMMANDS.md](../ADMIN
 
 | Symptom | Fix |
 |---|---|
-| A player's card is stale | `/refresh_card` (player) or `/create_card player:<name>` (mod) |
+| A player's card is stale | `/refreshcard` (player) or `/create_card player:<name>` (mod) |
 | ALL cards need a refresh (formula change) | `/bulk_refresh_cards`, slow by design |
 | Marks look wrong after mod changes | `/award_marks` to adjust; card refresh happens automatically |
 | Feat counts undercounted (legacy) | `/set_feat_count` sets a manual floor; auto-detection continues on top |

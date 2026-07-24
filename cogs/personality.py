@@ -1163,7 +1163,7 @@ class PersonalityCog(commands.Cog):
         lines += ["", _footer]
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="tilt_stats", description="The orientation-adjusted difficulty ladder across every logged game.")
+    @app_commands.command(name="tilt_stats", description="The lobby difficulty ladder (raw kill gap) across every logged game.")
     async def tilt_stats(self, interaction: discord.Interaction):
         await interaction.response.defer()
         try:
@@ -1175,8 +1175,8 @@ class PersonalityCog(commands.Cog):
             await interaction.followup.send("No games with team totals logged yet.")
             return
 
-        # Orientation-adjusted difficulty per lobby: subtract the role baseline,
-        # then band via the live config ladder (utils/tilt.py is the source).
+        # Difficulty per lobby: the raw kill gap, banded via the live config
+        # ladder (utils/tilt.py is the source; same grading for attack/defence).
         import utils.tilt as _tiltmod
         from collections import Counter
         cc = Counter()
@@ -1302,7 +1302,8 @@ class PersonalityCog(commands.Cog):
         metric="What to measure", by="Group the results by",
         feat="Only count runs with this feat (optional)",
         window="All-time or just this season",
-        side="Only count runs attacking, or defending (optional)")
+        side="Only count runs attacking, or defending (optional)",
+        player="Scope to one player: their weapon distribution, maps, etc. (optional)")
     @app_commands.choices(
         metric=[
             app_commands.Choice(name="Run count", value="runs"),
@@ -1355,10 +1356,32 @@ class PersonalityCog(commands.Cog):
                       metric: app_commands.Choice[str] = None,
                       feat: app_commands.Choice[str] = None,
                       window: app_commands.Choice[str] = None,
-                      side: app_commands.Choice[str] = None):
+                      side: app_commands.Choice[str] = None,
+                      player: discord.Member = None):
         await interaction.response.defer()
         _by = by.value if by else "weapon"
         _by_label = by.name if by else "Weapon"
+        # Per-player scope: pin one player, gather every name/IGN so legacy
+        # (blank discord_id) rows count too, and collapse a pointless self-
+        # grouping (by player when we already picked one player).
+        _pid = None; _pnames = None; _pscope_label = None; _prow = None
+        if player is not None:
+            _pid = str(player.id)
+            _names = {player.display_name}
+            try:
+                _prow = await _db.get_player(_pid)
+                if _prow and len(_prow) > 1 and _prow[1]:
+                    _names.add(_prow[1])
+                for _ign in (await _db.get_player_igns(_pid)) or []:
+                    if _ign and _ign.strip():
+                        _names.add(_ign)
+            except Exception as _pe:
+                print(f"[EXPLORE] player name lookup failed: {_pe}")
+            _pnames = list(_names)
+            _pscope_label = (_prow[1] if (_prow and len(_prow) > 1 and _prow[1])
+                             else player.display_name)
+            if _by == "player":
+                _by, _by_label = "weapon", "Weapon"
         _metric = metric.value if metric else "runs"
         _metric_label = metric.name if metric else "Run count"
         _feat = feat.value if feat else None
@@ -1387,20 +1410,30 @@ class PersonalityCog(commands.Cog):
         try:
             if _by == "feat":
                 rows = await _db.get_explore_by_feat(
-                    "runs", feat_names=_FEATS, season_start=_season_start, limit=12)
+                    "runs", feat_names=_FEATS, season_start=_season_start,
+                    player_id=_pid, player_names=_pnames, limit=12)
                 _metric, _metric_label = "runs", "Run count"
             else:
-                _tmin = 3 if _by in ("week", "month") else getattr(config, 'EXPLORE_MIN_RUNS', 8)
+                if _by in ("week", "month"):
+                    _tmin = 2 if _pid else 3
+                elif _pid:
+                    _tmin = 1   # one player rarely has 8 runs on a weapon; show them all
+                else:
+                    _tmin = getattr(config, 'EXPLORE_MIN_RUNS', 8)
                 _tlim = 20 if _by in ("week", "month") else 12
                 rows = await _db.get_explore(
                     _metric, _by, feat=_feat, season_start=_season_start,
-                    orientation=_side, min_runs=_tmin, limit=_tlim)
+                    orientation=_side, player_id=_pid, player_names=_pnames,
+                    min_runs=_tmin, limit=_tlim)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
 
         if not rows:
-            await interaction.followup.send("No runs match that view yet. Try a wider window or a different feat.")
+            _nomsg = (f"No runs logged for {_pscope_label} in that view yet."
+                      if _pscope_label else
+                      "No runs match that view yet. Try a wider window or a different feat.")
+            await interaction.followup.send(_nomsg)
             return
 
         # Value formatting + axis unit per metric.
@@ -1419,7 +1452,7 @@ class PersonalityCog(commands.Cog):
         elif _is_signed:
             if _metric == "avg_tilt":
                 _fmt = lambda v: f"{v:+.0f}%"
-                _unit = "avg lobby tilt (adjusted) — negative = harder"
+                _unit = "avg lobby tilt (raw kill gap) — negative = harder"
             else:
                 _fmt = lambda v: f"{v:+.1f}"      # +8.2 / -3.1
                 _unit = "points vs weapon average"
@@ -1432,7 +1465,8 @@ class PersonalityCog(commands.Cog):
         _pairs = [(r[0], r[1]) for r in rows]
         _samples = [r[2] for r in rows] if _is_rate else None
 
-        _title = f"{_metric_label} — by {_by_label}"
+        _title = (f"{_pscope_label} · {_metric_label} — by {_by_label}"
+                  if _pscope_label else f"{_metric_label} — by {_by_label}")
         _bits = []
         if _feat_label and _by != "feat":
             _bits.append(f"feat: {_feat_label}")
@@ -1440,8 +1474,8 @@ class PersonalityCog(commands.Cog):
             _bits.append(_side_label.lower())
         _bits.append(_win_label)
         _subtitle = " · ".join(_bits)
-        _min_runs = getattr(config, 'EXPLORE_MIN_RUNS', 8)
-        _footer = (f"min {_min_runs} runs per bar · {_win_label}" if _is_rate
+        _floor = locals().get('_tmin', getattr(config, 'EXPLORE_MIN_RUNS', 8))
+        _footer = (f"min {_floor} runs per bar · {_win_label}" if _is_rate
                    else f"{len(_pairs)} shown · {_win_label}")
 
         try:

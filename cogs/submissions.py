@@ -2497,11 +2497,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             print(f"[LETHALITY] percentile lookup failed: {_le}")
         blurb_parts.append(_leth_line)
 
-    # --- Lobby tilt: orientation-adjusted difficulty marker from banner totals ---
-    # Raw kill gap conflates lobby balance with your role (attack farms kills,
-    # defence doesn't), so we subtract the role baseline before banding. The blurb
-    # still shows the raw, verifiable gap; the label + valor come off the adjusted
-    # band. utils/tilt.py is the single source both this and the mark calc read.
+    # --- Lobby tilt: difficulty marker from the two banner totals ---
+    # The raw kill gap between the teams, signed from the player's own side.
+    # Graded the same for attack and defence (no role correction): Chiv is
+    # imbalanced by design, so we show the honest gap. The label + valor come
+    # off the band. utils/tilt.py is the single source both this and the mark
+    # calc read. (adjusted() is kept as a 0-baseline pass-through for now.)
     _tilt = None            # raw kill-gap %, shown in the blurb
     _tilt_band = None       # adjusted band dict: name / emoji / marks / tag
     _ett = vd.get('enemy_total_kills')
