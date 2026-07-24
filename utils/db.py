@@ -1158,6 +1158,32 @@ _BREAKDOWN_COLUMNS = {
 }
 
 
+def _tilt_baseline_case_inline():
+    """Inline CASE returning the role's tilt baseline (attack/defence) from
+    config.MAP_ATTACK_DEFENSE. Trusted config, never user input, safe to
+    interpolate. Used only inside the difficulty metric expressions."""
+    aw, dw = [], []
+    for _map, _pair in (getattr(config, 'MAP_ATTACK_DEFENSE', {}) or {}).items():
+        if not _pair or len(_pair) < 2:
+            continue
+        _m = str(_map).replace("'", "''")
+        _a = str(_pair[0]).replace("'", "''")
+        _d = str(_pair[1]).replace("'", "''")
+        aw.append(f"('{_m}','{_a}')")
+        dw.append(f"('{_m}','{_d}')")
+    _atk = int(getattr(config, 'TILT_BASELINE_ATTACK', 23))
+    _def = int(getattr(config, 'TILT_BASELINE_DEFENSE', 8))
+    a = ",".join(aw) or "(NULL,NULL)"
+    d = ",".join(dw) or "(NULL,NULL)"
+    return (f"CASE WHEN (map, faction) IN ({a}) THEN {_atk} "
+            f"WHEN (map, faction) IN ({d}) THEN {_def} ELSE 0 END")
+
+
+_ADJ_TILT_SQL = ("(100.0 * (team_total_kills - enemy_total_kills)::numeric "
+                 "/ NULLIF(LEAST(team_total_kills, enemy_total_kills), 0) - ("
+                 + _tilt_baseline_case_inline() + "))")
+
+
 # metric -> (SQL aggregate over the group, is_rate, unit, needs_min_sample).
 # Rate metrics get a HAVING floor so one lucky game can't top the chart.
 _EXPLORE_METRICS = {
@@ -1186,6 +1212,11 @@ _EXPLORE_METRICS = {
         True, "pts vs weapon avg", True),
     'best_td':     ("MAX(takedowns)",                                    False, "best TD", False),
     'best_kills':  ("MAX(kills)",                                        False, "best K", False),
+    # Difficulty (orientation-adjusted tilt). avg_tilt is signed: negative = the
+    # group tends to play HARDER lobbies. hard_carries counts Outmatched/Brutal
+    # runs (adjusted tilt <= -30), carries against the odds.
+    'avg_tilt':    (f"AVG({_ADJ_TILT_SQL})", True, "avg lobby tilt (adj)", True),
+    'hard_carries':(f"COUNT(*) FILTER (WHERE ({_ADJ_TILT_SQL}) <= -30)", False, "hard carries", False),
 }
 
 
@@ -1240,6 +1271,10 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         _group_expr = "COALESCE(NULLIF(s.discord_id, ''), 'name:' || LOWER(s.player_name))"
         _player_join = True
         where.append("COALESCE(s.player_name, '') <> ''")
+    elif group_by in ('week', 'month'):
+        _tr = 'week' if group_by == 'week' else 'month'
+        col = f"TO_CHAR(DATE_TRUNC('{_tr}', submitted_at), 'YYYY-MM-DD')"
+        where.append("submitted_at IS NOT NULL")
     else:
         col = _BREAKDOWN_COLUMNS.get(group_by)
         if not col:
@@ -1274,10 +1309,13 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
             f"SELECT {col} AS label, {agg} AS value, COUNT(*) AS n FROM {_from} "
             f"WHERE {' AND '.join(where)} "
             f"GROUP BY {_grp} {having} "
-            f"ORDER BY value DESC NULLS LAST, label ASC LIMIT ${n}",
+            f"ORDER BY {'label DESC' if group_by in ('week','month') else 'value DESC NULLS LAST, label ASC'} LIMIT ${n}",
             *args)
-    return [[r['label'], float(r['value']) if r['value'] is not None else 0.0,
+    _res = [[r['label'], float(r['value']) if r['value'] is not None else 0.0,
              int(r['n'])] for r in rows]
+    if group_by in ('week', 'month'):
+        _res.reverse()
+    return _res
 
 
 async def get_explore_by_feat(metric: str, *, feat_names: list,

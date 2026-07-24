@@ -1317,6 +1317,8 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Total kills", value="total_kills"),
             app_commands.Choice(name="Best single run (TD)", value="best_td"),
             app_commands.Choice(name="Best single run (K)", value="best_kills"),
+            app_commands.Choice(name="Avg lobby difficulty (tilt)", value="avg_tilt"),
+            app_commands.Choice(name="Hard-lobby carries", value="hard_carries"),
         ],
         by=[
             app_commands.Choice(name="Weapon", value="weapon"),
@@ -1325,6 +1327,8 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Subclass", value="subclass"),
             app_commands.Choice(name="Faction", value="faction"),
             app_commands.Choice(name="Attack / Defense", value="orientation"),
+            app_commands.Choice(name="Week (trend)", value="week"),
+            app_commands.Choice(name="Month (trend)", value="month"),
             app_commands.Choice(name="Feat", value="feat"),
         ],
         feat=[
@@ -1386,10 +1390,11 @@ class PersonalityCog(commands.Cog):
                     "runs", feat_names=_FEATS, season_start=_season_start, limit=12)
                 _metric, _metric_label = "runs", "Run count"
             else:
+                _tmin = 3 if _by in ("week", "month") else getattr(config, 'EXPLORE_MIN_RUNS', 8)
+                _tlim = 20 if _by in ("week", "month") else 12
                 rows = await _db.get_explore(
                     _metric, _by, feat=_feat, season_start=_season_start,
-                    orientation=_side,
-                    min_runs=getattr(config, 'EXPLORE_MIN_RUNS', 8), limit=12)
+                    orientation=_side, min_runs=_tmin, limit=_tlim)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
@@ -1401,7 +1406,7 @@ class PersonalityCog(commands.Cog):
         # Value formatting + axis unit per metric.
         _is_pct = _metric in ("lethality", "kill_share", "warlord")
         _is_avg = _metric in ("avg_td", "avg_kills")
-        _is_signed = _metric == "leth_vs_avg"
+        _is_signed = _metric in ("leth_vs_avg", "avg_tilt")
         _is_rate = _is_pct or _is_avg or _is_signed   # min-runs note + sample sizes
         if _is_pct:
             _fmt = lambda v: f"{v:.1f}%"
@@ -1412,12 +1417,17 @@ class PersonalityCog(commands.Cog):
             _unit = {"avg_td": "avg takedowns per run",
                      "avg_kills": "avg kills per run"}[_metric]
         elif _is_signed:
-            _fmt = lambda v: f"{v:+.1f}"      # +8.2 / -3.1
-            _unit = "points vs weapon average"
+            if _metric == "avg_tilt":
+                _fmt = lambda v: f"{v:+.0f}%"
+                _unit = "avg lobby tilt (adjusted) — negative = harder"
+            else:
+                _fmt = lambda v: f"{v:+.1f}"      # +8.2 / -3.1
+                _unit = "points vs weapon average"
         else:
             _fmt = lambda v: f"{int(round(v)):,}"
             _unit = {"runs": "runs", "total_td": "takedowns", "total_kills": "kills",
-                     "best_td": "takedowns", "best_kills": "kills"}.get(_metric, "")
+                     "best_td": "takedowns", "best_kills": "kills",
+                     "hard_carries": "hard-lobby carries"}.get(_metric, "")
 
         _pairs = [(r[0], r[1]) for r in rows]
         _samples = [r[2] for r in rows] if _is_rate else None
@@ -1436,11 +1446,18 @@ class PersonalityCog(commands.Cog):
 
         try:
             import utils.charts as _charts
-            _png = await _charts.render_async(
-                _charts.render_breakdown,
-                title=_title, subtitle=_subtitle, pairs=_pairs,
-                value_label=_unit, footer=_footer,
-                value_fmt=_fmt, samples=_samples)
+            if _by in ("week", "month"):
+                _png = await _charts.render_async(
+                    _charts.render_trend,
+                    title=_title, subtitle=_subtitle,
+                    labels=[p[0] for p in _pairs], values=[p[1] for p in _pairs],
+                    value_label=_unit, footer=_footer, value_fmt=_fmt, samples=_samples)
+            else:
+                _png = await _charts.render_async(
+                    _charts.render_breakdown,
+                    title=_title, subtitle=_subtitle, pairs=_pairs,
+                    value_label=_unit, footer=_footer,
+                    value_fmt=_fmt, samples=_samples)
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(_png), filename="explore.png"))
             return

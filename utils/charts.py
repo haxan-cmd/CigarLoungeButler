@@ -530,3 +530,46 @@ def render_lethality_charge(weapon, delta=0, dmax=15.0, intensity=None) -> bytes
     buf = _io.BytesIO()
     im.save(buf, format='PNG')
     return buf.getvalue()
+
+
+def render_trend(*, title, subtitle, labels, values, value_label, footer,
+                 value_fmt=None, samples=None) -> bytes:
+    """A single time-series line (for /explore grouped by week/month). Oldest ->
+    newest, left to right. BLOCKING: call via render_async."""
+    plt, fig = _new_figure((10, 5.4))
+
+    def _y(inches_from_top):
+        return 1.0 - (inches_from_top / 5.4)
+
+    fig.subplots_adjust(left=0.09, right=0.955, top=_y(1.05), bottom=0.19)
+    fig.text(0.055, _y(0.34), title, color=FG, fontsize=21, fontweight='bold', ha='left', va='center')
+    fig.text(0.055, _y(0.64), subtitle, color=MUT, fontsize=12.5, ha='left', va='center')
+    fig.add_artist(plt.Line2D([0.055, 0.955], [_y(0.84), _y(0.84)], color=GOLD, linewidth=1.4, alpha=0.55))
+    ax = fig.add_subplot(111)
+    _style_axis(ax, grid_axis='y')
+    if not labels:
+        ax.text(0.5, 0.5, 'no data', color=MUT, fontsize=12, ha='center', va='center')
+        ax.set_xticks([]); ax.set_yticks([])
+    else:
+        _fmt = value_fmt or (lambda v: str(int(round(v))))
+        x = list(range(len(labels)))
+        _lo = min(min(values), 0.0)
+        ax.fill_between(x, values, _lo, color=GOLD, alpha=0.08, zorder=1)
+        ax.plot(x, values, color=GOLD, linewidth=2.2, marker='o', markersize=5,
+                markerfacecolor=GOLD, markeredgecolor=BG, zorder=3)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, color=MUT, fontsize=8.5, rotation=45, ha='right')
+        _mx_i = max(x, key=lambda i: values[i])
+        for i in sorted({0, len(x) - 1, _mx_i}):
+            ax.annotate(_fmt(values[i]), (i, values[i]), textcoords="offset points",
+                        xytext=(0, 8), ha='center', color=FG, fontsize=9)
+        _hi = max(values); _span = (_hi - _lo) or 1
+        ax.set_ylim(_lo - _span * 0.08, _hi + _span * 0.20)
+        if _lo < 0 < _hi:
+            ax.axhline(0, color=MUT, linewidth=0.8, alpha=0.5)
+    ax.set_ylabel(value_label, color=MUT, fontsize=10.5, labelpad=8)
+    fig.text(0.955, _y(0.64), footer, color=MUT, fontsize=8.5, ha='right', va='center')
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    return buf.getvalue()
