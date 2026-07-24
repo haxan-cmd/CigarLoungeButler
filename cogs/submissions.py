@@ -2478,21 +2478,28 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
 
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
     # Pacifist runs are support play: a 0.0% Lethality line is noise, not a stat
-    _leth_green_t = None  # 0..1 weapon-charge intensity, from percentile above median
+    # Weapon-charge intensity: None = no icon (pacifist / no-lethality run),
+    # otherwise a value in [0, 1] that tints the weapon silhouette grey -> red by
+    # how far above the weapon average the run's lethality sits (red = lethal,
+    # matching the blood motif). At or below par it stays neutral grey, so every
+    # real lethality run gets at least the grey icon and the thumbnail is never blank.
+    _leth_green_t = None
     if (kills is not None and takedowns and takedowns > 0
             and not (kills == 0 and takedowns <= 10)):
         _leth_g = round(kills / takedowns * 100, 1)
         _leth_line = f"🩸 {_leth_g}% Lethality"
-        # Weapon-relative context: where this run ranks among all runs with the same
-        # weapon. "top X%" reads instantly where a raw "+N vs avg" doesn't. Only
-        # celebrate genuinely above-average runs (top 40%); thin-sample weapons and
-        # Hybrid return None. The same percentile drives the weapon-charge greenness.
+        _leth_green_t = 0.0   # neutral grey baseline; signed below once we have a percentile
+        # Weapon-relative context: where this run ranks among all runs with the
+        # same weapon. The icon colours grey -> red by percentile (above average);
+        # the "top X%" TEXT is reserved for genuinely strong runs (top 40%).
+        # Thin-sample weapons and Hybrid return None, so they stay neutral grey.
         try:
             _frac, _fn = await _db.get_weapon_lethality_percentile(selected_weapon, _leth_g)
-            if _frac is not None and _frac >= 0.60:
-                _top = max(1, round((1 - _frac) * 100))
-                _leth_line += f"  ·  top {_top}% on {selected_weapon}"
-                _leth_green_t = min(1.0, (_frac - 0.5) * 2)   # median = 0, best = full green
+            if _frac is not None:
+                _leth_green_t = max(0.0, min(1.0, (_frac - 0.5) * 2))  # grey at/below median, red above
+                if _frac >= 0.60:
+                    _top = max(1, round((1 - _frac) * 100))
+                    _leth_line += f"  ·  top {_top}% on {selected_weapon}"
         except Exception as _le:
             print(f"[LETHALITY] percentile lookup failed: {_le}")
         blurb_parts.append(_leth_line)
@@ -2816,17 +2823,25 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     try:
         _stash_id = getattr(config, 'LETHALITY_STASH_CHANNEL_ID', 0)
         if _leth_green_t is not None and _stash_id:
-            import utils.charts as _charts
-            _lpng = await _charts.render_async(
-                _charts.render_lethality_charge, selected_weapon, intensity=_leth_green_t)
-            if _lpng:
-                _stash_ch = (interaction.guild.get_channel(_stash_id)
-                             or await interaction.client.fetch_channel(_stash_id))
-                if _stash_ch:
-                    _smsg = await _stash_ch.send(
-                        file=discord.File(io.BytesIO(_lpng), filename="lethality.png"))
-                    if _smsg.attachments:
-                        _leth_thumb = _smsg.attachments[0].url
+            # The neutral-grey silhouette is identical every time, so stash one per
+            # weapon and reuse its URL rather than re-uploading it on every par run.
+            # Tinted (red) runs vary by intensity, so they render fresh.
+            _wkey = re.sub(r"[^a-z0-9]", "", (selected_weapon or "").lower())
+            _leth_thumb = _GREY_CHARGE_URLS.get(_wkey) if _leth_green_t == 0.0 else None
+            if not _leth_thumb:
+                import utils.charts as _charts
+                _lpng = await _charts.render_async(
+                    _charts.render_lethality_charge, selected_weapon, intensity=_leth_green_t)
+                if _lpng:
+                    _stash_ch = (interaction.guild.get_channel(_stash_id)
+                                 or await interaction.client.fetch_channel(_stash_id))
+                    if _stash_ch:
+                        _smsg = await _stash_ch.send(
+                            file=discord.File(io.BytesIO(_lpng), filename="lethality.png"))
+                        if _smsg.attachments:
+                            _leth_thumb = _smsg.attachments[0].url
+                            if _leth_green_t == 0.0 and _wkey:
+                                _GREY_CHARGE_URLS[_wkey] = _leth_thumb
     except Exception as _lce:
         print(f"[LETHALITY] charge stash failed: {_lce}")
     summary_reply = await original_message.reply(
@@ -3574,6 +3589,7 @@ _BG_SEMAPHORE = asyncio.Semaphore(_BG_LIMIT)
 _bg_task_refs: set = set()
 
 _active_vision: set[int] = set()  # prevents double-processing same message
+_GREY_CHARGE_URLS: dict[str, str] = {}  # weapon key -> stashed neutral-grey icon URL (reused)
 _queued_msgs: set[int] = set()  # prevents same message being finalised twice
 # Serializes board read-modify-writes across detached background tasks so two
 # concurrent submissions to the same board can't lose an update / dup.
