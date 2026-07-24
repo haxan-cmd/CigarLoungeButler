@@ -365,7 +365,7 @@ TILT_CARD_BADGES = ("Outmatched", "Brutal")
 # into one section per map, ranked by scoreboard SCORE (one row per player per
 # map, showing score / takedowns / kills).
 PEASANT_BOARD = "Peasant"
-PEASANT_EMOJI = "👨"   # 👨 default man
+PEASANT_EMOJI = "\U0001F3C3\u200D\u2642\uFE0F\u200D\u27A1\uFE0F"   # man running, facing right
 # Short map names (as stored) + faction where the peasant stage exists.
 PEASANT_MAP_FACTIONS = [("Coxwell", "Agatha"), ("Bridgetown", "Agatha")]
 PEASANT_MAPS = [m for m, _f in PEASANT_MAP_FACTIONS]

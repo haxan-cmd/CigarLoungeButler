@@ -3526,8 +3526,19 @@ class LeaderboardsCog(commands.Cog):
             pass
         try:
             emb = await _peasant_embed()
+            # Frame the board with the same decorative spacers as the other boards:
+            # top image above, the (editable) board embed, bottom image below. The
+            # spacers are posted once here; only the embed message is re-rendered.
+            try:
+                await interaction.channel.send(file=discord.File(DECORATION_TOP))
+            except Exception:
+                pass
             msg = await interaction.channel.send(embed=emb)
             await _db.set_peasant_board(interaction.channel_id, msg.id)
+            try:
+                await interaction.channel.send(file=discord.File(DECORATION_BOTTOM))
+            except Exception:
+                pass
         except Exception as e:
             await interaction.followup.send(f"❌ Couldn't post the board here: {e}", ephemeral=True)
             return

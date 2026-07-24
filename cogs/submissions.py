@@ -1000,7 +1000,7 @@ class ClassSelectView(discord.ui.View):
                 options.append(discord.SelectOption(
                     label="Peasant Run",
                     description="Coxwell/Bridgetown peasant highscore — own board",
-                    emoji="👨"))
+                    emoji="🏃"))
             self.add_item(ClassSelect(original_message, prompt_msg, category, classes, pre_detected_weapon, vision_data, options))
 
     @discord.ui.button(label="Search Class", style=discord.ButtonStyle.blurple, emoji="🔍", row=1)
