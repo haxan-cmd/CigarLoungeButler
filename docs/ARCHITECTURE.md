@@ -105,7 +105,16 @@ flowchart LR
 
 ## Pure logic and tests
 
-Rank / title / Hundred-Handed math lives in `utils/ranks.py` (no Discord or DB dependencies) so it can be imported and unit-tested in isolation. `tests/test_ranks.py` locks the tier boundaries, the Apex/Ascended/Legend caps, mastery vs virtuoso thresholds, and `HH_TOTAL == 46`. Run the suite with `pytest -q`.
+The load-bearing math lives in DB-free, Discord-free modules so it can be imported and unit-tested in isolation: `utils/ranks.py` (rank / title / Hundred-Handed math), `utils/tilt.py` (the lobby-difficulty ladder), `utils/parsing.py` (caption parsing), and `utils/challenges.py` (bounty special-challenge strings). `tests/test_ranks.py` locks the tier boundaries, the Apex/Ascended/Legend caps, mastery vs virtuoso thresholds, and `HH_TOTAL == 46`; `tests/test_tilt.py` locks the band boundaries and the tag-to-marks mapping the valor payout depends on. Run the suite with `pytest -q`.
+
+## Scoring and side systems
+
+Beyond the core mark/board pipeline, a few systems read the *lobby* rather than the individual, and each keeps its logic in one place so the number and the label cannot drift:
+
+- **Lobby difficulty** (`utils/tilt.py`) grades the raw kill gap between the two banner totals — signed from the submitting player's own side, so a stomp victim always reads negative — into seven bands. It is graded the same for attack and defence: Chiv is imbalanced by design, so the honest gap is shown rather than corrected for. The hard tail (your team outkilled) pays tiered **valor marks** (+1 / +2 / +3), written as a tag on the `feats` column so the mark math and the edit flow both see it.
+- **Weapon lethality** normalises kills-per-takedown against each weapon's own average, shown in the blurb as a green weapon-silhouette charge and a "top X%" percentile. The thumbnail is stashed in a channel and referenced by URL, because `attachment://` thumbnails detach on an edited message.
+- **The Peasant board** is a fully isolated highscore board for the Coxwell / Bridgetown Agatha peasant stage, with its own tables and submit flow (see structural rule 7).
+- **Butler lore** (`lore/chiv2_lore.md`) is injected into the chat context on relevant keywords rather than held permanently in the system prompt.
 
 ## Module ownership
 
@@ -115,10 +124,13 @@ One sentence per file. The full map with row shapes and conventions is in [CLAUD
 - `config.py`: every constant and ID; imports nothing from the project.
 - `utils/db.py`: the only Postgres surface. Pool, 5-second TTL read cache, targeted queries, and ALL schema/index DDL (startup-only).
 - `utils/helpers.py`: AI clients, the Gemini scorecard parser, nerve-centre alerting, and cross-module shared state (shutdown drain counter).
-- `cogs/submissions.py`: the per-run pipeline and edit flow. Owns `_BOARD_LOCK`, which serialises every board read-modify-write.
-- `cogs/leaderboards.py`: board rendering and mutation, indexes, ledger entrance, monthly/all-time boards.
-- `cogs/registry.py`: registry cards and mark math. Owns the registry-card lock.
-- `cogs/bounty.py`, `cogs/favourites.py`, `cogs/personality.py`, `cogs/admin.py`, `cogs/kofi.py`: bounty cycle, season board + title roles, Butler AI + task loops, mod tooling, donations.
+- `utils/parsing.py`, `utils/ranks.py`, `utils/tilt.py`, `utils/challenges.py`: the pure, DB-free logic modules — caption to (weapon, subclass) parsing, rank/title/Hundred-Handed math, the lobby-difficulty ladder, and bounty special-challenge parsing. All unit-tested.
+- `utils/charts.py`: themed matplotlib charts rendered off the event loop via `render_async` — the tilt ladder, the weapon-lethality charge, `/explore` breakdowns and trend lines, and the macro season graphs.
+- `cogs/submissions.py`: the per-run pipeline, the edit flow, and the isolated Peasant Run flow. Renders the blurb's lethality percentile and lobby-difficulty marker. Owns `_BOARD_LOCK`, which serialises every board read-modify-write.
+- `cogs/leaderboards.py`: board rendering and mutation, indexes, ledger entrance, monthly/all-time boards, and the isolated Peasant highscore board.
+- `cogs/registry.py`: registry cards and mark math (including difficulty valor marks). Owns the registry-card lock.
+- `cogs/personality.py`: Butler AI + task loops, lore injection, and the stats commands (`/explore`, `/tilt_stats`, `/serverstats`, `/help`).
+- `cogs/bounty.py`, `cogs/favourites.py`, `cogs/admin.py`, `cogs/kofi.py`: bounty cycle, season board + title roles, mod tooling, donations.
 
 ## Structural rules
 
@@ -128,3 +140,4 @@ One sentence per file. The full map with row shapes and conventions is in [CLAUD
 4. **DB timestamps are naive UTC** (`TIMESTAMP` columns; asyncpg rejects tz-aware values).
 5. **The `feats` column doubles as a tag bag**: `Resubmit` (excluded from weekly stats/bounty/ratings) and `Unlisted` (excluded from every board, record, rebuild, and rating; marks and bounty still count). Any new "exclude this run from X" behaviour should be a tag here, checked in the same four places those two are.
 6. **The healthcheck is load-bearing**: `GET /` returns 503 once the gateway is dead (after first ready), which is what lets Railway auto-restart a zombied process. Don't make it unconditionally return 200.
+7. **The Peasant board stays isolated.** It has its own tables (`peasant_runs` + the `peasant_board` pointer) and its own submit flow, and is deliberately *not* a `leaderboard_data` record — that is what keeps the generic board machinery (marks, rebuilds, indexes, ratings) from ever touching it. Don't fold it back into the shared board tables.
