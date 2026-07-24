@@ -1043,8 +1043,8 @@ async def _peasant_embed():
                              f"{r.get('deaths') or 0} D")
             val = "\n".join(lines)
         else:
-            # Empty state: the row template with placeholder slots.
-            val = "`1.` `———` — **—**  ·  — TD  ·  — K  ·  — D"
+            # Empty state: a clean column legend, no placeholder dashes.
+            val = "*Score · TD · K · D*"
         emb.add_field(name=f"{mp} · Agatha", value=val[:1024], inline=False)
     return emb
 
