@@ -1327,6 +1327,7 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Subclass", value="subclass"),
             app_commands.Choice(name="Faction", value="faction"),
             app_commands.Choice(name="Attack / Defense", value="orientation"),
+            app_commands.Choice(name="Side (map + faction)", value="side"),
             app_commands.Choice(name="Week (trend)", value="week"),
             app_commands.Choice(name="Month (trend)", value="month"),
             app_commands.Choice(name="Feat", value="feat"),

@@ -1289,6 +1289,11 @@ async def get_explore(metric: str, group_by: str, *, feat: str = None,
         _group_expr = "COALESCE(NULLIF(s.discord_id, ''), 'name:' || LOWER(s.player_name))"
         _player_join = True
         where.append("COALESCE(s.player_name, '') <> ''")
+    elif group_by == 'side':
+        # A "side" is the specific map + faction, e.g. "Coxwell · Mason" — the real
+        # unit that gets stomped or dominates, not a whole faction.
+        col = "map || ' · ' || faction"
+        where.append("COALESCE(map, '') <> '' AND COALESCE(faction, '') <> ''")
     elif group_by in ('week', 'month'):
         _tr = 'week' if group_by == 'week' else 'month'
         col = f"TO_CHAR(DATE_TRUNC('{_tr}', submitted_at), 'YYYY-MM-DD')"
