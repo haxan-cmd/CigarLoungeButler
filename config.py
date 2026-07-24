@@ -332,15 +332,16 @@ LOBBY_TILT_STOMP        = 75    # percent
 LOBBY_TILT_LEAN         = 18    # percent
 STOMP_STICKER_NAME      = "traininggrounds"
 
-# --- Orientation-adjusted difficulty ladder ------------------------------------
-# Raw tilt (above) conflates lobby balance with your ROLE: a big game is far
-# easier on attack (target-rich) than defence, so 67% of posted 100-TD runs are
-# attackers and they sit at a +23% median gap vs +8% for defenders. We subtract
-# your role's baseline first: "adjusted tilt" = raw kill gap minus the median a
-# posted run shows on that side. Difficulty then reads as how far BELOW your
-# side's norm the lobby was. Calibrated on 292 logged games (2026-07-23).
-TILT_BASELINE_ATTACK  = 23    # median kill-gap % of a posted attack run
-TILT_BASELINE_DEFENSE = 8     # ... and of a posted defence run
+# --- Lobby difficulty ladder ---------------------------------------------------
+# Difficulty is the RAW kill gap between the two banner totals, treated the same
+# for attack and defence. We tried role baselines (attack +23%, defence +8%) to
+# correct for attack being target-rich, but it produced fake "Outmatched" reads
+# (a −5% attacker got graded as −28%), and a real correction would have to be
+# per-map. Chiv's attack/defence imbalance is a known constant, so we just show
+# the honest kill gap. Baselines kept at 0 so the whole pipeline stays flat; set
+# them non-zero again only if a per-side model is ever built.
+TILT_BASELINE_ATTACK  = 0
+TILT_BASELINE_DEFENSE = 0
 
 # 7-band ladder on ADJUSTED tilt, hardest -> easiest. Each row:
 #   (low_edge_inclusive, name, emoji, bonus_marks, feat_tag)

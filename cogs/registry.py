@@ -1080,14 +1080,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
     _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link)
-    # Difficulty badges (Outmatched / Brutal hard carries) sit in the same section.
-    _dbadges = (lobby_stats or {}).get('difficulty') or {}
-    _dline = "  ".join(f"{_be} x{_dbadges[_bt]}" for _bt, _be in _tiltmod.card_badges() if _dbadges.get(_bt))
-    if _fol_lines or _dline:
+    if _fol_lines:
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
-        if _dline:
-            lines.append(f"\u2022 {_dline} \u2014 Outmatched odds")
         lines.append("")
 
     if best_placements:
@@ -2758,12 +2753,6 @@ class RegistryCog(commands.Cog):
         avg_td = round(sum(td_list) / len(td_list)) if td_list else 0
         avg_k = round(sum(kill_list) / len(kill_list)) if kill_list else 0
         kill_rate = round(avg_k / avg_td * 100) if avg_td else 0
-        _diff_badges = []
-        for _btag, _bemoji in _tiltmod.card_badges():
-            _bn = sum(1 for r in player_subs if len(r) > 11
-                      and _btag in [f.strip() for f in (r[11] or '').split(',')])
-            if _bn:
-                _diff_badges.append(f"{_bemoji} x{_bn}")
         tuff_count = sum(1 for ld_r in ld_all
                          if len(ld_r) > 1 and ld_r[0].strip() == 'TUFF'
                          and ld_r[1].strip() == resolved_name)
@@ -2819,8 +2808,6 @@ class RegistryCog(commands.Cog):
             record_lines.append(f"│ 📊 avg {avg_td} TD / {avg_k} K per run ({kill_rate}% kill rate)")
         if tuff_count:
             record_lines.append(f"│ <a:TUFF2:1520779243879927898> {tuff_count} TUFF entr{'y' if tuff_count == 1 else 'ies'}")
-        if _diff_badges:
-            record_lines.append("│ " + "  ".join(_diff_badges) + " Outmatched odds")
         if counting_line:
             record_lines.append(f"│ {counting_line}")
         if record_lines:

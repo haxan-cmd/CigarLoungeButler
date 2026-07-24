@@ -87,26 +87,20 @@ def build_challenge_rules_embeds():
     e = discord.Embed(
         title="⚖️  Lobby Difficulty",
         description=(
-            "Every submission is graded by the kill gap between the two teams, read "
-            "from the scoreboard banners relative to the smaller side. A big game is "
-            "far easier on attack (target-rich) than on defence, so we subtract your "
-            "role's baseline first: the grade reflects how hard YOUR lobby was, not "
-            "just which side you were on. The marker shows on your blurb, and the hard "
-            "tail pays valor marks."
+            "Every submission is graded by the raw kill gap between the two teams, "
+            "read from the scoreboard banners relative to the smaller side, the same "
+            "for attack and defence. The marker shows on your blurb, and the hard tail "
+            "(your team getting outkilled) pays valor marks."
         ),
         colour=C("#992d2d"),
     )
-    e.add_field(name="The ladder (adjusted gap vs your role's norm)", value=(
+    e.add_field(name="The ladder (kill gap)", value=(
         "🔴 **Brutal** (≤ −40%) — pays **+3 marks**. Valor.\n"
         "🟠 **Outmatched** (−40 to −22%) — pays **+2 marks**.\n"
         "🟠 **Slightly Uphill** (−22 to −10%) — pays **+1 mark**.\n"
-        "🟡 **Even** (−10 to +10%) — a typical game for your side. No marks.\n"
-        "🟢 **Slightly Favoured / Favoured** (+10 to +40%) — ahead of your norm.\n"
+        "🟡 **Even** (−10 to +10%) — a close game. No marks.\n"
+        "🟢 **Slightly Favoured / Favoured** (+10 to +40%) — your team ahead on kills.\n"
         "🍼 **Training Grounds** (≥ +40%) — a runaway. The playpen. Mockery, no marks."
-    ), inline=False)
-    e.add_field(name="Hard carries", value=(
-        "Outmatched and Brutal runs stack on your registry card as counting badges "
-        "(🟠 xN · 🔴 xN) — a tally of the lobbies you carried against the odds."
     ), inline=False)
     embeds.append(e)
 

@@ -437,7 +437,7 @@ def render_tilt_curve(*, tilts, lean, stomp, n_games) -> bytes:
 
 
 def render_tilt_ladder(*, counts, n_games) -> bytes:
-    """The orientation-adjusted difficulty ladder as horizontal bars, one per
+    """The difficulty ladder (raw kill gap) as horizontal bars, one per
     config.TILT_BANDS row, hardest at top. `counts` is {band_name: n}. Bands that
     pay valor marks are annotated. BLOCKING: call via render_async."""
     import io as _io
@@ -456,7 +456,7 @@ def render_tilt_ladder(*, counts, n_games) -> bytes:
         ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va)
 
     _t(5, 94, 'Difficulty ladder', size=23, color=GOLD, weight='bold')
-    _t(5, 88.8, f'{n_games} games, tilt centred on your role. Hard tail pays valor marks.',
+    _t(5, 88.8, f'{n_games} games, raw kill gap between the two teams. Hard tail pays valor marks.',
        size=11.5, color=MUT)
     maxp = max([100.0 * counts.get(nm, 0) / n for (_lo, nm, _e, _m, _tg) in rows] + [1.0])
     x0, xw = 40.0, 40.0

@@ -72,8 +72,8 @@ Your server knowledge:
 - The lounge has a counting channel. You track its stats: current run, the record, lifetime counts, who counts most, and who breaks it (the Idiot role goes to breakers). When counting stats appear in your context, use the real numbers — the record of shame is prime roasting material.
 
 How the systems work (answer players' questions about these accurately and specifically):
-- Weapon marks: 1 mark per valid 100-takedown submission. Bonus marks: +1 for 200 takedowns, +1 for 100 kills, +1 for a Triple (150 TD, 100 kills, and 20,000 points), +1 for a leaderboard High Score (beating your own best on any board), +1 to +3 for a hard lobby, graded on the kill gap adjusted for your role (attack farms kills, defence does not): Slightly Uphill +1, Outmatched +2, Brutal +3. Valor pay.
-- Lobby difficulty: every run is graded on the kill gap between the two teams, adjusted for your role. A big lead is easy on attack (target-rich) and hard on defence, so your side's normal is subtracted first: the grade is how far the lobby sat above or below your role's usual. Bands hardest to easiest: Brutal, Outmatched, Slightly Uphill, Even, Slightly Favoured, Favoured, Training Grounds. The hard tail pays the valor marks above; Training Grounds is a runaway that earns nothing but a baby bottle. Outmatched and Brutal runs stack as counting badges (orange and red circles) on the registry card, a tally of lobbies carried against the odds. /tilt_stats shows the whole distribution.
+- Weapon marks: 1 mark per valid 100-takedown submission. Bonus marks: +1 for 200 takedowns, +1 for 100 kills, +1 for a Triple (150 TD, 100 kills, and 20,000 points), +1 for a leaderboard High Score (beating your own best on any board), +1 to +3 for a hard lobby, graded on the raw kill gap between the two teams (same for attack and defence): Slightly Uphill +1, Outmatched +2, Brutal +3. Valor pay, only when your team was outkilled.
+- Lobby difficulty: every run is graded on the kill gap between the two teams, the same for attack and defence (Chiv's attack/defence imbalance is shown, not corrected for). Bands hardest to easiest: Brutal, Outmatched, Slightly Uphill, Even, Slightly Favoured, Favoured, Training Grounds. The hard tail pays the valor marks above; Training Grounds is a runaway that earns nothing but a baby bottle. /tilt_stats shows the whole distribution.
 - Weapon-relative lethality: a run's blurb compares its lethality (kills per takedown) against that weapon's community average, since some weapons finish and others only poke. Beating the weapon's average lights it green on the blurb, greener the further above.
 - Weapon ranks (marks per weapon): Bronze 1, Silver 5, Gold 12, Emerald 25, Diamond 40, Crimson 60, then Prestige Bronze 80, Prestige Silver 100, Prestige Gold 115, Prestige Emerald 125, Prestige Diamond 133, Prestige Crimson 141, and Iridescent 150 (the top rank).
 - Mastery: 100 qualifying runs with a weapon makes it Mastered, 250 makes it Virtuoso. Counts across every class that wields the weapon.
@@ -1192,8 +1192,7 @@ class PersonalityCog(commands.Cog):
             _png = await _charts.render_async(
                 _charts.render_tilt_ladder, counts=dict(cc), n_games=_N)
             await interaction.followup.send(
-                content=f"**Difficulty ladder** · {_N} games · role-adjusted (attack "
-                        f"{config.TILT_BASELINE_ATTACK}% / defence {config.TILT_BASELINE_DEFENSE}% baseline)",
+                content=f"**Difficulty ladder** · {_N} games · raw kill gap (same for attack and defence)",
                 file=discord.File(io.BytesIO(_png), filename="tilt.png"))
             return
         except Exception as _ce:
@@ -2114,8 +2113,8 @@ class PersonalityCog(commands.Cog):
                                 if _dc['Outmatched'] or _dc['Brutal'] or _dc['Uphill']:
                                     player_stats_ctx += (
                                         f"\n(Background info, do not quote verbatim.) Hard-lobby carries, "
-                                        f"strong games logged while their side was being outkilled (adjusted "
-                                        f"for role, genuinely hard and worth crediting): "
+                                        f"strong games logged while their side was being outkilled "
+                                        f"(genuinely hard, worth crediting): "
                                         f"{_dc['Brutal']} Brutal, {_dc['Outmatched']} Outmatched, "
                                         f"{_dc['Uphill']} Slightly Uphill.")
                                 else:

@@ -40,15 +40,16 @@ def test_raw_tilt():
     assert tilt.raw_tilt(500, None) is None
 
 
-def test_adjusted_centres_on_role():
-    # A defender at raw +8% sits exactly on the defence baseline -> adjusted 0.
-    assert tilt.adjusted(8, "Escape from Falmire", "Mason") == 0
-    # An attacker at raw +23% sits on the attack baseline -> adjusted 0.
-    assert tilt.adjusted(23, "Escape from Falmire", "Agatha") == 0
-    # Defender rolled at raw -30% -> adjusted -38% (harder than raw implies).
-    assert tilt.adjusted(-30, "Escape from Falmire", "Mason") == -38
-    # Unknown orientation: no adjustment.
+def test_adjusted_is_flat_across_roles():
+    # Baselines are flattened to 0, so adjusted tilt == raw for both sides and
+    # the same raw gap grades identically on attack and defence (Chiv's imbalance
+    # is shown, not corrected for).
+    assert tilt.adjusted(8, "Escape from Falmire", "Mason") == 8
+    assert tilt.adjusted(23, "Escape from Falmire", "Agatha") == 23
+    assert tilt.adjusted(-30, "Escape from Falmire", "Mason") == -30
     assert tilt.adjusted(-30, "Mystery Map", "Mason") == -30
+    assert (tilt.adjusted(-5, "Escape from Falmire", "Agatha")
+            == tilt.adjusted(-5, "Escape from Falmire", "Mason") == -5)
 
 
 def test_band_boundaries_and_tags():
