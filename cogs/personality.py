@@ -522,7 +522,12 @@ async def _linkify_reply(text, guild):
         for nm, tid, flags in targets:
             if linked >= _max_links:
                 break
-            pat = re.compile(r'(?<![\[\w`])' + re.escape(nm) + r'(?![\w\]`])', flags)
+            # Apostrophe-agnostic: the model often writes a curly ' where the board
+            # name has a straight ' (or vice versa). Without this, "Executioner's Axe"
+            # fails to match and the linker falls through to the sub-word "Axe",
+            # linking it to the wrong board.
+            _nm_pat = re.sub(r"['‘’ʼ]", "['‘’ʼ]", re.escape(nm))
+            pat = re.compile(r'(?<![\[\w`])' + _nm_pat + r'(?![\w\]`])', flags)
             pos = 0
             while True:
                 m = pat.search(out, pos)
