@@ -2000,6 +2000,42 @@ async def get_hundred_handed_progress(discord_id: str) -> list:
     return [(r['subclass'], r['weapon']) for r in rows]
 
 
+async def get_hh_done_combos(discord_id, player_name: str = None) -> set:
+    """Completed Hundred-Handed (subclass, weapon) PRIMARY combos for a player,
+    sourced from the SAME data the registry card shows: a submission with 100+
+    takedowns on that primary combo, OR a legacy per-weapon mark. This is the
+    authoritative source and cannot drift from the card the way the standalone
+    hundred_handed table did (which never read legacy marks)."""
+    from utils.ranks import HH_PRIMARIES
+    required = {(sc, w) for sc, ws in HH_PRIMARIES.items() for w in ws}
+    did = str(discord_id)
+    done = set()
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT subclass, weapon FROM submissions "
+            "WHERE discord_id = $1 AND takedowns >= 100", did)
+    for r in rows:
+        key = ((r['subclass'] or '').strip(), (r['weapon'] or '').strip())
+        if key in required:
+            done.add(key)
+    # Legacy imported history (keyed by weapon + subclass). Matches by stamped
+    # discord_id or by name, so it catches pre-bot completions the table missed.
+    try:
+        for row in await get_legacy_marks_for_player(player_name or '', did):
+            _w = (row[1] or '').strip() if len(row) > 1 else ''
+            _sc = (row[2] or '').strip() if len(row) > 2 else ''
+            try:
+                _m = int(row[3]) if len(row) > 3 and row[3] else 0
+            except (ValueError, TypeError):
+                _m = 0
+            if _m >= 1 and (_sc, _w) in required:
+                done.add((_sc, _w))
+    except Exception as _hhe:
+        print(f"[HH] legacy-mark merge failed for {did}: {_hhe}")
+    return done
+
+
 async def get_all_hundred_handed() -> list:
     """Return all (discord_id, player_name, subclass, weapon) rows across every player."""
     pool = _pool_check()

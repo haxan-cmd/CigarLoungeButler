@@ -461,8 +461,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
     # Check for Hundred-Handed — one submission per (subclass, weapon) pair for all non-archer subclasses
     try:
         from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-        hh_progress = await _db.get_hundred_handed_progress(discord_id_str)
-        _hh_done = {(r[0], r[1]) for r in hh_progress}
+        _hh_done = await _db.get_hh_done_combos(discord_id_str)
         _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
         # Progress counts only the required PRIMARY (subclass, weapon) slots — the
         # table can hold secondary-weapon combos too, which don't count toward /46.
@@ -2692,8 +2691,7 @@ class RegistryCog(commands.Cog):
         # ── Hundred Handed progress ──────────────────────────────────────
         try:
             from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-            _hh_rows = await _db.get_hundred_handed_progress(discord_id_str)
-            _hh_done = {(r[0], r[1]) for r in _hh_rows}
+            _hh_done = await _db.get_hh_done_combos(discord_id_str)
             _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
             hh_count = len(_hh_done & _hh_required)
             hh_complete = hh_count >= HH_TOTAL

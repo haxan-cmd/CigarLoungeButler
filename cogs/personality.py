@@ -2250,9 +2250,11 @@ class PersonalityCog(commands.Cog):
                             # i.e. out of 46, not the all-weapons CLASS_WEAPON_MAP count).
                             try:
                                 from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-                                _hh_done = {(r[0], r[1]) for r in await _db.get_hundred_handed_progress(discord_id_str)}
                                 _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
-                                _hh_matched = len(_hh_done & _hh_required)
+                                # Source completion from the SAME data as the card (100+ TD runs +
+                                # legacy marks) so the Butler can never disagree with a player's card.
+                                _hh_done = await _db.get_hh_done_combos(discord_id_str, player_name) & _hh_required
+                                _hh_matched = len(_hh_done)
                                 if _hh_required and _hh_required.issubset(_hh_done):
                                     hh_str = f"Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) — a 100-takedown run with every primary weapon on every non-archer subclass."
                                 else:
