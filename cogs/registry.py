@@ -515,6 +515,12 @@ async def get_feats_for_player(discord_id, cached_data=None):
             if len(row) < 5 or row[2].strip() != discord_id_str:
                 continue
             lb_name = row[0].strip()
+            if lb_name == 'TUFF':
+                # TUFF is a margin board, not a per-run screenshot feat, so tally its
+                # entries for the card badge but keep it out of the per-run feat emoji
+                # groups (feat_submissions).
+                board_counts['TUFF'] = board_counts.get('TUFF', 0) + 1
+                continue
             if lb_name in FEAT_BOARD_EMOJIS:
                 board_counts[lb_name] = board_counts.get(lb_name, 0) + 1
                 link = row[4].strip() if len(row) > 4 else ''
@@ -763,12 +769,11 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
         pos = next((i + 1 for i, s in enumerate(scores) if s <= player_score), len(scores))
         is_map = ' - ' in lb_name
         emoji = _FEAT_BOARD_EMOJI.get(lb_name) or ('🏆' if is_map else '<:weapon_hs:1350656128635375698>')
-        # TUFF is a margin board — its scores ARE the "+N" the board shows, so mirror
-        # the player's score. Other boards show the lead over the next player at #1.
+        # "Best Placements" shows your rank and, at #1, the lead over the next
+        # player. This applies to TUFF too: the card shows how far ahead of #2 you
+        # are, not your raw carry margin (that lives on the TUFF board and blurb).
         gap = None
-        if lb_name == "TUFF":
-            gap = player_score
-        elif pos == 1 and len(scores) >= 2:
+        if pos == 1 and len(scores) >= 2:
             gap = player_score - scores[1]
         placements.append((pos, lb_name, emoji, gap))
 
@@ -905,7 +910,7 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
     first one found in submission order."""
     import re
     lines = []
-    if not (named_feats or feat_submissions):
+    if not (named_feats or feat_submissions or (board_counts or {}).get('TUFF')):
         return lines
     if 'hhanded' in named_feats:
         lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
@@ -997,6 +1002,7 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         ('200 Takedowns', FEAT_EMOJIS['200 Takedowns']),
         ('100 Kills',     FEAT_EMOJIS['100 Kills']),
         ('Triple',        FEAT_EMOJIS['Triple']),
+        ('TUFF',          "<a:TUFF2:1520779243879927898>"),
     ]
     for _fb_label, _fb_emoji in _fallback_feats:
         if _fb_label in _rendered_labels:
@@ -2753,9 +2759,6 @@ class RegistryCog(commands.Cog):
         avg_td = round(sum(td_list) / len(td_list)) if td_list else 0
         avg_k = round(sum(kill_list) / len(kill_list)) if kill_list else 0
         kill_rate = round(avg_k / avg_td * 100) if avg_td else 0
-        tuff_count = sum(1 for ld_r in ld_all
-                         if len(ld_r) > 1 and ld_r[0].strip() == 'TUFF'
-                         and ld_r[1].strip() == resolved_name)
         season_line = None
         try:
             _season = await _db.get_current_season()
@@ -2806,8 +2809,6 @@ class RegistryCog(commands.Cog):
             record_lines.append(f"│ 🏁 {season_line}")
         if td_list:
             record_lines.append(f"│ 📊 avg {avg_td} TD / {avg_k} K per run ({kill_rate}% kill rate)")
-        if tuff_count:
-            record_lines.append(f"│ <a:TUFF2:1520779243879927898> {tuff_count} TUFF entr{'y' if tuff_count == 1 else 'ies'}")
         if counting_line:
             record_lines.append(f"│ {counting_line}")
         if record_lines:
