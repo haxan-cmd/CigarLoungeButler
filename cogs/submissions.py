@@ -960,14 +960,12 @@ class ClassSearchModal(discord.ui.Modal, title="Class Search"):
             vd = {**self.vision_data, 'subclass': selected_class}
             if selected_class == "Hybrid":
                 vd['subclass'] = "Hybrid"
-                view = MapSelectView(self.original_message, self.prompt_msg, "Hybrid", "Hybrid", vision_data=vd)
-                await interaction.response.edit_message(
-                    content="Class: `Hybrid` (weapon swap). Which map?", view=view)
+                await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                                      "Hybrid", "Hybrid", vd)
                 return
             if self.pre_detected_weapon:
-                view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
-                await interaction.response.edit_message(
-                    content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?", view=view)
+                await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                                      selected_class, self.pre_detected_weapon, vd)
             else:
                 weapons = get_all_weapons_for_class(selected_class)
                 view = WeaponSelectView(self.original_message, self.prompt_msg, selected_class, weapons,
@@ -1037,11 +1035,11 @@ class ClassSelect(discord.ui.Select):
         vd = {**self.vision_data, 'subclass': selected_class}
         if selected_class == "Hybrid":
             # No weapon to pick — a Hybrid run isn't tied to one. Store weapon and
-            # subclass both as "Hybrid" and go straight to the map.
+            # subclass both as "Hybrid", then let _proceed_weapon skip any map/
+            # faction vision already read instead of re-prompting for it.
             vd['subclass'] = "Hybrid"
-            view = MapSelectView(self.original_message, self.prompt_msg, "Hybrid", "Hybrid", vision_data=vd)
-            await interaction.response.edit_message(
-                content="Class: `Hybrid` (weapon swap). Which map?", view=view)
+            await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                                  "Hybrid", "Hybrid", vd)
             return
         if selected_class == "Peasant Run":
             # Own isolated path: restricted map, no weapon, no marks. See _finalise_peasant.
@@ -1050,9 +1048,11 @@ class ClassSelect(discord.ui.Select):
                 content="Peasant Run (Agatha peasant highscore). Which map?", view=view)
             return
         if self.pre_detected_weapon:
-            view = MapSelectView(self.original_message, self.prompt_msg, selected_class, self.pre_detected_weapon, vision_data=vd)
-            await interaction.response.edit_message(
-                content=f"Class: `{selected_class}` | Weapon: `{self.pre_detected_weapon}`. Which map?", view=view)
+            # Vision already had the weapon (it just missed the class), so route
+            # through the shared step: a map/faction vision already read is used,
+            # not re-prompted. Only genuinely missing fields get asked for.
+            await _proceed_weapon(interaction, self.original_message, self.prompt_msg,
+                                  selected_class, self.pre_detected_weapon, vd)
         else:
             if selected_class == "Archer":
                 view = MarksmanSubclassView(self.original_message, self.prompt_msg, vision_data=vd)
