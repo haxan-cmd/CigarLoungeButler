@@ -2269,7 +2269,12 @@ class PersonalityCog(commands.Cog):
                                         hh_str += (f" Still missing ({len(_hh_missing)}) by subclass: {_miss_str}. "
                                                    "[If the player asks what they are missing, YOU HAVE the exact gaps: list them as a bullet "
                                                    "list grouped by subclass, one bullet per subclass with its missing weapons after it. Do NOT "
-                                                   "defer to /progress, and do not truncate the list.]")
+                                                   "defer to /progress, and do not truncate the list. IMPORTANT: Hundred-Handed counts ONLY each "
+                                                   "subclass PRIMARY weapons, never secondaries. A weapon can be a primary on one subclass and only a "
+                                                   "secondary sidearm on others, and secondary use never counts. Cudgel and Short Sword, for instance, "
+                                                   "are primaries only on Ambusher, so having swung them as a sidearm elsewhere earns nothing here. If "
+                                                   "the player protests they already did a weapon, note dryly that they used it as a secondary or on "
+                                                   "another subclass, and the listed subclass still owes the primary run.]")
                                 player_stats_ctx += f"\n{hh_str}"
                             except Exception as _e:
                                 print(f"[BUTLER] ctx hundred-handed error: {_e}")
