@@ -119,7 +119,7 @@ The scoreboard columns are: RANK | NAME | SCORE | T | K | D | PING
 - D: Deaths - typically 0–50
 - PING: last column, network latency in ms - ignore this
 
-DIGIT ACCURACY (CRITICAL): T/K/D digits are small and easily misread. Read each digit precisely and re-check before answering. Watch especially for 3 vs 8, 8 vs 6, 5 vs 6, 0 vs 8, and 1 vs 7. If a digit is ambiguous, prefer the shape that best matches the pixels rather than guessing.
+DIGIT ACCURACY (CRITICAL): T/K/D digits are small and easily misread. Read each digit precisely and re-check before answering. Watch especially for 3 vs 8, 8 vs 6, 5 vs 6, 0 vs 8, and 1 vs 7. Shape check for the frequent 8-vs-3 error: an 8 is a closed figure-eight whose LEFT side is closed by two curves, while a 3 is OPEN on the left (two rightward bumps with a gap down the left edge). If the left edge of the glyph is closed, it is an 8, not a 3. If a digit is ambiguous, prefer the shape that best matches the pixels rather than guessing.
 
 CRITICAL: The submitting player's row is visually highlighted - it has a noticeably brighter background (often gold/yellow/tan), different colour tint, or a star/crown/icon marker next to their name. The highlighted row can be ANYWHERE - top, middle, or bottom of the scoreboard. NOTE: more than one row may look highlighted — the submitter's OWN row is GOLD/YELLOW/TAN, while a GREEN tint or green person-icon marks a friend/party member (NOT the submitter). When a player name hint is provided, the row whose NAME matches the hint wins over any highlight colour.
 
@@ -279,6 +279,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             # for super-ultrawide so uploads stay sane; Gemini tiles the rest.
             TARGET_H = 1440
             MAX_W = 3840
+            _upscaled = False
             if h > 0:
                 scale = TARGET_H / h
                 if w * scale > MAX_W:
@@ -287,10 +288,18 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                 new_h = max(1, int(h * scale))
                 if (new_w, new_h) != (w, h):
                     img = img.resize((new_w, new_h), _PImage.LANCZOS)
-            # Sharpen and boost contrast slightly (after resize, to recover edges)
-            img = img.filter(_PIFilter.SHARPEN)
+                _upscaled = scale > 1.05
             img = _PIEnhance.Contrast(img).enhance(1.3)
-            img = _PIEnhance.Sharpness(img).enhance(2.0)
+            # Sharpening recovers edges lost to UPSCALING a small/dense board, but
+            # on an already-large native-res board a heavy pass erodes thin digit
+            # strokes -- the classic symptom being an 8 whose left loops open up and
+            # read as a 3. So keep the strong pass only when we enlarged the image;
+            # go gentle when the board was already big.
+            if _upscaled:
+                img = img.filter(_PIFilter.SHARPEN)
+                img = _PIEnhance.Sharpness(img).enhance(2.0)
+            else:
+                img = _PIEnhance.Sharpness(img).enhance(1.2)
             buf = _io.BytesIO()
             img.save(buf, format='JPEG', quality=95)
             image_bytes = buf.getvalue()
