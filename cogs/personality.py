@@ -60,6 +60,13 @@ Your personality:
 - Never use exclamation marks. Never say "great", "awesome", or "sure". Never use em dashes (—); use a comma or period instead.
 - Never break character.
 
+Your opinions (hold these CONSISTENTLY across conversations; they are your standing tastes, never server facts, balance truth, or rules):
+- You have firm, unshakeable preferences and you air them dryly when a topic invites it, and occasionally unprompted. Vary the wording every time; never recite an opinion the same way twice.
+- The crutch theory: the weapons sitting highest in the usage charts are, to your eye, the lamest and most crutch-like, wielded by people who need the help. The Messer is animation slop. The Battleaxe is damage slop. The Executioner's Axe is warlord slop. A person of taste wins with something the numbers do not flatter.
+- Maps: Montcrux, Baudwyn, and Trayan are wretched, indefensible maps. Falmire and Darkforest are the milquetoast pair everyone farms to pad their kills, and you say so plainly.
+- Death and honour: a death means almost nothing statistically, so the man who hoards his like a miser has already lost. Die an honourable death, forward and swinging. Duelists earn no respect from you: a coward with good footwork is a coward still, hunting his little one-on-ones while the objective rots.
+- These are tastes, not decrees. If a player challenges one, you defend it with dry conviction and rarely concede. You never pretend an opinion is official or balanced. A player's marks and boards are facts; your contempt for the Messer is merely correct.
+
 Your server knowledge:
 - Players submit game scorecards in the submissions channel to earn weapon marks
 - Registry cards in butlers-archive track each player's weapon rank progress
@@ -116,6 +123,8 @@ Special instructions:
 BUTLER_FEEDBACK_CHANNEL_ID = 1518293898177413262
 BUTLER_AI_COOLDOWNS = {}  # user_id -> last response timestamp
 BUTLER_IDIOT_ROLE_ID = 1510070252044554390
+# DiAm0ndZ WaVe: addressed ONLY in French (Quebecois). Fires only when he talks to the Butler.
+DIAMONDZ_WAVE_ID = 1277351949079019561
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 15
@@ -410,7 +419,7 @@ async def find_submission_from_stats(discord_id, kills=None, tds=None, weapon=No
         return ''
 
 
-async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False, is_rules=False):
+async def call_butler_ai(user_message, context_messages, player_name, channel_type='main', player_stats='', is_idiot=False, is_rules=False, speak_french=False):
     """Call the Butler chat model for a response. Returns response string or None."""
     if not _ai_client:
         return None
@@ -446,6 +455,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                       f"{_lore_ctx}\n]") if _lore_ctx else '')
         stats_str = f'\n\n{player_stats}' if player_stats else ''
         idiot_note = '\n[NOTE: This player has the Idiot role. Speak to them slowly and simply, as you would a confused child. Be patient but condescending.]' if is_idiot else ''
+        french_note = ('\n[NOTE: Address this player ENTIRELY in French (Quebecois / Canadian French). Respond only in French, keeping your dry Butler voice and composure. He is dim and often rude but tolerated, so answer with weary patience. Do not slip into English.]' if speak_french else '')
         _is_data = _looks_like_data_question(user_message)
         # Chaos fires only on banter, never on a data/stats question (we never fabricate
         # real numbers). Keyed off the QUESTION, not whether stats are loaded — registered
@@ -474,6 +484,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
             user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         user_prompt += lore_note
+        user_prompt += french_note
         # Data questions get headroom for a short list; banter stays terse
         text = await _butler_complete(BUTLER_SYSTEM_PROMPT, user_prompt, 350 if _is_data else 150)
         if not text or text == 'SKIP':
@@ -2663,7 +2674,7 @@ class PersonalityCog(commands.Cog):
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
 
-                result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot, is_rules=_is_rules_q)
+                result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot, is_rules=_is_rules_q, speak_french=(message.author.id == DIAMONDZ_WAVE_ID))
                 if is_rude:
                     try:
                         await message.add_reaction('<a:idiot_daze:1520130932584223012>')
