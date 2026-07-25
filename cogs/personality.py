@@ -2257,6 +2257,19 @@ class PersonalityCog(commands.Cog):
                                     hh_str = f"Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) — a 100-takedown run with every primary weapon on every non-archer subclass."
                                 else:
                                     hh_str = f"Hundred-Handed progress: {_hh_matched}/{HH_TOTAL} (needs a 100-takedown run with each primary weapon on each non-archer subclass)."
+                                    # When they ask about Hundred-Handed / what they are missing, hand the
+                                    # Butler the EXACT gaps (grouped by subclass, <=9 groups) so it can bullet
+                                    # them out instead of deferring to /progress.
+                                    if ('hundred' in content_lower or 'handed' in content_lower or 'missing' in content_lower):
+                                        _hh_missing = _hh_required - _hh_done
+                                        _by_sub = {}
+                                        for _sc, _w in sorted(_hh_missing):
+                                            _by_sub.setdefault(_sc, []).append(_w)
+                                        _miss_str = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by_sub.items()))
+                                        hh_str += (f" Still missing ({len(_hh_missing)}) by subclass: {_miss_str}. "
+                                                   "[If the player asks what they are missing, YOU HAVE the exact gaps: list them as a bullet "
+                                                   "list grouped by subclass, one bullet per subclass with its missing weapons after it. Do NOT "
+                                                   "defer to /progress, and do not truncate the list.]")
                                 player_stats_ctx += f"\n{hh_str}"
                             except Exception as _e:
                                 print(f"[BUTLER] ctx hundred-handed error: {_e}")
