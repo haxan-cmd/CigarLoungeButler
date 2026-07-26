@@ -677,6 +677,19 @@ async def _reframe_thread(guild, thread, ordered_boards):
     except Exception as e:
         print(f"[REFRAME] wipe error in #{thread.id}: {e}")
     n = len(ordered_boards)
+    # Related links go on the LAST board (bottom of the thread), computed from the
+    # thread's PRIMARY board (the weapon TD board, or a map faction).
+    _rel = None
+    try:
+        _recs = await _get_lb_records()
+        _names = {r['Leaderboard Name'] for r in _recs}
+        _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+        _primary = next((b for b in ordered_boards if not _is_kills_board(b)),
+                        ordered_boards[0] if ordered_boards else None)
+        if _primary:
+            _rel = _related_boards_field(_primary, _names, _tby)
+    except Exception as _rle:
+        print(f"[REFRAME] related-links error: {_rle}")
     for idx, lb_name in enumerate(ordered_boards):
         try:
             entries = await get_leaderboard_entries(lb_name)
@@ -692,6 +705,8 @@ async def _reframe_thread(guild, thread, ordered_boards):
                     embeds[-1].set_image(url=None)
                 except Exception:
                     pass
+            if idx == n - 1 and _rel and embeds:
+                embeds[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
             # Only the FIRST board gets a TOP; each board's BOTTOM is the divider
             # to the next, so stacked boards don't show a BOTTOM+TOP pair.
             if idx == 0:
@@ -977,9 +992,21 @@ def _related_boards_field(lb_name, board_names, thread_by_name):
     """(field_name, value) linking the other weapon boards that share a subclass
     with this weapon, or None. Weapon boards only: map boards stack every faction
     in one thread, so a cross-link there points nowhere useful. Uses config.GUILD_ID."""
-    if " - " in lb_name:   # map board ("{Map} - {Faction}") -> skip
-        return None
     gid = getattr(config, "GUILD_ID", 0)
+    # Map board -> link the OTHER maps (one entry per map thread).
+    if " - " in lb_name and lb_name.split(" - ")[0] in getattr(config, "MAP_ATTACK_DEFENSE", {}):
+        my_map = lb_name.split(" - ")[0]
+        seen = {}
+        for nm in board_names:
+            if " - " in nm and nm.split(" - ")[0] in config.MAP_ATTACK_DEFENSE:
+                mp = nm.split(" - ")[0]
+                _tid = (thread_by_name.get(nm) or "").strip()
+                if mp != my_map and mp not in seen and _tid:
+                    seen[mp] = _tid
+        _mlinks = [f"[{mp}](https://discord.com/channels/{gid}/{_t})" for mp, _t in sorted(seen.items())]
+        return ("Related Maps", " · ".join(_mlinks[:12])) if _mlinks else None
+    if " - " in lb_name:   # any other " - " board -> no siblings
+        return None
     sp = getattr(config, "_SUBCLASS_PRIMARIES", {})
     sibs = set()
     for _sc, ws in sp.items():
@@ -1710,18 +1737,6 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
     # _sync_board_messages sees the attachment:// marker and uploads the file.
-    # Cross-links to sibling boards (same-class weapons / other-faction map),
-    # appended to the last embed. Not on kills boards (they sit under the TD board).
-    try:
-        if _embs and not _is_kills_board(lb_name):
-            _recs = await _get_lb_records()
-            _names = {r['Leaderboard Name'] for r in _recs}
-            _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
-            _rel = _related_boards_field(lb_name, _names, _tby)
-            if _rel:
-                _embs[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
-    except Exception as _rle:
-        print(f"[BOARD] related-links error for {lb_name}: {_rle}")
     if _embs and _is_kills_board(lb_name):
         _embs[-1].set_image(url=f"attachment://{os.path.basename(DECORATION_BOTTOM)}")
     return _embs
@@ -1757,12 +1772,9 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
         _kse = te.get('Lethality', '🧪')
         tail.add_field(name=f"{_kse} Kill Share",
                        value=_fld(kill_share_rows, lambda s: f"{s:.0f}%"), inline=False)
-    _min_txt = f"{rating_min}+ games"
     tail.add_field(
         name="\u200b",
-        value=(f"*These rank everyone with {_min_txt} — separate from the board "
-               "above, so you don't need to be in its top 10. Your score is the best "
-               "5-games-in-a-row average you've posted, and it never drops.*"),
+        value="*Best 5-game average \u2014 a separate ranking from the board above, and it never drops.*",
         inline=False,
     )
 
