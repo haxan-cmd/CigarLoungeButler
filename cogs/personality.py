@@ -511,18 +511,21 @@ async def _linkify_reply(text, guild):
         gid = guild.id
         # Board threads (case-insensitive match, original casing kept as label).
         # Paths are "thread/first_message" so the link lands ON the board embed.
-        from cogs.leaderboards import _get_lb_records, _board_jump_path
+        from cogs.leaderboards import _get_lb_records, _board_jump_path, _FEAT_BOARD_NAMES
         targets = []
         for r in await _get_lb_records():
-            nm, tid = r['Leaderboard Name'], str(r.get('Thread ID') or '').strip()
-            if tid and len(nm) >= 3:
-                targets.append((nm, _board_jump_path(r), re.IGNORECASE))
+            nm = r['Leaderboard Name']
+            raw_tid = str(r.get('Thread ID') or '').strip()
+            if raw_tid and len(nm) >= 3:
+                # Feat boards render as a native channel chip (<#id>); every other
+                # board keeps a masked link so the sentence's own wording is the label.
+                targets.append((nm, _board_jump_path(r), re.IGNORECASE, nm in _FEAT_BOARD_NAMES, raw_tid))
         # Player registry cards (case-sensitive to avoid false hits on short names)
         for p in await _db.get_all_players():
             nm = (p[1] or '').strip()
             tid = (p[2] or '').strip()
             if nm and tid and len(nm) >= 3:
-                targets.append((nm, tid, 0))
+                targets.append((nm, tid, 0, False, tid))
         targets.sort(key=lambda t: -len(t[0]))
         spans = []  # regions occupied by links we've inserted
 
@@ -530,7 +533,7 @@ async def _linkify_reply(text, guild):
             return any(not (b <= s or a >= e) for s, e in spans)
 
         _max_links = getattr(config, 'BUTLER_MAX_LINKS', 5)
-        for nm, tid, flags in targets:
+        for nm, tid, flags, is_feat, raw_tid in targets:
             if linked >= _max_links:
                 break
             # Apostrophe-agnostic: the model often writes a curly ' where the board
@@ -553,7 +556,10 @@ async def _linkify_reply(text, guild):
                         or out.rfind('](', 0, s) > out.rfind(')', 0, s)):
                     pos = e
                     continue
-                repl = f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
+                if is_feat:
+                    repl = f"<#{raw_tid}>"
+                else:
+                    repl = f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
                 out = out[:s] + repl + out[e:]
                 delta = len(repl) - (e - s)
                 spans = [(a if a < s else a + delta, b if b <= s else b + delta)
