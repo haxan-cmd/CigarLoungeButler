@@ -4429,19 +4429,15 @@ async def refresh_hundred_handed_board(guild):
     except Exception as _hpe:
         print(f"[HUNDRED_HANDED] progress query failed: {_hpe}")
         progress = []
+    # Only true completers (46/46). In-progress is deliberately omitted: some legacy
+    # completers are not fully reflected in marks yet, so a partial count would wrongly
+    # show a finished player as unfinished.
     completers = [nm for did, nm, c in progress if c >= HH_TOTAL and nm]
-    inprog = [(nm, c) for did, nm, c in progress if 0 < c < HH_TOTAL and nm]
-    lines = []
     if completers:
-        for i, nm in enumerate(completers, 1):
-            lines.append(f"│ {i}. `{nm}` — {_hh_emoji} {HH_TOTAL}/{HH_TOTAL} \u2713")
-    if inprog:
-        if completers:
-            lines.append("")
-        lines.append("**In progress**")
-        for nm, c in inprog[:10]:
-            lines.append(f"│ `{nm}` — {c}/{HH_TOTAL}")
-    desc = "\n".join(lines) if lines else "*No progress yet.*"
+        desc = "\n".join(f"│ {i}. `{nm}` — {_hh_emoji} {HH_TOTAL}/{HH_TOTAL} \u2713"
+                         for i, nm in enumerate(completers, 1))
+    else:
+        desc = "*No completions yet.*"
 
     embed = discord.Embed(title=_hh_emoji, description=desc, colour=EMBED_GOLD)
     embed.set_footer(text="Last updated")
