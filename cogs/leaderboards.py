@@ -739,6 +739,8 @@ def _embed_sig(e):
 async def _thread_needs_reframe(guild, thread, recs, ordered_boards):
     """True if the live messages differ from the target build (entries, layout,
     thumbnail, related) or any tracked message is missing. False = already correct."""
+    if any(b in _SPECIAL_BOARD_NAMES for b in ordered_boards):
+        return True   # delegate to the special renderer via _reframe_thread
     try:
         targets = dict(await _build_board_embeds(guild, ordered_boards))
     except Exception:
@@ -767,6 +769,18 @@ async def _reframe_thread(guild, thread, ordered_boards):
     then reposts each board as its own frame: [TOP png][embed(s), title inside]
     [BOTTOM png]. Nav buttons ride only the FINAL bottom. ordered_boards is the
     list of lb_names in display order. Paced to stay under rate limits."""
+    # Special boards own their thread and are drawn by their own renderer. Delegate
+    # them and DO NOT wipe the thread on their behalf (that would delete the real
+    # board). If the thread is only special boards, we are done after delegating.
+    _special = [b for b in ordered_boards if b in _SPECIAL_BOARD_NAMES]
+    for b in _special:
+        try:
+            await _render_special_board(guild, b)
+        except Exception as _spe:
+            print(f"[REFRAME] special board {b} error: {_spe}")
+    ordered_boards = [b for b in ordered_boards if b not in _SPECIAL_BOARD_NAMES]
+    if not ordered_boards:
+        return
     me = guild.me.id if guild.me else None
     try:
         async for m in thread.history(limit=400, oldest_first=True):
@@ -1009,6 +1023,23 @@ _FEAT_BOARD_NAMES = {
     "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
+
+
+# Boards with a dedicated renderer that OWNS its whole forum post. Generic reframe/
+# refresh must DELEGATE to these, never draw a generic (empty) board over them — that
+# was painting "Titles board - Takedowns / No entries yet" over the real All-Time
+# Titles board (and would clobber the Hundred Handed board the same way). Each lives
+# alone in its own thread.
+_SPECIAL_BOARD_NAMES = {"The Hundred Handed", "Titles board"}
+
+
+async def _render_special_board(guild, lb_name):
+    """Draw a special board via its own renderer (never the generic path)."""
+    if lb_name == "The Hundred Handed":
+        await refresh_hundred_handed_board(guild)
+    elif lb_name == "Titles board":
+        from cogs.favourites import refresh_all_time_titles_board
+        await refresh_all_time_titles_board(guild)
 
 
 def _board_jump_path(rec):
@@ -2730,9 +2761,9 @@ class LeaderboardsCog(commands.Cog):
         await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
 
         for lb_name in names_to_refresh:
-            if lb_name == "The Hundred Handed":
-                # HH has its own renderer (matched-46 completers) — not the generic score board
-                await refresh_hundred_handed_board(interaction.guild)
+            if lb_name in _SPECIAL_BOARD_NAMES:
+                # Own renderer (HH completers / All-Time Titles) — not the generic board
+                await _render_special_board(interaction.guild, lb_name)
                 continue
             lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
             if not lb_row:

@@ -1147,10 +1147,23 @@ async def refresh_all_time_titles_board(guild):
         stats = await calculate_butler_stats()  # all-time, no window
         embed = render_all_time_titles_embed(stats)
         ch = guild.get_channel(int(ch_id)) or await guild.fetch_channel(int(ch_id))
-        msg = await ch.fetch_message(int(msg_id))
-        await msg.edit(content="", embed=embed)
     except Exception as e:
         print(f"[TITLES_BOARD] refresh failed: {e}")
+        return
+    try:
+        msg = await ch.fetch_message(int(msg_id))
+        await msg.edit(content="", embed=embed)
+    except Exception:
+        # Tracked message is gone (e.g. an old generic reframe wiped the thread).
+        # Self-heal: repost the framed board and re-point the pointer.
+        try:
+            from cogs.leaderboards import DECORATION_TOP as _DTOP, DECORATION_BOTTOM as _DBOT
+            await ch.send(file=discord.File(_DTOP))
+            msg = await ch.send(embed=embed)
+            await ch.send(file=discord.File(_DBOT))
+            await _db.set_titles_board(str(ch_id), str(msg.id))
+        except Exception as e2:
+            print(f"[TITLES_BOARD] repost failed: {e2}")
 
 
 class FavouritesCog(commands.Cog):
