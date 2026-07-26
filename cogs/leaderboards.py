@@ -921,6 +921,39 @@ def _classify_board(name, board_type):
     return 'weapon'
 
 
+def _related_boards_field(lb_name, board_names, thread_by_name):
+    """(field_name, value) of sibling-board links for a board embed, or None.
+    Weapon boards link the other weapons that share a subclass (same class); map
+    boards link the other faction of the same map, but only when it is genuinely a
+    separate thread. Uses config.GUILD_ID so no guild object is needed."""
+    gid = getattr(config, "GUILD_ID", 0)
+    def _link(nm):
+        tid = (thread_by_name.get(nm) or "").strip()
+        return f"[{nm}](https://discord.com/channels/{gid}/{tid})" if tid else None
+    # Map board: "{Map} - {Faction}" -> other faction of the SAME map (diff thread)
+    if " - " in lb_name and lb_name.split(" - ")[0] in getattr(config, "MAP_ATTACK_DEFENSE", {}):
+        base = lb_name.split(" - ")[0]
+        my_tid = (thread_by_name.get(lb_name) or "").strip()
+        sibs = [nm for nm in board_names
+                if nm != lb_name and " - " in nm and nm.split(" - ")[0] == base
+                and (thread_by_name.get(nm) or "").strip()
+                and (thread_by_name.get(nm) or "").strip() != my_tid]
+        links = [l for l in (_link(s) for s in sorted(sibs)) if l]
+        return ("🗺️ Other side", " · ".join(links)) if links else None
+    # Weapon board: weapons that share a subclass with this one (primary role).
+    sp = getattr(config, "_SUBCLASS_PRIMARIES", {})
+    sibs = set()
+    for _sc, ws in sp.items():
+        if lb_name in ws:
+            sibs.update(ws)
+    sibs.discard(lb_name)
+    sibs = [w for w in sibs if w in board_names]
+    if not sibs:
+        return None
+    links = [l for l in (_link(w) for w in sorted(sibs)) if l]
+    return ("⚔️ Same class", " · ".join(links[:10])) if links else None
+
+
 def _safe_int(v, default=0):
     try:
         return int(str(v).strip())
@@ -1623,6 +1656,18 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
     # _sync_board_messages sees the attachment:// marker and uploads the file.
+    # Cross-links to sibling boards (same-class weapons / other-faction map),
+    # appended to the last embed. Not on kills boards (they sit under the TD board).
+    try:
+        if _embs and not _is_kills_board(lb_name):
+            _recs = await _get_lb_records()
+            _names = {r['Leaderboard Name'] for r in _recs}
+            _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+            _rel = _related_boards_field(lb_name, _names, _tby)
+            if _rel:
+                _embs[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
+    except Exception as _rle:
+        print(f"[BOARD] related-links error for {lb_name}: {_rle}")
     if _embs and _is_kills_board(lb_name):
         _embs[-1].set_image(url=f"attachment://{os.path.basename(DECORATION_BOTTOM)}")
     return _embs
