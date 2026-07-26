@@ -3653,6 +3653,43 @@ class LeaderboardsCog(commands.Cog):
             f"({len(knames)} weapon threads). New submissions update them automatically.",
             ephemeral=True)
 
+    @app_commands.command(name="delete_board", description="Delete a stray leaderboard board + its thread (mod only). Preview first.")
+    @app_commands.describe(board="Exact board name to delete (e.g. 'Titles board')",
+                           confirm="Leave false to PREVIEW. Set true to actually delete the board + thread.")
+    async def delete_board_cmd(self, interaction: discord.Interaction, board: str, confirm: bool = False):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        board = board.strip()
+        rec = next((r for r in await _get_lb_records()
+                    if (r.get('Leaderboard Name') or '').strip().lower() == board.lower()), None)
+        if not rec:
+            await interaction.followup.send(f"No board named **{board}** found.", ephemeral=True)
+            return
+        _tid = str(rec.get('Thread ID') or '').strip()
+        if not confirm:
+            await interaction.followup.send(
+                f"**Preview** — would delete the board record **{board}**"
+                + (f" and its thread <#{_tid}>" if _tid else "")
+                + ".\nRun again with `confirm: True` to apply.", ephemeral=True)
+            return
+        try:
+            await _db.delete_leaderboard(board)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Record delete failed: {e}", ephemeral=True)
+            return
+        _note = ""
+        if _tid:
+            try:
+                _th = interaction.guild.get_channel(int(_tid)) or await interaction.guild.fetch_channel(int(_tid))
+                if _th:
+                    await _th.delete()
+                    _note = " and deleted its thread"
+            except Exception as e:
+                _note = f" (thread not deleted: {e})"
+        await interaction.followup.send(f"\u2705 Removed the **{board}** board{_note}.", ephemeral=True)
+
     @app_commands.command(name="remove_board_score", description="Remove a player's entry from a board (mod only).")
     @app_commands.describe(board="Exact board name (e.g. Battle Axe)",
                            player="Player name exactly as shown on the board (or an @mention)",
