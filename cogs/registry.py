@@ -905,7 +905,7 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
 # source of truth now so the two can't drift.
 
 
-def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link=''):
+def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link='', board_url=None):
     """Feats of Legend bullet lines — shared by the registry card and /stats so
     the two renderings can never drift. Returns [] when the player has none.
 
@@ -985,10 +985,12 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         else:
             _db_override = _board_count_map.get(normalized)
             display_count = _db_override if _db_override is not None else count
+        _bu = (board_url or {}).get(label)
+        _lbl = f"[{label}]({_bu})" if _bu else label
         if display_count >= 5:
-            label_str = f"**{label}**"
+            label_str = f"**{_lbl}**"
         else:
-            label_str = f"*{label}*"
+            label_str = f"*{_lbl}*"
         suffix = f" ×{display_count}" if display_count > 1 else ""
         display_emojis = feat_display.get(normalized, normalized)
         lines.append(f"• {display_emojis}{suffix} {label_str}")
@@ -1006,7 +1008,9 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         if _fb_count == 0:
             continue
         _fb_suffix = f" ×{_fb_count}" if _fb_count > 1 else ""
-        _fb_label_str = f"**{_fb_label}**" if _fb_count >= 5 else f"*{_fb_label}*"
+        _fb_bu = (board_url or {}).get(_fb_label)
+        _fb_lbl = f"[{_fb_label}]({_fb_bu})" if _fb_bu else _fb_label
+        _fb_label_str = f"**{_fb_lbl}**" if _fb_count >= 5 else f"*{_fb_lbl}*"
         lines.append(f"• {_fb_emoji}{_fb_suffix} {_fb_label_str}")
     return lines
 
@@ -1079,8 +1083,26 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
             lines.append(f"• {prefix}{b}{placement_str}")
         lines.append("")
 
+    # Board deep-links for placements / feats / mastery. Guarded: without a guild
+    # we fall back to plain text. One records fetch, reused across sections.
+    _board_url = {}
+    if guild is not None:
+        try:
+            import re as _re_bu
+            from cogs.leaderboards import _get_lb_records as _glr
+            for _rec in await _glr():
+                _bn = (_rec.get('Leaderboard Name') or '').strip()
+                _tid = str(_rec.get('Thread ID') or '').strip()
+                if not (_bn and _tid):
+                    continue
+                _mm = _re_bu.search(r'\d{17,20}', str(_rec.get('Message ID') or ''))
+                _board_url[_bn] = (f"https://discord.com/channels/{guild.id}/{_tid}/{_mm.group(0)}"
+                                   if _mm else f"https://discord.com/channels/{guild.id}/{_tid}")
+        except Exception as _bue:
+            print(f"[CARD] board-url map failed: {_bue}")
+
     # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
-    _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link)
+    _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link, board_url=_board_url)
     if _fol_lines:
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
@@ -1090,7 +1112,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
         lines.append("**Best Placements:**")
         for pos, lb_name, emoji, gap in best_placements:
             gap_str = f" (+{gap})" if gap is not None else ""
-            lines.append(f"• {emoji} {lb_name} — #{pos}{gap_str}")
+            _pu = _board_url.get(lb_name)
+            _pn = f"[{lb_name}]({_pu})" if _pu else lb_name
+            lines.append(f"• {emoji} {_pn} — #{pos}{gap_str}")
         lines.append("")
 
     if personal_bests['kills'] > 0 or personal_bests['td'] > 0:
@@ -1112,12 +1136,14 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     _done = sorted(((w, c) for w, c in _counts.items() if c >= _MASTER), key=lambda t: -t[1])
     if _done:
         for w, c in _done:
+            _wu = _board_url.get(w)
+            _wl = f"[{w}]({_wu})" if _wu else w
             if c >= _VIRT:
                 _vemoji = config.VIRTUOSO_WEAPON_EMOJIS.get(w, getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "💎"))
-                lines.append(f"• {_vemoji} **{w}** ×{c} — *Virtuoso*")
+                lines.append(f"• {_vemoji} **{_wl}** ×{c} — *Virtuoso*")
             else:
                 _me = getattr(config, "MASTERY_WEAPON_EMOJIS", {}).get(w, "👑")
-                lines.append(f"• {_me} {w} ×{c}")
+                lines.append(f"• {_me} {_wl} ×{c}")
     else:
         lines.append("• None yet")
     # Progress toward the next mastery (closest weapon still under the threshold).
@@ -1151,7 +1177,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
                 continue
             _c = (_r[4] or '').strip(); _m = (_r[5] or '').strip()
             _td = (_r[7] or '?').strip(); _k = (_r[8] or '?').strip(); _d = (_r[9] or '?').strip()
-            _recent.append(f"{_c} \u00b7 {_w} \u00b7 {_m} \u2014 {_td}/{_k}/{_d}")
+            _lnk = (_r[12] or '').strip() if len(_r) > 12 else ''
+            _rtxt = f"{_c} \u00b7 {_w} \u00b7 {_m} \u2014 {_td}/{_k}/{_d}"
+            _recent.append(f"[{_rtxt}]({_lnk})" if _lnk else _rtxt)
             if len(_recent) >= 5:
                 break
     except Exception as _e_rg:
