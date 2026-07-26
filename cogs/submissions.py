@@ -2049,6 +2049,8 @@ async def _apply_edit(interaction, ev):
         new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
     if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
         new_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{ev.kills - ev.second_place_td}"
+    if "Flawless" in _feats:
+        new_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
     def _pline(lb, pos):
         _nm = _blink(lb, lb)
         if ' - ' in lb:
@@ -2691,6 +2693,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
     if kills is not None and _second_place_td is not None and kills > _second_place_td:
         marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{kills - _second_place_td}"
+    if "Flawless" in feats:
+        marks_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
 
     message_link = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
 

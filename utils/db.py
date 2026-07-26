@@ -2099,6 +2099,69 @@ async def get_hundred_handed_leaderboard() -> list:
     return [(did, name, cnt) for did, name, cnt, last in recs]
 
 
+async def get_all_hh_progress() -> list:
+    """[(discord_id, player_name, matched_count)] for EVERY player, computed from the
+    SAME authoritative source as the registry card: a submission with 100+ takedowns
+    on a required primary combo, OR a legacy per-weapon mark. Aggregated across all
+    players in one pass (two queries) so the Hundred-Handed board can never drift from
+    the cards the way the standalone hundred_handed table did. Identity variants (id vs
+    name spellings) are collapsed to one row, unioning their done-sets. Sorted by
+    matched count desc (completers first), then name."""
+    from utils.ranks import HH_PRIMARIES
+    required = {(sc, w) for sc, ws in HH_PRIMARIES.items() for w in ws}
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        subs = await conn.fetch(
+            "SELECT DISTINCT discord_id, player_name, subclass, weapon "
+            "FROM submissions WHERE takedowns >= 100")
+        legs = await conn.fetch(
+            "SELECT discord_id, player_name, weapon, subclass, marks FROM legacy_marks")
+
+    raw = {}   # (did, name_lower) -> [did, name, set(done required combos)]
+
+    def _add(did, name, sc, w):
+        combo = ((sc or '').strip(), (w or '').strip())
+        if combo not in required:
+            return
+        did = (did or '').strip(); name = (name or '').strip()
+        if not (did or name):
+            return
+        ent = raw.setdefault((did, name.lower()), [did, name, set()])
+        ent[2].add(combo)
+
+    for r in subs:
+        _add(r['discord_id'], r['player_name'], r['subclass'], r['weapon'])
+    for r in legs:
+        try:
+            _m = int(r['marks']) if r['marks'] is not None else 0
+        except (ValueError, TypeError):
+            _m = 0
+        if _m >= 1:
+            _add(r['discord_id'], r['player_name'], r['subclass'], r['weapon'])
+
+    def _collapse(entries, keyfn):
+        best = {}
+        for did, name, pairs in entries:
+            k = keyfn(did, name)
+            cur = best.get(k)
+            if cur is None:
+                best[k] = [did, name, set(pairs)]
+            else:
+                cur[2] |= pairs
+                if name and not cur[1]:
+                    cur[1] = name
+                if did and not cur[0]:
+                    cur[0] = did
+        return [(v[0], v[1], v[2]) for v in best.values()]
+
+    entries = [(d, n, p) for d, n, p in raw.values()]
+    entries = _collapse(entries, lambda did, name: did or name.lower())   # merge name variants under one id
+    entries = _collapse(entries, lambda did, name: name.lower() or did)   # merge one name across ids
+    result = [(d, n, len(p)) for d, n, p in entries]
+    result.sort(key=lambda x: (-x[2], (x[1] or '').lower()))
+    return result
+
+
 async def consolidate_hundred_handed(dry_run: bool = False) -> dict:
     """Merge duplicate Hundred Handed identities — the same player split across
     different discord_id / player_name spellings — into a single canonical

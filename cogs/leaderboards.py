@@ -1668,7 +1668,9 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
                     map_totals[k] = map_totals.get(k, 0) + 1
         busiest = max(map_totals.values()) if map_totals else 1
         this_total = map_totals.get(lb_name, 0)
-        min_games = max(1, min(5, round(5 * this_total / busiest))) if busiest else 5
+        # Cap the requirement at 3 (was 5): the busiest map needs 3 games, quieter
+        # maps proportionally fewer (floor 1) so lightly-played maps still get rated.
+        min_games = max(1, min(3, round(3 * this_total / busiest))) if busiest else 3
     else:
         # Scale the game minimum by weapon popularity (same idea as maps): the busiest
         # weapon needs a full 5-game sample; off-hand 1H weapons need as few as 2, so their
@@ -4418,17 +4420,28 @@ async def refresh_hundred_handed_board(guild):
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
     _hh_emoji = "<:hhanded:1430199468246044772>"
-    # Board mirrors the Hundred-Handed ROLE holders (the curated source of truth for
-    # who has completed it) — not the raw combo count, which can lag behind for
-    # players whose historical combos were never fully logged.
-    _hh_role = guild.get_role(config.HUNDRED_HANDED_ROLE_ID)
-    completers = sorted([m.display_name for m in (_hh_role.members if _hh_role else [])],
-                        key=lambda n: n.lower())
-    if not completers:
-        desc = "*No completions yet.*"
-    else:
-        desc = "\n".join(f"│ {i}. `{nm}` — {_hh_emoji} {HH_TOTAL}/{HH_TOTAL} \u2713"
-                         for i, nm in enumerate(completers, 1))
+    # Board is sourced from the SAME authoritative data as the registry cards
+    # (submissions 100+ TD + legacy marks, via get_all_hh_progress), NOT the role or
+    # the standalone hundred_handed table — both drifted and left the board empty while
+    # cards showed real progress. Completers list first, then in-progress.
+    try:
+        progress = await _db.get_all_hh_progress()
+    except Exception as _hpe:
+        print(f"[HUNDRED_HANDED] progress query failed: {_hpe}")
+        progress = []
+    completers = [nm for did, nm, c in progress if c >= HH_TOTAL and nm]
+    inprog = [(nm, c) for did, nm, c in progress if 0 < c < HH_TOTAL and nm]
+    lines = []
+    if completers:
+        for i, nm in enumerate(completers, 1):
+            lines.append(f"│ {i}. `{nm}` — {_hh_emoji} {HH_TOTAL}/{HH_TOTAL} \u2713")
+    if inprog:
+        if completers:
+            lines.append("")
+        lines.append("**In progress**")
+        for nm, c in inprog[:10]:
+            lines.append(f"│ `{nm}` — {c}/{HH_TOTAL}")
+    desc = "\n".join(lines) if lines else "*No progress yet.*"
 
     embed = discord.Embed(title=_hh_emoji, description=desc, colour=EMBED_GOLD)
     embed.set_footer(text="Last updated")
