@@ -184,44 +184,34 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     top_td_list = sorted(td_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
     top_kills_list = sorted(kills_scores_sub.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Volume-adjusted (Bayesian shrinkage) ranking for the ratio categories:
-    # pull each player's average toward the global mean based on how few games
-    # they've played, so a few lucky games can't top a percentage board and
-    # sustained high performance over many games ranks highest.
-    #   adjusted = (sum_of_ratios + PRIOR * global_mean) / (games + PRIOR)
-    _PRIOR = 5      # pseudo-games at the global mean; higher = rewards volume more
+    # PEAK ranking for the ratio categories: rank each player by their single best
+    # 5-game run (a contiguous streak) inside the season window, taken as a MAX so it
+    # NEVER drops. Hitting a season peak is locked in, and every later game is a free
+    # shot at a higher peak with zero downside -- so players stay incentivised to keep
+    # playing. Mirrors the all-time board ratings (leaderboards.py _peak), scoped to the
+    # season here. The 5-game window + 5-game minimum stop one lucky game topping a board.
+    _WINDOW = 5     # games in a "run"
     _MIN = 5        # 5+ games to qualify (matches the all-time boards' minimum)
-    _HALFLIFE = 30.0  # submissions — recent games weigh most, older ones fade (never fully drop)
 
-    def _shrunk_rank(data):
-        # Recency-weighted Bayesian shrinkage: each game is weighted by how recent
-        # it is (0.5 ** games_ago/HALFLIFE), then blended toward the league mean via
-        # the prior. So the stat tracks current form, and low volume still can't cheese it.
-        elig = {p: v for p, v in data.items() if len(v) >= _MIN}
-        allv = [x for v in elig.values() for x in v]
-        gmean = (sum(allv) / len(allv)) if allv else 0.0
+    def _peak_rank(data):
         ranked = []
-        for p, v in elig.items():
-            n = len(v)  # v is chronological (oldest first)
-            wsum = 0.0
-            wtot = 0.0
-            for i, r in enumerate(v):
-                w = 0.5 ** ((n - 1 - i) / _HALFLIFE)  # newest game -> weight 1
-                wsum += w * r
-                wtot += w
-            adj = (wsum + _PRIOR * gmean) / (wtot + _PRIOR)
-            ranked.append((p, adj, n))
+        for p, v in data.items():   # v is chronological (oldest first)
+            if len(v) < _MIN:
+                continue
+            w = min(_WINDOW, len(v))
+            best = max(sum(v[i:i + w]) / w for i in range(len(v) - w + 1))
+            ranked.append((p, best, len(v)))
         ranked.sort(key=lambda t: (-t[1], t[0]))  # name tiebreak = stable order on ties
         return ranked
 
     # ── KILL SHARE -- volume-adjusted kills ÷ team total kills % (games in parens) ──
     # Board display + season category points. Carries no role: the Executioner
     # title moved to true Lethality below, which is what its name always implied.
-    _leth = _shrunk_rank(team_kill_shares)
+    _leth = _peak_rank(team_kill_shares)
     most_lethal_top5 = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _leth[:5]]
 
     # ── WARLORD -- volume-adjusted takedowns ÷ team total kills % ──
-    _dom = _shrunk_rank(warlord_ratios)
+    _dom = _peak_rank(warlord_ratios)
     dom_ranked = [p for p, _adj, _n in _dom]
     most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
@@ -230,7 +220,7 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     # The Executioner role is awarded on THIS. It used to be awarded on Kill Share
     # above while being named most_lethal_*, so the holder never matched the
     # Lethality board and nobody could work out why.
-    _true_leth = _shrunk_rank(lethal_ratios)
+    _true_leth = _peak_rank(lethal_ratios)
     lethality_list = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _true_leth[:5]]
     most_lethal_player = _true_leth[0][0] if _true_leth else None
 
@@ -457,13 +447,13 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
             embed.add_field(name="⭐ Special Features  *(random this season)*", value=_table(frows), inline=False)
         embed.add_field(name=_RULE, value="​", inline=False)
 
-    embed.add_field(name="<a:mostlethal:1520490418817601658> Kill Share  *(kills ÷ team kills · recent-weighted)*",
+    embed.add_field(name="<a:mostlethal:1520490418817601658> Kill Share  *(kills ÷ team kills · best 5-game run)*",
                     value=_table(_rows(stats.get("high_lethality"), plain=True)) if stats.get("high_lethality") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · recent-weighted)*",
+    embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · best 5-game run)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="🩸 Lethality  *(kills per takedown · recent-weighted)* — 🗡️ Executioner",
+    embed.add_field(name="🩸 Lethality  *(kills per takedown · best 5-game run)* — 🗡️ Executioner",
                     value=_table(_rows(stats.get("lethality_list"), plain=True)) if stats.get("lethality_list") else "```\n— not enough data —\n```",
                     inline=False)
 
@@ -484,10 +474,11 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="🗡️ Top Weapons", value=_table(_rows(stats.get("top_weapons"))), inline=False)
     embed.add_field(name="🗺️ Top Maps", value=_table(_rows(stats.get("top_maps"))), inline=False)
 
-    embed.set_footer(text=("Kill Share / Warlord / Lethality here are recency-weighted averages for THIS "
-                           "season (5+ games) -- current form, not an all-time peak. The all-time boards "
-                           "show your best 5-games-in-a-row instead. Executioner goes to the Lethality "
-                           "leader, Warlord to the Warlord leader; a challenger must beat the holder by 1%."))
+    embed.set_footer(text=("Kill Share / Warlord / Lethality here are your best 5-game run for THIS "
+                           "season (5+ games) -- a season peak that never drops, so keep playing to beat "
+                           "it. The all-time boards show the same over your whole history. Executioner goes "
+                           "to the Lethality leader, Warlord to the Warlord leader; a challenger must beat "
+                           "the holder by 1%."))
     return embed
 
 
