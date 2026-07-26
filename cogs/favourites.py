@@ -1113,8 +1113,7 @@ def render_all_time_titles_embed(stats):
     Master rankings (gated at 15/9/6 boards), crown on the current holder of each.
     Ranked by boards placed on; average placement breaks ties (lower is better)."""
     _te = getattr(config, 'TITLE_EMOJIS', {})
-    gm_emoji = _te.get("Grand Marshal", "")
-    embed = discord.Embed(title=gm_emoji or "All-Time Titles", colour=0xC9A24B)
+    embed = discord.Embed(title="All-Time Titles", colour=0xC9A24B)
     for label, key, min_boards in _ATT_TITLES:
         dct = stats.get(key) or {}
         ranked = sorted(
