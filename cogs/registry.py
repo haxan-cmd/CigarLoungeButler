@@ -478,7 +478,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
         feats_str = row[11].strip() if len(row) > 11 else ''
         row_feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
         link = row[12].strip() if len(row) > 12 else ''
-        feat_emojis = ''.join(FEAT_EMOJIS[f] for f in ['200 Takedowns', '100 Kills', 'Triple', 'Predator', 'Flawless'] if f in row_feats)
+        feat_emojis = ''.join(FEAT_EMOJIS[f] for f in ['200 Takedowns', '100 Kills', 'Triple', 'Predator'] if f in row_feats)
         if feat_emojis:
             if link and link not in seen_links:
                 seen_links.add(link)
@@ -497,6 +497,11 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 feats.append((FEAT_EMOJIS['Hybrid'], link))
         except (ValueError, IndexError):
             pass
+        # Flawless stacks per qualifying run (a no-death game), counted from the
+        # Submissions sheet like Pacifist so the card reflects EVERY flawless, not
+        # just the board's best. Deduped against legacy board rows by link below.
+        if 'Flawless' in row_feats:
+            feats.append((FEAT_EMOJIS['Flawless'], link))
 
     # Also pull legacy feat entries from LeaderboardData
     FEAT_BOARD_EMOJIS = {
@@ -927,10 +932,6 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
     for emojis, link in feat_submissions:
         parts = re.findall(r'<a?:[^>]+>|[\U0001F000-\U0010FFFF]', emojis)
         normalized = ''.join(sorted(parts))
-        if normalized == flawless_emoji:
-            if flawless_entry is None:
-                flawless_entry = (emojis, link)
-            continue
         if FEAT_EMOJIS['Triple'] in normalized:
             if not (FEAT_EMOJIS['200 Takedowns'] in normalized and FEAT_EMOJIS['100 Kills'] in normalized):
                 continue
@@ -946,6 +947,7 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         ''.join(sorted([_e['Pacifist']])):                                               "Pacifist",
         ''.join(sorted([_e['200 Takedowns']])):                                          "200 Takedowns",
         ''.join(sorted([_e['100 Kills']])):                                              "100 Kills",
+        ''.join(sorted([_e['Flawless']])):                                               "Flawless",
         ''.join(sorted([_e['Triple']])):                                                 "Triple",
         ''.join(sorted([_e['Predator']])):                                               "Predator",
         ''.join(sorted([_e['200 Takedowns'], _e['100 Kills']])):                         "200 TD / 100 Kills",
@@ -958,12 +960,6 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         ''.join(sorted([_e['200 Takedowns'], _e['100 Kills'], _e['Triple'], _e['Flawless'], _e['Predator']])): "Hundred-Handed + Predator",
     }
 
-    if flawless_entry:
-        emojis, link = flawless_entry
-        # Prefer the Flawless board's PB link — it tracks the player's BEST flawless,
-        # while `link` here is just whichever flawless appeared first in submission order.
-        link = flawless_pb_link or link
-        lines.append(f"• {emojis} ***Flawless*** —[Link]({link})" if link else f"• {emojis} ***Flawless***")
     _board_count_map = {
         ''.join(sorted([_e['100 Kills']])):     board_counts.get('100 Kills', 0),
         ''.join(sorted([_e['200 Takedowns']])): board_counts.get('200 Takedowns', 0),

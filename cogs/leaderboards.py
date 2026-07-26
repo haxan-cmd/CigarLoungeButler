@@ -697,7 +697,9 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         updates.append((map_lb_name, takedowns, True, True, False))
 
     if "Flawless" in feats:
-        updates.append(("Flawless", takedowns, False, True, False))
+        # Unlimited board: every no-death run stacks (ranked by takedowns), like
+        # 100 Kills / 200 Takedowns / Triple. (Was personal-best, one row per player.)
+        updates.append(("Flawless", takedowns, False, False, True))
     # Board placement uses raw stats — independent of feat mark counting
     # Triples also qualify for 100 Kills / 200 Takedowns boards if stats meet threshold
     if kills >= 100:
