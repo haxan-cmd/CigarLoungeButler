@@ -1369,9 +1369,12 @@ class FavouritesCog(commands.Cog):
         try:
             stats = await calculate_butler_stats()
             embed = render_all_time_titles_embed(stats)
+            # Frame it like the leaderboards: TOP spacer, the embed, BOTTOM spacer.
+            await interaction.channel.send(file=discord.File(DECORATION_TOP))
             msg = await interaction.channel.send(embed=embed)
+            await interaction.channel.send(file=discord.File(DECORATION_BOTTOM))
             await _db.set_titles_board(str(interaction.channel.id), str(msg.id))
-            await interaction.followup.send("\u2705 All-Time Titles board posted here. It refreshes with the monthly report or via /refresh_titles_board.", ephemeral=True)
+            await interaction.followup.send("\u2705 All-Time Titles board posted here (framed). It refreshes with the monthly report or via /refresh_titles_board.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"\u274c Setup failed: {e}", ephemeral=True)
 
