@@ -2800,7 +2800,7 @@ class RegistryCog(commands.Cog):
                 _slabel = _season.get('label') or 'the season'
                 for _i, (_nm, _pts) in enumerate(_standings, 1):
                     if _nm == resolved_name:
-                        season_line = f"#{_i} in {_slabel} — {_pts} GP"
+                        season_line = f"#{_i} in the {_slabel} season — {_pts} GP"
                         break
         except Exception as _se:
             print(f"[STATS] season line error: {_se}")
