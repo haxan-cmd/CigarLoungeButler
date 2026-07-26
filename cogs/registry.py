@@ -905,6 +905,28 @@ async def get_bounty_completions_for_player(discord_id, cached_data=None):
 # source of truth now so the two can't drift.
 
 
+async def _board_url_map(guild):
+    """{board_name: deep-link URL} for hyperlinking placements / feats / mastery.
+    Empty when guild is None or the leaderboard records cannot be read."""
+    out = {}
+    if guild is None:
+        return out
+    try:
+        import re as _re_bu
+        from cogs.leaderboards import _get_lb_records as _glr
+        for _rec in await _glr():
+            _bn = (_rec.get('Leaderboard Name') or '').strip()
+            _tid = str(_rec.get('Thread ID') or '').strip()
+            if not (_bn and _tid):
+                continue
+            _mm = _re_bu.search(r'\d{17,20}', str(_rec.get('Message ID') or ''))
+            out[_bn] = (f"https://discord.com/channels/{guild.id}/{_tid}/{_mm.group(0)}"
+                        if _mm else f"https://discord.com/channels/{guild.id}/{_tid}")
+    except Exception as _bue:
+        print(f"[CARD] board-url map failed: {_bue}")
+    return out
+
+
 def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link='', board_url=None):
     """Feats of Legend bullet lines — shared by the registry card and /stats so
     the two renderings can never drift. Returns [] when the player has none.
@@ -1085,21 +1107,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     # Board deep-links for placements / feats / mastery. Guarded: without a guild
     # we fall back to plain text. One records fetch, reused across sections.
-    _board_url = {}
-    if guild is not None:
-        try:
-            import re as _re_bu
-            from cogs.leaderboards import _get_lb_records as _glr
-            for _rec in await _glr():
-                _bn = (_rec.get('Leaderboard Name') or '').strip()
-                _tid = str(_rec.get('Thread ID') or '').strip()
-                if not (_bn and _tid):
-                    continue
-                _mm = _re_bu.search(r'\d{17,20}', str(_rec.get('Message ID') or ''))
-                _board_url[_bn] = (f"https://discord.com/channels/{guild.id}/{_tid}/{_mm.group(0)}"
-                                   if _mm else f"https://discord.com/channels/{guild.id}/{_tid}")
-        except Exception as _bue:
-            print(f"[CARD] board-url map failed: {_bue}")
+    _board_url = await _board_url_map(guild)
 
     # Feats of Legend rendering lives in _feats_of_legend_lines (shared with /stats)
     _fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless_pb_link, board_url=_board_url)
@@ -2724,6 +2732,7 @@ class RegistryCog(commands.Cog):
             hh_complete = False
         # ── Card page 1 extras: title, class ranks, feats, placements ────
         player_title = get_player_title(len(bounty_completions))
+        _ps_board_url = await _board_url_map(interaction.guild)
         try:
             named_feats, feat_submissions, fol_board_counts, fol_flawless_link = await get_feats_for_player(int(discord_id_str))
             # HH progress computed above is authoritative here (no guild role lookup needed)
@@ -2731,7 +2740,7 @@ class RegistryCog(commands.Cog):
                 named_feats.add('hhanded')
             else:
                 named_feats.discard('hhanded')
-            fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, fol_board_counts, fol_flawless_link)
+            fol_lines = _feats_of_legend_lines(named_feats, feat_submissions, fol_board_counts, fol_flawless_link, board_url=_ps_board_url)
         except Exception as _fe:
             print(f"[STATS] feats of legend error: {_fe}")
             fol_lines = []
@@ -2866,7 +2875,8 @@ class RegistryCog(commands.Cog):
 
         if stats_placements:
             _field("Best Placements", [
-                f"│ {emoji} {lb_name} — #{pos}" + (f" (+{gap})" if gap is not None else "")
+                f"│ {emoji} " + (f"[{lb_name}]({_ps_board_url[lb_name]})" if lb_name in _ps_board_url else lb_name)
+                + f" — #{pos}" + (f" (+{gap})" if gap is not None else "")
                 for pos, lb_name, emoji, gap in stats_placements])
 
         if hh_count > 0:
@@ -2894,12 +2904,13 @@ class RegistryCog(commands.Cog):
             _vdefault = getattr(config, "VIRTUOSO_DEFAULT_EMOJI", "\U0001f48e")
             mastery_lines = []
             for w, c in sorted(_mcounts.items(), key=lambda t: -t[1]):
+                _wl = f"[{w}]({_ps_board_url[w]})" if w in _ps_board_url else w
                 if c >= _VIRT:
                     _e = config.VIRTUOSO_WEAPON_EMOJIS.get(w, _vdefault)
-                    mastery_lines.append(f"│ {_e} **{w}** ×{c} — *Virtuoso*")
+                    mastery_lines.append(f"│ {_e} **{_wl}** ×{c} — *Virtuoso*")
                 else:
                     _me = getattr(config, "MASTERY_WEAPON_EMOJIS", {}).get(w, "👑")
-                    mastery_lines.append(f"│ {_me} {w} ×{c}")
+                    mastery_lines.append(f"│ {_me} {_wl} ×{c}")
             _field("Weapon Mastery", mastery_lines)
 
         await interaction.followup.send(embed=emb)
