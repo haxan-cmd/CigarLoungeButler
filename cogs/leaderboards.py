@@ -659,6 +659,108 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
     return new_ids
 
 
+_WEAPON_THUMB_URLS = {}   # weapon key -> stashed grey-silhouette URL (reused)
+
+
+async def _weapon_thumb_url(guild, weapon):
+    """Hosted URL for a weapon's grey silhouette: rendered once, uploaded to the
+    lethality stash channel, and reused. A URL (not an attachment) survives embed
+    edits, so board thumbnails persist through in-place refreshes. None if no
+    vendored outline or the stash is unavailable."""
+    key = _re.sub(r'[^a-z0-9]', '', str(weapon or '').lower())
+    if not key:
+        return None
+    if key in _WEAPON_THUMB_URLS:
+        return _WEAPON_THUMB_URLS[key]
+    try:
+        import utils.charts as _charts, io as _io
+        png = await _charts.render_async(_charts.render_lethality_charge, weapon, intensity=0.0)
+        if not png:
+            _WEAPON_THUMB_URLS[key] = None
+            return None
+        _sid = getattr(config, 'LETHALITY_STASH_CHANNEL_ID', 0)
+        ch = guild.get_channel(_sid) or await guild.fetch_channel(_sid)
+        msg = await ch.send(file=discord.File(_io.BytesIO(png), filename=f"{key}.png"))
+        url = msg.attachments[0].url if msg.attachments else None
+        _WEAPON_THUMB_URLS[key] = url
+        return url
+    except Exception as e:
+        print(f"[THUMB] stash upload failed for {weapon}: {e}")
+        return None
+
+
+async def _build_board_embeds(guild, ordered_boards):
+    """Framed board embeds for a thread (entries + weapon thumbnail + related on
+    the LAST board), without posting. Returns [(lb_name, [embeds])] in order.
+    Shared by _reframe_thread (posts them) and the /refresh_all skip-check."""
+    n = len(ordered_boards)
+    _rel = None
+    try:
+        _recs = await _get_lb_records()
+        _names = {r['Leaderboard Name'] for r in _recs}
+        _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+        _primary = next((b for b in ordered_boards if not _is_kills_board(b)),
+                        ordered_boards[0] if ordered_boards else None)
+        if _primary:
+            _rel = _related_boards_field(_primary, _names, _tby)
+    except Exception as _rle:
+        print(f"[BUILD] related-links error: {_rle}")
+    out = []
+    for idx, lb_name in enumerate(ordered_boards):
+        entries = await get_leaderboard_entries(lb_name)
+        entries = await _sort_board_entries(lb_name, entries)
+        show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+        score_prefix = "+" if lb_name == "TUFF" else ""
+        is_map = (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+        embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+        if embeds:
+            try:
+                embeds[-1].set_image(url=None)
+            except Exception:
+                pass
+        if idx == n - 1 and _rel and embeds:
+            embeds[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
+        if not is_map and lb_name not in _FEAT_BOARD_NAMES and embeds:
+            _weap = lb_name[:-6].strip() if _is_kills_board(lb_name) else lb_name
+            _turl = await _weapon_thumb_url(guild, _weap)
+            if _turl:
+                embeds[0].set_thumbnail(url=_turl)
+        out.append((lb_name, embeds))
+    return out
+
+
+def _embed_sig(e):
+    """Comparable signature of an embed's visible content (thumbnail by presence,
+    since Discord re-proxies image URLs)."""
+    fields = tuple((f.name or '', f.value or '') for f in (e.fields or []))
+    return ((e.title or ''), (e.description or ''), fields, bool(e.thumbnail))
+
+
+async def _thread_needs_reframe(guild, thread, recs, ordered_boards):
+    """True if the live messages differ from the target build (entries, layout,
+    thumbnail, related) or any tracked message is missing. False = already correct."""
+    try:
+        targets = dict(await _build_board_embeds(guild, ordered_boards))
+    except Exception:
+        return True
+    for r in recs:
+        lb = r['Leaderboard Name']
+        tembeds = targets.get(lb)
+        if tembeds is None:
+            return True
+        mids = [int(m) for m in _re.findall(r'\d{17,20}', str(r.get('Message ID') or ''))]
+        if len(mids) != len(tembeds):
+            return True
+        for mid, temb in zip(mids, tembeds):
+            try:
+                cur = await thread.fetch_message(mid)
+            except Exception:
+                return True
+            if not cur.embeds or _embed_sig(cur.embeds[0]) != _embed_sig(temb):
+                return True
+    return False
+
+
 async def _reframe_thread(guild, thread, ordered_boards):
     """Deterministic clean rebuild of a thread's boards from the template. Wipes
     EVERY bot message in the thread first (no stray or duplicated decorations),
@@ -676,39 +778,10 @@ async def _reframe_thread(guild, thread, ordered_boards):
                 await asyncio.sleep(0.3)
     except Exception as e:
         print(f"[REFRAME] wipe error in #{thread.id}: {e}")
-    n = len(ordered_boards)
-    # Related links go on the LAST board (bottom of the thread), computed from the
-    # thread's PRIMARY board (the weapon TD board, or a map faction).
-    _rel = None
-    try:
-        _recs = await _get_lb_records()
-        _names = {r['Leaderboard Name'] for r in _recs}
-        _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
-        _primary = next((b for b in ordered_boards if not _is_kills_board(b)),
-                        ordered_boards[0] if ordered_boards else None)
-        if _primary:
-            _rel = _related_boards_field(_primary, _names, _tby)
-    except Exception as _rle:
-        print(f"[REFRAME] related-links error: {_rle}")
-    for idx, lb_name in enumerate(ordered_boards):
+    targets = await _build_board_embeds(guild, ordered_boards)
+    n = len(targets)
+    for idx, (lb_name, embeds) in enumerate(targets):
         try:
-            entries = await get_leaderboard_entries(lb_name)
-            entries = await _sort_board_entries(lb_name, entries)
-            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-            score_prefix = "+" if lb_name == "TUFF" else ""
-            is_map = (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-            # Every board now gets an explicit BOTTOM png, so drop any baked-in
-            # bottom spacer (kills boards) to avoid a doubled decoration.
-            if embeds:
-                try:
-                    embeds[-1].set_image(url=None)
-                except Exception:
-                    pass
-            if idx == n - 1 and _rel and embeds:
-                embeds[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
-            # Only the FIRST board gets a TOP; each board's BOTTOM is the divider
-            # to the next, so stacked boards don't show a BOTTOM+TOP pair.
             if idx == 0:
                 await thread.send(file=discord.File(DECORATION_TOP)); await asyncio.sleep(0.3)
             ids = []
@@ -2699,39 +2772,58 @@ class LeaderboardsCog(commands.Cog):
         all_lb_rows = await _get_lb_records()
         guild = interaction.guild
         done, failed = [], []
+        skipped = 0
 
-        # Edit each board in place (fast, reliable). Bulk wipe-and-repost tripped
-        # rate limits over ~90 boards and left threads half-rebuilt; use
-        # /reframe_thread per thread to clean strays / fix a broken frame instead.
+        # Reframe threads that differ from the template; pass over ones already correct.
+        # Per-thread isolation + a recovery pause between threads so a rate-limit
+        # blip on one thread can't stall or half-build the rest.
+        by_thread = {}
         for lb_row in all_lb_rows:
             lb_name = lb_row.get('Leaderboard Name')
-            thread_id_raw = lb_row.get('Thread ID')
-            msg_id_raw = lb_row.get('Message ID')
-            if not lb_name or not thread_id_raw or not msg_id_raw:
+            tid = str(lb_row.get('Thread ID') or '').strip()
+            mid = str(lb_row.get('Message ID') or '').strip()
+            if not lb_name or not tid or not mid:
                 continue
-            try:
-                entries = await get_leaderboard_entries(lb_name)
-                entries = await _sort_board_entries(lb_name, entries)
-                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-                score_prefix = "+" if lb_name == "TUFF" else ""
-                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-                thread_id = int(thread_id_raw)
-                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
-                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content="")
-                if new_ids != message_ids:
-                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
-                done.append(lb_name)
-            except Exception as e:
-                nerve_log_error(f"Leaderboard refresh {lb_name}", e)
-                failed.append(lb_name)
-            await asyncio.sleep(0.8)
+            by_thread.setdefault(tid, []).append(lb_row)
 
-        summary = f"\u2705 Refreshed {len(done)} boards."
+        for tid, recs in by_thread.items():
+            try:
+                thread = guild.get_channel(int(tid)) or await guild.fetch_channel(int(tid))
+                id_to_board = {}
+                for r in recs:
+                    for _m in _re.findall(r'\d{17,20}', str(r.get('Message ID') or '')):
+                        id_to_board[int(_m)] = r['Leaderboard Name']
+                order = []
+                try:
+                    async for _msg in thread.history(limit=400, oldest_first=True):
+                        _b = id_to_board.get(_msg.id)
+                        if _b and _b not in order:
+                            order.append(_b)
+                except Exception:
+                    pass
+                for r in recs:
+                    if r['Leaderboard Name'] not in order:
+                        order.append(r['Leaderboard Name'])
+                if await _thread_needs_reframe(guild, thread, recs, order):
+                    await _reframe_thread(guild, thread, order)
+                    done.extend(order)
+                    await asyncio.sleep(1.5)   # heavy op -> let buckets recover
+                else:
+                    skipped += 1
+                    await asyncio.sleep(0.3)   # already correct, just move on
+                continue
+            except Exception as e:
+                nerve_log_error(f"Reframe thread {tid}", e)
+                failed.append(str(tid))
+            await asyncio.sleep(0.5)
+
+        summary = f"\u2705 Reframed {len(done)} boards; skipped {skipped} unchanged thread(s)."
         if failed:
-            summary += f"\n\u274c Failed: {', '.join(failed)}"
-        await interaction.edit_original_response(content=summary)
+            summary += "\n\u274c " + str(len(failed)) + " thread(s) failed \u2014 re-run /reframe_thread in: " + " ".join("<#"+x+">" for x in failed)
+        try:
+            await interaction.edit_original_response(content=summary[:1900])
+        except Exception:
+            pass
 
     @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Kill Share + Warlord) at once (mod only).")
     async def refresh_map_boards(self, interaction: discord.Interaction):
