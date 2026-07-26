@@ -1370,9 +1370,11 @@ class FavouritesCog(commands.Cog):
             stats = await calculate_butler_stats()
             embed = render_all_time_titles_embed(stats)
             # Frame it like the leaderboards: TOP spacer, the embed, BOTTOM spacer.
-            await interaction.channel.send(file=discord.File(DECORATION_TOP))
+            # Use leaderboards' resolved asset paths (config.* is just the filename).
+            from cogs.leaderboards import DECORATION_TOP as _DTOP, DECORATION_BOTTOM as _DBOT
+            await interaction.channel.send(file=discord.File(_DTOP))
             msg = await interaction.channel.send(embed=embed)
-            await interaction.channel.send(file=discord.File(DECORATION_BOTTOM))
+            await interaction.channel.send(file=discord.File(_DBOT))
             await _db.set_titles_board(str(interaction.channel.id), str(msg.id))
             await interaction.followup.send("\u2705 All-Time Titles board posted here (framed). It refreshes with the monthly report or via /refresh_titles_board.", ephemeral=True)
         except Exception as e:
