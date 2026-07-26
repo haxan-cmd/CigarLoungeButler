@@ -65,6 +65,14 @@ def _blurb_embed(desc, edited=False, thumb=None):
         e.set_thumbnail(url=thumb)
     return e
 
+# Message ids of blurbs the user has corrected via the Edit flow. A submission's
+# background tasks keep rewriting its blurb for ~120s from a cached pre-edit copy;
+# once the user edits, that cache is stale, so a late background commit would revert
+# the correction. blurb_commit checks this set and defers to the user's edit. Ids are
+# cleared when the background run finishes (no more commits after that).
+_USER_EDITED_BLURBS = set()
+
+
 def _blurb_desc(msg):
     """Blurb text of a summary message: embed description, or plain content for
     pre-embed-era blurbs (an edit upgrades those to the embed format)."""
@@ -1776,6 +1784,17 @@ async def _apply_edit(interaction, ev):
     except Exception:
         pass
 
+    # Claim the blurb: from now on this run's still-running background tasks must not
+    # rewrite it from their stale pre-edit cache (that clobber is what made edits
+    # "not stick"). blurb_commit checks this set; the bg run clears the id when done.
+    try:
+        if getattr(ev, '_message', None) is not None:
+            _USER_EDITED_BLURBS.add(ev._message.id)
+            if len(_USER_EDITED_BLURBS) > 2000:
+                _USER_EDITED_BLURBS.clear()
+    except Exception:
+        pass
+
     # Recompute stat-derived feats from the EDITED numbers. Stats edits used to
     # leave ev.feats frozen at submit-time values, so a corrected 200/100 run
     # kept no feat lines, wrong marks, and a stale DB feats column. Non-stat
@@ -2905,6 +2924,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if not _blurb_state['dirty'] or _blurb_state['desc'] is None:
             return
         _blurb_state['dirty'] = False
+        if summary_reply.id in _USER_EDITED_BLURBS:
+            # The user has corrected this blurb; our cached copy is pre-edit. Their
+            # edit is authoritative — don't overwrite it with stale background content.
+            return
         try:
             await _blurb_edit(summary_reply, _blurb_state['desc'])
         except Exception as _bce:
@@ -3596,6 +3619,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 await nerve_alert(interaction.client, "background tasks", _bge)
             except Exception:
                 pass
+        finally:
+            # Background run is done — no more blurb commits, so drop any edit-claim
+            # for this blurb (keeps _USER_EDITED_BLURBS from growing unbounded).
+            _USER_EDITED_BLURBS.discard(summary_reply.id)
     # Reap the deferred reactions. They have been running concurrently with
     # everything above, so this is almost always already done; awaiting keeps a
     # strong reference so the loop cannot garbage-collect a pending task, and
