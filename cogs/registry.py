@@ -1089,13 +1089,14 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
         lines.append(f"• {cls}: {cls_emoji} — {cdata['rank']}")
-    lines.append("")
-
+    # The all-time titles (Grand Marshal / Weapons Master / Campaign Master) sit
+    # under the same Titles heading, separated by a blank line so they read as
+    # their own group — only shown when the player actually holds one.
     if butler_titles:
-        lines.append("**Butler Monthly:**")
+        lines.append("")
         for t in butler_titles:
             lines.append(f"• {t}")
-        lines.append("")
+    lines.append("")
 
     if bounties_done:
         lines.append("**Bounties Completed:**")
