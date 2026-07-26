@@ -604,6 +604,7 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
         _nav = _nav_view(thread.guild.id) if _deco else None
         if i < len(message_ids):
             edited = False
+            gone = False
             try:
                 msg = await thread.fetch_message(message_ids[i])
                 if _deco:
@@ -614,14 +615,15 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
                     await msg.edit(content=msg_content, embed=emb)
                 new_ids.append(message_ids[i])
                 edited = True
+            except discord.NotFound:
+                gone = True   # message truly deleted -> safe to recreate
             except Exception as edit_err:
-                print(f"Leaderboard edit failed for msg {message_ids[i]} in #{thread.id}, posting fresh: {edit_err}")
-            if not edited:
-                try:
-                    old_msg = await thread.fetch_message(message_ids[i])
-                    await old_msg.delete()
-                except Exception:
-                    pass
+                # Transient failure (rate limit / 5xx). KEEP the existing message
+                # rather than risk a duplicate; the next refresh will catch it.
+                print(f"Leaderboard edit failed for msg {message_ids[i]} in #{thread.id}, keeping it: {edit_err}")
+                new_ids.append(message_ids[i])
+                edited = True
+            if not edited and gone:
                 msg = await thread.send(content=msg_content, embed=emb,
                                         file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
                                         view=_nav if _deco else discord.utils.MISSING)
@@ -922,25 +924,12 @@ def _classify_board(name, board_type):
 
 
 def _related_boards_field(lb_name, board_names, thread_by_name):
-    """(field_name, value) of sibling-board links for a board embed, or None.
-    Weapon boards link the other weapons that share a subclass (same class); map
-    boards link the other faction of the same map, but only when it is genuinely a
-    separate thread. Uses config.GUILD_ID so no guild object is needed."""
+    """(field_name, value) linking the other weapon boards that share a subclass
+    with this weapon, or None. Weapon boards only: map boards stack every faction
+    in one thread, so a cross-link there points nowhere useful. Uses config.GUILD_ID."""
+    if " - " in lb_name:   # map board ("{Map} - {Faction}") -> skip
+        return None
     gid = getattr(config, "GUILD_ID", 0)
-    def _link(nm):
-        tid = (thread_by_name.get(nm) or "").strip()
-        return f"[{nm}](https://discord.com/channels/{gid}/{tid})" if tid else None
-    # Map board: "{Map} - {Faction}" -> other faction of the SAME map (diff thread)
-    if " - " in lb_name and lb_name.split(" - ")[0] in getattr(config, "MAP_ATTACK_DEFENSE", {}):
-        base = lb_name.split(" - ")[0]
-        my_tid = (thread_by_name.get(lb_name) or "").strip()
-        sibs = [nm for nm in board_names
-                if nm != lb_name and " - " in nm and nm.split(" - ")[0] == base
-                and (thread_by_name.get(nm) or "").strip()
-                and (thread_by_name.get(nm) or "").strip() != my_tid]
-        links = [l for l in (_link(s) for s in sorted(sibs)) if l]
-        return ("🗺️ Other side", " · ".join(links)) if links else None
-    # Weapon board: weapons that share a subclass with this one (primary role).
     sp = getattr(config, "_SUBCLASS_PRIMARIES", {})
     sibs = set()
     for _sc, ws in sp.items():
@@ -950,8 +939,12 @@ def _related_boards_field(lb_name, board_names, thread_by_name):
     sibs = [w for w in sibs if w in board_names]
     if not sibs:
         return None
-    links = [l for l in (_link(w) for w in sorted(sibs)) if l]
-    return ("⚔️ Same class", " · ".join(links[:10])) if links else None
+    links = []
+    for w in sorted(sibs):
+        tid = (thread_by_name.get(w) or "").strip()
+        if tid:
+            links.append(f"[{w}](https://discord.com/channels/{gid}/{tid})")
+    return ("Related Weapons", " · ".join(links[:10])) if links else None
 
 
 def _safe_int(v, default=0):
@@ -2661,6 +2654,9 @@ class LeaderboardsCog(commands.Cog):
             except Exception as e:
                 nerve_log_error(f"Leaderboard refresh {lb_name}", e)
                 failed.append(lb_name)
+            # Pace the bulk edit so a burst doesn't trip Discord's per-channel
+            # rate limit (which forces recreations and leaves duplicates).
+            await asyncio.sleep(0.8)
 
         # Dress thread-bottom spacer messages (map/feat threads) with the nav
         # row — normal refreshes edit board messages and never touch the

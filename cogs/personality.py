@@ -1327,11 +1327,8 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Avg lethality (K/TD)", value="lethality"),
             app_commands.Choice(name="Avg kill share", value="kill_share"),
             app_commands.Choice(name="Avg warlord", value="warlord"),
-            app_commands.Choice(name="Lethality vs weapon avg", value="leth_vs_avg"),
             app_commands.Choice(name="Avg takedowns per run", value="avg_td"),
             app_commands.Choice(name="Avg kills per run", value="avg_kills"),
-            app_commands.Choice(name="Total takedowns", value="total_td"),
-            app_commands.Choice(name="Total kills", value="total_kills"),
             app_commands.Choice(name="Best single run (TD)", value="best_td"),
             app_commands.Choice(name="Best single run (K)", value="best_kills"),
             app_commands.Choice(name="Avg lobby difficulty (tilt)", value="avg_tilt"),
@@ -1343,11 +1340,9 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Map", value="map"),
             app_commands.Choice(name="Subclass", value="subclass"),
             app_commands.Choice(name="Faction", value="faction"),
-            app_commands.Choice(name="Attack / Defense", value="orientation"),
             app_commands.Choice(name="Side (map + faction)", value="side"),
             app_commands.Choice(name="Week (trend)", value="week"),
             app_commands.Choice(name="Month (trend)", value="month"),
-            app_commands.Choice(name="Feat", value="feat"),
         ],
         feat=[
             app_commands.Choice(name="100 Kills", value="100 Kills"),
@@ -1407,11 +1402,6 @@ class PersonalityCog(commands.Cog):
         _side_label = side.name if side else None
         _season_only = bool(window and window.value == "season")
 
-        # Grouping by feat only makes sense as a run count, and can't ALSO filter
-        # by a feat (that's just that one feat). Guard both.
-        _FEATS = ["100 Kills", "200 Takedowns", "Triple", "Predator",
-                  "Flawless", "Pacifist", "High Score", "Brutal"]
-
         _season_start = None
         _win_label = "all time"
         if _season_only:
@@ -1425,23 +1415,17 @@ class PersonalityCog(commands.Cog):
                 print(f"[EXPLORE] season window lookup failed: {_we}")
 
         try:
-            if _by == "feat":
-                rows = await _db.get_explore_by_feat(
-                    "runs", feat_names=_FEATS, season_start=_season_start,
-                    player_id=_pid, player_names=_pnames, limit=12)
-                _metric, _metric_label = "runs", "Run count"
+            if _by in ("week", "month"):
+                _tmin = 2 if _pid else 3
+            elif _pid:
+                _tmin = 1   # one player rarely has 8 runs on a weapon; show them all
             else:
-                if _by in ("week", "month"):
-                    _tmin = 2 if _pid else 3
-                elif _pid:
-                    _tmin = 1   # one player rarely has 8 runs on a weapon; show them all
-                else:
-                    _tmin = getattr(config, 'EXPLORE_MIN_RUNS', 8)
-                _tlim = 20 if _by in ("week", "month") else 12
-                rows = await _db.get_explore(
-                    _metric, _by, feat=_feat, season_start=_season_start,
-                    orientation=_side, player_id=_pid, player_names=_pnames,
-                    min_runs=_tmin, limit=_tlim)
+                _tmin = getattr(config, 'EXPLORE_MIN_RUNS', 8)
+            _tlim = 20 if _by in ("week", "month") else 12
+            rows = await _db.get_explore(
+                _metric, _by, feat=_feat, season_start=_season_start,
+                orientation=_side, player_id=_pid, player_names=_pnames,
+                min_runs=_tmin, limit=_tlim)
         except Exception as _ee:
             await interaction.followup.send(f"Couldn't build that view: {_ee}")
             return
