@@ -659,6 +659,53 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
     return new_ids
 
 
+async def _reframe_thread(guild, thread, ordered_boards):
+    """Deterministic clean rebuild of a thread's boards from the template. Wipes
+    EVERY bot message in the thread first (no stray or duplicated decorations),
+    then reposts each board as its own frame: [TOP png][embed(s), title inside]
+    [BOTTOM png]. Nav buttons ride only the FINAL bottom. ordered_boards is the
+    list of lb_names in display order. Paced to stay under rate limits."""
+    me = guild.me.id if guild.me else None
+    try:
+        async for m in thread.history(limit=400, oldest_first=True):
+            if me is None or m.author.id == me:
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+                await asyncio.sleep(0.3)
+    except Exception as e:
+        print(f"[REFRAME] wipe error in #{thread.id}: {e}")
+    n = len(ordered_boards)
+    for idx, lb_name in enumerate(ordered_boards):
+        try:
+            entries = await get_leaderboard_entries(lb_name)
+            entries = await _sort_board_entries(lb_name, entries)
+            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+            score_prefix = "+" if lb_name == "TUFF" else ""
+            is_map = (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+            # Every board now gets an explicit BOTTOM png, so drop any baked-in
+            # bottom spacer (kills boards) to avoid a doubled decoration.
+            if embeds:
+                try:
+                    embeds[-1].set_image(url=None)
+                except Exception:
+                    pass
+            await thread.send(file=discord.File(DECORATION_TOP)); await asyncio.sleep(0.3)
+            ids = []
+            for emb in embeds:
+                _m = await thread.send(embed=emb)
+                ids.append(str(_m.id)); await asyncio.sleep(0.3)
+            _last = (idx == n - 1)
+            await thread.send(file=discord.File(DECORATION_BOTTOM),
+                              view=_nav_view(guild.id) if _last else discord.utils.MISSING)
+            await asyncio.sleep(0.3)
+            await _db.update_leaderboard_messages(lb_name, '|'.join(ids))
+        except Exception as e:
+            print(f"[REFRAME] board {lb_name} error: {e}")
+
+
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
                               player_name, message_link, bot_user=None, second_place_td=None, score=None):
@@ -1463,6 +1510,11 @@ def _lb_title(lb_name, show_title, cont=False):
         base = f"{lb_name[:-6]} - Kills"      # "Messer Kills" renders as "Messer - Kills"
     elif lb_name not in _FEAT_BOARD_NAMES and ' - ' not in lb_name:
         base = f"{lb_name} - Takedowns"       # weapon TD board, paired with the Kills board below it
+    elif ' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE:
+        _mp, _fac = lb_name.split(' - ', 1)
+        _mi = config.MAP_ATTACK_DEFENSE.get(_mp)
+        _suf = "\u2694\ufe0f" if (_mi and _mi[0] == _fac) else "\U0001f6e1\ufe0f"
+        base = f"{_mp} - {_fac} {_suf}"
     else:
         base = lb_name
     return f"{base} (cont.)" if cont else base
@@ -3148,6 +3200,37 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n\n\u26a0\ufe0f Errors ({len(errors)}):\n" + "\n".join(errors[:5])
 
         await interaction.edit_original_response(content=summary[:1900])
+
+    @app_commands.command(name="reframe_thread", description="Clean-rebuild THIS thread's boards from the template (mod only).")
+    async def reframe_thread_cmd(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        thread = interaction.channel
+        tid = str(getattr(thread, "id", "") or "")
+        recs = [r for r in await _get_lb_records() if str(r.get("Thread ID") or "").strip() == tid]
+        if not recs:
+            await interaction.followup.send("No boards are registered to this thread.", ephemeral=True)
+            return
+        # Derive display order from the current message positions (before wiping).
+        id_to_board = {}
+        for r in recs:
+            for mid in _re.findall(r"\d{17,20}", str(r.get("Message ID") or "")):
+                id_to_board[int(mid)] = r['Leaderboard Name']
+        order = []
+        try:
+            async for m in thread.history(limit=400, oldest_first=True):
+                b = id_to_board.get(m.id)
+                if b and b not in order:
+                    order.append(b)
+        except Exception:
+            pass
+        for r in recs:
+            if r['Leaderboard Name'] not in order:
+                order.append(r['Leaderboard Name'])
+        await _reframe_thread(interaction.guild, thread, order)
+        await interaction.followup.send(f"\u2705 Reframed {len(order)} board(s): {', '.join(order)}", ephemeral=True)
 
     @app_commands.command(name="fix_board_decoration", description="Re-frame a single (non-map) board with fresh top/bottom decoration (mod only).")
     @app_commands.describe(name="Exact leaderboard name, e.g. 'Messer' or 'Glaive'")
