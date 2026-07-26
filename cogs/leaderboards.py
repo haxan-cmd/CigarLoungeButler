@@ -3710,7 +3710,7 @@ class LeaderboardsCog(commands.Cog):
             await interaction.edit_original_response(
                 content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
 
-    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns / Pacifist entries (mod only).")
+    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns / Triple / Flawless / Pacifist entries (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("Not for you.", ephemeral=True)
@@ -3768,6 +3768,14 @@ class LeaderboardsCog(commands.Cog):
                     continue
                 await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
                 existing.add((board, link))
+                added += 1
+
+            # Flawless: any no-death run (tagged Flawless), unlimited, ranked by
+            # takedowns. Stacks per run like 100 Kills, so seed every one.
+            if ('Flawless' in (feats_str or '') and takedowns > 0
+                    and ("Flawless", link) not in existing):
+                await _db.add_leaderboard_entry("Flawless", player, discord_id, takedowns, link, weapon)
+                existing.add(("Flawless", link))
                 added += 1
 
         await _prune_pacifist_board()
