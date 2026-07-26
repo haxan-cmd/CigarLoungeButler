@@ -484,11 +484,6 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="🗡️ Top Weapons", value=_table(_rows(stats.get("top_weapons"))), inline=False)
     embed.add_field(name="🗺️ Top Maps", value=_table(_rows(stats.get("top_maps"))), inline=False)
 
-    embed.add_field(name="─── All-Time Titles ───", value=_table([
-        ("Grand Marshal", stats.get("grand_marshal") or "—"),
-        ("Weapons Master", stats.get("weapons_master") or "—"),
-        ("Campaign Master", stats.get("campaign_master") or "—"),
-    ]), inline=False)
     embed.set_footer(text=("Kill Share / Warlord / Lethality here are recency-weighted averages for THIS "
                            "season (5+ games) -- current form, not an all-time peak. The all-time boards "
                            "show your best 5-games-in-a-row instead. Executioner goes to the Lethality "
@@ -1106,6 +1101,59 @@ def _render_macro_png(period, changes, hh_counts, hh_total):
     return buf.read()
 
 
+_ATT_TITLES = [
+    ("Grand Marshal",   "_combined_placements", 15),
+    ("Weapons Master",  "_weapon_placements",    9),
+    ("Campaign Master", "_map_placements",       6),
+]
+
+
+def render_all_time_titles_embed(stats):
+    """Combined All-Time Titles board: Grand Marshal / Weapons Master / Campaign
+    Master rankings (gated at 15/9/6 boards), crown on the current holder of each.
+    Ranked by boards placed on; average placement breaks ties (lower is better)."""
+    _te = getattr(config, 'TITLE_EMOJIS', {})
+    gm_emoji = _te.get("Grand Marshal", "")
+    embed = discord.Embed(title=gm_emoji or "All-Time Titles", colour=0xC9A24B)
+    for label, key, min_boards in _ATT_TITLES:
+        dct = stats.get(key) or {}
+        ranked = sorted(
+            ((p, len(v), sum(v) / len(v)) for p, v in dct.items() if len(v) >= min_boards),
+            key=lambda t: (-t[1], t[2]))
+        if not ranked:
+            body = f"*No one qualifies yet (needs {min_boards}+ boards).*"
+        else:
+            _rows = []
+            for i, (p, cnt, avg) in enumerate(ranked[:6], 1):
+                crown = " \U0001f451" if i == 1 else ""
+                _rows.append(f"`{i}.` **{p}** \u2014 {cnt} boards \u00b7 avg #{avg:.2f}{crown}")
+            body = "\n".join(_rows)
+        embed.add_field(name=f"{_te.get(label, '')} {label}  \u00b7  {min_boards}+ boards",
+                        value=body, inline=False)
+    embed.set_footer(text="Ranked by boards placed on; average placement breaks ties (lower is better). Crown = current holder.")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+
+async def refresh_all_time_titles_board(guild):
+    """Rebuild the pinned All-Time Titles board embed, if one has been set up."""
+    try:
+        ptr = await _db.get_titles_board()
+    except Exception:
+        ptr = None
+    if not ptr:
+        return
+    ch_id, msg_id = ptr
+    try:
+        stats = await calculate_butler_stats()  # all-time, no window
+        embed = render_all_time_titles_embed(stats)
+        ch = guild.get_channel(int(ch_id)) or await guild.fetch_channel(int(ch_id))
+        msg = await ch.fetch_message(int(msg_id))
+        await msg.edit(content="", embed=embed)
+    except Exception as e:
+        print(f"[TITLES_BOARD] refresh failed: {e}")
+
+
 class FavouritesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1313,6 +1361,30 @@ class FavouritesCog(commands.Cog):
         )
         await interaction.followup.send(header + "\n".join(out).rstrip())
 
+    @app_commands.command(name="setup_titles_board", description="Post the combined All-Time Titles board in THIS thread (mod only).")
+    async def setup_titles_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            stats = await calculate_butler_stats()
+            embed = render_all_time_titles_embed(stats)
+            msg = await interaction.channel.send(embed=embed)
+            await _db.set_titles_board(str(interaction.channel.id), str(msg.id))
+            await interaction.followup.send("\u2705 All-Time Titles board posted here. It refreshes with the monthly report or via /refresh_titles_board.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"\u274c Setup failed: {e}", ephemeral=True)
+
+    @app_commands.command(name="refresh_titles_board", description="Rebuild the All-Time Titles board now (mod only).")
+    async def refresh_titles_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await refresh_all_time_titles_board(interaction.guild)
+        await interaction.followup.send("\u2705 All-Time Titles board refreshed.", ephemeral=True)
+
     @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
     async def force_finalize_season(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -1376,6 +1448,7 @@ class FavouritesCog(commands.Cog):
             embed = await build_favourites_embed(stats, bot_avatar_url=guild.me.display_avatar.url if guild else None)
             await refresh_favourites_message(guild, embed)
             await update_title_roles(guild, stats, include_weekly=False)
+            await refresh_all_time_titles_board(guild)
             await interaction.followup.send("\u2705 Rebuilt the pinned Butler Monthly report.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"\u274c Report refresh failed: {e}", ephemeral=True)
@@ -1472,9 +1545,6 @@ class FavouritesCog(commands.Cog):
                 _pulse = f"**{_runs}** runs" + (f" \u00b7 **{_players}** players" if _players else "")
                 summary.add_field(name="📊 This Season", value=_pulse, inline=False)
 
-            _alltime = _champion_lines(stats, ['grand_marshal', 'weapons_master', 'campaign_master'])
-            if _alltime:
-                summary.add_field(name="🏛️ All-Time Titles", value="\n".join(_alltime), inline=False)
             await interaction.followup.send(embed=summary, ephemeral=True)
 
         except Exception as e:

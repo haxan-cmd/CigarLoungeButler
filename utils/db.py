@@ -135,6 +135,10 @@ _SCHEMA_STATEMENTS = [
     # machinery never renders it as a weapon board.
     "CREATE TABLE IF NOT EXISTS peasant_board ("
     "id INT PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
+    # The combined All-Time Titles board (Grand Marshal / Weapons Master / Campaign
+    # Master rankings), pinned at a single mod-chosen message in the feats forum.
+    "CREATE TABLE IF NOT EXISTS titles_board ("
+    "id INT PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
 ]
 
 
@@ -988,6 +992,24 @@ async def set_peasant_board(channel_id, message_id):
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO peasant_board (id, channel_id, message_id) VALUES (1, $1, $2) "
+            "ON CONFLICT (id) DO UPDATE SET channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id",
+            str(channel_id), str(message_id))
+
+
+async def get_titles_board():
+    """(channel_id, message_id) strings for the All-Time Titles board post, or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT channel_id, message_id FROM titles_board WHERE id=1")
+    return (row['channel_id'], row['message_id']) if row else None
+
+
+async def set_titles_board(channel_id, message_id):
+    """Point the All-Time Titles board at a specific message (any channel/thread)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO titles_board (id, channel_id, message_id) VALUES (1, $1, $2) "
             "ON CONFLICT (id) DO UPDATE SET channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id",
             str(channel_id), str(message_id))
 

@@ -23,7 +23,7 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, the Peasant board, `/top`, `/refresh*`, `/remove_board_score`. |
 | `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation (incl. difficulty valor marks), `/playerstats`, `/refreshcard`, legacy imports. |
 | `cogs/bounty.py` | Monthly bounty: progress tracking, forum cards, completion, `/bounty_*` commands. |
-| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles, seasons/Hall of Fame, `/report`, `/standings`, `/season`, `/titles`. |
+| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles, seasons/Hall of Fame, the combined All-Time Titles board (`/setup_titles_board`, `refresh_all_time_titles_board`), `/report`, `/standings`, `/season`, `/titles`. |
 | `cogs/personality.py` | Butler AI chat (on_message, with lore injection), task loops (polls, digest, dry-spell, daily cycle), `/explore`, `/tilt_stats`, `/serverstats`, `/help`, bounty channel placeholders. |
 | `cogs/admin.py` | Mod tooling: `/remove_submission`, `/unlist_submission`, backups, rules posts, `/award_marks`, `/set_feat_count`. |
 | `cogs/kofi.py` | Ko-fi donations: webhook handler (route lives in bot.py), dashboard embed. |
@@ -50,6 +50,7 @@ Sheets era). Cogs index into them positionally. Key maps:
 - players: 0 discord_id · 1 player_name · 2 forum_thread_id · 3 total_marks · 4 submission_count · 5 last_submission · 6 weapon_marks · 7 class_marks · 8-10 manual feat-count overrides (None = auto)
 - peasant_runs (own table, not leaderboard_data): player_name, discord_id, map, faction, score, takedowns, kills, deaths, message_link. One highscore row per player per map.
 - peasant_board (pointer, single row id=1): channel_id, message_id for the posted board message.
+- titles_board (pointer, single row id=1): channel_id, message_id for the combined All-Time Titles board (Grand Marshal / Weapons Master / Campaign Master rankings). Refreshed on `/refresh_report` or `/refresh_titles_board`; no longer shown in the monthly report.
 
 ## Conventions and gotchas
 
