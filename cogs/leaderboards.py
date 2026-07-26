@@ -3693,7 +3693,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="remove_board_score", description="Remove a player's entry from a board (mod only).")
     @app_commands.describe(board="Exact board name (e.g. Battle Axe)",
                            player="Player name exactly as shown on the board (or an @mention)",
-                           message_link="Optional: link to the specific run — removes ONLY that entry (for boards where a player has several, e.g. TUFF)")
+                           message_link="Optional: link to a specific run to remove only that one entry (for stacked boards like TUFF)")
     @app_commands.autocomplete(board=_rank_name_ac)
     async def remove_board_score_cmd(self, interaction: discord.Interaction, board: str, player: str, message_link: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -3747,7 +3747,7 @@ class LeaderboardsCog(commands.Cog):
             await interaction.edit_original_response(
                 content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
 
-    @app_commands.command(name="backfill_feat_boards", description="Scan submissions and add missing 100 Kills / 200 Takedowns / Triple / Flawless / Pacifist entries (mod only).")
+    @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, Pacifist (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("Not for you.", ephemeral=True)
