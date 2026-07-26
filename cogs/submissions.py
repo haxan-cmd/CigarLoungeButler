@@ -73,6 +73,14 @@ def _blurb_desc(msg):
     return msg.content or ''
 
 async def _blurb_edit(msg, desc, edited=False, view=None):
+    # Re-fetch the blurb fresh first. The EditView holds the Message object captured
+    # when the blurb was first posted; editing that stale reference is what made the
+    # post intermittently keep its pre-edit text while the DB/card/boards were already
+    # correct. A fresh fetch also gives us the current thumbnail to preserve.
+    try:
+        msg = await msg.channel.fetch_message(msg.id)
+    except Exception:
+        pass  # fall back to the reference we were handed
     # content='' clears the plain text (also wipes the old-format blurb text
     # when an edit upgrades a pre-embed message)
     # Keep the lethality-charge weapon as the embed THUMBNAIL across edits. Two
@@ -94,7 +102,18 @@ async def _blurb_edit(msg, desc, edited=False, view=None):
         emb.set_thumbnail(url=_th)
     if view is not None:
         kwargs['view'] = view
-    await msg.edit(**kwargs)
+    # Retry a couple of times so a transient rate-limit/network blip can't silently
+    # drop the visual refresh (the caller used to swallow this and still report success).
+    _last = None
+    for _attempt in range(3):
+        try:
+            await msg.edit(**kwargs)
+            return
+        except discord.HTTPException as _he:
+            _last = _he
+            await asyncio.sleep(1.0 * (_attempt + 1))
+    if _last:
+        raise _last
 
 
 def _link_weapon(weapon, guild_id, lb_thread_map):
@@ -2064,16 +2083,26 @@ async def _apply_edit(interaction, ev):
     if _shown:
         new_summary += "\n" + "\n".join(_pline(lb, pos) for lb, pos in _shown)
 
+    # Keep the SAME edit view attached so the Edit button stays live — users can
+    # correct more than one field, one per click (previously view=None killed it
+    # after a single edit, so map-then-nothing-else was all you got).
+    _blurb_ok = True
     try:
-        # Keep the SAME edit view attached so the Edit button stays live — users can
-        # correct more than one field, one per click (previously view=None killed it
-        # after a single edit, so map-then-nothing-else was all you got).
         await _blurb_edit(ev._message, new_summary, edited=True, view=ev)
-    except Exception:
-        pass
+    except Exception as _be:
+        _blurb_ok = False
+        print(f"[EDIT] blurb refresh failed: {_be}")
+        try:
+            from utils.helpers import nerve_alert
+            await nerve_alert(interaction.client, "edit blurb refresh", _be)
+        except Exception:
+            pass
 
     try:
-        await interaction.followup.send("✅ Updated! You can hit **✏️ Edit** again to fix another field.", ephemeral=True)
+        if _blurb_ok:
+            await interaction.followup.send("✅ Updated! You can hit **✏️ Edit** again to fix another field.", ephemeral=True)
+        else:
+            await interaction.followup.send("✅ Saved (stats, boards and card are updated). The post itself didn't refresh just now — hit **✏️ Edit** again in a moment and it'll catch up.", ephemeral=True)
     except Exception:
         pass
 

@@ -568,7 +568,22 @@ async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 4
             continue
         seen.add(r['discord_id'])
         _their_team = _team_total(r['kills'], r['team_kill_share'])
-        if _my_team and _their_team:
+        # Side detection from the banner totals, which are stored ORIENTED (your team's
+        # total + the enemy total). Teammates report the SAME (team, enemy) pair;
+        # opponents report it SWAPPED. Pick whichever orientation fits better — robust
+        # even in a close match, where comparing team-vs-team alone read two opponents
+        # as allies ("alongside" when it should be "against"; Mack/boomhauer 2026-07-26).
+        # If the two totals are too symmetric to tell the sides apart, stay neutral.
+        _myt, _mye = me['team_total_kills'], me['enemy_total_kills']
+        _tht, _the = r['team_total_kills'], r['enemy_total_kills']
+        if all(isinstance(x, int) and x > 0 for x in (_myt, _mye, _tht, _the)):
+            _same_fit = abs(_myt - _tht) + abs(_mye - _the)
+            _opp_fit = abs(_myt - _the) + abs(_mye - _tht)
+            if abs(_same_fit - _opp_fit) <= max(6, int(max(_myt, _mye) * 0.03)):
+                same_team = None
+            else:
+                same_team = _same_fit < _opp_fit
+        elif _my_team and _their_team:
             same_team = abs(_my_team - _their_team) <= max(_my_team, _their_team) * 0.10
         else:
             same_team = None
