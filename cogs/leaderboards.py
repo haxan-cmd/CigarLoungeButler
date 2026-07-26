@@ -2688,44 +2688,37 @@ class LeaderboardsCog(commands.Cog):
         guild = interaction.guild
         done, failed = [], []
 
-        # Group boards by thread and reframe each thread once from the template:
-        # wipes strays / doubled decorations, reposts each board framed cleanly.
-        by_thread = {}
+        # Edit each board in place (fast, reliable). Bulk wipe-and-repost tripped
+        # rate limits over ~90 boards and left threads half-rebuilt; use
+        # /reframe_thread per thread to clean strays / fix a broken frame instead.
         for lb_row in all_lb_rows:
             lb_name = lb_row.get('Leaderboard Name')
-            tid = str(lb_row.get('Thread ID') or '').strip()
-            mid = str(lb_row.get('Message ID') or '').strip()
-            if not lb_name or not tid or not mid:
+            thread_id_raw = lb_row.get('Thread ID')
+            msg_id_raw = lb_row.get('Message ID')
+            if not lb_name or not thread_id_raw or not msg_id_raw:
                 continue
-            by_thread.setdefault(tid, []).append(lb_row)
-
-        for tid, recs in by_thread.items():
             try:
-                thread = guild.get_channel(int(tid)) or await guild.fetch_channel(int(tid))
-                id_to_board = {}
-                for r in recs:
-                    for _m in _re.findall(r'\d{17,20}', str(r.get('Message ID') or '')):
-                        id_to_board[int(_m)] = r['Leaderboard Name']
-                order = []
-                try:
-                    async for _msg in thread.history(limit=400, oldest_first=True):
-                        _b = id_to_board.get(_msg.id)
-                        if _b and _b not in order:
-                            order.append(_b)
-                except Exception:
-                    pass
-                for r in recs:
-                    if r['Leaderboard Name'] not in order:
-                        order.append(r['Leaderboard Name'])
-                await _reframe_thread(guild, thread, order)
-                done.extend(order)
+                entries = await get_leaderboard_entries(lb_name)
+                entries = await _sort_board_entries(lb_name, entries)
+                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+                score_prefix = "+" if lb_name == "TUFF" else ""
+                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+                thread_id = int(thread_id_raw)
+                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
+                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content="")
+                if new_ids != message_ids:
+                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                done.append(lb_name)
             except Exception as e:
-                nerve_log_error(f"Reframe thread {tid}", e)
-                failed.append(tid)
+                nerve_log_error(f"Leaderboard refresh {lb_name}", e)
+                failed.append(lb_name)
+            await asyncio.sleep(0.8)
 
-        summary = f"\u2705 Reframed {len(done)} boards across {len(by_thread)} threads."
+        summary = f"\u2705 Refreshed {len(done)} boards."
         if failed:
-            summary += f"\n\u274c Failed threads: {', '.join(failed)}"
+            summary += f"\n\u274c Failed: {', '.join(failed)}"
         await interaction.edit_original_response(content=summary)
 
     @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Kill Share + Warlord) at once (mod only).")
