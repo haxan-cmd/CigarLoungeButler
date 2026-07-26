@@ -1145,7 +1145,7 @@ async def _sort_board_entries(lb_name, entries):
         # One row per player, best takedowns; ties by score.
         best = {}
         for e in entries:
-            did = e.get('discord_id') or ('name:' + (e.get('player_name') or '').lower())
+            did = (e.get('did') or '').strip() or ('name:' + (e.get('player') or '').strip().lower())
             try:
                 _sc = int(e.get('score') or 0)
             except (ValueError, TypeError):
