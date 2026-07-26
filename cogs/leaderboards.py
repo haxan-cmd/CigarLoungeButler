@@ -692,7 +692,10 @@ async def _reframe_thread(guild, thread, ordered_boards):
                     embeds[-1].set_image(url=None)
                 except Exception:
                     pass
-            await thread.send(file=discord.File(DECORATION_TOP)); await asyncio.sleep(0.3)
+            # Only the FIRST board gets a TOP; each board's BOTTOM is the divider
+            # to the next, so stacked boards don't show a BOTTOM+TOP pair.
+            if idx == 0:
+                await thread.send(file=discord.File(DECORATION_TOP)); await asyncio.sleep(0.3)
             ids = []
             for emb in embeds:
                 _m = await thread.send(embed=emb)
@@ -894,8 +897,8 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             print(f"No leaderboards DB entry found for: {lb_name}")
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-        embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
-        header_content = _map_header(lb_name) if is_map else ""
+        embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+        header_content = ""
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -1020,7 +1023,13 @@ async def _sort_board_entries(lb_name, entries):
                 best[did] = e
         return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))
     if lb_name != "Pacifist":
-        return sorted(entries, key=lambda x: x['score'], reverse=True)
+        _sorted = sorted(entries, key=lambda x: x['score'], reverse=True)
+        # Weapon / map / kills boards are top-10. Guard the DISPLAY so a bloated
+        # board (legacy or backfill rows that skipped the insert-time eviction)
+        # can never render more than 10. Feat boards are unlimited and pass through.
+        if _classify_board(lb_name, '') in ('weapon', 'map', 'weapon_kills'):
+            return _sorted[:10]
+        return _sorted
     subs = await _db.get_all_submissions()
     tdl = {}
     for s in subs:
@@ -1166,8 +1175,8 @@ async def _render_board(guild, lb_row, lb_name):
     show_weapon = lb_name in ("100 Kills", "200 Takedowns")
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-    embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
-    header_content = _map_header(lb_name) if is_map else ""
+    embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+    header_content = ""
     thread_id = int(thread_raw)
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
     if not message_ids:
@@ -2648,8 +2657,8 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
-            header_content = _map_header(lb_name) if is_map else ""
+            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+            header_content = ""
 
             thread_id = int(lb_row['Thread ID'])
             message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -2692,8 +2701,8 @@ class LeaderboardsCog(commands.Cog):
                 show_weapon = lb_name in ("100 Kills", "200 Takedowns")
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
-                header_content = _map_header(lb_name) if is_map else ""
+                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+                header_content = ""
 
                 thread_id = int(thread_id_raw)
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
@@ -2881,8 +2890,8 @@ class LeaderboardsCog(commands.Cog):
             show_weapon = lb_name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, not is_map)
-            header_content = _map_header(lb_name) if is_map else ""
+            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+            header_content = ""
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
