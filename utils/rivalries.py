@@ -1,13 +1,13 @@
 """Pure head-to-head / ally aggregation for the Nemesis & Friend system.
 
 Reuses the same lobby-fingerprint idea as db.get_lobbymates (same map, tight time
-window, matching faction banner totals) but computes it across a player's WHOLE
-history in-Python, so it has no Discord/DB dependency and is unit-tested
-(tests/test_rivalries.py). The cog scopes/fetches submissions and hands them here.
+window, matching faction banner totals, with a kill-share fallback for side
+detection) but computes it across a player's WHOLE history in-Python, so it has no
+Discord/DB dependency and is unit-tested (tests/test_rivalries.py).
 
 Row indices (submissions shape): 0 submitted_at · 1 player_name · 2 discord_id ·
 3 weapon · 5 map · 7 takedowns · 8 kills · 11 feats · 18 total_lobby_kills ·
-25 team_total_kills · 26 enemy_total_kills.
+20 team_kill_share · 25 team_total_kills · 26 enemy_total_kills.
 """
 from collections import defaultdict
 from datetime import datetime
@@ -16,6 +16,13 @@ from datetime import datetime
 def _i(v):
     try:
         return int(str(v).strip())
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _f(v):
+    try:
+        return float(str(v).strip())
     except (ValueError, TypeError, AttributeError):
         return None
 
@@ -47,7 +54,7 @@ def _pair(a, b):
 def _same_lobby(r1, r2, window_min):
     """Do two runs look like the same match? Same map, within the time window, and
     matching banner totals (or the legacy roster-sum fallback). Mirrors get_lobbymates."""
-    if (r1[5] or '').strip().lower() != (r2[5] or '').strip().lower() or not (r1[5] or '').strip():
+    if not (r1[5] or '').strip() or (r1[5] or '').strip().lower() != (r2[5] or '').strip().lower():
         return False
     t1, t2 = _ts(r1[0]), _ts(r2[0])
     if not t1 or not t2 or abs((t1 - t2).total_seconds()) / 60.0 > window_min:
@@ -64,10 +71,17 @@ def _same_lobby(r1, r2, window_min):
     return False
 
 
+def _team_total(kills, share):
+    if kills and share and share > 0:
+        return kills * 100.0 / share
+    return None
+
+
 def _same_team(r1, r2):
-    """True=allies, False=opponents, None=too symmetric to tell. Uses the ORIENTED
-    banner totals (your team total + the enemy total): teammates share the pair,
-    opponents see it swapped."""
+    """True=allies, False=opponents, None=undetermined. Prefers the ORIENTED banner
+    totals (teammates share the (team, enemy) pair, opponents see it swapped). When
+    banner totals are missing, falls back to kill-share-derived team totals, matching
+    db.get_lobbymates. Balanced banner totals return None (honestly can't tell)."""
     myt = _i(r1[25]) if len(r1) > 25 else None
     mye = _i(r1[26]) if len(r1) > 26 else None
     tht = _i(r2[25]) if len(r2) > 25 else None
@@ -75,57 +89,78 @@ def _same_team(r1, r2):
     if all(isinstance(x, int) and x > 0 for x in (myt, mye, tht, the)):
         same = abs(myt - tht) + abs(mye - the)
         opp = abs(myt - the) + abs(mye - tht)
-        if abs(same - opp) <= max(6, int(max(myt, mye) * 0.03)):
-            return None
-        return same < opp
+        if abs(same - opp) > max(6, int(max(myt, mye) * 0.03)):
+            return same < opp
+        return None
+    _t1 = _team_total(_i(r1[8]), _f(r1[20]) if len(r1) > 20 else None)
+    _t2 = _team_total(_i(r2[8]), _f(r2[20]) if len(r2) > 20 else None)
+    if _t1 and _t2:
+        return abs(_t1 - _t2) <= max(_t1, _t2) * 0.10
     return None
 
 
 def compute_rivalries(target_key, all_subs, window_min=45):
-    """Aggregate a player's head-to-head (opponents) and ally records across every
-    match we can fingerprint. Returns:
+    """Aggregate a player's shared-lobby history. Every shared lobby is an ENCOUNTER;
+    when sides resolve, it also counts as an opponent clash (with win/loss by kills) or
+    an ally match. Returns:
       {
-        'nemesis':  {name, encounters, wins, losses} | None,   # most-faced opponent
-        'ally':     {name, matches} | None,                     # most-played-with
-        'opponents':[{name, encounters, wins, losses}, ...],    # by encounters desc
-        'allies':   [{name, matches}, ...],                     # by matches desc
+        'nemesis': {key, name, encounters, wins, losses} | None,
+        'ally':    {key, name, matches} | None,
+        'opponents':[{key, name, encounters, wins, losses}, ...],  # opp-clash desc
+        'allies':   [{key, name, matches}, ...],                   # matches desc
       }
-    wins/losses are from the target's view, decided by kills in that shared match."""
+    nemesis = the player you clash with as an OPPONENT most; if no clash ever resolves
+    to opponents, it falls back to the player you simply share lobbies with most."""
     subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
     target_runs = [r for r in subs if ident(r)[0] == target_key]
-    opp = defaultdict(lambda: {'key': '', 'name': '', 'encounters': 0, 'wins': 0, 'losses': 0})
-    ally = defaultdict(lambda: {'key': '', 'name': '', 'matches': 0})
+    enc = defaultdict(lambda: {'key': '', 'name': '', 'encounters': 0,
+                               'wins': 0, 'losses': 0, 'ally': 0})
     for tr in target_runs:
         tk = _i(tr[8]) or 0
         for r in subs:
             k, name = ident(r)
-            if k == target_key:
+            if k == target_key or not _same_lobby(tr, r, window_min):
                 continue
-            if not _same_lobby(tr, r, window_min):
-                continue
+            e = enc[k]
+            e['key'] = k
+            e['name'] = name or e['name']
+            e['encounters'] += 1
             side = _same_team(tr, r)
-            if side is True:
-                a = ally[k]
-                a['key'] = k
-                a['name'] = name or a['name']
-                a['matches'] += 1
-            elif side is False:
-                o = opp[k]
-                o['key'] = k
-                o['name'] = name or o['name']
-                o['encounters'] += 1
+            if side is False:
                 rk = _i(r[8]) or 0
                 if tk > rk:
-                    o['wins'] += 1
+                    e['wins'] += 1
                 elif rk > tk:
-                    o['losses'] += 1
-    opponents = sorted(opp.values(), key=lambda d: (-d['encounters'], -(d['losses'] - d['wins'])))
-    allies = sorted(ally.values(), key=lambda d: -d['matches'])
+                    e['losses'] += 1
+            elif side is True:
+                e['ally'] += 1
+    if not enc:
+        return {'nemesis': None, 'ally': None, 'opponents': [], 'allies': []}
+
+    def _clashes(e):
+        return e['wins'] + e['losses']
+
+    all_e = list(enc.values())
+    opps = [e for e in all_e if _clashes(e) > 0]
+    opps.sort(key=lambda e: (-_clashes(e), -(e['losses'] - e['wins'])))
+    allies = sorted((e for e in all_e if e['ally'] > 0), key=lambda e: -e['ally'])
+    if opps:
+        nemesis = opps[0]
+    else:  # no clash ever resolved to opponents — fall back to most-shared-lobby
+        nemesis = max(all_e, key=lambda e: e['encounters'])
+    nem_out = {'key': nemesis['key'], 'name': nemesis['name'],
+               'encounters': nemesis['encounters'],
+               'wins': nemesis['wins'], 'losses': nemesis['losses']}
+    ally_out = None
+    if allies:
+        a = allies[0]
+        ally_out = {'key': a['key'], 'name': a['name'], 'matches': a['ally']}
     return {
-        'nemesis': opponents[0] if opponents else None,
-        'ally': allies[0] if allies else None,
-        'opponents': opponents,
-        'allies': allies,
+        'nemesis': nem_out,
+        'ally': ally_out,
+        'opponents': [{'key': e['key'], 'name': e['name'], 'encounters': e['encounters'],
+                       'wins': e['wins'], 'losses': e['losses']} for e in opps],
+        'allies': [{'key': e['key'], 'name': e['name'], 'matches': e['ally']} for e in allies],
     }
 
 
@@ -137,12 +172,16 @@ def rivalry_context(display_name, data, top=3):
         return ''
     lines = [f"RIVALRY DATA for {display_name} (from shared-lobby history, approximate):"]
     if nem:
-        rec = f"{nem['wins']}-{nem['losses']}" if (nem['wins'] or nem['losses']) else "even/unclear"
-        lines.append(f"- Nemesis (most-faced opponent): {nem['name']}, {nem['encounters']} clashes, "
-                     f"head-to-head {rec} (target's kills vs theirs).")
+        if nem['wins'] or nem['losses']:
+            lines.append(f"- Nemesis (most-faced opponent): {nem['name']}, {nem['encounters']} clashes, "
+                         f"head-to-head {nem['wins']}-{nem['losses']} (their kills decided each).")
+        else:
+            _tm = f"{nem['encounters']} time{'s' if nem['encounters'] != 1 else ''}"
+            lines.append(f"- Most-shared lobby: {nem['name']} ({_tm}). The sides were too even to keep an "
+                         f"honest win-loss, so treat them as a frequent foe, not a scored one.")
     if al:
         lines.append(f"- Closest ally (most matches on the same team): {al['name']}, {al['matches']} together.")
-    others = [o for o in data.get('opponents', [])[1:top + 1]]
+    others = [o for o in data.get('opponents', [])[1:top + 1] if (o['wins'] or o['losses'])]
     if others:
         lines.append("- Other rivals: "
                      + ", ".join(f"{o['name']} ({o['wins']}-{o['losses']}, {o['encounters']} clashes)"

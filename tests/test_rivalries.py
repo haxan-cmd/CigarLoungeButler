@@ -62,6 +62,28 @@ def test_excludes_resubmit_and_empty_output():
     assert rivalry_context("A", d) == ""
 
 
+def test_kill_share_fallback_resolves_side_without_banner_totals():
+    # No banner totals (25/26 blank), but kills + team_kill_share present -> team totals
+    # derive to ~300 each = same team = ally. total_lobby_kills carries the same-lobby match.
+    a = row("2026-07-27 12:00:00", "A", "1", team_total=0, enemy_total=0); a[25] = ""; a[26] = ""
+    a[8] = "60"; a[20] = "20"; a[18] = "600"
+    b = row("2026-07-27 12:02:00", "B", "2", team_total=0, enemy_total=0); b[25] = ""; b[26] = ""
+    b[8] = "45"; b[20] = "15"; b[18] = "600"
+    d = compute_rivalries("1", [a, b])
+    assert d['ally'] and d['ally']['name'] == "B" and d['ally']['matches'] == 1
+
+
+def test_nemesis_falls_back_to_most_shared_lobby_when_sides_unknown():
+    # No banner totals and no team_kill_share -> side never resolves, but they clearly
+    # share the lobby; nemesis should still surface by encounter frequency (unscored).
+    a = row("2026-07-27 12:00:00", "A", "1"); a[25] = ""; a[26] = ""; a[18] = "600"
+    b = row("2026-07-27 12:02:00", "B", "2"); b[25] = ""; b[26] = ""; b[18] = "600"
+    d = compute_rivalries("1", [a, b])
+    assert d['nemesis'] and d['nemesis']['name'] == "B"
+    assert d['nemesis']['encounters'] == 1 and d['nemesis']['wins'] == 0 and d['nemesis']['losses'] == 0
+    assert "Most-shared lobby" in rivalry_context("A", d)
+
+
 def test_context_renders_when_present():
     subs = [
         row("2026-07-27 12:00:00", "A", "1", kills=60, team_total=300, enemy_total=280),
