@@ -71,17 +71,13 @@ def _same_lobby(r1, r2, window_min):
     return False
 
 
-def _team_total(kills, share):
-    if kills and share and share > 0:
-        return kills * 100.0 / share
-    return None
-
-
 def _same_team(r1, r2):
-    """True=allies, False=opponents, None=undetermined. Prefers the ORIENTED banner
-    totals (teammates share the (team, enemy) pair, opponents see it swapped). When
-    banner totals are missing, falls back to kill-share-derived team totals, matching
-    db.get_lobbymates. Balanced banner totals return None (honestly can't tell)."""
+    """True=allies, False=opponents, None=undetermined. Uses ONLY the ORIENTED banner
+    totals: teammates share the (team, enemy) pair, opponents see it swapped. There is
+    deliberately NO kill-share fallback here — that method can't tell sides apart in a
+    balanced game (both teams have similar totals), which wrongly labels opponents as
+    allies. When banner totals are missing or too symmetric we return None, so the run
+    still counts as a shared-lobby ENCOUNTER but is never claimed as a confirmed ally."""
     myt = _i(r1[25]) if len(r1) > 25 else None
     mye = _i(r1[26]) if len(r1) > 26 else None
     tht = _i(r2[25]) if len(r2) > 25 else None
@@ -91,11 +87,6 @@ def _same_team(r1, r2):
         opp = abs(myt - the) + abs(mye - tht)
         if abs(same - opp) > max(6, int(max(myt, mye) * 0.03)):
             return same < opp
-        return None
-    _t1 = _team_total(_i(r1[8]), _f(r1[20]) if len(r1) > 20 else None)
-    _t2 = _team_total(_i(r2[8]), _f(r2[20]) if len(r2) > 20 else None)
-    if _t1 and _t2:
-        return abs(_t1 - _t2) <= max(_t1, _t2) * 0.10
     return None
 
 
