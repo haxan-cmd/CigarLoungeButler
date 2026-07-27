@@ -1734,16 +1734,30 @@ class PersonalityCog(commands.Cog):
             description=(f"{_total} replies logged · {_rated} rated ({_pct}) · "
                          f"👍 {agg.get('pos') or 0} · 👎 {agg.get('neg') or 0} · "
                          f"💬 {agg.get('replies') or 0} replies"))
+        # Discord caps the WHOLE embed at 6000 chars, not just per-field. Adding every
+        # row unconditionally (up to 20 × ~1.3k) blew that cap and 400'd the send, so
+        # track the running total and stop before we hit it.
+        _budget = 5800
+        _used = len(emb.title or '') + len(emb.description or '')
+        _shown = 0
         for r in rows:
             _score = (r['positive'] or 0) - (r['negative'] or 0)
             _reacts = r['reactions'] or 'no reacts'
             _rep = r['replies'] or 0
             _rep_str = f" · 💬{_rep}" if _rep else ""
-            _name = f"{_score:+d} · {_reacts}{_rep_str} · {r['player_name']}"
+            _name = f"{_score:+d} · {_reacts}{_rep_str} · {r['player_name']}"[:256]
             _trig = (r['trigger'] or '')[:90]
             _resp = (r['response'] or '')[:280]
-            emb.add_field(name=_name[:256], value=f"> {_trig}\n{_resp}"[:1024], inline=False)
-        emb.set_footer(text="Promote the winners into BUTLER_SYSTEM_PROMPT as examples")
+            _val = f"> {_trig}\n{_resp}"[:1024]
+            if _used + len(_name) + len(_val) > _budget:
+                break
+            emb.add_field(name=_name, value=_val, inline=False)
+            _used += len(_name) + len(_val)
+            _shown += 1
+        _foot = "Promote the winners into BUTLER_SYSTEM_PROMPT as examples"
+        if _shown < len(rows):
+            _foot = f"Showing {_shown} of {len(rows)} (embed limit) · " + _foot
+        emb.set_footer(text=_foot)
         await interaction.followup.send(embed=emb, ephemeral=True)
 
     @app_commands.command(name="counting_backfill", description="Replay the counting channel's full history to rebuild counting stats (mod only).")
