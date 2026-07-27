@@ -1872,7 +1872,7 @@ async def _apply_edit(interaction, ev):
     # rebuild the affected weapon/map boards for this player so another of their
     # runs reclaims the slot if this run moved off a board.
     try:
-        from cogs.leaderboards import update_leaderboards, rebuild_score_boards
+        from cogs.leaderboards import update_leaderboards, rebuild_score_boards, reseed_feat_boards_for_run
         _edit_guild = ev.original_message.guild
         async with _BOARD_LOCK:
             _old_boards = await _db.delete_leaderboard_entries_by_link(ev.message_link)
@@ -1904,6 +1904,16 @@ async def _apply_edit(interaction, ev):
             if _affected:
                 await rebuild_score_boards(
                     _edit_guild, board_names=list(_affected), only_player=str(ev.author.id))
+            # Unlimited feat boards (100 Kills / 200 TD / Triple / Flawless) aren't
+            # covered by rebuild_score_boards, so re-seed this run's rows explicitly —
+            # otherwise the delete-by-link above (or a failed update_leaderboards) could
+            # strand them and undercount the player's card. Idempotent by link.
+            try:
+                await reseed_feat_boards_for_run(
+                    _edit_guild, ev.author.display_name, str(ev.author.id),
+                    ev.message_link, ev.kills, ev.takedowns, ev.weapon, (ev.feats or []))
+            except Exception as _rfe:
+                print(f"[EDIT] feat-board reseed error: {_rfe}")
     except Exception as e:
         print(f"[EDIT] board propagation error: {e}")
 

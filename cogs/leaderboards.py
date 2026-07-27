@@ -1432,6 +1432,46 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
     return summary
 
 
+async def reseed_feat_boards_for_run(guild, player_name, discord_id, link,
+                                     kills, takedowns, weapon, feats, render=True):
+    """Ensure ONE run's unlimited feat-board rows (100 Kills / 200 Takedowns / Triple /
+    Flawless) exist, adding any that qualify by the run's stats/feats but are missing.
+
+    These boards are NOT covered by rebuild_score_boards, so an edit that cleared a
+    run's rows by link (or a failed re-add) could strand them and undercount the card.
+    Idempotent: keyed by the run's message link, so it never duplicates a row that is
+    already there. Returns the list of board names it re-seeded."""
+    if not link:
+        return []
+    feats_s = feats if isinstance(feats, str) else ", ".join(feats or [])
+    is_pacifist = (kills == 0 and takedowns <= 10)
+    if 'Unlisted' in feats_s or is_pacifist:
+        return []
+    targets = []
+    if kills >= 100:
+        targets.append(("100 Kills", kills))
+    if takedowns >= 200:
+        targets.append(("200 Takedowns", takedowns))
+    if 'Triple' in feats_s:
+        targets.append(("Triple", takedowns))
+    if 'Flawless' in feats_s and takedowns > 0:
+        targets.append(("Flawless", takedowns))
+    added = []
+    for board, score in targets:
+        rows = await _db.get_leaderboard_by_board(board)
+        if any((r[4].strip() if len(r) > 4 and r[4] else '') == link for r in rows):
+            continue  # this run already has a row on this board
+        await _db.add_leaderboard_entry(board, player_name, discord_id, score, link, weapon)
+        added.append(board)
+    if render and added:
+        _recs = await _get_lb_records()
+        for board in added:
+            _rec = next((r for r in _recs if r['Leaderboard Name'] == board), None)
+            if _rec:
+                await _render_board(guild, _rec, board)
+    return added
+
+
 async def post_scorecard_to_threads(guild, lb_names, original_message):
     """Re-upload scorecard image to each leaderboard thread."""
     if not original_message.attachments:
