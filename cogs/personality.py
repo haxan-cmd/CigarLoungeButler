@@ -240,6 +240,8 @@ _DATA_QUESTION_WORDS = (
     'top 10', 'top ten', 'title', 'predator', 'triple', 'flawless', 'bounty',
     'progress', 'average', ' avg', 'compare', 'standing', 'best game',
     'lobby', 'same game', 'same match', 'teammate', 'who was i', 'who else',
+    'nemesis', 'rival', ' ally', 'allies', 'closest', 'best teammate',
+    'play with', 'play against', 'played with', 'played against',
 )
 
 
@@ -2385,10 +2387,10 @@ class PersonalityCog(commands.Cog):
                             try:
                                 _rv_q = resolved_message.lower()
                                 if any(w in _rv_q for w in ('rival', 'nemesis', 'enemy', 'arch ',
-                                                            'archenemy', 'friend', 'ally', 'allies',
+                                                            'archenemy', 'friend', ' ally', 'allies', 'closest',
                                                             'best teammate', 'head to head', 'head-to-head',
                                                             'who beats me', 'who do i beat', 'who do i lose',
-                                                            'play with most', 'played with most', 'play against')):
+                                                            'play with', 'played with', 'play against', 'played against')):
                                     from utils.rivalries import compute_rivalries, rivalry_context
                                     _rv = compute_rivalries(discord_id_str, await _db.get_all_submissions())
                                     _rvctx = rivalry_context(player_name, _rv)
