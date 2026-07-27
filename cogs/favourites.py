@@ -865,6 +865,20 @@ async def finalize_season(guild, season):
     try:
         created = await forum.create_thread(name=label, content=f"**{label} — Hall of Fame**", embed=embed)
         await _db.set_season_thread(season["id"], str(created.thread.id))
+        # Auto-post the season's Superlatives once, when the HoF thread is first
+        # created (never on later refreshes, so /force_finalize_season is idempotent),
+        # plus a nudge for players to pull their own /wrapped recap.
+        try:
+            from utils.wrapped import compute_superlatives
+            _start = season["started_at"].timestamp()
+            _end = season["ended_at"].timestamp() if season.get("ended_at") else None
+            _subs = [r for r in await _db.get_all_submissions() if _sub_in_window(r, _start, _end)]
+            _awards = compute_superlatives(_subs)
+            if _awards:
+                await created.thread.send(embed=_render_superlatives_embed(label, _awards))
+            await created.thread.send(f"*Run `/wrapped` for your own {label} recap.*")
+        except Exception as _se:
+            print(f"[HOF] superlatives post error: {_se}")
         await _hof_index_refresh(guild)
         print(f"[HOF] Posted {label}")
     except Exception as e:
@@ -1157,12 +1171,116 @@ async def refresh_all_time_titles_board(guild):
             print(f"[TITLES_BOARD] repost failed: {e2}")
 
 
+_WRAP_GOLD = 0xC9A24B
+
+
+def _sub_in_window(row, start_ts, end_ts=None):
+    """True if a submission row's submitted_at falls in [start_ts, end_ts)."""
+    try:
+        ts = datetime.strptime((row[0] or '').strip(), '%Y-%m-%d %H:%M:%S').replace(
+            tzinfo=timezone.utc).timestamp()
+    except Exception:
+        return False
+    if ts < start_ts:
+        return False
+    if end_ts is not None and ts >= end_ts:
+        return False
+    return True
+
+
+async def _windowed_subs():
+    """(subs, label) scoped to the current open season if one exists, else all-time."""
+    all_subs = await _db.get_all_submissions()
+    season = await _db.get_current_season()
+    if season and season.get('started_at'):
+        start = season['started_at'].timestamp()
+        return [r for r in all_subs if _sub_in_window(r, start)], (season.get('label') or 'this season')
+    return all_subs, 'all time'
+
+
+def _render_wrapped_embed(name, label, w):
+    e = discord.Embed(title=f"\U0001f381 {name} — {label} Wrapped", colour=_WRAP_GOLD)
+    e.description = (f"**{w['runs']}** runs · **{w['kills']:,}** kills · "
+                    f"**{w['takedowns']:,}** takedowns · **{w['deaths']:,}** deaths "
+                    f"(K/D **{w['kd']}**)")
+    if w['signature_weapon']:
+        e.add_field(name="\U0001f5e1️ Signature weapon",
+                    value=f"**{w['signature_weapon']}** — {w['signature_weapon_runs']} runs", inline=True)
+    if w['signature_map']:
+        e.add_field(name="\U0001f5fa️ Home turf",
+                    value=f"**{w['signature_map']}** — {w['signature_map_runs']} runs", inline=True)
+    e.add_field(name="\U0001f3a8 Range",
+                value=f"{w['weapons_used']} weapons · {w['maps_played']} maps", inline=True)
+    bg = w['best_game']
+    if bg:
+        line = f"{bg['takedowns']} TD / {bg['kills']} K / {bg['deaths']} D on {bg['weapon']}"
+        if bg.get('map'):
+            line += f" ({bg['map']})"
+        if bg.get('link'):
+            line = f"[{line}]({bg['link']})"
+        e.add_field(name="\U0001f3c6 Best game", value=line, inline=False)
+    feat_bits = []
+    if w['triples']:        feat_bits.append(f"{w['triples']}× Triple")
+    if w['hundred_kills']:  feat_bits.append(f"{w['hundred_kills']}× 100 Kills")
+    if w['two_hundred_td']: feat_bits.append(f"{w['two_hundred_td']}× 200 TD")
+    if w['flawless_runs']:  feat_bits.append(f"{w['flawless_runs']}× Flawless")
+    if feat_bits:
+        e.add_field(name="⭐ Feats", value=" · ".join(feat_bits), inline=False)
+    extra = []
+    if w['flawless_streak'] >= 2: extra.append(f"\U0001f9ca {w['flawless_streak']}-game flawless streak")
+    if w['carries']:             extra.append(f"\U0001f396️ {w['carries']} valor runs (fought uphill)")
+    if w['night_runs']:          extra.append(f"\U0001f989 {w['night_runs']} after-midnight runs")
+    if extra:
+        e.add_field(name="​", value="\n".join(extra), inline=False)
+    e.set_footer(text=f"{label} · Cigar Lounge Wrapped")
+    return e
+
+
+def _render_superlatives_embed(label, awards):
+    from utils.wrapped import SUPERLATIVE_TITLES
+    e = discord.Embed(title=f"\U0001f3c6 {label} — Superlatives", colour=_WRAP_GOLD,
+                      description="The awards nobody asked for, delivered without ceremony.")
+    for key, (title, _blurb) in SUPERLATIVE_TITLES.items():
+        if key in awards:
+            a = awards[key]
+            e.add_field(name=title, value=f"**{a['name']}** — {a['detail']}", inline=False)
+    e.set_footer(text=f"{label} · Cigar Lounge")
+    return e
+
+
 class FavouritesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     async def cog_load(self):
         await _db.season_init()
+
+    @app_commands.command(name="wrapped", description="Your season recap — signature weapon, best game, streaks and more.")
+    @app_commands.describe(player="Whose recap to show (defaults to you).")
+    async def wrapped_cmd(self, interaction: discord.Interaction, player: discord.Member = None):
+        await interaction.response.defer()
+        from utils.wrapped import build_wrapped
+        target = player or interaction.user
+        subs, label = await _windowed_subs()
+        did = str(target.id)
+        mine = [r for r in subs if len(r) > 2 and (r[2] or '').strip() == did]
+        w = build_wrapped(mine)
+        if w['runs'] == 0:
+            await interaction.followup.send(
+                f"No runs for **{target.display_name}** in {label} yet — submit a scorecard first.")
+            return
+        await interaction.followup.send(embed=_render_wrapped_embed(target.display_name, label, w))
+
+    @app_commands.command(name="superlatives", description="The season's tongue-in-cheek awards, handed out by the Butler.")
+    async def superlatives_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        from utils.wrapped import compute_superlatives
+        subs, label = await _windowed_subs()
+        awards = compute_superlatives(subs)
+        if not awards:
+            await interaction.followup.send(f"Not enough runs in {label} to hand out awards yet.")
+            return
+        await interaction.followup.send(embed=_render_superlatives_embed(label, awards))
 
     @app_commands.command(name="season_start", description="Open a season now for the current bounty (mod only).")
     @app_commands.describe(label="Season name — e.g. the bounty title")
