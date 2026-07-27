@@ -114,6 +114,7 @@ Special instructions:
 - When 'lobbymates' are in your context, those are players who submitted the SAME match as the asker — teammates fought on their side, opponents on the other. You may narrate this: who was there, who outscored whom. Only claim it when the context actually lists them; never invent a lobbymate.
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
+- When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
 - Never invent commands or channels that do not exist.
@@ -670,6 +671,8 @@ _AGG_TRIGGERS = (
     'best weapon', 'deadliest', 'across weapon', 'across map', 'faction split',
     'win rate', 'win-rate', 'aggregate', 'overall stat', 'community stat', 'server stat',
     'most active', 'average takedown', 'average kill', 'per weapon', 'per map', 'per subclass',
+    'unique', 'per day', 'daily', 'a day', 'how many players', 'how many people',
+    'how active', 'how often', 'submit', 'submissions per', 'runs per',
 )
 
 
@@ -688,6 +691,7 @@ def _server_aggregates(subs):
     MF = defaultdict(lambda: defaultdict(int))        # map -> faction -> runs
     S = defaultdict(lambda: [0, 0, defaultdict(int)]) # subclass -> [runs, td, weapon counts]
     Fac = defaultdict(int); Players = defaultdict(int)
+    Days = defaultdict(lambda: [0, set()])            # 'YYYY-MM-DD' -> [runs, {players}]
     tot_n = tot_td = tot_k = 0
     rec_td = (0, None); rec_k = (0, None); rec_score = (0, None)
     for r in subs:
@@ -703,6 +707,11 @@ def _server_aggregates(subs):
         mp = (r[5] or '').strip(); fac = (r[6] or '').strip(); name = (r[1] or '').strip()
         sc = _i(r[24]) if len(r) > 24 else None
         tot_n += 1; tot_td += td; tot_k += k
+        _day = (r[0] or '')[:10]                       # 'YYYY-MM-DD' from submitted_at
+        if _day:
+            Days[_day][0] += 1
+            if name:
+                Days[_day][1].add(name)
         if name:
             Players[name] += 1
             if td > rec_td[0]: rec_td = (td, name)
@@ -727,6 +736,15 @@ def _server_aggregates(subs):
     L = ["=== SERVER AGGREGATE STATS (resubmissions excluded) ==="]
     L.append(f"Totals: {tot_n} runs, {tot_td} takedowns, {tot_k} kills. Single-run records: "
              f"{rec_td[0]} TD ({rec_td[1]}), {rec_k[0]} kills ({rec_k[1]}), {rec_score[0]} score ({rec_score[1]}).")
+    _nd = len(Days)
+    if _nd:
+        _avg_runs = tot_n / _nd
+        _avg_uniq = sum(len(d[1]) for d in Days.values()) / _nd
+        _busiest = max(Days.items(), key=lambda x: x[1][0])
+        L.append(f"Community cadence: {len(Players)} unique submitters all-time, active across {_nd} days. "
+                 f"Per active day on average: {_avg_runs:.1f} runs by {_avg_uniq:.1f} unique players "
+                 f"(busiest day {_busiest[0]} with {_busiest[1][0]} runs). "
+                 f"Server-wide per run: {tot_td/tot_n:.1f} TD, {tot_k/tot_n:.1f} kills.")
     _tw = max(W.items(), key=lambda x: x[1][0]) if W else None
     _ts = max(S.items(), key=lambda x: x[1][0]) if S else None
     _tm = max(M.items(), key=lambda x: x[1][0]) if M else None
