@@ -3723,17 +3723,25 @@ class LeaderboardsCog(commands.Cog):
         weapon = board if kind == 'weapon' else (board[:-6] if kind == 'weapon_kills' else '')
         # Purge stale rows for this person: blank-id legacy rows by name, plus any
         # junk mention-keyed rows from a bad add.
+        _UNLIMITED_FEAT = {"100 Kills", "200 Takedowns", "Triple", "TUFF", "Flawless"}
         async with _board_lock():
-            try:
-                await _db.delete_blank_id_entries_by_name(board, player)
-            except Exception:
-                pass
-            for _sk in stale_keys:
+            if board in _UNLIMITED_FEAT:
+                # Unlimited per-run boards hold MANY rows per player; INSERT one row
+                # instead of upsert (which UPDATEs every existing row of theirs to the
+                # same value, corrupting the board). Skip the blank-id purge too so we
+                # do not nuke their legitimate rows.
+                await _db.add_leaderboard_entry(board, player, key, score, link or '', weapon)
+            else:
                 try:
-                    await _db.delete_leaderboard_entry_by_board_and_player(board, _sk)
+                    await _db.delete_blank_id_entries_by_name(board, player)
                 except Exception:
                     pass
-            await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
+                for _sk in stale_keys:
+                    try:
+                        await _db.delete_leaderboard_entry_by_board_and_player(board, _sk)
+                    except Exception:
+                        pass
+                await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
 
             # Re-cap top-10 for weapon/map boards, then re-render.
             if kind in ('weapon', 'map'):
@@ -3748,8 +3756,9 @@ class LeaderboardsCog(commands.Cog):
         # Report whether it survived the top-10 cap.
         final = sorted(await _db.get_leaderboard_by_board(board),
                        key=lambda r: _safe_int(r[3]) if len(r) > 3 else 0, reverse=True)
-        survived = any((r[1] or '').strip().lower() == player.lower()
-                       and _safe_int(r[3]) == score for r in final[:10])
+        survived = True if board in _UNLIMITED_FEAT else any(
+            (r[1] or '').strip().lower() == player.lower()
+            and _safe_int(r[3]) == score for r in final[:10])
         note = "" if survived else " ⚠️ (ranked below top-10, stored but not shown)"
         await interaction.edit_original_response(
             content=f"✅ Set **{player}** = {score} on **{board}**.{note}")
