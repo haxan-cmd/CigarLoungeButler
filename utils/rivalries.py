@@ -157,3 +157,53 @@ def rivalry_context(display_name, data, top=3):
         lines.append("- Other frequent foes: "
                      + ", ".join(f"{o['name']} ({o['meetings']})" for o in others) + ".")
     return "\n".join(lines)
+
+
+def compute_pair_awards(all_subs, window_min=45, min_meetings=2):
+    """Server-wide pair awards from shared-lobby history (no win/loss):
+      'bitter_rivals': the two players who meet as NON-teammates most (most clashes)
+      'inseparable':   the two players confirmed on the SAME team most
+    Returns {'bitter_rivals': {a, b, clashes} | None, 'inseparable': {a, b, matches} | None}.
+    Map-bucketed and time-sorted, so it avoids a full O(N^2) scan: within each map the
+    inner loop stops as soon as the time gap exceeds the window."""
+    subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
+    by_map = defaultdict(list)
+    for r in subs:
+        mp = (r[5] or '').strip().lower()
+        if mp and _ts(r[0]):
+            by_map[mp].append(r)
+    pair = defaultdict(lambda: {'a': '', 'b': '', 'meetings': 0, 'ally': 0})
+    for runs in by_map.values():
+        runs.sort(key=lambda r: _ts(r[0]))
+        for i in range(len(runs)):
+            r1 = runs[i]
+            t1 = _ts(r1[0])
+            k1, n1 = ident(r1)
+            for j in range(i + 1, len(runs)):
+                r2 = runs[j]
+                if (_ts(r2[0]) - t1).total_seconds() / 60.0 > window_min:
+                    break
+                k2, n2 = ident(r2)
+                if k1 == k2 or not _same_lobby(r1, r2, window_min):
+                    continue
+                pk = tuple(sorted([k1, k2]))
+                p = pair[pk]
+                if pk[0] == k1:
+                    p['a'], p['b'] = (n1 or p['a']), (n2 or p['b'])
+                else:
+                    p['a'], p['b'] = (n2 or p['a']), (n1 or p['b'])
+                p['meetings'] += 1
+                if _same_team(r1, r2) is True:
+                    p['ally'] += 1
+
+    def _clash(p):
+        return p['meetings'] - p['ally']
+
+    rivals = [p for p in pair.values() if p['meetings'] >= min_meetings and _clash(p) > 0]
+    duos = [p for p in pair.values() if p['ally'] >= min_meetings]
+    br = max(rivals, key=_clash) if rivals else None
+    ins = max(duos, key=lambda p: p['ally']) if duos else None
+    return {
+        'bitter_rivals': ({'a': br['a'], 'b': br['b'], 'clashes': _clash(br)} if br else None),
+        'inseparable': ({'a': ins['a'], 'b': ins['b'], 'matches': ins['ally']} if ins else None),
+    }

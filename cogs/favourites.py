@@ -1,5 +1,6 @@
 # Stats calculation, Butler Monthly embed, title role assignment, and /butlers_report.
 import time
+import asyncio
 from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
@@ -870,12 +871,14 @@ async def finalize_season(guild, season):
         # plus a nudge for players to pull their own /wrapped recap.
         try:
             from utils.wrapped import compute_superlatives
+            from utils.rivalries import compute_pair_awards
             _start = season["started_at"].timestamp()
             _end = season["ended_at"].timestamp() if season.get("ended_at") else None
             _subs = [r for r in await _db.get_all_submissions() if _sub_in_window(r, _start, _end)]
             _awards = compute_superlatives(_subs)
-            if _awards:
-                await created.thread.send(embed=_render_superlatives_embed(label, _awards))
+            _pairs = await asyncio.to_thread(compute_pair_awards, _subs)
+            if _awards or _pairs.get('bitter_rivals') or _pairs.get('inseparable'):
+                await created.thread.send(embed=_render_superlatives_embed(label, _awards, _pairs))
             await created.thread.send(f"*Run `/wrapped` for your own {label} recap.*")
         except Exception as _se:
             print(f"[HOF] superlatives post error: {_se}")
@@ -1236,7 +1239,7 @@ def _render_wrapped_embed(name, label, w):
     return e
 
 
-def _render_superlatives_embed(label, awards):
+def _render_superlatives_embed(label, awards, pairs=None):
     from utils.wrapped import SUPERLATIVE_TITLES
     e = discord.Embed(title=f"\U0001f3c6 {label} — Superlatives", colour=_WRAP_GOLD,
                       description="The awards nobody asked for, delivered without ceremony.")
@@ -1244,6 +1247,17 @@ def _render_superlatives_embed(label, awards):
         if key in awards:
             a = awards[key]
             e.add_field(name=title, value=f"**{a['name']}** — {a['detail']}", inline=False)
+    if pairs:
+        br = pairs.get('bitter_rivals')
+        if br:
+            e.add_field(name="\U0001f5e1️ Bitter Rivals",
+                        value=f"**{br['a']}** & **{br['b']}** — {br['clashes']} clashes, fated to keep meeting",
+                        inline=False)
+        ins = pairs.get('inseparable')
+        if ins:
+            e.add_field(name="\U0001f91d Inseparable",
+                        value=f"**{ins['a']}** & **{ins['b']}** — {ins['matches']} battles shoulder to shoulder",
+                        inline=False)
     e.set_footer(text=f"{label} · Cigar Lounge")
     return e
 
@@ -1275,12 +1289,14 @@ class FavouritesCog(commands.Cog):
     async def superlatives_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer()
         from utils.wrapped import compute_superlatives
+        from utils.rivalries import compute_pair_awards
         subs, label = await _windowed_subs()
         awards = compute_superlatives(subs)
-        if not awards:
+        pairs = await asyncio.to_thread(compute_pair_awards, subs)
+        if not awards and not (pairs.get('bitter_rivals') or pairs.get('inseparable')):
             await interaction.followup.send(f"Not enough runs in {label} to hand out awards yet.")
             return
-        await interaction.followup.send(embed=_render_superlatives_embed(label, awards))
+        await interaction.followup.send(embed=_render_superlatives_embed(label, awards, pairs))
 
     @app_commands.command(name="season_start", description="Open a season now for the current bounty (mod only).")
     @app_commands.describe(label="Season name — e.g. the bounty title")
