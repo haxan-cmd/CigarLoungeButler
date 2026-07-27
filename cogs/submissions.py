@@ -1641,8 +1641,10 @@ class EditFieldSelect(discord.ui.Select):
         ev = self.edit_view
 
         if field == "weapon":
-            all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in ["Longbowman", "Crossbowman", "Skirmisher"]] + ["Archer"])
-            view = ClassSelectView(ev.original_message, None, "all", all_classes)
+            # Edit-only picker: sets ev.cls/ev.weapon and routes through _apply_edit
+            # (moves the board entry + marks correctly). The old path re-ran the fresh
+            # submission flow, which logged a DUPLICATE run instead of editing.
+            view = EditClassSelectView(ev)
             await interaction.response.edit_message(
                 content="**Edit weapon:** Which class were you playing?",
                 view=view
@@ -1775,6 +1777,85 @@ class EditTripleView(discord.ui.View):
 
 
 
+_RANGED_SUBCLASSES = ["Longbowman", "Crossbowman", "Skirmisher"]
+
+
+def _edit_class_list():
+    """Classes shown in the weapon-edit picker: melee classes plus a collapsed
+    'Archer' (covers the three ranged subclasses)."""
+    return sorted([c for c in CLASS_WEAPON_MAP.keys() if c not in _RANGED_SUBCLASSES] + ["Archer"])
+
+
+def _weapons_for_edit_class(cls):
+    if cls == "Archer":
+        ws = set()
+        for sc in _RANGED_SUBCLASSES:
+            ws.update(CLASS_WEAPON_MAP.get(sc, []))
+        return sorted(ws)
+    return get_all_weapons_for_class(cls)
+
+
+def _resolve_edit_subclass(cls, weapon):
+    """Store the real ranged subclass (so marks/registry stay correct) when the
+    picker collapsed them under 'Archer'."""
+    if cls != "Archer":
+        return cls
+    for sc in _RANGED_SUBCLASSES:
+        if weapon in CLASS_WEAPON_MAP.get(sc, []):
+            return sc
+    return "Longbowman"
+
+
+class EditClassSelectView(discord.ui.View):
+    def __init__(self, edit_view):
+        super().__init__(timeout=300)
+        self.add_item(EditClassSelect(edit_view))
+
+
+class EditClassSelect(discord.ui.Select):
+    def __init__(self, edit_view):
+        self.edit_view = edit_view
+        opts = [discord.SelectOption(label=c) for c in _edit_class_list()]
+        opts.append(discord.SelectOption(label="Hybrid", description="Weapon-swap — no single weapon"))
+        super().__init__(placeholder="Choose class...", options=opts[:25])
+
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        cls = self.values[0]
+        if cls == "Hybrid":
+            ev.cls = "Hybrid"; ev.weapon = "Hybrid"
+            await _apply_edit(interaction, ev)
+            return
+        weapons = _weapons_for_edit_class(cls)
+        if not weapons:
+            await interaction.response.send_message(f"No weapons found for {cls}.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content=f"**Edit weapon:** class `{cls}` — which weapon?",
+            view=EditWeaponSelectView(ev, cls, weapons))
+
+
+class EditWeaponSelectView(discord.ui.View):
+    def __init__(self, edit_view, cls, weapons):
+        super().__init__(timeout=300)
+        self.add_item(EditWeaponSelect(edit_view, cls, weapons))
+
+
+class EditWeaponSelect(discord.ui.Select):
+    def __init__(self, edit_view, cls, weapons):
+        self.edit_view = edit_view
+        self._cls = cls
+        options = [discord.SelectOption(label=w) for w in weapons][:25]
+        super().__init__(placeholder="Choose weapon...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        ev = self.edit_view
+        weapon = self.values[0]
+        ev.weapon = weapon
+        ev.cls = _resolve_edit_subclass(self._cls, weapon)
+        await _apply_edit(interaction, ev)
+
+
 async def _apply_edit(interaction, ev):
     """Write the updated submission back to the DB and update the summary message."""
     # Ack immediately — the board propagation below can take several seconds, which
@@ -1863,6 +1944,12 @@ async def _apply_edit(interaction, ev):
             )
     except Exception as e:
         print(f"Edit DB update error: {e}")
+        # The submission row itself didn't update — the edit effectively didn't persist.
+        try:
+            from utils.helpers import nerve_alert
+            await nerve_alert(interaction.client, "edit: submission row write", e)
+        except Exception:
+            pass
 
     # Propagate the edit to the leaderboards. Previously an edit only rewrote the
     # summary + card, so the boards kept the pre-edit score (e.g. a mis-parsed map
@@ -1897,6 +1984,13 @@ async def _apply_edit(interaction, ev):
                 )
             except Exception as _e_upd:
                 print(f"[EDIT] update_leaderboards error: {_e_upd}")
+                # Surface it: a failed re-add here silently strands this run's board
+                # rows (the DC/Triple class of bug), so make it visible not just logged.
+                try:
+                    from utils.helpers import nerve_alert
+                    await nerve_alert(interaction.client, "edit: update_leaderboards", _e_upd)
+                except Exception:
+                    pass
             _new_boards = {b for b in (None if ev.vip else ev.weapon,
                                        None if ev.vip else f"{ev.weapon} Kills",
                                        f"{ev.map_name} - {ev.faction}") if b}
@@ -1916,6 +2010,11 @@ async def _apply_edit(interaction, ev):
                 print(f"[EDIT] feat-board reseed error: {_rfe}")
     except Exception as e:
         print(f"[EDIT] board propagation error: {e}")
+        try:
+            from utils.helpers import nerve_alert
+            await nerve_alert(interaction.client, "edit: board propagation", e)
+        except Exception:
+            pass
 
     # Reconcile the scorecard's reactions with the EDITED stats. They only ever
     # fired at submit time, so a corrected run kept the old stats' reactions and

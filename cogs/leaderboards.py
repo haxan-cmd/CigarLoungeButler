@@ -763,7 +763,23 @@ async def _thread_needs_reframe(guild, thread, recs, ordered_boards):
     return False
 
 
+def _board_lock():
+    """The submissions board lock (lazy import avoids a circular import at load).
+    Serialises every board read-modify-write so mod refresh/reframe commands can't
+    race a live submission finalising into the same thread."""
+    from cogs.submissions import _BOARD_LOCK
+    return _BOARD_LOCK
+
+
 async def _reframe_thread(guild, thread, ordered_boards):
+    """Locked entry point for a thread reframe. Held against submission board writes
+    (same lock) so a reframe and a finalising submission never render one thread at
+    once. /refresh_all reacquires per thread, so queued submissions interleave."""
+    async with _board_lock():
+        await _reframe_thread_inner(guild, thread, ordered_boards)
+
+
+async def _reframe_thread_inner(guild, thread, ordered_boards):
     """Deterministic clean rebuild of a thread's boards from the template. Wipes
     EVERY bot message in the thread first (no stray or duplicated decorations),
     then reposts each board as its own frame: [TOP png][embed(s), title inside]
@@ -2800,37 +2816,38 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
 
-        for lb_name in names_to_refresh:
-            if lb_name in _SPECIAL_BOARD_NAMES:
-                # Own renderer (HH completers / All-Time Titles) — not the generic board
-                await _render_special_board(interaction.guild, lb_name)
-                continue
-            lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
-            if not lb_row:
-                continue
+        async with _board_lock():
+            for lb_name in names_to_refresh:
+                if lb_name in _SPECIAL_BOARD_NAMES:
+                    # Own renderer (HH completers / All-Time Titles) — not the generic board
+                    await _render_special_board(interaction.guild, lb_name)
+                    continue
+                lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
+                if not lb_row:
+                    continue
 
-            entries = await get_leaderboard_entries(lb_name)
-            entries = await _sort_board_entries(lb_name, entries)
+                entries = await get_leaderboard_entries(lb_name)
+                entries = await _sort_board_entries(lb_name, entries)
 
-            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-            score_prefix = "+" if lb_name == "TUFF" else ""
-            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-            header_content = ""
+                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
+                score_prefix = "+" if lb_name == "TUFF" else ""
+                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
+                header_content = ""
 
-            thread_id = int(lb_row['Thread ID'])
-            message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
+                thread_id = int(lb_row['Thread ID'])
+                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
 
-            try:
-                guild = interaction.guild
-                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
-                if new_ids != message_ids:
-                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                try:
+                    guild = interaction.guild
+                    thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+                    if new_ids != message_ids:
+                        await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
 
-            except Exception as e:
-                await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
-                return
+                except Exception as e:
+                    await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
+                    return
 
         await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
 
@@ -2907,30 +2924,31 @@ class LeaderboardsCog(commands.Cog):
         all_lb_rows = await _get_lb_records()
         guild = interaction.guild
         done, failed = [], []
-        for lb_row in all_lb_rows:
-            lb_name = lb_row.get('Leaderboard Name')
-            thread_id_raw = lb_row.get('Thread ID')
-            msg_id_raw = lb_row.get('Message ID')
-            if not lb_name or not thread_id_raw or not msg_id_raw:
-                continue
-            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            if not is_map:
-                continue
-            try:
-                entries = await get_leaderboard_entries(lb_name)
-                entries = await _sort_board_entries(lb_name, entries)
-                embeds = await _rated_embeds(lb_name, entries, True, None, 0, False, "", False)
-                header_content = _map_header(lb_name)
-                thread_id = int(thread_id_raw)
-                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
-                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
-                if new_ids != message_ids:
-                    await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
-                done.append(lb_name)
-            except Exception as e:
-                nerve_log_error(f"Map board refresh {lb_name}", e)
-                failed.append(lb_name)
+        async with _board_lock():
+            for lb_row in all_lb_rows:
+                lb_name = lb_row.get('Leaderboard Name')
+                thread_id_raw = lb_row.get('Thread ID')
+                msg_id_raw = lb_row.get('Message ID')
+                if not lb_name or not thread_id_raw or not msg_id_raw:
+                    continue
+                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+                if not is_map:
+                    continue
+                try:
+                    entries = await get_leaderboard_entries(lb_name)
+                    entries = await _sort_board_entries(lb_name, entries)
+                    embeds = await _rated_embeds(lb_name, entries, True, None, 0, False, "", False)
+                    header_content = _map_header(lb_name)
+                    thread_id = int(thread_id_raw)
+                    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
+                    thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+                    if new_ids != message_ids:
+                        await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+                    done.append(lb_name)
+                except Exception as e:
+                    nerve_log_error(f"Map board refresh {lb_name}", e)
+                    failed.append(lb_name)
         summary = f"\u2705 Refreshed {len(done)} map boards (Kill Share + Warlord)."
         if failed:
             summary += f"\n\u274c Failed: {', '.join(failed)}"
@@ -3566,7 +3584,8 @@ class LeaderboardsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         board_names = [name] if name else None
         try:
-            summary = await rebuild_score_boards(interaction.guild, board_names=board_names)
+            async with _board_lock():
+                summary = await rebuild_score_boards(interaction.guild, board_names=board_names)
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Rebuild failed: {e}")
             return
@@ -3704,26 +3723,27 @@ class LeaderboardsCog(commands.Cog):
         weapon = board if kind == 'weapon' else (board[:-6] if kind == 'weapon_kills' else '')
         # Purge stale rows for this person: blank-id legacy rows by name, plus any
         # junk mention-keyed rows from a bad add.
-        try:
-            await _db.delete_blank_id_entries_by_name(board, player)
-        except Exception:
-            pass
-        for _sk in stale_keys:
+        async with _board_lock():
             try:
-                await _db.delete_leaderboard_entry_by_board_and_player(board, _sk)
+                await _db.delete_blank_id_entries_by_name(board, player)
             except Exception:
                 pass
-        await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
+            for _sk in stale_keys:
+                try:
+                    await _db.delete_leaderboard_entry_by_board_and_player(board, _sk)
+                except Exception:
+                    pass
+            await _db.upsert_leaderboard_entry(board, player, key, score, link or '', weapon)
 
-        # Re-cap top-10 for weapon/map boards, then re-render.
-        if kind in ('weapon', 'map'):
-            rows = await _db.get_leaderboard_by_board(board)
-            for _ in range(max(0, len(rows) - 10)):
-                await _db.delete_lowest_leaderboard_entry(board)
+            # Re-cap top-10 for weapon/map boards, then re-render.
+            if kind in ('weapon', 'map'):
+                rows = await _db.get_leaderboard_by_board(board)
+                for _ in range(max(0, len(rows) - 10)):
+                    await _db.delete_lowest_leaderboard_entry(board)
 
-        rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
-        if rec:
-            await _render_board(interaction.guild, rec, board)
+            rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
+            if rec:
+                await _render_board(interaction.guild, rec, board)
 
         # Report whether it survived the top-10 cap.
         final = sorted(await _db.get_leaderboard_by_board(board),
@@ -3981,48 +4001,49 @@ class LeaderboardsCog(commands.Cog):
         player = player.strip()
 
         removed = 0
-        if message_link and message_link.strip():
-            # Remove only this run's entry. Unlimited boards (TUFF, 100 Kills...)
-            # hold one row per qualifying run, and the player may have several.
-            link = message_link.strip()
-            try:
-                rows = await _db.get_leaderboard_by_board(board)
-                if any(len(r) > 4 and (r[4] or '').strip() == link for r in rows):
-                    await _db.delete_leaderboard_entry_by_link(board, link)
-                    removed = 1
-            except Exception as e:
-                print(f"[REMOVE_BOARD] link delete error: {e}")
-        else:
-            # Match by the visible name; if they passed an @mention, also resolve it to
-            # the player's canonical name so either form works, and keep the raw "<@id>"
-            # string too (in case a bad add stored the mention as the name).
-            names = {player}
-            _m = _re.match(r'^<@!?(\d+)>$', player)
-            if _m:
-                mid = _m.group(1)
+        async with _board_lock():
+            if message_link and message_link.strip():
+                # Remove only this run's entry. Unlimited boards (TUFF, 100 Kills...)
+                # hold one row per qualifying run, and the player may have several.
+                link = message_link.strip()
                 try:
-                    for p in await _db.get_all_players():
-                        if p and (p[0] or '').strip() == mid and (p[1] or '').strip():
-                            names.add((p[1] or '').strip())
-                            break
-                except Exception:
-                    pass
-
-            for nm in names:
-                try:
-                    removed += await _db.delete_leaderboard_entries_by_board_and_name(board, nm)
+                    rows = await _db.get_leaderboard_by_board(board)
+                    if any(len(r) > 4 and (r[4] or '').strip() == link for r in rows):
+                        await _db.delete_leaderboard_entry_by_link(board, link)
+                        removed = 1
                 except Exception as e:
-                    print(f"[REMOVE_BOARD] delete error for {nm}: {e}")
+                    print(f"[REMOVE_BOARD] link delete error: {e}")
+            else:
+                # Match by the visible name; if they passed an @mention, also resolve it to
+                # the player's canonical name so either form works, and keep the raw "<@id>"
+                # string too (in case a bad add stored the mention as the name).
+                names = {player}
+                _m = _re.match(r'^<@!?(\d+)>$', player)
+                if _m:
+                    mid = _m.group(1)
+                    try:
+                        for p in await _db.get_all_players():
+                            if p and (p[0] or '').strip() == mid and (p[1] or '').strip():
+                                names.add((p[1] or '').strip())
+                                break
+                    except Exception:
+                        pass
 
-        if removed:
-            rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
-            if rec:
-                await _render_board(interaction.guild, rec, board)
-            await interaction.edit_original_response(
-                content=f"\u2705 Removed {removed} entr{'y' if removed == 1 else 'ies'} for **{player}** from **{board}**.")
-        else:
-            await interaction.edit_original_response(
-                content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
+                for nm in names:
+                    try:
+                        removed += await _db.delete_leaderboard_entries_by_board_and_name(board, nm)
+                    except Exception as e:
+                        print(f"[REMOVE_BOARD] delete error for {nm}: {e}")
+
+            if removed:
+                rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
+                if rec:
+                    await _render_board(interaction.guild, rec, board)
+                await interaction.edit_original_response(
+                    content=f"\u2705 Removed {removed} entr{'y' if removed == 1 else 'ies'} for **{player}** from **{board}**.")
+            else:
+                await interaction.edit_original_response(
+                    content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
 
     @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, Pacifist (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
@@ -4037,62 +4058,63 @@ class LeaderboardsCog(commands.Cog):
 
         existing = {(r[0], r[4]) for r in lb_rows if len(r) > 4}
 
-        added = 0
-        for row in sub_rows:
-            if len(row) < 13:
-                continue
-            feats_str  = row[11] or ""
-            if 'Unlisted' in feats_str:
-                continue  # unlisted runs stay off feat boards too
-            link       = (row[12] or "").strip()
-            player     = row[1] or ""
-            discord_id = row[2] or ""
-            kills      = int(row[8]) if row[8] else 0
-            takedowns  = int(row[7]) if row[7] else 0
-            weapon     = row[3] or ""
-            if not link:
-                continue
-            # Pacifist: 0-kill run with <=10 takedowns, ranked by raw score. Needs a
-            # stored score (older subs from before the score column are NULL -> skip).
-            if kills == 0 and takedowns <= 10:
-                p_score = 0
-                if len(row) > 24 and row[24]:
-                    try:
-                        p_score = int(str(row[24]).replace(',', '').strip())
-                    except (ValueError, TypeError):
-                        p_score = 0
-                if p_score > 0 and ("Pacifist", link) not in existing:
-                    await _db.add_leaderboard_entry("Pacifist", player, discord_id, p_score, link, weapon)
-                    existing.add(("Pacifist", link))
-                    added += 1
-                continue  # a pacifist run qualifies for no other feat board
-
-            is_triple_row = 'Triple' in (feats_str or '')
-            for board, stat in FEAT_MAP.items():
-                # Qualify by raw stats — catches Triples that didn't get the feat tag
-                score = kills if stat == "kills" else takedowns
-                if board == "Triple":
-                    if not is_triple_row:
-                        continue
-                else:
-                    threshold = 100 if stat == "kills" else 200
-                    if score < threshold:
-                        continue
-                if (board, link) in existing:
+        async with _board_lock():
+            added = 0
+            for row in sub_rows:
+                if len(row) < 13:
                     continue
-                await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
-                existing.add((board, link))
-                added += 1
+                feats_str  = row[11] or ""
+                if 'Unlisted' in feats_str:
+                    continue  # unlisted runs stay off feat boards too
+                link       = (row[12] or "").strip()
+                player     = row[1] or ""
+                discord_id = row[2] or ""
+                kills      = int(row[8]) if row[8] else 0
+                takedowns  = int(row[7]) if row[7] else 0
+                weapon     = row[3] or ""
+                if not link:
+                    continue
+                # Pacifist: 0-kill run with <=10 takedowns, ranked by raw score. Needs a
+                # stored score (older subs from before the score column are NULL -> skip).
+                if kills == 0 and takedowns <= 10:
+                    p_score = 0
+                    if len(row) > 24 and row[24]:
+                        try:
+                            p_score = int(str(row[24]).replace(',', '').strip())
+                        except (ValueError, TypeError):
+                            p_score = 0
+                    if p_score > 0 and ("Pacifist", link) not in existing:
+                        await _db.add_leaderboard_entry("Pacifist", player, discord_id, p_score, link, weapon)
+                        existing.add(("Pacifist", link))
+                        added += 1
+                    continue  # a pacifist run qualifies for no other feat board
 
-            # Flawless: any no-death run (tagged Flawless), unlimited, ranked by
-            # takedowns. Stacks per run like 100 Kills, so seed every one.
-            if ('Flawless' in (feats_str or '') and takedowns > 0
-                    and ("Flawless", link) not in existing):
-                await _db.add_leaderboard_entry("Flawless", player, discord_id, takedowns, link, weapon)
-                existing.add(("Flawless", link))
-                added += 1
+                is_triple_row = 'Triple' in (feats_str or '')
+                for board, stat in FEAT_MAP.items():
+                    # Qualify by raw stats — catches Triples that didn't get the feat tag
+                    score = kills if stat == "kills" else takedowns
+                    if board == "Triple":
+                        if not is_triple_row:
+                            continue
+                    else:
+                        threshold = 100 if stat == "kills" else 200
+                        if score < threshold:
+                            continue
+                    if (board, link) in existing:
+                        continue
+                    await _db.add_leaderboard_entry(board, player, discord_id, score, link, weapon)
+                    existing.add((board, link))
+                    added += 1
 
-        await _prune_pacifist_board()
+                # Flawless: any no-death run (tagged Flawless), unlimited, ranked by
+                # takedowns. Stacks per run like 100 Kills, so seed every one.
+                if ('Flawless' in (feats_str or '') and takedowns > 0
+                        and ("Flawless", link) not in existing):
+                    await _db.add_leaderboard_entry("Flawless", player, discord_id, takedowns, link, weapon)
+                    existing.add(("Flawless", link))
+                    added += 1
+
+            await _prune_pacifist_board()
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
 
     @app_commands.command(name="backfill_legacy_ids", description="Attach registered discord_ids to blank-id legacy board rows (mod only). Preview first.")
@@ -4345,7 +4367,8 @@ class LeaderboardsCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            await refresh_hundred_handed_board(interaction.guild)
+            async with _board_lock():
+                await refresh_hundred_handed_board(interaction.guild)
             await interaction.followup.send("\u2705 Hundred Handed board redrawn (nothing else touched \u2014 no seeding, no roles).", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"\u274c Refresh failed: {e}", ephemeral=True)
