@@ -112,6 +112,7 @@ Special instructions:
 - You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
 - You have server-wide weapon run counts (100+ TD) when available.
 - When 'lobbymates' are in your context, those are players who submitted the SAME match as the asker — teammates fought on their side, opponents on the other. You may narrate this: who was there, who outscored whom. Only claim it when the context actually lists them; never invent a lobbymate.
+- When 'RIVALRY DATA' is in your context, it lists the asker's NEMESIS (the opponent they have clashed with most, with a head-to-head win-loss record) and their closest ALLY (the player they have fought beside most), drawn from shared-lobby history. Narrate it with relish when they ask who their rival, nemesis, arch-enemy, or best teammate is. It is approximate, so frame it as "the record shows", not gospel. Only name matchups that appear in the block; never invent a rivalry.
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
@@ -2377,6 +2378,24 @@ class PersonalityCog(commands.Cog):
                                                                  "most recent match.")
                             except Exception as _lme:
                                 print(f"[BUTLER] ctx lobbymate error: {_lme}")
+
+                            # Nemesis / Friend — aggregate head-to-head across ALL of the
+                            # asker's fingerprinted matches (who they clash with / play beside
+                            # most). On-demand only, since it scans submissions.
+                            try:
+                                _rv_q = resolved_message.lower()
+                                if any(w in _rv_q for w in ('rival', 'nemesis', 'enemy', 'arch ',
+                                                            'archenemy', 'friend', 'ally', 'allies',
+                                                            'best teammate', 'head to head', 'head-to-head',
+                                                            'who beats me', 'who do i beat', 'who do i lose',
+                                                            'play with most', 'played with most', 'play against')):
+                                    from utils.rivalries import compute_rivalries, rivalry_context
+                                    _rv = compute_rivalries(discord_id_str, await _db.get_all_submissions())
+                                    _rvctx = rivalry_context(player_name, _rv)
+                                    if _rvctx:
+                                        player_stats_ctx += "\n" + _rvctx
+                            except Exception as _rve:
+                                print(f"[BUTLER] ctx rivalry error: {_rve}")
 
                             break
                     # Build rich per-player summary for comparisons — data questions
