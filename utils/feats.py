@@ -39,3 +39,14 @@ def derive_stat_feats(kills, takedowns, deaths, weapon, feat_weapons, triple):
     if weapon in feat_weapons and kills >= 100:
         feats.append(weapon)
     return feats
+
+
+def tilt_mark(feats, tilt_bands):
+    """The valor mark a hard-lobby run earns from its tilt tag. Returns
+    (marks, emoji, name) for the FIRST matching band (bands are ordered hardest
+    first), or (0, None, None) if the run carries no tilt tag. `tilt_bands` is
+    config.TILT_BANDS: rows of (low_gap, name, emoji, marks, tag)."""
+    for _low, name, emoji, marks, tag in tilt_bands:
+        if tag and tag in feats:
+            return marks, emoji, name
+    return 0, None, None

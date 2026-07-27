@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
-from utils.feats import is_triple_run, derive_stat_feats
+from utils.feats import is_triple_run, derive_stat_feats, tilt_mark
 import io
 import utils.tilt as _tilt_mod
 
@@ -2174,9 +2174,9 @@ async def _apply_edit(interaction, ev):
         _kp = next((p for lb, p in _edit_placements if lb == "100 Kills"), None)
         _ml.append(f"*<a:100kill:1361412390339608686> +1{(' — ' + _rlink('100 Kills', _kp)) if _kp else ''}*")
     if 'Triple' in _feats: _me += 1; _ml.append("*<a:triple:1365532698260668466> +1 Triple*")
-    for _dlo, _dnm, _dem, _dmk, _dtg in config.TILT_BANDS:
-        if _dtg and _dtg in _feats:
-            _me += _dmk; _ml.append(f"*{_dem} +{_dmk} {_dnm} lobby*"); break
+    _tm, _tem, _tnm = tilt_mark(_feats, config.TILT_BANDS)
+    if _tm:
+        _me += _tm; _ml.append(f"*{_tem} +{_tm} {_tnm} lobby*")
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
     if _is_pac:
         new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
@@ -2809,11 +2809,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if 'Triple' in feats:
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
-    for _dlo, _dnm, _dem, _dmk, _dtg in config.TILT_BANDS:
-        if _dtg and _dtg in feats:
-            marks_earned += _dmk
-            marks_lines.append(f"*{_dem} +{_dmk} {_dnm} lobby*")
-            break
+    _tm, _tem, _tnm = tilt_mark(feats, config.TILT_BANDS)
+    if _tm:
+        marks_earned += _tm
+        marks_lines.append(f"*{_tem} +{_tm} {_tnm} lobby*")
     if _is_hybrid:
         marks_summary = ("\n\n🔀 **Hybrid run** — a weapon-swap game. No weapon marks, "
                          "but it lands on the **Hybrid** board (ranked by takedowns).")

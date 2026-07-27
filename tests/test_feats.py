@@ -1,6 +1,30 @@
 """Tests for utils.feats — the shared feat-derivation logic used by both the
 submission finalise path and the edit path."""
-from utils.feats import is_pacifist, is_triple_run, derive_stat_feats
+from utils.feats import is_pacifist, is_triple_run, derive_stat_feats, tilt_mark
+
+# (low_gap, name, emoji, marks, tag) — hardest first, mirrors config.TILT_BANDS shape
+_BANDS = [
+    (99, "Brutal", "🔴", 3, "Brutal"),
+    (30, "Outmatched", "🟠", 2, "Outmatched"),
+    (10, "Slightly Uphill", "🟡", 1, "Uphill"),
+    (0, "Even", "🟢", 0, None),
+]
+
+
+def test_tilt_mark_matches_band_by_tag():
+    assert tilt_mark(["Brutal"], _BANDS) == (3, "🔴", "Brutal")
+    assert tilt_mark(["Outmatched"], _BANDS) == (2, "🟠", "Outmatched")
+    assert tilt_mark(["Uphill"], _BANDS) == (1, "🟡", "Slightly Uphill")
+
+
+def test_tilt_mark_none_when_no_tilt_tag():
+    assert tilt_mark(["100 Kills", "Flawless"], _BANDS) == (0, None, None)
+    assert tilt_mark([], _BANDS) == (0, None, None)
+
+
+def test_tilt_mark_first_match_wins():
+    # a run should only ever carry one tilt tag, but if two appear the hardest (first) wins
+    assert tilt_mark(["Uphill", "Brutal"], _BANDS) == (3, "🔴", "Brutal")
 
 FEAT_WEAPONS = {"Mallet", "Knife"}
 
