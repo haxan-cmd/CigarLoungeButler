@@ -1978,22 +1978,32 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="refreshcard", description="Refresh your registry card.")
+    @app_commands.command(name="refreshcard", description="Refresh your registry card (mods can target another player).")
+    @app_commands.describe(player="(Mods only) refresh someone else's card instead of your own.")
     @discord.app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
-    async def refresh_card(self, interaction: discord.Interaction):
+    async def refresh_card(self, interaction: discord.Interaction, player: discord.Member = None):
         await interaction.response.defer(ephemeral=True)
         try:
-            discord_id_str = str(interaction.user.id)
+            # Targeting another player is mod-only; refreshing your own is open.
+            target = player or interaction.user
+            if player is not None and player.id != interaction.user.id:
+                if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+                    await interaction.followup.send("Only mods can refresh another player's card.", ephemeral=True)
+                    return
+
+            discord_id_str = str(target.id)
 
             # Check player is registered
             rows = await _db.get_all_players()
             registered = any(row and row[0].strip() == discord_id_str for row in rows)
             if not registered:
-                await interaction.followup.send("No card on file. Submit a run first.", ephemeral=True)
+                who = "You have" if target.id == interaction.user.id else f"{target.display_name} has"
+                await interaction.followup.send(f"No card on file. {who} to submit a run first.", ephemeral=True)
                 return
 
-            await create_or_update_registry_card(interaction.guild, interaction.user.id, interaction.user.display_name)
-            await interaction.followup.send("Registry card updated.", ephemeral=True)
+            await create_or_update_registry_card(interaction.guild, target.id, target.display_name)
+            _who = "Registry card updated." if target.id == interaction.user.id else f"Registry card updated for {target.display_name}."
+            await interaction.followup.send(_who, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
