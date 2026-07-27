@@ -1,13 +1,16 @@
 """Pure head-to-head / ally aggregation for the Nemesis & Friend system.
 
-Reuses the same lobby-fingerprint idea as db.get_lobbymates (same map, tight time
-window, matching faction banner totals, with a kill-share fallback for side
-detection) but computes it across a player's WHOLE history in-Python, so it has no
-Discord/DB dependency and is unit-tested (tests/test_rivalries.py).
+Deliberately does NOT track per-game win/loss: a submitted scoreboard is a snapshot,
+not a final result, so "you beat X" would be misleading. Instead it counts how often
+two players share a lobby and compares their TYPICAL output across those shared games
+(apples-to-apples: same lobbies, same difficulty), which is robust to when someone
+screenshots. Ally sides come from the reliable banner totals only.
 
-Row indices (submissions shape): 0 submitted_at · 1 player_name · 2 discord_id ·
-3 weapon · 5 map · 7 takedowns · 8 kills · 11 feats · 18 total_lobby_kills ·
-20 team_kill_share · 25 team_total_kills · 26 enemy_total_kills.
+Reuses the db.get_lobbymates fingerprint (same map, tight time window, matching
+banner totals). No Discord/DB dependency; unit-tested in tests/test_rivalries.py.
+
+Row indices: 0 submitted_at · 1 player_name · 2 discord_id · 5 map · 7 takedowns ·
+8 kills · 11 feats · 18 total_lobby_kills · 25 team_total_kills · 26 enemy_total_kills.
 """
 from collections import defaultdict
 from datetime import datetime
@@ -16,13 +19,6 @@ from datetime import datetime
 def _i(v):
     try:
         return int(str(v).strip())
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
-def _f(v):
-    try:
-        return float(str(v).strip())
     except (ValueError, TypeError, AttributeError):
         return None
 
@@ -52,8 +48,8 @@ def _pair(a, b):
 
 
 def _same_lobby(r1, r2, window_min):
-    """Do two runs look like the same match? Same map, within the time window, and
-    matching banner totals (or the legacy roster-sum fallback). Mirrors get_lobbymates."""
+    """Same map, within the time window, and matching banner totals (or the legacy
+    roster-sum fallback). Mirrors db.get_lobbymates."""
     if not (r1[5] or '').strip() or (r1[5] or '').strip().lower() != (r2[5] or '').strip().lower():
         return False
     t1, t2 = _ts(r1[0]), _ts(r2[0])
@@ -72,12 +68,9 @@ def _same_lobby(r1, r2, window_min):
 
 
 def _same_team(r1, r2):
-    """True=allies, False=opponents, None=undetermined. Uses ONLY the ORIENTED banner
-    totals: teammates share the (team, enemy) pair, opponents see it swapped. There is
-    deliberately NO kill-share fallback here — that method can't tell sides apart in a
-    balanced game (both teams have similar totals), which wrongly labels opponents as
-    allies. When banner totals are missing or too symmetric we return None, so the run
-    still counts as a shared-lobby ENCOUNTER but is never claimed as a confirmed ally."""
+    """True=allies, None=not confirmed. Uses ONLY the oriented banner totals: teammates
+    share the (team, enemy) pair, opponents see it swapped. No kill-share fallback
+    (it can't tell sides apart in a balanced game and invents false allies)."""
     myt = _i(r1[25]) if len(r1) > 25 else None
     mye = _i(r1[26]) if len(r1) > 26 else None
     tht = _i(r2[25]) if len(r2) > 25 else None
@@ -91,23 +84,22 @@ def _same_team(r1, r2):
 
 
 def compute_rivalries(target_key, all_subs, window_min=45):
-    """Aggregate a player's shared-lobby history. Every shared lobby is an ENCOUNTER;
-    when sides resolve, it also counts as an opponent clash (with win/loss by kills) or
-    an ally match. Returns:
+    """Aggregate a player's shared-lobby history — NO per-game win/loss. Returns:
       {
-        'nemesis': {key, name, encounters, wins, losses} | None,
+        'nemesis': {key, name, meetings, my_td, my_k, their_td, their_k} | None,
         'ally':    {key, name, matches} | None,
-        'opponents':[{key, name, encounters, wins, losses}, ...],  # opp-clash desc
-        'allies':   [{key, name, matches}, ...],                   # matches desc
+        'foes':    [ ...nemesis-shaped, meetings desc... ],
+        'allies':  [{key, name, matches}, ...],
       }
-    nemesis = the player you clash with as an OPPONENT most; if no clash ever resolves
-    to opponents, it falls back to the player you simply share lobbies with most."""
+    nemesis = the player they meet most who ISN'T a confirmed teammate; the averages
+    (over all their shared games) say who tends to show up bigger. ally = the most
+    banner-confirmed teammate."""
     subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
     target_runs = [r for r in subs if ident(r)[0] == target_key]
-    enc = defaultdict(lambda: {'key': '', 'name': '', 'encounters': 0,
-                               'wins': 0, 'losses': 0, 'ally': 0})
+    enc = defaultdict(lambda: {'key': '', 'name': '', 'meetings': 0, 'ally': 0,
+                               'my_td': 0, 'my_k': 0, 'their_td': 0, 'their_k': 0})
     for tr in target_runs:
-        tk = _i(tr[8]) or 0
+        _mtd, _mk = _i(tr[7]) or 0, _i(tr[8]) or 0
         for r in subs:
             k, name = ident(r)
             if k == target_key or not _same_lobby(tr, r, window_min):
@@ -115,42 +107,32 @@ def compute_rivalries(target_key, all_subs, window_min=45):
             e = enc[k]
             e['key'] = k
             e['name'] = name or e['name']
-            e['encounters'] += 1
-            side = _same_team(tr, r)
-            if side is False:
-                rk = _i(r[8]) or 0
-                if tk > rk:
-                    e['wins'] += 1
-                elif rk > tk:
-                    e['losses'] += 1
-            elif side is True:
+            e['meetings'] += 1
+            e['my_td'] += _mtd
+            e['my_k'] += _mk
+            e['their_td'] += (_i(r[7]) or 0)
+            e['their_k'] += (_i(r[8]) or 0)
+            if _same_team(tr, r) is True:
                 e['ally'] += 1
     if not enc:
-        return {'nemesis': None, 'ally': None, 'opponents': [], 'allies': []}
+        return {'nemesis': None, 'ally': None, 'foes': [], 'allies': []}
 
-    def _clashes(e):
-        return e['wins'] + e['losses']
+    def _shaped(e):
+        n = e['meetings'] or 1
+        return {'key': e['key'], 'name': e['name'], 'meetings': e['meetings'],
+                'my_td': round(e['my_td'] / n, 1), 'my_k': round(e['my_k'] / n, 1),
+                'their_td': round(e['their_td'] / n, 1), 'their_k': round(e['their_k'] / n, 1)}
 
-    all_e = list(enc.values())
-    opps = [e for e in all_e if _clashes(e) > 0]
-    opps.sort(key=lambda e: (-_clashes(e), -(e['losses'] - e['wins'])))
-    allies = sorted((e for e in all_e if e['ally'] > 0), key=lambda e: -e['ally'])
-    if opps:
-        nemesis = opps[0]
-    else:  # no clash ever resolved to opponents — fall back to most-shared-lobby
-        nemesis = max(all_e, key=lambda e: e['encounters'])
-    nem_out = {'key': nemesis['key'], 'name': nemesis['name'],
-               'encounters': nemesis['encounters'],
-               'wins': nemesis['wins'], 'losses': nemesis['losses']}
-    ally_out = None
-    if allies:
-        a = allies[0]
-        ally_out = {'key': a['key'], 'name': a['name'], 'matches': a['ally']}
+    def _foe_score(e):
+        return e['meetings'] - e['ally']   # shared lobbies not confirmed as teammate
+
+    foes = sorted((e for e in enc.values() if _foe_score(e) > 0), key=lambda e: -_foe_score(e))
+    allies = sorted((e for e in enc.values() if e['ally'] > 0), key=lambda e: -e['ally'])
     return {
-        'nemesis': nem_out,
-        'ally': ally_out,
-        'opponents': [{'key': e['key'], 'name': e['name'], 'encounters': e['encounters'],
-                       'wins': e['wins'], 'losses': e['losses']} for e in opps],
+        'nemesis': _shaped(foes[0]) if foes else None,
+        'ally': ({'key': allies[0]['key'], 'name': allies[0]['name'], 'matches': allies[0]['ally']}
+                 if allies else None),
+        'foes': [_shaped(e) for e in foes],
         'allies': [{'key': e['key'], 'name': e['name'], 'matches': e['ally']} for e in allies],
     }
 
@@ -161,20 +143,17 @@ def rivalry_context(display_name, data, top=3):
     nem, al = data.get('nemesis'), data.get('ally')
     if not nem and not al:
         return ''
-    lines = [f"RIVALRY DATA for {display_name} (from shared-lobby history, approximate):"]
+    lines = [f"RIVALRY DATA for {display_name} (shared-lobby history, approximate; NO per-game win/loss):"]
     if nem:
-        if nem['wins'] or nem['losses']:
-            lines.append(f"- Nemesis (most-faced opponent): {nem['name']}, {nem['encounters']} clashes, "
-                         f"head-to-head {nem['wins']}-{nem['losses']} (their kills decided each).")
-        else:
-            _tm = f"{nem['encounters']} time{'s' if nem['encounters'] != 1 else ''}"
-            lines.append(f"- Most-shared lobby: {nem['name']} ({_tm}). The sides were too even to keep an "
-                         f"honest win-loss, so treat them as a frequent foe, not a scored one.")
+        _mt = f"{nem['meetings']} meeting{'s' if nem['meetings'] != 1 else ''}"
+        lines.append(f"- Nemesis (the foe met most): {nem['name']}, {_mt}. Across those games {display_name} "
+                     f"averages {nem['my_td']} TD / {nem['my_k']} K to {nem['name']}'s "
+                     f"{nem['their_td']} TD / {nem['their_k']} K (who tends to show up bigger).")
     if al:
-        lines.append(f"- Closest ally (most matches on the same team): {al['name']}, {al['matches']} together.")
-    others = [o for o in data.get('opponents', [])[1:top + 1] if (o['wins'] or o['losses'])]
+        _m = f"{al['matches']} time{'s' if al['matches'] != 1 else ''}"
+        lines.append(f"- Closest ally (most confirmed on the same team): {al['name']}, {_m} together.")
+    others = data.get('foes', [])[1:top + 1]
     if others:
-        lines.append("- Other rivals: "
-                     + ", ".join(f"{o['name']} ({o['wins']}-{o['losses']}, {o['encounters']} clashes)"
-                                 for o in others) + ".")
+        lines.append("- Other frequent foes: "
+                     + ", ".join(f"{o['name']} ({o['meetings']})" for o in others) + ".")
     return "\n".join(lines)
