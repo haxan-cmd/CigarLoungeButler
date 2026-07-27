@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import utils.db as _db
+from utils.feats import is_triple_run, derive_stat_feats
 import io
 import utils.tilt as _tilt_mod
 
@@ -1888,21 +1889,8 @@ async def _apply_edit(interaction, ev):
         _nf = [f for f in _old_f if f in _KEEP]
         _was_triple = 'Triple' in _old_f
         _sc = ev.score if isinstance(ev.score, int) else None
-        _is_triple = (ev.takedowns >= 150 and ev.kills >= 100
-                      and (_was_triple or (_sc is not None and _sc >= 20000)))
-        if _is_triple:
-            _nf.append('Triple')
-        else:
-            if ev.kills >= 100:
-                _nf.append('100 Kills')
-            if ev.takedowns >= 200:
-                _nf.append('200 Takedowns')
-        if ev.deaths == 0 and ev.takedowns > 0 and not (ev.kills == 0 and ev.takedowns <= 10):
-            _nf.append('Flawless')
-        if ev.takedowns >= 150 and ev.deaths == 0:
-            _nf.append('Predator')
-        if ev.weapon in FEAT_WEAPONS and ev.kills >= 100:
-            _nf.append(ev.weapon)
+        _is_triple = is_triple_run(ev.kills, ev.takedowns, _sc, confirmed=_was_triple)
+        _nf.extend(derive_stat_feats(ev.kills, ev.takedowns, ev.deaths, ev.weapon, FEAT_WEAPONS, _is_triple))
         ev.feats = _nf
     except Exception as _e_rf:
         print(f"[EDIT] feat recompute error: {_e_rf}")
@@ -2386,7 +2374,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _score = (vision_data or {}).get('score')
     if not isinstance(_score, int):
         _score = None
-    is_triple = takedowns >= 150 and kills >= 100 and (score_over_20k or (_score is not None and _score >= 20000))
+    is_triple = is_triple_run(kills, takedowns, _score, confirmed=score_over_20k)
     # Flag to nerve centre when a Triple was self-confirmed (manual "20k+?" -> yes) but the
     # scorecard vision read a score UNDER 20k — a possible inflated claim worth a look.
     if is_triple and score_over_20k and _score is not None and _score < 20000:
@@ -2437,20 +2425,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                                 + ", ".join(_corr) + f"\n{_mlc}")
     except Exception as _e_corr:
         print(f"[CORRECTIONS] feedback log error: {_e_corr}")
-    if is_triple:
-        feats.append("Triple")
-    else:
-        # Only credit 100 Kills / 200 Takedowns on non-Triple games
-        if kills >= 100:
-            feats.append("100 Kills")
-        if takedowns >= 200:
-            feats.append("200 Takedowns")
-    if deaths == 0 and takedowns > 0 and not (kills == 0 and takedowns <= 10):
-        feats.append("Flawless")
-    if takedowns >= 150 and deaths == 0:
-        feats.append("Predator")
-    if selected_weapon in FEAT_WEAPONS and kills >= 100:
-        feats.append(selected_weapon)
+    feats.extend(derive_stat_feats(kills, takedowns, deaths, selected_weapon, FEAT_WEAPONS, is_triple))
 
     # ── Instant acknowledgment ────────────────────────────────────────────────
     # Fire the stat-based reactions on the scorecard FIRST — before the blurb,
