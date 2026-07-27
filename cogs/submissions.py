@@ -3496,6 +3496,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         try:
             _mates = await _db.get_lobbymates(str(interaction.user.id), message_link)
             if _mates:
+                # Flag a lobbymate if they're this player's aggregate nemesis or closest
+                # ally (over all shared-lobby history). The scan runs off the event loop.
+                _nem_key = _ally_key = None
+                try:
+                    from utils.rivalries import compute_rivalries
+                    _all_subs = await _db.get_all_submissions()
+                    _rv = await asyncio.to_thread(compute_rivalries, str(interaction.user.id), _all_subs)
+                    _nem_key = (_rv.get('nemesis') or {}).get('key')
+                    _ally_key = (_rv.get('ally') or {}).get('key')
+                except Exception as _rve:
+                    print(f"[LOBBYMATE] rivalry tag error: {_rve}")
                 _lines = []
                 for _mm in _mates[:3]:
                     if _mm['same_team'] is True:
@@ -3504,7 +3515,13 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         _rel = "against"
                     else:
                         _rel = "in a lobby with"
-                    _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`")
+                    _mk = (_mm.get('discord_id') or '').strip() or ('name:' + (_mm.get('player_name') or '').lower())
+                    _tag = ""
+                    if _mk and _mk == _nem_key:
+                        _tag = " — ⚔️ your nemesis"
+                    elif _mk and _mk == _ally_key:
+                        _tag = " — \U0001f91d your closest ally"
+                    _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`{_tag}")
                 if _lines:
                     _lm_desc = await blurb_read()
                     blurb_write(_lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))

@@ -93,8 +93,8 @@ def compute_rivalries(target_key, all_subs, window_min=45):
     wins/losses are from the target's view, decided by kills in that shared match."""
     subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
     target_runs = [r for r in subs if ident(r)[0] == target_key]
-    opp = defaultdict(lambda: {'name': '', 'encounters': 0, 'wins': 0, 'losses': 0})
-    ally = defaultdict(lambda: {'name': '', 'matches': 0})
+    opp = defaultdict(lambda: {'key': '', 'name': '', 'encounters': 0, 'wins': 0, 'losses': 0})
+    ally = defaultdict(lambda: {'key': '', 'name': '', 'matches': 0})
     for tr in target_runs:
         tk = _i(tr[8]) or 0
         for r in subs:
@@ -106,10 +106,12 @@ def compute_rivalries(target_key, all_subs, window_min=45):
             side = _same_team(tr, r)
             if side is True:
                 a = ally[k]
+                a['key'] = k
                 a['name'] = name or a['name']
                 a['matches'] += 1
             elif side is False:
                 o = opp[k]
+                o['key'] = k
                 o['name'] = name or o['name']
                 o['encounters'] += 1
                 rk = _i(r[8]) or 0
