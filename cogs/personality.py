@@ -1657,16 +1657,31 @@ class PersonalityCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _bounty_prep_reminder(self, guild):
-        """A few days before month-end, ping the mods to prep next month's bounty."""
-        from datetime import datetime, timezone
+        """A few days before the ACTIVE bounty/season turns one month old, ping the mods
+        to prep the next one. Anchored to the season's real start date, NOT the calendar
+        month \u2014 a bounty started mid-month must not get a bogus 'month-end' reminder."""
+        from datetime import datetime
         import calendar as _cal
+
+        def _add_month(dt):
+            m, y = dt.month + 1, dt.year
+            if m > 12:
+                m, y = 1, y + 1
+            return dt.replace(year=y, month=m, day=min(dt.day, _cal.monthrange(y, m)[1]))
+
         try:
-            now = datetime.now(timezone.utc)
-            last_day = _cal.monthrange(now.year, now.month)[1]
-            days_left = last_day - now.day
+            season = await _db.get_current_season()
+            if not season or not season.get('started_at'):
+                return  # no live season -> nothing to roll over
+            started = season['started_at']
+            if getattr(started, 'tzinfo', None) is not None:
+                started = started.replace(tzinfo=None)   # DB timestamps are naive UTC
+            now = datetime.utcnow()
+            cycle_end = _add_month(started)              # ~one month after it started
+            days_left = (cycle_end.date() - now.date()).days
             if days_left > 3:
                 return
-            marker = f"{now.year}-{now.month:02d}"
+            marker = cycle_end.strftime('%Y-%m-%d')      # fire once per cycle end
             if getattr(self, "_bounty_reminder_month", None) == marker:
                 return
             self._bounty_reminder_month = marker
@@ -1674,8 +1689,10 @@ class PersonalityCog(commands.Cog):
                   or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
             if ch:
                 mention = f"<@{config.MANAGER_ID}>"
+                _lead = (f"**{days_left} day(s) left** in the current bounty/season"
+                         if days_left > 0 else "The current bounty/season is **due to roll over**")
                 await ch.send(
-                    f"\U0001f4c5 {mention} \u2014 **{days_left} day(s) left** in this month's bounty/season. "
+                    f"\U0001f4c5 {mention} \u2014 {_lead} (started {started.strftime('%b %d')}). "
                     f"Prep next month's bounty (weapon list, bonus challenge, picture) and run "
                     f"`/bounty_create` when ready to roll it over.",
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
