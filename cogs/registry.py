@@ -722,8 +722,13 @@ async def get_personal_bests(discord_id, cached_data=None):
     }
 
 
-async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
-    """Get top N best leaderboard placements for a player across all boards."""
+async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None, featured=None):
+    """Best leaderboard placements for a player across all boards.
+
+    featured: an ordered list of board names the player has PINNED — when given, only
+    those (that they still hold) are returned, in the pinned order. Otherwise the top
+    placements are auto-ranked by dominance. top_n=None returns ALL placements (used to
+    build the pin picker)."""
     discord_id_str = str(discord_id)
     try:
         all_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
@@ -789,7 +794,11 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None):
         return (1, pos)              # others sorted by placement
 
     placements.sort(key=sort_key)
-    return placements[:top_n]
+    if featured:
+        by_name = {p[1]: p for p in placements}     # p = (pos, lb_name, emoji, gap)
+        chosen = [by_name[b] for b in featured if b in by_name]
+        return chosen if top_n is None else chosen[:top_n]
+    return placements if top_n is None else placements[:top_n]
 
 
 async def get_bounty_completions_for_player(discord_id, cached_data=None):
@@ -1068,7 +1077,12 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
         except (ValueError, TypeError):
             pass
     special_ops = await get_special_ops_for_player(discord_id, cached_data)
-    best_placements = await get_best_placements_for_player(discord_id, cached_data=cached_data)
+    try:
+        _featured = await _db.get_card_featured_boards(discord_id)
+    except Exception:
+        _featured = []
+    best_placements = await get_best_placements_for_player(
+        discord_id, cached_data=cached_data, featured=_featured or None)
     personal_bests = await get_personal_bests(discord_id, cached_data)
     lobby_stats = await get_lobby_stats_for_player(discord_id, cached_data)
 
@@ -1961,11 +1975,78 @@ async def _save_legacy_feats(player_name, legacy_feats):
 
 
 
+class _PinPlacementsSelect(discord.ui.Select):
+    """Multi-select of a player's board placements; saving pins them to their card."""
+    def __init__(self, uid, all_placements, current):
+        self.uid = uid
+        _cur = set(current or [])
+        opts = []
+        for pos, lb, _emoji, gap in all_placements[:25]:
+            _desc = (f"#{pos}" + (f" (+{gap})" if gap else ""))[:100]
+            opts.append(discord.SelectOption(label=lb[:100], value=lb[:100],
+                                             description=_desc, default=(lb in _cur)))
+        super().__init__(placeholder="Placements to feature (pick any; none = automatic)…",
+                         min_values=0, max_values=len(opts), options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        chosen = list(self.values)
+        try:
+            await _db.set_card_featured_boards(str(self.uid), chosen)
+            _m = interaction.guild.get_member(self.uid) if interaction.guild else None
+            _name = _m.display_name if _m else interaction.user.display_name
+            await create_or_update_registry_card(interaction.guild, self.uid, _name)
+        except Exception as _ce:
+            print(f"[CARD] pin refresh error: {_ce}")
+            await interaction.followup.send(f"Saved, but the card refresh hiccuped: {_ce}", ephemeral=True)
+            return
+        if chosen:
+            await interaction.followup.send(
+                f"Pinned {len(chosen)} placement(s) to your card.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "Cleared your pins — your card is back to the automatic top placements.", ephemeral=True)
+
+
+class _PinPlacementsView(discord.ui.View):
+    def __init__(self, uid, all_placements, current):
+        super().__init__(timeout=180)
+        self.add_item(_PinPlacementsSelect(uid, all_placements, current))
+
+
 class RegistryCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         global _bot_ref
         _bot_ref = bot
+        # USER context menu — a separate pool from the 100 slash-command cap, so it
+        # costs no slot. Right-click any player -> pin the Best Placements shown on
+        # YOUR OWN card (the right-clicked target is ignored; it always edits yours).
+        self._pin_ctx = app_commands.ContextMenu(
+            name="Pin Card Placements", callback=self._pin_placements_ctx)
+        self.bot.tree.add_command(self._pin_ctx)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self._pin_ctx.name, type=self._pin_ctx.type)
+
+    async def _pin_placements_ctx(self, interaction: discord.Interaction, member: discord.Member):
+        """Customize the INVOKER's own card placements (target member ignored)."""
+        await interaction.response.defer(ephemeral=True)
+        uid = interaction.user.id
+        try:
+            all_p = await get_best_placements_for_player(uid, top_n=None)
+        except Exception as _pe:
+            await interaction.followup.send(f"Couldn't load your placements: {_pe}", ephemeral=True)
+            return
+        if not all_p:
+            await interaction.followup.send(
+                "You have no board placements to pin yet — land on a board first.", ephemeral=True)
+            return
+        current = await _db.get_card_featured_boards(str(uid))
+        await interaction.followup.send(
+            "Pick which placements to feature on **your** card. They show in the order Discord "
+            "lists them; choose none and save to go back to the automatic top placements.",
+            view=_PinPlacementsView(uid, all_p, current), ephemeral=True)
 
     @app_commands.command(name="create_card", description="Create or refresh a player's registry card (admin only).")
     @app_commands.checks.has_permissions(administrator=True)

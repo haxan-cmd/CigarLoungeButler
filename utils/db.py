@@ -87,6 +87,7 @@ _SCHEMA_STATEMENTS = [
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS kills_100_count INTEGER",
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS takedowns_200_count INTEGER",
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS triple_count INTEGER",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS card_featured_boards TEXT",
     "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS bonus_completions TEXT DEFAULT '[]'",
     "CREATE TABLE IF NOT EXISTS hundred_handed ("
     "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
@@ -917,6 +918,27 @@ async def set_manual_feat_count(discord_id: str, feat: str, count: int):
             f"UPDATE players SET {col}=$1 WHERE discord_id=$2",
             count, str(discord_id)
         )
+
+
+async def get_card_featured_boards(discord_id: str) -> list:
+    """Ordered board names a player has PINNED to their card's Best Placements
+    ('|'-delimited in the column). Empty list means use the auto-ranked default."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        v = await conn.fetchval(
+            "SELECT card_featured_boards FROM players WHERE discord_id=$1", str(discord_id))
+    return [b for b in (v or '').split('|') if b.strip()]
+
+
+async def set_card_featured_boards(discord_id: str, boards: list):
+    """Pin an ordered list of board names to a player's card (pass [] to clear and
+    fall back to the auto-ranked top placements)."""
+    _cache_invalidate('players')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE players SET card_featured_boards=$1 WHERE discord_id=$2",
+            '|'.join(boards), str(discord_id))
 
 
 async def clear_registry_thread(discord_id: str):
