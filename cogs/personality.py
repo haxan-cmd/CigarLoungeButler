@@ -2769,37 +2769,49 @@ class PersonalityCog(commands.Cog):
                     except Exception:
                         pass
 
-                # Robust Hundred-Handed self-gap. The deep per-player block above only
-                # runs when the asker matches a players row and is nested 6 levels deep,
-                # so it silently misses (the Butler then says "I don't have your checklist").
-                # If someone is clearly asking about THEIR OWN Hundred-Handed, inject the
-                # exact remaining combos here, keyed by id-or-name like the card.
+                # Robust Hundred-Handed gap injection. The deep per-player block above only
+                # runs when the ASKER matches a players row and is nested 6 levels deep, so
+                # it silently misses (the Butler then says "I don't have the records"). Here,
+                # for any Hundred-Handed question, resolve WHOSE progress is asked about —
+                # the asker (first person) OR a named registered player (e.g. "how many does
+                # Coors have left") — and inject that player's exact gaps + count.
                 try:
                     _cl = content_lower
                     if (('hundred' in _cl or 'handed' in _cl)
-                            and any(t in _cl for t in (' i ', "i'm", 'am i', ' my ', ' me ', 'missing',
-                                                       'need for', 'do i need', 'still need', 'what do i'))
                             and 'HUNDRED-HANDED' not in player_stats_ctx.upper()):
-                        from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-                        _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
-                        _done = await _db.get_hh_done_combos(str(message.author.id), player_name) & _req
-                        _missing = _req - _done
-                        if _req and _req.issubset(_done):
-                            player_stats_ctx += f"\n\nAsker Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL})."
-                        elif _missing:
-                            _by = {}
-                            for _sc, _w in sorted(_missing):
-                                _by.setdefault(_sc, []).append(_w)
-                            _ms = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by.items()))
-                            player_stats_ctx += (
-                                f"\n\nAsker Hundred-Handed progress: {len(_done)}/{HH_TOTAL}. Still missing "
-                                f"{len(_missing)} PRIMARY combos, by subclass: {_ms}. "
-                                "[You HAVE the exact gaps. If they ask what they're missing, list them as a bullet "
-                                "list grouped by subclass, one bullet per subclass. Do NOT defer to /progress or the "
-                                "archive. Hundred-Handed counts ONLY each subclass's PRIMARY weapons; secondary use "
-                                "never counts, so a weapon can still be owed on a subclass where it's only a sidearm.]")
+                        _tid, _tname = None, None
+                        if any(t in _cl for t in (' i ', "i'm", 'am i', ' my ', ' me ', 'do i', 'what do i')):
+                            _tid, _tname = str(message.author.id), player_name
+                        else:
+                            for _pr in await _db.get_all_players():
+                                _pnm = (_pr[1] or '').strip() if len(_pr) > 1 else ''
+                                if _pnm and len(_pnm) >= 3 and re.search(
+                                        r"(?<!\w)" + re.escape(_pnm.lower()) + r"(?:'?s)?(?!\w)", _cl):
+                                    _tid = (_pr[0] or '').strip() if len(_pr) > 0 else ''
+                                    _tname = _pnm
+                                    break
+                        if _tname:
+                            from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+                            _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+                            _done = await _db.get_hh_done_combos(_tid or '', _tname) & _req
+                            _missing = _req - _done
+                            _who = "You" if _tid == str(message.author.id) else _tname
+                            if _req and _req.issubset(_done):
+                                player_stats_ctx += f"\n\n{_who} Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL})."
+                            elif _missing:
+                                _by = {}
+                                for _sc, _w in sorted(_missing):
+                                    _by.setdefault(_sc, []).append(_w)
+                                _ms = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by.items()))
+                                player_stats_ctx += (
+                                    f"\n\n{_who} Hundred-Handed: {len(_done)}/{HH_TOTAL} done, {len(_missing)} PRIMARY "
+                                    f"combos left, by subclass: {_ms}. "
+                                    "[You HAVE the exact count AND the gaps. If asked how many are left, give the number; "
+                                    "if they want specifics, bullet the combos grouped by subclass. Do NOT defer to "
+                                    "/progress or the archive. Hundred-Handed counts ONLY each subclass's PRIMARY weapons; "
+                                    "secondary use never counts, so a weapon can still be owed where it's only a sidearm.]")
                 except Exception as _hhe:
-                    print(f"[BUTLER] hh self-gap error: {_hhe}")
+                    print(f"[BUTLER] hh gap error: {_hhe}")
 
                 # Detect rude messages — force idiot emoji regardless of AI response
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
