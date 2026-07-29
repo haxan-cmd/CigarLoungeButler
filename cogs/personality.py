@@ -1403,6 +1403,7 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Pacifist", value="Pacifist"),
             app_commands.Choice(name="High Score", value="High Score"),
             app_commands.Choice(name="Brutal lobby", value="Brutal"),
+            app_commands.Choice(name="Training Grounds (runaway)", value="Training Grounds"),
         ],
         window=[
             app_commands.Choice(name="All time", value="all"),

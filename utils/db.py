@@ -1301,10 +1301,16 @@ _EXPLORE_METRICS = {
 # feats column is deliberately exclusive (a Triple is tagged Triple instead of
 # 100 Kills / 200 Takedowns), but the boards count inclusively — these keep
 # /explore consistent with the boards. Pacifist is never written at all.
+# Training Grounds is the top tilt band (a runaway win); it carries no feats tag, so
+# filter it from the adjusted kill-gap band, threshold pulled from config.TILT_BANDS so
+# it tracks any band retune. (Brutal already filters via its written 'Brutal' tag.)
+_TG_LOW = max((int(b[0]) for b in getattr(config, 'TILT_BANDS', []) if b), default=40)
+
 _FEAT_STAT_CONDITION = {
     "100 Kills":     "COALESCE(kills,0) >= 100",
     "200 Takedowns": "COALESCE(takedowns,0) >= 200",
     "Pacifist":      "COALESCE(kills,0) = 0 AND COALESCE(takedowns,0) <= 10",
+    "Training Grounds": f"({_ADJ_TILT_SQL}) >= {_TG_LOW}",
 }
 
 
