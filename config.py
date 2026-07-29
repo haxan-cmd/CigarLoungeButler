@@ -297,6 +297,27 @@ REGISTRY_CLASS_MAP = {
     "Archer":   ["Longbowman", "Crossbowman", "Skirmisher"],
 }
 
+# Case-insensitive canonical weapon-name lookup, built from every weapon the
+# registry knows about. Submissions can carry off-canonical casing (e.g. a stored
+# "polehammer" or "two-handed hammer"). The bounty matches case-insensitively, so
+# those still count there, but the card's class-progression math looks weapons up
+# by exact canonical name — so without this the marks silently vanish from the
+# card while still showing in the bounty. Fold both registry maps in so any
+# weapon the card iterates is covered.
+WEAPON_CANON = {}
+for _subws in list(REGISTRY_WEAPON_MAP.values()) + list(CLASS_WEAPON_MAP.values()):
+    for _cw in _subws:
+        WEAPON_CANON[_cw.lower()] = _cw
+
+
+def canonical_weapon(name):
+    """Return the canonical spelling/casing for a weapon name, or the trimmed
+    input unchanged if it isn't a known weapon."""
+    if not name:
+        return name
+    n = name.strip()
+    return WEAPON_CANON.get(n.lower(), n)
+
 MASTERY_THRESHOLD  = 100   # qualifying (100+ TD) primary-weapon runs to master a weapon
 VIRTUOSO_THRESHOLD = 250   # runs to reach Virtuoso on a weapon
 

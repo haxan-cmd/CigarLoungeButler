@@ -41,6 +41,25 @@ def test_subclass_alias_values_are_real():
         assert v in valid, f"subclass alias {k!r} -> unknown {v!r}"
 
 
+def test_canonical_weapon_normalizes_case_and_hyphens():
+    # Off-canonical casing must map back to the exact registry spelling, or the
+    # card's class-progression lookups miss marks the bounty still counts.
+    assert config.canonical_weapon("polehammer") == "Polehammer"
+    assert config.canonical_weapon("POLEHAMMER") == "Polehammer"
+    assert config.canonical_weapon("two-handed hammer") == "Two-Handed Hammer"
+    assert config.canonical_weapon("  Two-Handed Hammer  ") == "Two-Handed Hammer"
+    # idempotent + safe on unknown/blank input
+    assert config.canonical_weapon("Polehammer") == "Polehammer"
+    assert config.canonical_weapon("Frying Pan") == "Frying Pan"
+    assert config.canonical_weapon("") == ""
+
+
+def test_canonical_covers_every_registry_weapon():
+    for subws in config.REGISTRY_WEAPON_MAP.values():
+        for w in subws:
+            assert config.canonical_weapon(w.lower()) == w
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

@@ -76,7 +76,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             continue
         if row[2].strip() != discord_id_str:
             continue
-        weapon = row[3].strip() if len(row) > 3 else ''
+        weapon = config.canonical_weapon(row[3].strip()) if len(row) > 3 else ''
         submitted_class = row[4].strip() if len(row) > 4 else ''
         feats_str = row[11].strip() if len(row) > 11 else ''
         feats = [f.strip() for f in feats_str.split(',')] if feats_str and feats_str != 'None' else []
@@ -131,7 +131,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                 continue
             if row[2].strip() != discord_id_str:
                 continue
-            weapon = row[5].strip() if len(row) > 5 else ''
+            weapon = config.canonical_weapon(row[5].strip()) if len(row) > 5 else ''
             if not weapon or weapon in ('Other', 'Multiple Weapons', 'Hybrid'):
                 continue
             # Skip plain key if any subclass-keyed entry exists for this weapon
@@ -169,7 +169,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             for row in legacy_rows:
                 if len(row) < 4:
                     continue
-                weapon = row[1].strip()
+                weapon = config.canonical_weapon(row[1].strip())
                 subclass = row[2].strip() if len(row) > 2 else ''
                 try:
                     marks = int(row[3])
