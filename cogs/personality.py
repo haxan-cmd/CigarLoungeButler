@@ -280,6 +280,16 @@ def _looks_like_rules_question(text):
     if len(t) < 8:
         return False
     has_kw = any(k in t for k in _RULES_KEYWORDS)
+    # Personal-PROGRESS questions ("how many do I have left", "what am I missing",
+    # "how many does X have left", "what do I still need") are DATA questions, not
+    # generic rules explainers. Route them to the stats path so the Butler answers with
+    # the player's real numbers instead of reciting the rule and deflecting.
+    if any(p in t for p in (
+            'have left', 'left for', 'left on', 'left to', 'missing', 'still need',
+            'still missing', 'still have', 'do i have', 'do i still', 'what do i still',
+            'my progress', "'s progress", 'their progress', 'how many do i',
+            'how much do i', 'how close am i', 'how far am i')):
+        return False
     has_q = (
         '?' in t
         or t.startswith(('how ', 'what', 'why ', 'when ', 'does ', 'do i', 'is ', 'explain', 'can i', 'where '))
