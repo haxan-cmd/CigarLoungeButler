@@ -2824,6 +2824,28 @@ class PersonalityCog(commands.Cog):
                 except Exception as _hhe:
                     print(f"[BUTLER] hh gap error: {_hhe}")
 
+                # Full map roster injection. Asked for a map tier list / ranking, the
+                # Butler otherwise improvises from the few maps named in its prompt and
+                # silently drops the rest. Hand it the complete roster so every map is placed.
+                try:
+                    _cl2 = content_lower
+                    if ('map' in _cl2 and any(k in _cl2 for k in (
+                            'tier', 'rank', 'ranking', 'best', 'worst', 'favourite',
+                            'favorite', 'list', 'rate', 'rating', 'top map', 'good map',
+                            'bad map'))
+                            and 'FULL MAP ROSTER' not in player_stats_ctx.upper()):
+                        _maps = sorted(getattr(config, 'MAPS', []) or [])
+                        if _maps:
+                            player_stats_ctx += (
+                                "\n\nFULL MAP ROSTER (every map in the pool, all "
+                                f"{len(_maps)}): " + ", ".join(_maps) +
+                                ". [If asked to rank, tier, or list the maps, place EVERY "
+                                "map on this roster, none skipped. Your existing map opinions "
+                                "stand; slot the rest by your own taste. Use these exact map "
+                                "names.]")
+                except Exception as _mre:
+                    print(f"[BUTLER] map roster ctx error: {_mre}")
+
                 # Detect rude messages — force idiot emoji regardless of AI response
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
