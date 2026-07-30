@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 import config
 import utils.db as _db
 from utils.feats import is_triple_run, derive_stat_feats, tilt_mark
+from utils.validation import impossible_submission_reason
 import io
 import utils.tilt as _tilt_mod
 
@@ -2360,6 +2361,39 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"[FINALISE] Picker reroute failed: {e}")
         return
+
+    # Impossible-data guard: reject a run whose (map, faction) pair can't exist
+    # in-game — e.g. Agatha on Askandir, which is a Mason/Tenosia map. This is
+    # deliberately narrow: it fires ONLY on a contradiction, never on incomplete
+    # data. A blank faction (one side of the scoreboard), missing lobby totals,
+    # etc. all pass. On a real contradiction the scorecard was misread or faked,
+    # so we don't log it — we ask for a resubmit and offer a one-tap manager flag.
+    _reject_reason = impossible_submission_reason(selected_map, faction, config.MAP_FACTIONS)
+    if _reject_reason:
+        try:
+            _rlink = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+            await interaction.edit_original_response(
+                content=(f"⛔ Hold on — that scorecard has data that can't be right: "
+                         f"**{_reject_reason}**\n"
+                         f"Nothing was logged. Please double-check the map/team and resubmit. "
+                         f"If you're sure it's correct, use the button to flag a manager."),
+                embed=None,
+                view=RejectedSubmissionView(interaction.user, _reject_reason, _rlink),
+            )
+        except Exception as _e_rej:
+            print(f"[REJECT] rejection notice failed: {_e_rej}")
+        # Nerve-centre trail so mods see rejections even if the submitter walks away.
+        try:
+            _ncr = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                   or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if _ncr:
+                _rl2 = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+                await _ncr.send(f"⛔ **Submission rejected — {interaction.user.display_name}**: "
+                                f"{_reject_reason} ({selected_weapon}, {selected_map}/{faction})\n{_rl2}")
+        except Exception as _e_ncr:
+            print(f"[REJECT] nerve trail failed: {_e_ncr}")
+        return
+
     # Cross-cog lazy imports to avoid circular dependencies at module load
     from cogs.leaderboards import update_leaderboards, update_leaderboard_index, build_ledger_entrance, refresh_hundred_handed_board as _refresh_hundred_handed_board
     from cogs.bounty import update_bounty, get_active_bounty, check_bounty_completion
@@ -3754,6 +3788,46 @@ _bg_task_refs: set = set()
 _active_vision: set[int] = set()  # prevents double-processing same message
 _GREY_CHARGE_URLS: dict[str, str] = {}  # weapon key -> stashed neutral-grey icon URL (reused)
 _queued_msgs: set[int] = set()  # prevents same message being finalised twice
+
+
+class RejectedSubmissionView(discord.ui.View):
+    """Shown when a run is rejected for impossible data (e.g. Agatha on Askandir).
+    The run is NOT logged. The submitter can just resubmit a corrected scorecard;
+    the button is an escape hatch to flag a manager if they believe it's right
+    (a rare vision edge case), so nothing legit gets silently swallowed."""
+
+    def __init__(self, submitter: discord.abc.User, reason: str, link: str):
+        super().__init__(timeout=1800)
+        self._submitter = submitter
+        self._reason = reason
+        self._link = link
+        self._flagged = False
+
+    @discord.ui.button(label="This is correct — flag a manager",
+                       style=discord.ButtonStyle.secondary, emoji="\U0001f6ce️")
+    async def flag(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self._flagged:
+            await interaction.response.send_message("A manager's already been flagged for this one.",
+                                                    ephemeral=True)
+            return
+        self._flagged = True
+        button.disabled = True
+        try:
+            nc = interaction.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                 or await interaction.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if nc:
+                await nc.send(
+                    f"\U0001f6ce️ <@{config.MANAGER_ID}> — {self._submitter.mention} says a "
+                    f"rejected submission is actually correct and wants a look.\n"
+                    f"Blocked because: {self._reason}\n{self._link}")
+        except Exception as _e_flag:
+            print(f"[REJECT] manager flag failed: {_e_flag}")
+        try:
+            await interaction.response.edit_message(view=self)
+        except Exception:
+            pass
+        await interaction.followup.send("Flagged a manager — they'll take a look. "
+                                        "No need to resubmit unless they ask.", ephemeral=True)
 # Serializes board read-modify-writes across detached background tasks so two
 # concurrent submissions to the same board can't lose an update / dup.
 _BOARD_LOCK = asyncio.Lock()
