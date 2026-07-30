@@ -560,6 +560,9 @@ class SubmitView(discord.ui.View):
                     lines.append(f"\nℹ️ {parsed['_name_warn']}")
                 if parsed.get('_stat_warn'):
                     lines.append(f"\n⚠️ {parsed['_stat_warn']}")
+                _mf_warn = impossible_submission_reason(parsed.get('map'), parsed.get('faction'), config.MAP_FACTIONS)
+                if _mf_warn:
+                    lines.append(f"\n⚠️ {_mf_warn} Use **Fix Map** or **Fix Team** before confirming.")
                 # Weapon/class are never printed on the scoreboard \u2014 asking for
                 # them is the NORMAL next step, not a vision miss. "Could not
                 # read" is reserved for fields vision genuinely should have got.
@@ -709,6 +712,16 @@ class VisionConfirmView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self._owner_check(interaction):
             await interaction.response.send_message("I'm afraid I can only take instruction from the one who posted this engagement, sir.", ephemeral=True)
+            return
+        # Catch an impossible map/team pair (e.g. Agatha on Askandir) right here, so
+        # it's corrected in this same view via Fix Map / Fix Team instead of being
+        # rejected after submit. A blank faction is incomplete, not impossible, and
+        # passes through untouched.
+        _bad = impossible_submission_reason(self.parsed.get('map'), self.parsed.get('faction'), config.MAP_FACTIONS)
+        if _bad:
+            await interaction.response.send_message(
+                f"⚠️ {_bad}\nUse **Fix Map** or **Fix Team** below to correct it, then Confirm.",
+                ephemeral=True)
             return
         await self._proceed(interaction)
 
@@ -938,8 +951,10 @@ async def _proceed_weapon(interaction, original_message, prompt_msg, selected_cl
         # All fields confirmed — return to VisionConfirmView so user can review before final submit
         view = VisionConfirmView(original_message, prompt_msg, vd)
         td, k, d = vd.get('takedowns','?'), vd.get('kills','?'), vd.get('deaths','?')
+        _mf_warn = impossible_submission_reason(vd.get('map'), vd.get('faction'), config.MAP_FACTIONS)
+        _warn_line = f"\n⚠️ {_mf_warn} Use **Fix Map** or **Fix Team** first." if _mf_warn else ""
         await interaction.response.edit_message(
-            content=f"✅ `{selected_class}` · `{selected_weapon}` · `{vd['map']}` · `{vd['faction']}` · TD:`{td}` K:`{k}` D:`{d}`\nLooks right? Hit **Confirm** to submit.",
+            content=f"✅ `{selected_class}` · `{selected_weapon}` · `{vd['map']}` · `{vd['faction']}` · TD:`{td}` K:`{k}` D:`{d}`\nLooks right? Hit **Confirm** to submit.{_warn_line}",
             view=view
         )
     elif vd.get('map'):
