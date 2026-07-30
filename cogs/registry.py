@@ -2074,10 +2074,16 @@ class RegistryCog(commands.Cog):
 
             discord_id_str = str(target.id)
 
-            # Check player is registered
-            rows = await _db.get_all_players()
-            registered = any(row and row[0].strip() == discord_id_str for row in rows)
-            if not registered:
+            # Gate on whether the player has actually SUBMITTED runs, not on a
+            # players-table row. The card is derived from submissions, and a
+            # players row can be missing/mismatched (e.g. a rename or a card that
+            # never got a row written). Checking get_all_players here made
+            # /refreshcard silently bail for people who had runs but no row, while
+            # the admin /create_card (which has no such guard) worked fine.
+            # create_or_update_registry_card does its own no-submissions cleanup,
+            # so this is just for a friendly early message.
+            _mine = await _db.get_submissions_by_player(discord_id_str, limit=1)
+            if not _mine:
                 who = "You have" if target.id == interaction.user.id else f"{target.display_name} has"
                 await interaction.followup.send(f"No card on file. {who} to submit a run first.", ephemeral=True)
                 return
