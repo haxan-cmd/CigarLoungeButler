@@ -187,8 +187,9 @@ def build_challenge_rules_embeds():
         colour=C("#2B6CB0"),
     )
     e.add_field(name="Boards", value=(
-        "• **Weapon boards** — best takedown game per weapon\n"
-        "• **Map boards** — best takedown game per map/faction (VIP counts here)\n"
+        "• **Weapon boards** — best takedown game per weapon. "
+        "⚠️ **VIP runs do NOT count** (the VIP kill feed is inflated).\n"
+        "• **Map boards** — best takedown game per map/faction. **VIP runs DO count here.**\n"
         "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF"
     ), inline=False)
     e.add_field(name="<a:TUFF2:1520779243879927898>  TUFF", value=(
