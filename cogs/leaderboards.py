@@ -607,6 +607,21 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
             gone = False
             try:
                 msg = await thread.fetch_message(message_ids[i])
+                # Preserve the Related Weapons/Maps cross-link. The incremental
+                # update path (update_leaderboards -> _rated_embeds) rebuilds the
+                # embed WITHOUT this field, which silently stripped it whenever a
+                # submission touched the board that carries it. Reframe embeds
+                # already include it, so this only fires on the incremental path
+                # and never double-adds.
+                try:
+                    _REL_NAMES = ("Related Weapons", "Related Maps")
+                    if not any((f.name or "") in _REL_NAMES for f in emb.fields):
+                        for _of in (msg.embeds[0].fields if msg.embeds else []):
+                            if (_of.name or "") in _REL_NAMES and _of.value:
+                                emb.add_field(name=_of.name, value=_of.value, inline=False)
+                                break
+                except Exception as _rel_carry_err:
+                    print(f"[SYNC] related-field carry-over skipped: {_rel_carry_err}")
                 if _deco:
                     await msg.edit(content=msg_content, embed=emb,
                                    attachments=[discord.File(DECORATION_BOTTOM)],
@@ -639,6 +654,21 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
     # Boards with a baked-in border never need the standalone spacer repost.
     if recreated and not any(_baked_deco(e) for e in embeds):
         try:
+            # The standalone bottom deco/nav message isn't tracked in message_ids,
+            # so the recreate path can't reuse it — left alone it stacks a SECOND
+            # nav row. Drop any existing untracked bot message that carries the nav
+            # (link buttons live only on the bottom deco in a non-baked thread)
+            # before posting the fresh one, so there's always exactly one.
+            _me = thread.guild.me.id if thread.guild and thread.guild.me else None
+            async for _old in thread.history(limit=10):
+                if _old.id in new_ids:
+                    continue
+                if (_me is None or _old.author.id == _me) and _old.components:
+                    try:
+                        await _old.delete()
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
             await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
         except Exception as deco_err:
             print(f"Decoration repost failed in #{thread.id}: {deco_err}")
