@@ -979,19 +979,16 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             if existing_entry:
                 if score > existing_score:
                     await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                    _all = sorted([int(r[3]) for r in board_values if len(r) > 3 and r[3]], reverse=True)
-                    board_scores = [s for s in _all if s != existing_score]
+                    board_scores = [s for s in (int(r[3]) for r in board_values if len(r) > 3 and r[3]) if s != existing_score]
                     board_scores.append(score)
                     board_scores.sort(reverse=True)
                     pos = board_scores.index(score) + 1
-                    old_pos = (_all.index(existing_score) + 1) if existing_score in _all else pos + 1
-                    # High Score fires only when the run IMPROVES the player's board
-                    # placement (climbs at least one spot) — NOT when they merely beat their
-                    # own score in the same slot. (Making the board for the first time is the
-                    # new-entry branch below, which already registers it.)
-                    if pos < old_pos:
-                        any_updated = True
-                        placements.append((lb_name, pos))
+                    # High Score = the run MOVES the board. A score above the player's
+                    # existing entry moves it (climbs past another player, or advances the
+                    # player's own row) — either way it counts. (A fresh entry onto the
+                    # board is the new-entry branch below.)
+                    any_updated = True
+                    placements.append((lb_name, pos))
                 else:
                     continue
             else:
