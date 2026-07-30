@@ -477,6 +477,51 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
+    @app_commands.command(name="backfill_players", description="Create a players row for anyone who has submitted but has no row (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def backfill_players(self, interaction: discord.Interaction):
+        """Seed the players table from SUBMISSION history rather than a Discord role.
+
+        A players row is normally written on each submission, but rows can be
+        absent for anyone who submitted before that guarantee existed, or via a
+        path that skipped it. When a row is missing, lookups that trust the
+        players table misfire: the Butler treats the person as unregistered and
+        statless, /progress can't find them by name, etc. This repairs every
+        currently-affected player in one pass, keyed on discord_id (never a name).
+        """
+        await interaction.response.defer(ephemeral=True)
+        try:
+            existing = {r[0].strip() for r in await _db.get_all_players() if r and r[0]}
+            subs = await _db.get_all_submissions()
+            # Newest submission name per discord_id — that's the most current IGN,
+            # and using it (not a display name) also helps name-based lookups.
+            latest = {}  # did -> (submitted_at, name)
+            for r in subs:
+                if len(r) < 3:
+                    continue
+                did = (r[2] or '').strip()
+                name = (r[1] or '').strip()
+                ts = (r[0] or '')
+                if not did or not name:
+                    continue
+                if did not in latest or ts > latest[did][0]:
+                    latest[did] = (ts, name)
+            added = 0
+            for did, (_ts, name) in latest.items():
+                if did in existing:
+                    continue
+                try:
+                    await _db.upsert_player(did, name)
+                    added += 1
+                except Exception as _e_bf:
+                    print(f"[BACKFILL] row create failed for {did}: {_e_bf}")
+            await interaction.followup.send(
+                f"✅ Backfill complete — **{added}** players row(s) created from submission "
+                f"history.\n⏭️ **{len(latest) - added}** submitters already had a row.",
+                ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
     @app_commands.command(name="patch_notes", description="Post patch notes to the current channel (mod only)")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(version="Version number e.g. v1.3.0", notes="What changed — use | to separate bullet points")
