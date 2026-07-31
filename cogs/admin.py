@@ -80,6 +80,13 @@ def build_challenge_rules_embeds():
         "<a:highscore:1360312918545269057> +1 for Leaderboard High Score\n"
         "🟠 +1 to +3 for a hard lobby (see Lobby Difficulty)"
     ), inline=False)
+    e.add_field(name="How marks add up", value=(
+        "Every qualifying run is **1 mark**, and the bonuses above **stack on top**, "
+        "so a single game can be worth several. A **High Score** is any run that moves "
+        "a board — including the first time you land on a weapon's board — so your very "
+        "first game with a weapon is usually **2 marks** (1 for the run + 1 for the High "
+        "Score). Catch a hard lobby on top and it's more. More marks than games is normal."
+    ), inline=False)
     e.add_field(name="Note", value="Goedendag counts for Polearms **and** Engineer (Footman).", inline=False)
     embeds.append(e)
 
