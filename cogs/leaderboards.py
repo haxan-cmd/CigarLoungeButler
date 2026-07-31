@@ -1040,7 +1040,13 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 'link': row[4] if len(row) > 4 else '',
                 'weapon': row[5] if len(row) > 5 else '',
             })
-        entries = sorted(entries, key=lambda x: x['score'], reverse=True)
+        # Use the shared prep (same as the reframe path) so the LIVE update renders
+        # identically: weapon/map/kills boards are capped to top-10, Pacifist/Hybrid
+        # get their one-row-per-player dedup. Sorting inline here skipped the cap, so
+        # a board with >10 rows (a stray legacy/backfill duplicate) spilled onto a
+        # second embed on every submission — and /refresh (which DOES use this) only
+        # fixed it until the next run. This converges the two paths.
+        entries = await _sort_board_entries(lb_name, entries)
 
         show_weapon = lb_name in ("100 Kills", "200 Takedowns")
         score_prefix = "+" if lb_name == "TUFF" else ""
