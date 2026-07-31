@@ -928,7 +928,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     # (pacifist objective runs have their own Pacifist score board). Landing on /
     # advancing it earns +1 (tagged 'Top Score' in the finalise path, like High Score).
     if not is_pacifist and score and score > 0:
-        updates.append(("Top Score", score, True, True, False))
+        # personal_best (one row per player), NOT top_10 — the top_10 flag would trim
+        # the DB to 10. Top Score keeps one row per player and is capped to 50 at
+        # display time (see _sort_board_entries).
+        updates.append(("Top Score", score, False, True, False))
 
     # Hybrid: a weapon-swap run (no single weapon). Its own board, ranked by
     # takedowns, one row per player. Excluded from weapon marks/boards elsewhere.
@@ -1210,6 +1213,20 @@ async def _sort_board_entries(lb_name, entries):
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
         return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))
+    if lb_name == "Top Score":
+        # One row per player (their best-scoring match), capped to the top 50 by
+        # score. The board stores one row per player, but a big community makes the
+        # list very long — 50 keeps it readable without trimming it to a top-10.
+        best = {}
+        for e in entries:
+            did = (e.get('did') or '').strip() or ('name:' + (e.get('player') or '').strip().lower())
+            try:
+                _sc = int(e.get('score') or 0)
+            except (ValueError, TypeError):
+                _sc = 0
+            if did not in best or _sc > int(best[did].get('score') or 0):
+                best[did] = e
+        return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))[:50]
     if lb_name != "Pacifist":
         _sorted = sorted(entries, key=lambda x: x['score'], reverse=True)
         # Weapon / map / kills boards are top-10. Guard the DISPLAY so a bloated
