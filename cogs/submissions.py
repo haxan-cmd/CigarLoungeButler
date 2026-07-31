@@ -2194,6 +2194,7 @@ async def _apply_edit(interaction, ev):
     if _tm:
         _me += _tm; _ml.append(f"*{_tem} +{_tm} {_tnm} lobby*")
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
+    if 'Top Score' in _feats: _me += 1; _ml.append("🏆 +1 Top Score")
     if _is_pac:
         new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
     else:
@@ -3198,6 +3199,31 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         await _db.update_submission_feats(submission_row, updated_feats)
                 except Exception as e:
                     print(f"Highscore feat write error: {e}")
+
+        # Top Score = the run advanced the highest-match-points board (one row per
+        # player). Same +1-mark treatment as High Score, tracked on its own feat tag.
+        if any(lb == "Top Score" for lb, _ in placements):
+            react_later("🏆")
+            try:
+                import re as _re_ts
+                def _inc_marks_ts(content):
+                    def _rep(m):
+                        n = int(m.group(1)) + 1
+                        return f"**{n} Mark{'s' if n != 1 else ''}**"
+                    return _re_ts.sub(r'\*\*(\d+) [Mm]arks?\*\*', _rep, content)
+                blurb_write(_inc_marks_ts(await blurb_read()) + "\n🏆 +1 Top Score")
+            except Exception as e:
+                print(f"Top Score mark edit error: {e}")
+            if submission_row:
+                try:
+                    current_feats = await _db.get_submission_feats(submission_row)
+                    if 'Top Score' not in current_feats:
+                        updated_feats = ('Top Score' if current_feats in ('', 'None')
+                                         else (current_feats.rstrip(', ') + ', Top Score').lstrip(', '))
+                        await _db.update_submission_feats(submission_row, updated_feats)
+                except Exception as e:
+                    print(f"Top Score feat write error: {e}")
+
         if any(lb == "TUFF" for lb, _ in placements):
             react_later("<a:TUFF2:1520779243879927898>")
         if any(lb == "Pacifist" for lb, _ in placements):

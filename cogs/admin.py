@@ -78,6 +78,7 @@ def build_challenge_rules_embeds():
         "<a:100kill:1361412390339608686> +1 for 100 Kills\n"
         "<a:triple:1365532698260668466> +1 for Triple\n"
         "<a:highscore:1360312918545269057> +1 for Leaderboard High Score\n"
+        "🏆 +1 for a Top Score (highest match points board)\n"
         "🟠 +1 to +3 for a hard lobby (see Lobby Difficulty)"
     ), inline=False)
     e.add_field(name="How marks add up", value=(
@@ -197,7 +198,8 @@ def build_challenge_rules_embeds():
         "• **Weapon boards** — best takedown game per weapon. "
         "⚠️ **VIP runs do NOT count** (the VIP kill feed is inflated).\n"
         "• **Map boards** — best takedown game per map/faction. **VIP runs DO count here.**\n"
-        "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF"
+        "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF\n"
+        "• 🏆 **Top Score** — highest scoreboard points in a match, one row per player"
     ), inline=False)
     e.add_field(name="<a:TUFF2:1520779243879927898>  TUFF", value=(
         "A hard-carry board: you score **TUFF** when your **kills** beat your best "

@@ -923,6 +923,13 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     if is_pacifist and score and score > 0:
         updates.append(("Pacifist", score, False, False, True))
 
+    # Top Score: highest scoreboard POINTS in a single match, one row per player,
+    # top 10, ranked by score. Any real combat run with a read score qualifies
+    # (pacifist objective runs have their own Pacifist score board). Landing on /
+    # advancing it earns +1 (tagged 'Top Score' in the finalise path, like High Score).
+    if not is_pacifist and score and score > 0:
+        updates.append(("Top Score", score, True, True, False))
+
     # Hybrid: a weapon-swap run (no single weapon). Its own board, ranked by
     # takedowns, one row per player. Excluded from weapon marks/boards elsewhere.
     if str(selected_weapon).strip() == "Hybrid" and takedowns:
@@ -1064,6 +1071,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
     "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
+    "Top Score",            # highest scoreboard points in a match, one row per player
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
 
@@ -3847,6 +3855,35 @@ class LeaderboardsCog(commands.Cog):
             f"Players log it by picking **Hybrid** as their class on submission. "
             f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
 
+    @app_commands.command(name="setup_top_score_board", description="Create the Top Score (highest match points) board thread in the feats forum (mod only).")
+    async def setup_top_score_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        lb_name = "Top Score"
+        recs = await _get_lb_records()
+        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
+            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
+            return
+        # Classify like the Pacifist board (a feat-style personal-best board).
+        pac = next((r for r in recs if r['Leaderboard Name'] == "Pacifist"), None)
+        board_type = (pac.get('Type', '') if pac else '') or 'feat'
+        try:
+            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
+                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            embeds = await _rated_embeds(lb_name, [], False, None, 0, False, "", True)
+            result = await forum.create_thread(name=lb_name, embeds=embeds)
+            thread, first_msg = result.thread, result.message
+            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), board_type)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Created **{lb_name}** board: {thread.mention}. Ranks the highest scoreboard "
+            f"points in a single match, one row per player, top 10. Landing on it earns +1 mark. "
+            f"Run `/backfill_feat_boards` to seed it from history.", ephemeral=True)
+
     @app_commands.command(name="setup_peasant_board", description="Post the Peasant highscore board in THIS channel or thread (mod only).")
     async def setup_peasant_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -4149,6 +4186,48 @@ class LeaderboardsCog(commands.Cog):
                     await _db.add_leaderboard_entry("Flawless", player, discord_id, takedowns, link, weapon)
                     existing.add(("Flawless", link))
                     added += 1
+
+            # Top Score: one row per player \u2014 their single highest-scoring match.
+            # (Additive: keep the higher of stored vs computed, so legacy rows with
+            # no matching submission survive.) Pacifist runs are excluded; they own
+            # the Pacifist score board.
+            _best_score = {}  # key -> (score, player, link, weapon)
+            for row in sub_rows:
+                if len(row) < 13 or 'Unlisted' in (row[11] or ''):
+                    continue
+                _k = int(row[8]) if row[8] else 0
+                _td = int(row[7]) if row[7] else 0
+                if _k == 0 and _td <= 10:
+                    continue  # pacifist
+                _sc = 0
+                if len(row) > 24 and row[24]:
+                    try:
+                        _sc = int(str(row[24]).replace(',', '').strip())
+                    except (ValueError, TypeError):
+                        _sc = 0
+                if _sc <= 0:
+                    continue
+                _pl = row[1] or ''
+                _did = row[2] or ''
+                _key = _did if _did else (f"legacy:{_pl.lower()}" if _pl else '')
+                if not _key:
+                    continue
+                cur = _best_score.get(_key)
+                if cur is None or _sc > cur[0]:
+                    _best_score[_key] = (_sc, _pl, (row[12] or '').strip(), row[3] or '')
+            _ts_existing = {}
+            for r in await _db.get_leaderboard_by_board("Top Score"):
+                eid = (r[2] if len(r) > 2 else '') or ''
+                enm = (r[1] if len(r) > 1 else '').strip()
+                ek = eid if eid else (f"legacy:{enm.lower()}" if enm else '')
+                esc = int(r[3]) if len(r) > 3 and r[3] else 0
+                if ek:
+                    _ts_existing[ek] = max(_ts_existing.get(ek, 0), esc)
+            for _key, (_sc, _pl, _lnk, _wp) in _best_score.items():
+                if _ts_existing.get(_key, -1) >= _sc:
+                    continue
+                await _db.upsert_leaderboard_entry("Top Score", _pl, _key, _sc, _lnk, _wp)
+                added += 1
 
             await _prune_pacifist_board()
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
