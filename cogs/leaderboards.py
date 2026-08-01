@@ -1758,6 +1758,7 @@ _LB_EMOJI = {
     "The Hundred Handed": "<:hhanded:1430199468246044772>",
     "Knife":            "\U0001f5e1\ufe0f",
     "Mallet":           "\U0001f528",
+    "Score":            "\U0001f3c6",   # \ud83c\udfc6 \u2014 highest match points board
 }
 
 def _lb_title(lb_name, show_title, cont=False):
@@ -2844,7 +2845,9 @@ class LeaderboardsCog(commands.Cog):
             await interaction.edit_original_response(content=f"✅ Map leaderboard for **{name}** set up with both factions.")
 
         else:
-            entries = await get_leaderboard_entries(name)
+            # Same prep as the live/refresh paths so /setup obeys the per-board caps
+            # (e.g. weapon/map top-10, Score top-50) instead of rendering every row.
+            entries = await _sort_board_entries(name, await get_leaderboard_entries(name))
             show_weapon = name in ("100 Kills", "200 Takedowns")
             score_prefix = "+" if name == "TUFF" else ""
             embeds = format_leaderboard_embeds(name, entries, 0, show_weapon, score_prefix)
