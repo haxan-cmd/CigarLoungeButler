@@ -997,8 +997,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     # existing entry moves it (climbs past another player, or advances the
                     # player's own row) — either way it counts. (A fresh entry onto the
                     # board is the new-entry branch below.)
-                    any_updated = True
-                    placements.append((lb_name, pos))
+                    # Score is capped at top 50 — a personal best that still ranks
+                    # beyond 50th isn't on the visible board, so it earns no
+                    # mark/notification (the row is kept for records).
+                    if lb_name != "Score" or pos <= 50:
+                        any_updated = True
+                        placements.append((lb_name, pos))
                 else:
                     continue
             else:
@@ -1017,12 +1021,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                         await _db.delete_lowest_leaderboard_entry(lb_name)
                         board_values = await _db.get_leaderboard_by_board(lb_name)
                 await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                any_updated = True  # New entry on a board counts as a PB
                 board_scores = sorted([int(r[3]) for r in board_values if len(r) > 3 and r[3]], reverse=True)
                 board_scores.append(score)
                 board_scores.sort(reverse=True)
                 pos = board_scores.index(score) + 1
-                placements.append((lb_name, pos))
+                # Score caps at top 50: a first entry ranking below that is stored
+                # but earns no mark/notification (not on the visible board).
+                if lb_name != "Score" or pos <= 50:
+                    any_updated = True  # New entry on a board counts as a PB
+                    placements.append((lb_name, pos))
         else:
             await _db.add_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
             any_updated = True
