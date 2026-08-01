@@ -1059,7 +1059,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
         embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-        header_content = ""
+        header_content = _board_header(lb_name)
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -1083,6 +1083,16 @@ _FEAT_BOARD_NAMES = {
     "Score",            # highest scoreboard points in a match, one row per player
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
+
+
+def _board_header(lb_name):
+    """Content for a board's starter message. A feat board with an emoji shows it
+    as the forum thread PREVIEW — otherwise Discord renders an embed-only message
+    as 'Click to see attachment'. Empty for weapon/map boards (they carry a
+    decorative top spacer instead)."""
+    if lb_name in _FEAT_BOARD_NAMES:
+        return getattr(config, 'FEAT_EMOJIS', {}).get(lb_name, "") or ""
+    return ""
 
 
 # Boards with a dedicated renderer that OWNS its whole forum post. Generic reframe/
@@ -1381,7 +1391,7 @@ async def _render_board(guild, lb_row, lb_name):
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
     embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-    header_content = ""
+    header_content = _board_header(lb_name)
     thread_id = int(thread_raw)
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
     if not message_ids:
@@ -2891,7 +2901,7 @@ class LeaderboardsCog(commands.Cog):
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
                 embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-                header_content = ""
+                header_content = _board_header(lb_name)
 
                 thread_id = int(lb_row['Thread ID'])
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -3111,7 +3121,7 @@ class LeaderboardsCog(commands.Cog):
             score_prefix = "+" if lb_name == "TUFF" else ""
             is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
             embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-            header_content = ""
+            header_content = _board_header(lb_name)
 
             old_ids_str = lb_row['Message ID']
             old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
@@ -3896,7 +3906,7 @@ class LeaderboardsCog(commands.Cog):
             forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
                      or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
             embeds = await _rated_embeds(lb_name, [], False, None, 0, False, "", True)
-            result = await forum.create_thread(name=lb_name, embeds=embeds)
+            result = await forum.create_thread(name=lb_name, content=_board_header(lb_name) or None, embeds=embeds)
             thread, first_msg = result.thread, result.message
             await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), board_type)
         except Exception as e:
