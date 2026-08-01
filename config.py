@@ -551,7 +551,8 @@ CLASS_RANK_THRESHOLDS    = list(enumerate(CLASS_RANKS))
 
 # ── Alias maps ────────────────────────────────────────────────────────────────
 WEAPON_ALIASES = {
-    "ls": "Longsword", "longsword": "Longsword",
+    "ls": "Longsword", "longsword": "Longsword", "long sword": "Longsword",
+    "great sword": "Greatsword",
     "hmace": "Heavy Mace", "heavy mace": "Heavy Mace",
     "mace": "Mace", "1h mace": "Mace",
     "dane": "Dane Axe", "dane axe": "Dane Axe",
