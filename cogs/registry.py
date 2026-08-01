@@ -101,7 +101,7 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
                 marks += 1
             if 'High Score' in feats:
                 marks += 1
-            if 'Top Score' in feats:
+            if 'Score' in feats:
                 marks += 1
             # Difficulty valor: Slightly Uphill +1, Outmatched +2, Brutal +3
             # (orientation-adjusted band, tagged at submission time). One tag max.

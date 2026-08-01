@@ -923,15 +923,15 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     if is_pacifist and score and score > 0:
         updates.append(("Pacifist", score, False, False, True))
 
-    # Top Score: highest scoreboard POINTS in a single match, one row per player,
+    # Score: highest scoreboard POINTS in a single match, one row per player,
     # top 10, ranked by score. Any real combat run with a read score qualifies
     # (pacifist objective runs have their own Pacifist score board). Landing on /
-    # advancing it earns +1 (tagged 'Top Score' in the finalise path, like High Score).
+    # advancing it earns +1 (tagged 'Score' in the finalise path, like High Score).
     if not is_pacifist and score and score > 0:
         # personal_best (one row per player), NOT top_10 — the top_10 flag would trim
-        # the DB to 10. Top Score keeps one row per player and is capped to 50 at
+        # the DB to 10. Score keeps one row per player and is capped to 50 at
         # display time (see _sort_board_entries).
-        updates.append(("Top Score", score, False, True, False))
+        updates.append(("Score", score, False, True, False))
 
     # Hybrid: a weapon-swap run (no single weapon). Its own board, ranked by
     # takedowns, one row per player. Excluded from weapon marks/boards elsewhere.
@@ -1080,7 +1080,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 _FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
     "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
-    "Top Score",            # highest scoreboard points in a match, one row per player
+    "Score",            # highest scoreboard points in a match, one row per player
     "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
 }
 
@@ -1213,7 +1213,7 @@ async def _sort_board_entries(lb_name, entries):
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
         return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))
-    if lb_name == "Top Score":
+    if lb_name == "Score":
         # One row per player (their best-scoring match), capped to the top 50 by
         # score. The board stores one row per player, but a big community makes the
         # list very long — 50 keeps it readable without trimming it to a top-10.
@@ -3878,13 +3878,13 @@ class LeaderboardsCog(commands.Cog):
             f"Players log it by picking **Hybrid** as their class on submission. "
             f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
 
-    @app_commands.command(name="setup_top_score_board", description="Create the Top Score (highest match points) board thread in the feats forum (mod only).")
-    async def setup_top_score_board(self, interaction: discord.Interaction):
+    @app_commands.command(name="setup_score_board", description="Create the Score (highest match points) board thread in the feats forum (mod only).")
+    async def setup_score_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        lb_name = "Top Score"
+        lb_name = "Score"
         recs = await _get_lb_records()
         if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
             await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
@@ -4210,7 +4210,7 @@ class LeaderboardsCog(commands.Cog):
                     existing.add(("Flawless", link))
                     added += 1
 
-            # Top Score: one row per player \u2014 their single highest-scoring match.
+            # Score: one row per player \u2014 their single highest-scoring match.
             # (Additive: keep the higher of stored vs computed, so legacy rows with
             # no matching submission survive.) Pacifist runs are excluded; they own
             # the Pacifist score board.
@@ -4239,7 +4239,7 @@ class LeaderboardsCog(commands.Cog):
                 if cur is None or _sc > cur[0]:
                     _best_score[_key] = (_sc, _pl, (row[12] or '').strip(), row[3] or '')
             _ts_existing = {}
-            for r in await _db.get_leaderboard_by_board("Top Score"):
+            for r in await _db.get_leaderboard_by_board("Score"):
                 eid = (r[2] if len(r) > 2 else '') or ''
                 enm = (r[1] if len(r) > 1 else '').strip()
                 ek = eid if eid else (f"legacy:{enm.lower()}" if enm else '')
@@ -4249,7 +4249,7 @@ class LeaderboardsCog(commands.Cog):
             for _key, (_sc, _pl, _lnk, _wp) in _best_score.items():
                 if _ts_existing.get(_key, -1) >= _sc:
                     continue
-                await _db.upsert_leaderboard_entry("Top Score", _pl, _key, _sc, _lnk, _wp)
+                await _db.upsert_leaderboard_entry("Score", _pl, _key, _sc, _lnk, _wp)
                 added += 1
 
             await _prune_pacifist_board()

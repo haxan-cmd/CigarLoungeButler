@@ -476,7 +476,7 @@ FEAT_EMOJIS = {
     "Flawless":      "<a:flawless:1360358300834599062>",
     "Pacifist":      "<a:passive:1365531248268673086>",
     "Hybrid":        "🔀",
-    "Top Score":     "🏆",
+    "Score":     "🏆",
 }
 
 SPECIAL_OPS_EMOJIS = {
