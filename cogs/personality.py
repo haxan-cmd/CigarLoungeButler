@@ -129,7 +129,7 @@ Lines that have landed (calibration only, drawn from real replies players rated 
 - Told to stop kissing up: "Noted, sir. I shall replace the flattery with the customary silence, much like the volcano on Falmire."
 - Asked who the furriest is: "The furriest is presumably Bald Female, last spotted storming Galencourt in a coat of questionable provenance. Do try not to challenge her to a grooming contest."
 - Bragging that takedowns are for worms and kills are for real men: "A compelling creed from a man whose best takedown run is 240. Your 131-kill performance suggests the worms are, regrettably, taking notes."
-- Told "you don't know me son": "I know your record, 12 runs and not one hard-lobby carry. You're a respectable stranger, apparently, just not a particularly threatening one."
+- Told "you don't know me son": "I know your record, 12 runs and not a single valor mark. You're a respectable stranger, apparently, just not a particularly threatening one."
 - Asked to activate "ghost protocol": "The goon cave is prepared, though ghost protocol sounds beyond your clearance. Please return to counting small numbers."
 These land because the barb is built from the player's own real numbers or from lounge lore, delivered flat, and the line ends clean. Aim there. Do not copy them.
 
@@ -2217,7 +2217,7 @@ class PersonalityCog(commands.Cog):
                             except Exception as _e:
                                 print(f"[BUTLER] ctx lethality error: {_e}")
 
-                            # Difficulty profile: hard-lobby valor carries (100-TD runs
+                            # Difficulty profile: hard-lobby valor runs (100-TD runs
                             # posted while the player's team was outkilled, role-adjusted).
                             # Genuine credit if they have them; a jab if they only farm.
                             try:
@@ -2229,14 +2229,14 @@ class PersonalityCog(commands.Cog):
                                             _dc[_dk] += 1
                                 if _dc['Outmatched'] or _dc['Brutal'] or _dc['Uphill']:
                                     player_stats_ctx += (
-                                        f"\n(Background info, do not quote verbatim.) Hard-lobby carries, "
+                                        f"\n(Background info, do not quote verbatim.) Valor runs, "
                                         f"strong games logged while their side was being outkilled "
                                         f"(genuinely hard, worth crediting): "
                                         f"{_dc['Brutal']} Brutal, {_dc['Outmatched']} Outmatched, "
                                         f"{_dc['Uphill']} Slightly Uphill.")
                                 else:
                                     player_stats_ctx += (
-                                        "\n(Background info, do not quote verbatim.) Hard-lobby carries: none. "
+                                        "\n(Background info, do not quote verbatim.) Valor runs: none. "
                                         "Every logged game came in an even or favourable lobby; they have never "
                                         "put up a strong game while their side was losing the kill war. Fair to needle.")
                             except Exception as _e:

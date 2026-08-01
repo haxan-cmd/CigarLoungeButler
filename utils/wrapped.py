@@ -14,7 +14,7 @@ Row indices (see CLAUDE.md submissions map):
 """
 from datetime import datetime
 
-# Hard-lobby carry tags written on the feats column by the tilt grader.
+# Valor tags written on the feats column by the tilt grader.
 VALOR_TAGS = ("Brutal", "Outmatched", "Uphill")
 # The maps the Butler considers kill-farms (his standing opinion); used by the
 # "Farmer" superlative. The cog can override.
@@ -139,7 +139,7 @@ def compute_superlatives(subs, farm_maps=DEFAULT_FARM_MAPS, min_games=3):
       bloodbath     single highest-kill game
       glass_cannon  highest avg (kills+deaths) per game   (>= min_games)
       farmer        most runs on the farm maps
-      comeback_king most hard-lobby carries (valor tags)
+      comeback_king most valor runs (valor tags)
       one_trick     highest single-weapon share of runs   (>= min_games)
       night_shift   most runs logged between 00:00 and 06:00
       iron_will     most runs overall
