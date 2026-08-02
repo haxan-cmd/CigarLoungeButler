@@ -3037,20 +3037,6 @@ class PersonalityCog(commands.Cog):
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
 
-                # TEMP diagnostic: for board/title questions, report whether the board
-                # context actually reached the prompt. Deduped by nerve_alert (10 min).
-                if any(_k in resolved_message.lower() for _k in ('not on', 'board title', 'boards am i', 'what boards', 'am i not')):
-                    try:
-                        from utils.helpers import nerve_alert as _na
-                        _dbg = (f"BOARD-CTX DEBUG — {player_name}: "
-                                f"standings={'Leaderboard standings' in player_stats_ctx}, "
-                                f"absent={'NO entry on' in player_stats_ctx}, "
-                                f"title={'title standings' in player_stats_ctx}, "
-                                f"ctx_len={len(player_stats_ctx)}")
-                        await _na(self.bot, _dbg, Exception(_dbg))
-                    except Exception:
-                        pass
-
                 result = await call_butler_ai(resolved_message, ctx_messages, player_name, 'main', player_stats_ctx, is_idiot=is_idiot, is_rules=_is_rules_q, speak_french=(message.author.id == DIAMONDZ_WAVE_ID))
                 if is_rude:
                     try:
