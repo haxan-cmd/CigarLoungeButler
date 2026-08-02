@@ -2330,10 +2330,11 @@ class PersonalityCog(commands.Cog):
                                 for weapon, entries in boards.items():
                                     entries.sort(key=lambda x: -x[2])
                                     for rank, (pname, pdid, score) in enumerate(entries, 1):
-                                        # Match by discord_id (robust); fall back to name only
-                                        # for legacy blank-id rows. Name-only matching missed
-                                        # a player's own boards under a name variant/override.
-                                        if (pdid and pdid == discord_id_str) or (not pdid and pname == player_name_for_ld):
+                                        # Match on EITHER discord_id OR name — an entry may
+                                        # carry a stale/other id (matched by name) or a name
+                                        # variant (matched by id); requiring id-only, or
+                                        # name-only-when-blank, missed a player's own boards.
+                                        if (pdid and pdid == discord_id_str) or (pname and pname == player_name_for_ld):
                                             medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
                                             _u = _UNIT.get(weapon, "TDs")
                                             standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
@@ -2404,7 +2405,8 @@ class PersonalityCog(commands.Cog):
                                             continue
                                         _map_all.add(_b)
                                         _rd = (_r[2] or '').strip() if len(_r) > 2 else ''
-                                        if (_rd and _rd == discord_id_str) or (not _rd and _r[1].strip() == _ldn):
+                                        _rn = _r[1].strip() if len(_r) > 1 else ''
+                                        if (_rd and _rd == discord_id_str) or (_rn and _rn == _ldn):
                                             _map_on.add(_b)
                                     _map_absent = sorted(_map_all - _map_on)
                                     if _map_absent:
