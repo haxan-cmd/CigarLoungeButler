@@ -2304,7 +2304,8 @@ class PersonalityCog(commands.Cog):
                                         score = int(ld_r[3])
                                     except ValueError:
                                         continue
-                                    boards.setdefault(weapon, []).append((ld_r[1].strip(), score))
+                                    boards.setdefault(weapon, []).append(
+                                        (ld_r[1].strip(), (ld_r[2] or '').strip() if len(ld_r) > 2 else '', score))
                                 # Board values aren't all takedowns: the Score board is
                                 # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
                                 # margin. Label each with its real unit so the Butler
@@ -2313,18 +2314,38 @@ class PersonalityCog(commands.Cog):
                                          "Pacifist": "points",
                                          "100 Kills": "kills", "TUFF": "kill margin"}
                                 standings = []
+                                _on_weapons = set()
                                 for weapon, entries in boards.items():
-                                    entries.sort(key=lambda x: -x[1])
-                                    for rank, (pname, score) in enumerate(entries, 1):
-                                        if pname == player_name_for_ld:
+                                    entries.sort(key=lambda x: -x[2])
+                                    for rank, (pname, pdid, score) in enumerate(entries, 1):
+                                        # Match by discord_id (robust); fall back to name only
+                                        # for legacy blank-id rows. Name-only matching missed
+                                        # a player's own boards under a name variant/override.
+                                        if (pdid and pdid == discord_id_str) or (not pdid and pname == player_name_for_ld):
                                             medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
                                             _u = _UNIT.get(weapon, "TDs")
                                             standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
+                                            _on_weapons.add(weapon)
                                             break
                                 if standings:
                                     player_stats_ctx += f"\nLeaderboard standings: {', '.join(standings)}"
                                 else:
                                     player_stats_ctx += "\nLeaderboard standings: none recorded"
+                                # Exact complement for "what boards am I NOT on" — computed by
+                                # discord_id, WEAPON boards only (feat/kills boards excluded).
+                                try:
+                                    from utils.boards import is_feat_board as _isfeat, is_kills_board as _iskb
+                                    _weapon_boards = {w for w in boards if not _isfeat(w) and not _iskb(w)}
+                                    _absent = sorted(_weapon_boards - _on_weapons)
+                                    if _absent:
+                                        player_stats_ctx += (
+                                            f"\nWeapon boards this player has NO entry on ({len(_absent)}): "
+                                            + ", ".join(_absent)
+                                            + ". [This is the authoritative list for 'which boards am I not on' — use it exactly, do not guess.]")
+                                    elif _weapon_boards:
+                                        player_stats_ctx += "\nThis player has an entry on EVERY weapon board."
+                                except Exception as _abe:
+                                    print(f"[BUTLER] ctx absent-boards error: {_abe}")
                             except Exception as _e:
                                 print(f"[BUTLER] ctx standings error: {_e}")
 
