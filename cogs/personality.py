@@ -2410,6 +2410,35 @@ class PersonalityCog(commands.Cog):
                                                    "the player protests they already did a weapon, note dryly that they used it as a secondary or on "
                                                    "another subclass, and the listed subclass still owes the primary run.]")
                                 player_stats_ctx += f"\n{hh_str}"
+                                # Nearest goal across tracks — for the Butler to drop IN
+                                # PASSING when it fits a stats-adjacent reply. Gated on
+                                # data questions (keeps the marks scan off pure banter),
+                                # reusing the HH sets just computed.
+                                if _is_data_q:
+                                    try:
+                                        from cogs.registry import calculate_weapon_marks_for_player
+                                        from utils.goals import next_goals
+                                        _gm = await calculate_weapon_marks_for_player(int(discord_id_str))
+                                        _flat = {}
+                                        for _k, _v in (_gm or {}).items():
+                                            _w = _k[0] if isinstance(_k, tuple) else _k
+                                            if _w and _w not in ('Other', 'Multiple Weapons', 'Hybrid'):
+                                                _flat[_w] = _flat.get(_w, 0) + _v
+                                        _goals = next_goals(
+                                            _flat, _hh_required - _hh_done,
+                                            mastery_threshold=config.MASTERY_THRESHOLD,
+                                            virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
+                                            rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
+                                            hh_total=HH_TOTAL)
+                                        if _goals.get('nearest'):
+                                            player_stats_ctx += (
+                                                f"\nAsker's nearest goal right now: {_goals['nearest']['label']}. "
+                                                "[Optional colour: you MAY fold this into ONE short clause if it fits "
+                                                "naturally (after a strong game, a stats question, or some trash talk). "
+                                                "Never force it, never lead with it or make it the whole reply, and drop "
+                                                "it if it doesn't fit.]")
+                                    except Exception as _ge:
+                                        print(f"[BUTLER] ctx next-goal error: {_ge}")
                             except Exception as _e:
                                 print(f"[BUTLER] ctx hundred-handed error: {_e}")
 
