@@ -2104,7 +2104,7 @@ class RegistryCog(commands.Cog):
     async def versus(self, interaction: discord.Interaction, player: discord.Member):
         await interaction.response.defer()
         if player.id == interaction.user.id:
-            await interaction.followup.send("You can't face yourself, sir. Pick someone else.", ephemeral=True)
+            await interaction.followup.send("Pick someone other than yourself.", ephemeral=True)
             return
         try:
             from utils.rivalries import head_to_head
@@ -2178,10 +2178,9 @@ class RegistryCog(commands.Cog):
                 rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
                 hh_total=HH_TOTAL)
 
-            _who = "You're" if target.id == interaction.user.id else f"**{_name}** is"
+            _who = "You have" if target.id == interaction.user.id else f"**{_name}** has"
             if not g['nearest']:
-                await interaction.followup.send(
-                    f"{_who} just getting started — log a few runs and I'll chart a course, sir.")
+                await interaction.followup.send(f"{_who} no logged runs yet — submit a few and goals will appear.")
                 return
 
             emb = discord.Embed(
@@ -2201,7 +2200,6 @@ class RegistryCog(commands.Cog):
                     value=(f"{hh['label']}{_prog}. Closest subclass: **{hh['closest_subclass']}** "
                            f"(owe: {_cw})."),
                     inline=False)
-            emb.set_footer(text="Three tracks, three directions — chase whichever suits your mood.")
             await interaction.followup.send(embed=emb)
         except Exception as e:
             await interaction.followup.send(f"Couldn't chart your goals: {e}", ephemeral=True)
