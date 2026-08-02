@@ -2073,7 +2073,15 @@ class PersonalityCog(commands.Cog):
                     for p_row in p_rows:
                         if p_row and p_row[0].strip() == discord_id_str:
                             total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
-                            top_weapons = p_row[6].strip()[:120] if len(p_row) > 6 else ''
+                            # Truncate the "Weapon: N, ..." list on a comma boundary, not
+                            # a hard char count — a mid-entry cut left dangling fragments
+                            # like "Dagger: ." in the Butler's context.
+                            _tw_raw = p_row[6].strip() if len(p_row) > 6 else ''
+                            if len(_tw_raw) > 120:
+                                _tw_cut = _tw_raw[:120].rsplit(',', 1)[0].rstrip(', ')
+                                top_weapons = _tw_cut or _tw_raw[:120]
+                            else:
+                                top_weapons = _tw_raw
                             # Find the player's best games from their submission history.
                             # We track best-by-TD and best-by-kills separately because they
                             # might be different games — Butler needs weapon+map to answer
@@ -2121,7 +2129,9 @@ class PersonalityCog(commands.Cog):
                                     if ld_row[1].strip() != player_name_for_ld:
                                         continue
                                     lb_name = ld_row[0].strip()
-                                    if ' - ' in lb_name or lb_name in _FBN or _is_kb(lb_name):
+                                    # 'Top Score' is the pre-rename name of the Score board;
+                                    # exclude it too until stale rows are cleaned.
+                                    if ' - ' in lb_name or lb_name in _FBN or _is_kb(lb_name) or lb_name == 'Top Score':
                                         continue
                                     try:
                                         ld_td = int(ld_row[3])
@@ -2269,7 +2279,8 @@ class PersonalityCog(commands.Cog):
                                 # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
                                 # margin. Label each with its real unit so the Butler
                                 # doesn't call 25,078 points "takedowns".
-                                _UNIT = {"Score": "points", "Pacifist": "points",
+                                _UNIT = {"Score": "points", "Top Score": "points",
+                                         "Pacifist": "points",
                                          "100 Kills": "kills", "TUFF": "kill margin"}
                                 standings = []
                                 for weapon, entries in boards.items():
@@ -2291,11 +2302,17 @@ class PersonalityCog(commands.Cog):
                             # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
                             # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
                             try:
-                                _NON_WEAPON = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF"}
+                                # Only real weapon TD boards count as "weapons" here —
+                                # exclude every feat board (Score=points, TUFF=margin,
+                                # etc.), kills boards, map boards, and the pre-rename
+                                # 'Top Score'. Otherwise the Score board's point value
+                                # surfaced as a weapon with 13k+ takedowns.
+                                from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN2, _is_kills_board as _is_kb2
                                 weapon_boards = set()
                                 for _lr in ld_for_pb:
                                     _b = _lr[0].strip() if _lr else ''
-                                    if _b and ' - ' not in _b and _b not in _NON_WEAPON:
+                                    if (_b and ' - ' not in _b and _b not in _FBN2
+                                            and not _is_kb2(_b) and _b != 'Top Score'):
                                         weapon_boards.add(_b)
                                 best_td_by_weapon = {}
                                 for _r in player_subs_pb:
