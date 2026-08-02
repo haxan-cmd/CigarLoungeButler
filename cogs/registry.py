@@ -2099,6 +2099,113 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
+    @app_commands.command(name="versus", description="Your head-to-head history with another player — shared lobbies and typical output.")
+    @app_commands.describe(player="The player to compare yourself against.")
+    async def versus(self, interaction: discord.Interaction, player: discord.Member):
+        await interaction.response.defer()
+        if player.id == interaction.user.id:
+            await interaction.followup.send("You can't face yourself, sir. Pick someone else.", ephemeral=True)
+            return
+        try:
+            from utils.rivalries import head_to_head
+            subs = await _db.get_all_submissions()
+            me_id, foe_id = str(interaction.user.id), str(player.id)
+            h = await asyncio.to_thread(head_to_head, me_id, foe_id, subs)
+            _me = interaction.user.display_name
+            _foe = player.display_name
+            if not h:
+                await interaction.followup.send(
+                    f"You and **{_foe}** have never shared a logged lobby — no history to speak of. Yet.")
+                return
+
+            _mt = f"{h['meetings']} shared lobb{'y' if h['meetings'] == 1 else 'ies'}"
+            _side = []
+            if h['opponents']:
+                _side.append(f"{h['opponents']} as opponents")
+            if h['same_team']:
+                _side.append(f"{h['same_team']} as teammates")
+            _side_str = (" — " + ", ".join(_side)) if _side else ""
+
+            emb = discord.Embed(
+                title=f"⚔️  {_me}  vs  {_foe}",
+                colour=discord.Colour.from_str("#C9A24B"),
+                description=(f"{_mt}{_side_str}."
+                            + (f" Last met {h['last_met']}." if h.get('last_met') else "")))
+            # Comparative averages across the SHARED games (apples-to-apples).
+            emb.add_field(
+                name="Typical output when you meet",
+                value=(f"`{_me[:16]:<16}` {h['a_td']} TD · {h['a_k']} K\n"
+                       f"`{_foe[:16]:<16}` {h['b_td']} TD · {h['b_k']} K"),
+                inline=False)
+            _bigger_td = _me if h['a_td'] > h['b_td'] else (_foe if h['b_td'] > h['a_td'] else None)
+            if _bigger_td:
+                emb.add_field(name="Who shows up bigger",
+                              value=f"**{_bigger_td}** tends to post more takedowns in these lobbies.",
+                              inline=False)
+            if h.get('maps'):
+                _mp = " · ".join(f"{m} ({n})" for m, n in list(h['maps'].items())[:5])
+                emb.add_field(name="Where you cross paths", value=_mp, inline=False)
+            emb.set_footer(text="Shared-lobby history — no win/loss (a scoreboard is a snapshot, not a result).")
+            await interaction.followup.send(embed=emb)
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't build the head-to-head: {e}", ephemeral=True)
+
+    @app_commands.command(name="next", description="Your nearest goal on each track: next rank, mastery, and Hundred-Handed.")
+    @app_commands.describe(player="(Optional) look up someone else's goals instead of your own.")
+    async def next_goal_cmd(self, interaction: discord.Interaction, player: discord.Member = None):
+        await interaction.response.defer()
+        target = player or interaction.user
+        try:
+            from utils.goals import next_goals
+            from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+            _id = str(target.id)
+            _name = target.display_name
+            # Flatten marks per weapon (summed across subclasses) for rank/mastery.
+            _marks = await calculate_weapon_marks_for_player(target.id)
+            flat = {}
+            for k, v in (_marks or {}).items():
+                w = k[0] if isinstance(k, tuple) else k
+                if w and w not in ('Other', 'Multiple Weapons', 'Hybrid'):
+                    flat[w] = flat.get(w, 0) + v
+            # Hundred-Handed gaps (PRIMARY combos only).
+            _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+            _done = await _db.get_hh_done_combos(_id, _name) & _req
+            _missing = _req - _done
+            g = next_goals(
+                flat, _missing,
+                mastery_threshold=config.MASTERY_THRESHOLD,
+                virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
+                rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
+                hh_total=HH_TOTAL)
+
+            _who = "You're" if target.id == interaction.user.id else f"**{_name}** is"
+            if not g['nearest']:
+                await interaction.followup.send(
+                    f"{_who} just getting started — log a few runs and I'll chart a course, sir.")
+                return
+
+            emb = discord.Embed(
+                title=f"🎯  What's next for {_name}",
+                colour=discord.Colour.from_str("#C9A24B"),
+                description=f"**Closest:** {g['nearest']['label']}.")
+            if g['rank_up']:
+                emb.add_field(name="⚔️ Next rank", value=g['rank_up']['label'], inline=False)
+            if g['mastery']:
+                emb.add_field(name="👑 Mastery", value=g['mastery']['label'], inline=False)
+            if g['hundred_handed']:
+                hh = g['hundred_handed']
+                _cw = ", ".join(hh['closest_weapons'][:4])
+                _prog = f" ({hh['done']}/{hh['total']})" if hh.get('total') else ""
+                emb.add_field(
+                    name="🖐️ Hundred-Handed",
+                    value=(f"{hh['label']}{_prog}. Closest subclass: **{hh['closest_subclass']}** "
+                           f"(owe: {_cw})."),
+                    inline=False)
+            emb.set_footer(text="Three tracks, three directions — chase whichever suits your mood.")
+            await interaction.followup.send(embed=emb)
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't chart your goals: {e}", ephemeral=True)
+
     @app_commands.command(name="update_index", description="Rebuild an index thread in a forum (admin only).")
     @app_commands.describe(forum="Which forum to rebuild the index for (omit for all)")
     @app_commands.choices(forum=[

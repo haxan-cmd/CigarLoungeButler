@@ -1,6 +1,6 @@
 """Tests for utils.rivalries — shared-lobby aggregation (meetings + comparative
 averages, no per-game win/loss)."""
-from utils.rivalries import compute_rivalries, rivalry_context, compute_pair_awards
+from utils.rivalries import compute_rivalries, rivalry_context, compute_pair_awards, head_to_head
 
 
 def row(ts, name, did, mp="Falmire", kills=40, td=50, team_total=300, enemy_total=280, feats=""):
@@ -105,6 +105,41 @@ def test_pair_awards_ignore_one_offs():
             row("2026-07-27 12:02:00", "B", "2", team_total=280, enemy_total=300)]
     p = compute_pair_awards(subs, min_meetings=2)
     assert p['bitter_rivals'] is None and p['inseparable'] is None
+
+
+def test_head_to_head_none_when_never_met():
+    subs = [
+        row("2026-07-27 12:00:00", "A", "1", mp="Falmire", team_total=300, enemy_total=280),
+        row("2026-07-27 20:00:00", "B", "2", mp="Rudhelm", team_total=280, enemy_total=300),
+    ]
+    assert head_to_head("1", "2", subs) is None
+    assert head_to_head("1", "1", subs) is None       # same player
+
+
+def test_head_to_head_opponents_and_averages():
+    # A vs B as opponents twice (banners swapped), with A the bigger scorer.
+    subs = []
+    for i, (tt, et, atd, btd) in enumerate([(300, 280, 60, 40), (410, 400, 80, 30)]):
+        ts = f"2026-07-2{i+1} 12:00:00"
+        subs.append(row(ts, "A", "1", td=atd, team_total=tt, enemy_total=et))
+        subs.append(row(ts, "B", "2", td=btd, team_total=et, enemy_total=tt))  # swapped = foe
+    h = head_to_head("1", "2", subs)
+    assert h['meetings'] == 2
+    assert h['opponents'] == 2 and h['same_team'] == 0
+    assert h['a_td'] == 70.0 and h['b_td'] == 35.0    # (60+80)/2 vs (40+30)/2
+    assert h['a_name'] == "A" and h['b_name'] == "B"
+    assert h['maps'].get("Falmire") == 2
+    assert h['last_met'] == "2026-07-22"
+
+
+def test_head_to_head_same_team_counts_as_ally_side():
+    # C & D on the SAME team (same orientation) once.
+    subs = [
+        row("2026-07-27 12:00:00", "C", "3", team_total=320, enemy_total=300),
+        row("2026-07-27 12:02:00", "D", "4", team_total=320, enemy_total=300),
+    ]
+    h = head_to_head("3", "4", subs)
+    assert h['meetings'] == 1 and h['same_team'] == 1 and h['opponents'] == 0
 
 
 def test_context_uses_averages_not_winloss():

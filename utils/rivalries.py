@@ -137,6 +137,64 @@ def compute_rivalries(target_key, all_subs, window_min=45):
     }
 
 
+def head_to_head(a_key, b_key, all_subs, window_min=45):
+    """Pairwise shared-lobby record between two specific players. Same philosophy as
+    compute_rivalries: NO per-game win/loss (a scoreboard is a snapshot). Returns
+    None if they've never shared a lobby, else:
+      {
+        'meetings': int, 'same_team': int, 'opponents': int,   # opponents = confirmed foes
+        'a_name': str, 'b_name': str,
+        'a_td', 'a_k', 'b_td', 'b_k': float,   # each player's AVERAGE across shared games
+        'maps': {map_name: n, ...},            # where they cross paths, most-frequent first
+        'last_met': 'YYYY-MM-DD' | None,
+      }
+    'same_team' + 'opponents' won't always sum to meetings — a game whose banner
+    totals can't confirm the side is counted as a meeting but neither."""
+    if a_key == b_key:
+        return None
+    subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
+    a_runs = [r for r in subs if ident(r)[0] == a_key]
+    b_runs = [r for r in subs if ident(r)[0] == b_key]
+    if not a_runs or not b_runs:
+        return None
+    meetings = same = opp = 0
+    a_td = a_k = b_td = b_k = 0
+    a_name = b_name = ''
+    maps = defaultdict(int)
+    last_met = None
+    for ar in a_runs:
+        a_name = ident(ar)[1] or a_name
+        for br in b_runs:
+            b_name = ident(br)[1] or b_name
+            if not _same_lobby(ar, br, window_min):
+                continue
+            meetings += 1
+            a_td += _i(ar[7]) or 0; a_k += _i(ar[8]) or 0
+            b_td += _i(br[7]) or 0; b_k += _i(br[8]) or 0
+            st = _same_team(ar, br)
+            if st is True:
+                same += 1
+            elif st is False:
+                opp += 1
+            _m = (ar[5] or '').strip()
+            if _m:
+                maps[_m] += 1
+            _t = _ts(ar[0])
+            if _t and (last_met is None or _t > last_met):
+                last_met = _t
+    if meetings == 0:
+        return None
+    n = meetings
+    return {
+        'meetings': meetings, 'same_team': same, 'opponents': opp,
+        'a_name': a_name, 'b_name': b_name,
+        'a_td': round(a_td / n, 1), 'a_k': round(a_k / n, 1),
+        'b_td': round(b_td / n, 1), 'b_k': round(b_k / n, 1),
+        'maps': dict(sorted(maps.items(), key=lambda kv: -kv[1])),
+        'last_met': last_met.strftime('%Y-%m-%d') if last_met else None,
+    }
+
+
 def rivalry_context(display_name, data, top=3):
     """Compact text block for the Butler's chat context, or '' if there's nothing.
     The Butler narrates from this; it never invents matchups not listed here."""
