@@ -459,7 +459,7 @@ async def add_submission(
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
     if isinstance(timestamp, str):
         try: timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-        except: timestamp = None
+        except Exception: timestamp = None
     async with pool.acquire() as conn:
         row_id = await conn.fetchval("""
             INSERT INTO submissions
@@ -701,7 +701,7 @@ async def upsert_player(discord_id, player_name, forum_thread_id=None,
     pool = _pool_check()
     if isinstance(last_submission, str):
         try: last_submission = datetime.strptime(last_submission, '%Y-%m-%d %H:%M:%S')
-        except: last_submission = None
+        except Exception: last_submission = None
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO players
