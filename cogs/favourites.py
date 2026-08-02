@@ -258,16 +258,12 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     map_placements = {}
     non_weapon_feat_placements = {}
 
-    from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN
-    WEAPON_FEAT_BOARDS = {'Mallet', 'Knife'}   # weapon-specific feats -> still weapon boards
+    from utils.boards import non_weapon_feat_boards
     SKIP_LB = {'100 Kills', '200 Takedowns'}
     # Non-weapon feat boards (Score, TUFF, Pacifist, Triple, Hybrid, Flawless,
-    # Healing Horn/Banner) count toward Grand Marshal (most boards) but NOT Weapons
-    # Master. Derived from the canonical set so a NEW feat board never silently lands
-    # in the weapon bucket and inflates that title — which is exactly what the Score
-    # board was doing (every player has a Score entry -> everyone gained a phantom
-    # "weapon board").
-    NON_WEAPON_FEAT_BOARDS = (set(_FBN) - WEAPON_FEAT_BOARDS - SKIP_LB - {'The Hundred Handed'})
+    # Healing…) count toward Grand Marshal but NOT Weapons Master. Single source in
+    # utils.boards (tested) — a new feat board can't silently inflate the weapon count.
+    NON_WEAPON_FEAT_BOARDS = non_weapon_feat_boards()
 
     lb_groups = {}
     for row in ld:

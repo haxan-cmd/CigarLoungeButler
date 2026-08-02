@@ -1084,12 +1084,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
 # Boards that have their own qualifying rules / are unlimited — handled by
 # /backfill_feat_boards, NOT by the weapon/map rebuild below.
-_FEAT_BOARD_NAMES = {
-    "100 Kills", "200 Takedowns", "Triple", "TUFF",
-    "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
-    "Score",            # highest scoreboard points in a match, one row per player
-    "The Hundred Handed",   # progress board, not score-based — no rebuilds, no kills twin
-}
+# Single source of truth lives in utils.boards (pure + unit-tested). Imported under
+# the existing private name so every `from cogs.leaderboards import _FEAT_BOARD_NAMES`
+# keeps working.
+from utils.boards import FEAT_BOARD_NAMES as _FEAT_BOARD_NAMES
 
 
 def _board_header(lb_name):

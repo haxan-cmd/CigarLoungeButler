@@ -350,11 +350,11 @@ async def _alltime_title_holders(cached_data=None):
     (Grand Marshal/Weapons Master/Campaign Master = board-breadth leaders;
     Apex/Frenzied = highest average on the 100 Kills / 200 Takedowns boards.)"""
     ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
-    from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN
+    from utils.boards import non_weapon_feat_boards
     SKIP_LB = {"100 Kills", "200 Takedowns"}
     # Non-weapon feat boards must not count as weapon boards (Weapons Master).
-    # Derived from the canonical set so new feat boards (e.g. Score) stay out of it.
-    NON_WEAPON_FEAT_BOARDS = (set(_FBN) - {"Mallet", "Knife"} - SKIP_LB - {"The Hundred Handed"})
+    # Single source in utils.boards (tested).
+    NON_WEAPON_FEAT_BOARDS = non_weapon_feat_boards()
     lb_groups = {}
     for row in ld:
         if len(row) < 4:
@@ -2554,13 +2554,12 @@ class RegistryCog(commands.Cog):
 
         # ── Title standings ───────────────────────────────────────────────────────
         ld = await _db.get_all_leaderboard_data()
-        from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN_ts
+        from utils.boards import non_weapon_feat_boards
         SKIP_LB = {"100 Kills", "200 Takedowns"}
         WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
-        # Non-weapon feat boards (Score, TUFF, Pacifist, Triple, Hybrid, Flawless,
-        # Healing…) count toward Grand Marshal but NOT Weapons Master — derived so a
-        # new feat board never inflates the weapon count.
-        NON_WEAPON_FEAT_BOARDS = (set(_FBN_ts) - WEAPON_FEAT_BOARDS - SKIP_LB - {"The Hundred Handed"})
+        # Non-weapon feat boards count toward Grand Marshal but NOT Weapons Master —
+        # single source in utils.boards (tested).
+        NON_WEAPON_FEAT_BOARDS = non_weapon_feat_boards()
 
         lb_groups = {}
         for row in ld:
@@ -2642,11 +2641,10 @@ class RegistryCog(commands.Cog):
         total_weapon_boards = len(holder_weapon) if holder_weapon else 0
         total_map_boards = len(holder_map) if holder_map else 0
         # More accurate: count unique board names
-        from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN_ps
-        # Weapon-board total must exclude the non-weapon feat boards (Score, TUFF,
-        # Pacifist, Triple, Hybrid, Flawless, Healing…) or the Weapons Master
-        # denominator is inflated — Mallet/Knife stay counted (weapon-specific feats).
-        _NON_WEAPON_PS = (set(_FBN_ps) - {"Mallet", "Knife"} - {"The Hundred Handed"})
+        from utils.boards import non_weapon_feat_boards
+        # Weapon-board total must exclude non-weapon feat boards (Score, TUFF, etc.)
+        # or the Weapons Master denominator is inflated. Single source in utils.boards.
+        _NON_WEAPON_PS = non_weapon_feat_boards()
         all_board_names = set(lb_groups.keys()) - {"100 Kills", "200 Takedowns"}
         total_combined_boards = len(all_board_names)
         total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in _NON_WEAPON_PS])
