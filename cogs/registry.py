@@ -2635,9 +2635,14 @@ class RegistryCog(commands.Cog):
         total_weapon_boards = len(holder_weapon) if holder_weapon else 0
         total_map_boards = len(holder_map) if holder_map else 0
         # More accurate: count unique board names
+        from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN_ps
+        # Weapon-board total must exclude the non-weapon feat boards (Score, TUFF,
+        # Pacifist, Triple, Hybrid, Flawless, Healing…) or the Weapons Master
+        # denominator is inflated — Mallet/Knife stay counted (weapon-specific feats).
+        _NON_WEAPON_PS = (set(_FBN_ps) - {"Mallet", "Knife"} - {"The Hundred Handed"})
         all_board_names = set(lb_groups.keys()) - {"100 Kills", "200 Takedowns"}
         total_combined_boards = len(all_board_names)
-        total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in {"Flawless", "Healing Horn", "Healing Banner"}])
+        total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in _NON_WEAPON_PS])
         total_map_boards = len([b for b in all_board_names if " - " in b])
 
         _TITLE_PAD = max(len(l) for l in ["Grand Marshal", "Weapons Master", "Campaign Master", "Apex", "Frenzied"])

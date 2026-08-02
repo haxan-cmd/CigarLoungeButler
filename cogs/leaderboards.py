@@ -2069,7 +2069,10 @@ async def archive_and_reset_boards(guild):
     thread, then clear those boards. Feat boards, marks, ranks and mastery are
     untouched. Boards are only cleared AFTER a successful archive.
     Returns (weapon_boards, map_boards, rows_cleared, thread_url|None)."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF", "Pacifist"}
+    # Use the canonical feat-board set, not a hand-maintained copy — a stale copy
+    # here omitted Score/Hybrid/Mallet/Knife, which would have archived+CLEARED
+    # those (all-time) boards on a season reset.
+    _FEAT = set(_FEAT_BOARD_NAMES)
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
@@ -2703,7 +2706,9 @@ async def seed_alltime_from_current(guild):
     """Merge the CURRENT seasonal board scores into the all-time top-10 WITHOUT
     clearing anything, then render. Safe to run repeatedly \u2014 keeps each
     player's best score. Used to populate/preview all-time before any reset."""
-    _FEAT = {"100 Kills", "200 Takedowns", "Flawless", "Healing Horn", "Healing Banner", "Triple", "TUFF", "Pacifist"}
+    # Canonical feat-board set (a stale copy here omitted Score/Hybrid/Mallet/Knife,
+    # which would wrongly merge into the all-time weapon/map records).
+    _FEAT = set(_FEAT_BOARD_NAMES)
     ld = await _db.get_all_leaderboard_data()
     boards = {}
     for row in ld:
