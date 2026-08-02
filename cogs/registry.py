@@ -350,8 +350,11 @@ async def _alltime_title_holders(cached_data=None):
     (Grand Marshal/Weapons Master/Campaign Master = board-breadth leaders;
     Apex/Frenzied = highest average on the 100 Kills / 200 Takedowns boards.)"""
     ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
+    from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN
     SKIP_LB = {"100 Kills", "200 Takedowns"}
-    NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn", "Healing Banner"}
+    # Non-weapon feat boards must not count as weapon boards (Weapons Master).
+    # Derived from the canonical set so new feat boards (e.g. Score) stay out of it.
+    NON_WEAPON_FEAT_BOARDS = (set(_FBN) - {"Mallet", "Knife"} - SKIP_LB - {"The Hundred Handed"})
     lb_groups = {}
     for row in ld:
         if len(row) < 4:
@@ -2551,9 +2554,13 @@ class RegistryCog(commands.Cog):
 
         # ── Title standings ───────────────────────────────────────────────────────
         ld = await _db.get_all_leaderboard_data()
+        from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN_ts
         SKIP_LB = {"100 Kills", "200 Takedowns"}
         WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
-        NON_WEAPON_FEAT_BOARDS = {"Flawless", "Healing Horn", "Healing Banner"}
+        # Non-weapon feat boards (Score, TUFF, Pacifist, Triple, Hybrid, Flawless,
+        # Healing…) count toward Grand Marshal but NOT Weapons Master — derived so a
+        # new feat board never inflates the weapon count.
+        NON_WEAPON_FEAT_BOARDS = (set(_FBN_ts) - WEAPON_FEAT_BOARDS - SKIP_LB - {"The Hundred Handed"})
 
         lb_groups = {}
         for row in ld:
