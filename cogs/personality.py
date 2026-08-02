@@ -2349,6 +2349,59 @@ class PersonalityCog(commands.Cog):
                             except Exception as _e:
                                 print(f"[BUTLER] ctx standings error: {_e}")
 
+                            # Title strategy — when the player asks about the board TITLES, hand
+                            # over their rank + lead on each and their MAP-board gaps (weapon gaps
+                            # are listed above), so the Butler can advise concretely how to extend.
+                            if any(_k in content_lower for _k in
+                                   ('title', 'grand marshal', 'weapons master', 'campaign master', 'marshal')):
+                                try:
+                                    _tstats = await calculate_butler_stats()
+                                    _ldn = player_name_for_ld
+                                    _title_lines = []
+                                    for _lbl, _key, _minb in (("Grand Marshal", "_combined_placements", 15),
+                                                              ("Weapons Master", "_weapon_placements", 9),
+                                                              ("Campaign Master", "_map_placements", 6)):
+                                        _dct = _tstats.get(_key) or {}
+                                        _ranked = sorted(((p, len(v), sum(v) / len(v))
+                                                          for p, v in _dct.items() if len(v) >= _minb),
+                                                         key=lambda t: (-t[1], t[2]))
+                                        _mi = next((i for i, (p, c, a) in enumerate(_ranked) if p == _ldn), None)
+                                        if _mi is None:
+                                            _cnt = len(_dct.get(_ldn) or [])
+                                            _title_lines.append(f"{_lbl}: not yet qualified ({_cnt}/{_minb} boards needed).")
+                                        elif _mi == 0:
+                                            _gap = (f", leads #2 ({_ranked[1][0]}, {_ranked[1][1]}) by {_ranked[0][1] - _ranked[1][1]} board(s)"
+                                                    if len(_ranked) > 1 else ", uncontested")
+                                            _title_lines.append(f"{_lbl}: #1 HOLDER — {_ranked[0][1]} boards{_gap}.")
+                                        else:
+                                            _ahead = _ranked[_mi - 1]
+                                            _title_lines.append(
+                                                f"{_lbl}: #{_mi + 1} — {_ranked[_mi][1]} boards, "
+                                                f"{_ahead[1] - _ranked[_mi][1]} behind #{_mi} ({_ahead[0]}).")
+                                    if _title_lines:
+                                        player_stats_ctx += (
+                                            "\nAll-time title standings for this player:\n" + "\n".join(_title_lines)
+                                            + "\n[To EXTEND a title, place on MORE of its boards: weapon boards for Weapons "
+                                              "Master, map boards for Campaign Master, either for Grand Marshal. Use the "
+                                              "board-gap lists in this context to advise which specific boards to chase.]")
+                                    # Map-board gaps (Campaign Master), matched by discord_id.
+                                    _map_on, _map_all = set(), set()
+                                    for _r in ld_for_pb:
+                                        _b = _r[0].strip() if _r else ''
+                                        if ' - ' not in _b or _b.split(' - ')[0] not in getattr(config, 'MAP_ATTACK_DEFENSE', {}):
+                                            continue
+                                        _map_all.add(_b)
+                                        _rd = (_r[2] or '').strip() if len(_r) > 2 else ''
+                                        if (_rd and _rd == discord_id_str) or (not _rd and _r[1].strip() == _ldn):
+                                            _map_on.add(_b)
+                                    _map_absent = sorted(_map_all - _map_on)
+                                    if _map_absent:
+                                        player_stats_ctx += (f"\nMap boards this player has NO entry on ({len(_map_absent)}): "
+                                                             + ", ".join(_map_absent)
+                                                             + ". [Authoritative for Campaign Master gaps.]")
+                                except Exception as _tse:
+                                    print(f"[BUTLER] ctx title-strategy error: {_tse}")
+
                             # Per-weapon best takedowns — lets the Butler answer "which weapons do I still
                             # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
                             # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
