@@ -2108,6 +2108,12 @@ class PersonalityCog(commands.Cog):
                             # only exist there, not in submissions.
                             player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
                             ld_for_pb = await _db.get_all_leaderboard_data()
+                            # Only genuine weapon TAKEDOWN boards feed the "best TD game".
+                            # Feat boards aren't takedown-ranked — Score/Pacifist are POINTS
+                            # (10k-25k), TUFF is a kill margin, Kills boards are kills — and
+                            # letting them in made the Score board's huge point value the
+                            # player's "best takedown game". Exclude all of them + map boards.
+                            from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN, _is_kills_board as _is_kb
                             try:
                                 for ld_row in ld_for_pb:
                                     if len(ld_row) < 4:
@@ -2115,7 +2121,7 @@ class PersonalityCog(commands.Cog):
                                     if ld_row[1].strip() != player_name_for_ld:
                                         continue
                                     lb_name = ld_row[0].strip()
-                                    if ' - ' in lb_name or lb_name in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns', '100 Kills'}:
+                                    if ' - ' in lb_name or lb_name in _FBN or _is_kb(lb_name):
                                         continue
                                     try:
                                         ld_td = int(ld_row[3])
