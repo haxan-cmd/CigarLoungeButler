@@ -575,14 +575,26 @@ async def _linkify_reply(text, guild):
         # Board threads (case-insensitive match, original casing kept as label).
         # Paths are "thread/first_message" so the link lands ON the board embed.
         from cogs.leaderboards import _get_lb_records, _board_jump_path, _FEAT_BOARD_NAMES
+        _recs = await _get_lb_records()
         targets = []
-        for r in await _get_lb_records():
+        _map_path = {}   # bare map name -> (jump_path, thread_id)
+        for r in _recs:
             nm = r['Leaderboard Name']
             raw_tid = str(r.get('Thread ID') or '').strip()
             if raw_tid and len(nm) >= 3:
                 # Feat boards render as a native channel chip (<#id>); every other
                 # board keeps a masked link so the sentence's own wording is the label.
                 targets.append((nm, _board_jump_path(r), re.IGNORECASE, nm in _FEAT_BOARD_NAMES, raw_tid))
+            # Map boards are "{Map} - {Faction}" and all factions of a map share ONE
+            # thread. The Butler often writes just the map name (or "Map, Faction"),
+            # so also link the BARE map name to that map's thread.
+            if raw_tid and ' - ' in nm:
+                _base = nm.split(' - ')[0].strip()
+                if _base and _base in getattr(config, 'MAP_ATTACK_DEFENSE', {}) and _base not in _map_path:
+                    _map_path[_base] = (_board_jump_path(r), raw_tid)
+        for _base, (_path, _btid) in _map_path.items():
+            if len(_base) >= 3:
+                targets.append((_base, _path, re.IGNORECASE, False, _btid))
         # Player registry cards (case-sensitive to avoid false hits on short names)
         for p in await _db.get_all_players():
             nm = (p[1] or '').strip()
