@@ -350,7 +350,7 @@ async def _alltime_title_holders(cached_data=None):
     (Grand Marshal/Weapons Master/Campaign Master = board-breadth leaders;
     Apex/Frenzied = highest average on the 100 Kills / 200 Takedowns boards.)"""
     ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
-    from utils.boards import non_weapon_feat_boards
+    from utils.boards import non_weapon_feat_boards, is_kills_board
     SKIP_LB = {"100 Kills", "200 Takedowns"}
     # Non-weapon feat boards must not count as weapon boards (Weapons Master).
     # Single source in utils.boards (tested).
@@ -362,8 +362,8 @@ async def _alltime_title_holders(cached_data=None):
         lb_groups.setdefault(row[0].strip(), []).append(row[1].strip())
     holder_weapon, holder_map, holder_combined = {}, {}, {}
     for lb_name, players_on_board in lb_groups.items():
-        if lb_name in SKIP_LB:
-            continue
+        if lb_name in SKIP_LB or is_kills_board(lb_name):
+            continue   # Kills companion boards don't count as separate weapon boards
         is_map = " - " in lb_name
         is_nwf = lb_name in NON_WEAPON_FEAT_BOARDS
         for p in players_on_board[:10]:
@@ -2659,7 +2659,7 @@ class RegistryCog(commands.Cog):
 
         # ── Title standings ───────────────────────────────────────────────────────
         ld = await _db.get_all_leaderboard_data()
-        from utils.boards import non_weapon_feat_boards
+        from utils.boards import non_weapon_feat_boards, is_kills_board
         SKIP_LB = {"100 Kills", "200 Takedowns"}
         WEAPON_FEAT_BOARDS = {"Mallet", "Knife"}
         # Non-weapon feat boards count toward Grand Marshal but NOT Weapons Master —
@@ -2685,8 +2685,8 @@ class RegistryCog(commands.Cog):
         holder_combined = {}
 
         for lb_name, players_on_board in lb_groups.items():
-            if lb_name in SKIP_LB:
-                continue
+            if lb_name in SKIP_LB or is_kills_board(lb_name):
+                continue   # Kills companion boards don't count as separate weapon boards
             is_map = " - " in lb_name
             is_non_weapon_feat = lb_name in NON_WEAPON_FEAT_BOARDS
             for i, p in enumerate(players_on_board[:10]):
@@ -2746,11 +2746,13 @@ class RegistryCog(commands.Cog):
         total_weapon_boards = len(holder_weapon) if holder_weapon else 0
         total_map_boards = len(holder_map) if holder_map else 0
         # More accurate: count unique board names
-        from utils.boards import non_weapon_feat_boards
+        from utils.boards import non_weapon_feat_boards, is_kills_board
         # Weapon-board total must exclude non-weapon feat boards (Score, TUFF, etc.)
         # or the Weapons Master denominator is inflated. Single source in utils.boards.
         _NON_WEAPON_PS = non_weapon_feat_boards()
-        all_board_names = set(lb_groups.keys()) - {"100 Kills", "200 Takedowns"}
+        # Exclude Kills companion boards from the totals too (one board per weapon).
+        all_board_names = {b for b in lb_groups
+                           if b not in {"100 Kills", "200 Takedowns"} and not is_kills_board(b)}
         total_combined_boards = len(all_board_names)
         total_weapon_boards = len([b for b in all_board_names if " - " not in b and b not in _NON_WEAPON_PS])
         total_map_boards = len([b for b in all_board_names if " - " in b])
