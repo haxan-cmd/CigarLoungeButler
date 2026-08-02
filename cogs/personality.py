@@ -2259,13 +2259,20 @@ class PersonalityCog(commands.Cog):
                                     except ValueError:
                                         continue
                                     boards.setdefault(weapon, []).append((ld_r[1].strip(), score))
+                                # Board values aren't all takedowns: the Score board is
+                                # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
+                                # margin. Label each with its real unit so the Butler
+                                # doesn't call 25,078 points "takedowns".
+                                _UNIT = {"Score": "points", "Pacifist": "points",
+                                         "100 Kills": "kills", "TUFF": "kill margin"}
                                 standings = []
                                 for weapon, entries in boards.items():
                                     entries.sort(key=lambda x: -x[1])
                                     for rank, (pname, score) in enumerate(entries, 1):
                                         if pname == player_name_for_ld:
                                             medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
-                                            standings.append(f"{weapon}: {medal} ({score} TDs, {rank}/{len(entries)})")
+                                            _u = _UNIT.get(weapon, "TDs")
+                                            standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
                                             break
                                 if standings:
                                     player_stats_ctx += f"\nLeaderboard standings: {', '.join(standings)}"
