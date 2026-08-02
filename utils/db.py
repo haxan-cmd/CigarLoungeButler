@@ -89,6 +89,7 @@ _SCHEMA_STATEMENTS = [
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS triple_count INTEGER",
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS card_featured_boards TEXT",
     "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS bonus_completions TEXT DEFAULT '[]'",
+    "ALTER TABLE bounties ADD COLUMN IF NOT EXISTS grace_delete_at TIMESTAMP",
     "CREATE TABLE IF NOT EXISTS hundred_handed ("
     "id SERIAL PRIMARY KEY, discord_id TEXT NOT NULL, player_name TEXT, "
     "subclass TEXT NOT NULL, weapon TEXT NOT NULL, achieved_at TIMESTAMP DEFAULT NOW(), "
@@ -1560,6 +1561,43 @@ async def update_bounty_field(bounty_id: int, field: str, value):
         value = value.strip().upper() in ('TRUE', 'T', '1', 'YES', 'Y')
     async with pool.acquire() as conn:
         await conn.execute(f"UPDATE bounties SET {field}=$1 WHERE id=$2", value, bounty_id)
+
+
+async def set_bounty_grace_delete(bounty_id: int, when):
+    """Persist WHEN an ended bounty's channel/role should be deleted. Survives a
+    restart, unlike an in-handler asyncio.sleep. `when` must be naive UTC."""
+    pool = _pool_check()
+    if isinstance(when, str):
+        try:
+            when = datetime.strptime(when, '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            when = None
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE bounties SET grace_delete_at=$1 WHERE id=$2", when, bounty_id)
+
+
+async def get_bounties_pending_deletion() -> list[dict]:
+    """Ended bounties whose grace period has elapsed and still have a channel/role
+    to clean up. Returns dicts: id, title, channel_id, role_id."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, title, channel_id, role_id FROM bounties "
+            "WHERE active = FALSE AND grace_delete_at IS NOT NULL "
+            "AND grace_delete_at <= (NOW() AT TIME ZONE 'utc') "
+            "AND (channel_id IS NOT NULL OR role_id IS NOT NULL)")
+        return [dict(r) for r in rows]
+
+
+async def clear_bounty_grace(bounty_id: int):
+    """After the channel/role are deleted, clear the pointers so the sweep never
+    retries this bounty. NEVER deletes the bounties row itself (it holds the
+    completions/season history)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE bounties SET grace_delete_at=NULL, channel_id=NULL, role_id=NULL WHERE id=$1",
+            bounty_id)
 
 
 async def add_bounty(title, channel_id, message_id, theme_emoji, weapons,

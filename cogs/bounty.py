@@ -5,7 +5,7 @@ import json
 import asyncio
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta
 
 import config
@@ -627,6 +627,62 @@ class BountyCog(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self._grace_sweep.start()
+
+    def cog_unload(self):
+        self._grace_sweep.cancel()
+
+    @tasks.loop(minutes=30)
+    async def _grace_sweep(self):
+        """Delete the channel/role of any ended bounty whose 24h grace period has
+        elapsed. Replaces an in-handler asyncio.sleep(24h) that a restart would lose,
+        orphaning the channel forever. Persistent + idempotent: clears the pointers
+        only after a clean pass, never touches the bounties row itself."""
+        try:
+            due = await _db.get_bounties_pending_deletion()
+        except Exception as e:
+            print(f"[BOUNTY SWEEP] query error: {e}")
+            return
+        if not due:
+            return
+        guild = self.bot.get_guild(config.GUILD_ID)
+        if not guild:
+            return
+        for b in due:
+            hard_error = False
+            try:
+                _cid = b.get('channel_id')
+                if _cid:
+                    ch = guild.get_channel(int(_cid))
+                    if ch is None:
+                        try:
+                            ch = await guild.fetch_channel(int(_cid))
+                        except discord.NotFound:
+                            ch = None            # already gone -> treat as done
+                        except Exception as _fe:
+                            hard_error = True; print(f"[BOUNTY SWEEP] channel fetch error: {_fe}")
+                    if ch:
+                        await ch.delete(reason=f"Bounty ended: {b['title']}")
+                _rid = b.get('role_id')
+                if _rid:
+                    role = guild.get_role(int(_rid))
+                    if role:
+                        await role.delete(reason=f"Bounty ended: {b['title']}")
+            except discord.NotFound:
+                pass                             # channel/role already gone -> done
+            except Exception as e:
+                hard_error = True
+                print(f"[BOUNTY SWEEP] cleanup error for {b.get('title')}: {e}")
+            if not hard_error:
+                try:
+                    await _db.clear_bounty_grace(b['id'])
+                    print(f"[BOUNTY SWEEP] cleaned up channel/role for {b.get('title')}")
+                except Exception as _ce:
+                    print(f"[BOUNTY SWEEP] clear-grace error: {_ce}")
+
+    @_grace_sweep.before_loop
+    async def _before_grace_sweep(self):
+        await self.bot.wait_until_ready()
 
     @app_commands.command(name="bounty_create", description="Create a new monthly bounty (mod only)")
     @app_commands.describe(
@@ -887,14 +943,15 @@ class BountyCog(commands.Cog):
         except Exception as _ce:
             print(f"[BOUNTY END] card refresh sweep error: {_ce}")
 
-        await asyncio.sleep(86400)
-        channel = guild.get_channel(bounty['channel_id'])
-        if channel:
-            await channel.delete(reason=f"Bounty ended: {bounty['title']}")
-        if bounty['role_id']:
-            role = guild.get_role(bounty['role_id'])
-            if role:
-                await role.delete(reason=f"Bounty ended: {bounty['title']}")
+        # Persist the deletion time instead of sleeping 24h in the handler — a
+        # restart (Railway redeploy, SIGTERM, crash) would have lost the sleep and
+        # orphaned the channel/role forever. The _grace_sweep loop deletes them once
+        # the grace period elapses, and survives restarts.
+        try:
+            _grace_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=24)
+            await _db.set_bounty_grace_delete(bounty['id'], _grace_at)
+        except Exception as _ge:
+            print(f"[BOUNTY END] grace-delete schedule failed: {_ge}")
 
     @app_commands.command(name="bounty_post_progress", description="Post or repost the live TOP HUNTERS board in the bounty channel (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
