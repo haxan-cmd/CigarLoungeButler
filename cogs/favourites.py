@@ -867,11 +867,21 @@ async def finalize_season(guild, season):
         except Exception as e:
             print(f"[HOF] Could not refresh season thread: {e}")
     try:
-        created = await forum.create_thread(name=label, content=f"**{label} — Hall of Fame**", embed=embed)
+        # Framing intro so the whole thread reads as ONE closing recap (crown ->
+        # standings -> superlatives -> rivalries -> what now), not loose embeds.
+        _intro = f"**{label} — Hall of Fame**"
+        try:
+            _st, _, _ = await season_total(season)
+            _champ = _st[0][0] if _st else None
+            if _champ:
+                _intro += f"\n🏆 **{_champ}** takes the season. Standings, superlatives, and the season's rivalries below."
+        except Exception:
+            pass
+        created = await forum.create_thread(name=label, content=_intro, embed=embed)
         await _db.set_season_thread(season["id"], str(created.thread.id))
-        # Auto-post the season's Superlatives once, when the HoF thread is first
-        # created (never on later refreshes, so /force_finalize_season is idempotent),
-        # plus a nudge for players to pull their own /wrapped recap.
+        # Auto-post the season's Superlatives + rivalries once, when the HoF thread
+        # is first created (never on later refreshes, so /force_finalize_season stays
+        # idempotent), then one unified closing that points forward.
         try:
             from utils.wrapped import compute_superlatives
             from utils.rivalries import compute_pair_awards
@@ -882,7 +892,9 @@ async def finalize_season(guild, season):
             _pairs = await asyncio.to_thread(compute_pair_awards, _subs)
             if _awards or _pairs.get('bitter_rivals') or _pairs.get('inseparable'):
                 await created.thread.send(embed=_render_superlatives_embed(label, _awards, _pairs))
-            await created.thread.send(f"*Run `/wrapped` for your own {label} recap.*")
+            await created.thread.send(
+                f"That's **{label}** in the books. Your personal recap: `/wrapped`  ·  "
+                f"your goals from here: `/next`.")
         except Exception as _se:
             print(f"[HOF] superlatives post error: {_se}")
         await _hof_index_refresh(guild)
