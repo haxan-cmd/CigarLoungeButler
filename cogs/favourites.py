@@ -281,10 +281,15 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
             score = 0
         lb_groups.setdefault(lb_name, []).append((player, score))
 
+    _weapon_board_set, _map_board_set = set(), set()   # distinct boards per title universe
     for lb_name, entries in lb_groups.items():
         if lb_name in SKIP_LB:
             continue
         is_map = ' - ' in lb_name
+        if is_map:
+            _map_board_set.add(lb_name)
+        elif lb_name not in NON_WEAPON_FEAT_BOARDS:
+            _weapon_board_set.add(lb_name)
         ranked_entries = sorted(entries, key=lambda t: -t[1])
         for i, (player, _sc) in enumerate(ranked_entries[:10]):
             placement = i + 1
@@ -375,6 +380,9 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
         '_weapon_placements': weapon_placements,
         '_map_placements': map_placements,
         '_combined_placements': combined,
+        '_weapon_board_total': len(_weapon_board_set),
+        '_map_board_total': len(_map_board_set),
+        '_combined_board_total': len(_weapon_board_set) + len(_map_board_set),
         'apex': apex or "N/A",
         'frenzied': frenzied or "N/A",
         'top_total_tally': top_total_tally,
@@ -1136,9 +1144,13 @@ def render_all_time_titles_embed(stats):
     Master rankings (gated at 15/9/6 boards), crown on the current holder of each.
     Ranked by boards placed on; average placement breaks ties (lower is better)."""
     _te = getattr(config, 'TITLE_EMOJIS', {})
+    _totals = {"_combined_placements": stats.get('_combined_board_total', 0),
+               "_weapon_placements":   stats.get('_weapon_board_total', 0),
+               "_map_placements":       stats.get('_map_board_total', 0)}
     embed = discord.Embed(title="All-Time Titles", colour=0xC9A24B)
     for label, key, min_boards in _ATT_TITLES:
         dct = stats.get(key) or {}
+        _total = _totals.get(key, 0)
         ranked = sorted(
             ((p, len(v), sum(v) / len(v)) for p, v in dct.items() if len(v) >= min_boards),
             key=lambda t: (-t[1], t[2]))
@@ -1148,10 +1160,13 @@ def render_all_time_titles_embed(stats):
             _rows = []
             for i, (p, cnt, avg) in enumerate(ranked[:6], 1):
                 crown = " \U0001f451" if i == 1 else ""
-                _rows.append(f"`{i}.` **{p}** \u2014 {cnt} boards \u00b7 avg #{avg:.2f}{crown}")
+                _cntstr = f"{cnt}/{_total}" if _total else f"{cnt}"
+                _rows.append(f"`{i}.` **{p}** \u2014 {_cntstr} boards \u00b7 avg #{avg:.2f}{crown}")
             body = "\n".join(_rows)
-        embed.add_field(name=f"{_te.get(label, '')} {label}  \u00b7  {min_boards}+ boards",
-                        value=body, inline=False)
+        _hdr = f"{_te.get(label, '')} {label}  \u00b7  {min_boards}+ boards"
+        if _total:
+            _hdr += f"  \u00b7  {_total} total"
+        embed.add_field(name=_hdr, value=body, inline=False)
     embed.set_footer(text="Ranked by boards placed on; average placement breaks ties (lower is better). Crown = current holder.")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
