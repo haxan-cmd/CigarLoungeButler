@@ -2341,7 +2341,14 @@ class PersonalityCog(commands.Cog):
                                             _on_weapons.add(weapon)
                                             break
                                 if standings:
-                                    player_stats_ctx += f"\nLeaderboard standings: {', '.join(standings)}"
+                                    # Cap the list — a 77-board player otherwise bloats the
+                                    # prompt to ~8k chars and the model (reasoning 'none') chokes
+                                    # and deflects. Specific-weapon rank questions get their own
+                                    # board injection, so trimming here is safe.
+                                    _shown = standings[:20]
+                                    _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
+                                    player_stats_ctx += (f"\nLeaderboard standings (on {len(standings)} boards, showing top 20): "
+                                                         + ", ".join(_shown) + _more)
                                 else:
                                     player_stats_ctx += "\nLeaderboard standings: none recorded"
                                 # Exact complement for "what boards am I NOT on" — computed by
@@ -2452,12 +2459,14 @@ class PersonalityCog(commands.Cog):
                                             best_td_by_weapon[_b] = max(best_td_by_weapon.get(_b, 0), int(_lr[3]))
                                         except ValueError:
                                             pass
-                                if weapon_boards:
+                                # Only inject this (long) per-weapon list when the question is
+                                # actually about takedown targets — it's noise for board/title
+                                # questions and bloats the prompt.
+                                if weapon_boards and any(_k in content_lower for _k in
+                                                         ('takedown', ' td', 'how many', 'need', 'to get on', 'to place')):
                                     _have = sorted((w for w in weapon_boards if best_td_by_weapon.get(w, 0) > 0),
                                                    key=lambda w: -best_td_by_weapon[w])
-                                    _none = sorted(w for w in weapon_boards if best_td_by_weapon.get(w, 0) == 0)
                                     _have_str = ", ".join(f"{w}: {best_td_by_weapon[w]}" for w in _have) or "none"
-                                    _none_str = ", ".join(_none)
                                     player_stats_ctx += (
                                         "\n\nPer-weapon best takedowns (best single-run TD on each weapon board): "
                                         + _have_str
