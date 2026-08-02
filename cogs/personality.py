@@ -2542,13 +2542,21 @@ class PersonalityCog(commands.Cog):
                             # Per-weapon avg Kill Share / Warlord / Lethality — the same three
                             # ratings the boards and registry cards show. Returns THREE dicts;
                             # unpacking two silently killed this whole block for months.
-                            try:
+                            # Only when the question is about ratings — this block runs a DB
+                            # scan and lists a line PER weapon (~2k chars for a 40-weapon
+                            # player), which ballooned the prompt on unrelated questions.
+                            if any(_k in content_lower for _k in
+                                   ('lethal', 'warlord', 'kill share', 'killshare', 'rating', 'ratio', 'best weapon', 'most lethal')):
+                              try:
                                 from cogs.registry import calculate_weapon_shares_for_player
                                 w_kill, w_warlord, w_leth = await calculate_weapon_shares_for_player(discord_id_str)
                                 all_weapons = set(w_kill) | set(w_warlord) | set(w_leth)
                                 if all_weapons:
+                                    # If a specific weapon is named, lead with it; cap the rest.
+                                    _named = set(extract_weapons_from_message(resolved_message))
+                                    _ordered = sorted(all_weapons, key=lambda w: (w not in _named, w))
                                     share_lines = []
-                                    for w in sorted(all_weapons):
+                                    for w in _ordered[:25]:
                                         parts = []
                                         if w in w_warlord:
                                             parts.append(f"{w_warlord[w]}% Warlord")
@@ -2557,11 +2565,12 @@ class PersonalityCog(commands.Cog):
                                         if w in w_leth:
                                             parts.append(f"{w_leth[w]}% Lethality")
                                         share_lines.append(f"{w}: {', '.join(parts)}")
+                                    _rmore = f" (+{len(all_weapons) - 25} more weapons)" if len(all_weapons) > 25 else ""
                                     player_stats_ctx += (
                                         "\nPer-weapon board ratings (rolling averages, only weapons with 2+ runs; "
                                         "Warlord = takedowns/team kills, Kill Share = kills/team kills, "
-                                        "Lethality = kills/takedowns): " + '; '.join(share_lines))
-                            except Exception as _we:
+                                        "Lethality = kills/takedowns): " + '; '.join(share_lines) + _rmore)
+                              except Exception as _we:
                                 print(f"[BUTLER] weapon shares error: {_we}")
 
                             # Lobbymates — only when the asker mentions the lobby/match/who
