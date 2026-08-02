@@ -206,16 +206,46 @@ async def count_qualifying_runs(weapon_name, min_td=100):
         return None
 
 
-def extract_weapon_from_message(text):
-    """Try to find a known weapon name mentioned in the message."""
-    all_weapons = set()
+def _weapon_universe():
+    """Every real weapon name — primaries plus the full 1H/2H lists, so board
+    lookups work for non-primary weapons too."""
+    u = set()
     for weapons in _SUBCLASS_PRIMARIES.values():
-        all_weapons.update(weapons)
-    text_lower = text.lower()
-    for w in sorted(all_weapons, key=len, reverse=True):  # longest match first
+        u.update(weapons)
+    u.update(getattr(config, 'WEAPONS_1H', []))
+    u.update(getattr(config, 'WEAPONS_2H', []))
+    return u
+
+
+def extract_weapon_from_message(text):
+    """Try to find a known weapon name mentioned in the message (first/longest)."""
+    text_lower = (text or '').lower()
+    for w in sorted(_weapon_universe(), key=len, reverse=True):  # longest match first
         if w.lower() in text_lower:
             return w
     return None
+
+
+def extract_weapons_from_message(text, limit=6):
+    """ALL known weapons named in the message, in mention order, de-overlapped so
+    'Battle Axe' doesn't also yield 'Axe'. Lets the Butler answer a question that
+    names several boards ("who's king of battle axe, messer, and heavy mace")."""
+    t = (text or '').lower()
+    hits = []
+    for w in sorted(_weapon_universe(), key=len, reverse=True):  # longest first
+        wl = w.lower()
+        idx = t.find(wl)
+        if idx != -1:
+            hits.append((idx, w))
+            # blank the matched span so a shorter contained weapon can't re-match
+            t = t[:idx] + (' ' * len(wl)) + t[idx + len(wl):]
+    out = []
+    for _idx, w in sorted(hits, key=lambda x: x[0]):   # mention order
+        if w not in out:
+            out.append(w)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def extract_stats_from_message(text):
@@ -2783,15 +2813,15 @@ class PersonalityCog(commands.Cog):
                                 f"Most breaks (the record of shame): {_tbs}.")
                     except Exception as _cse:
                         print(f"[BUTLER] counting ctx error: {_cse}")
-                mentioned_weapon = extract_weapon_from_message(resolved_message)
-                if mentioned_weapon:
+                # Inject EVERY weapon board named in the message (not just the first),
+                # so "who's king of battle axe, messer, and heavy mace" gets all three.
+                for _mw in extract_weapons_from_message(resolved_message):
                     try:
-                        # Targeted, index-backed fetch of just this board instead of
-                        # scanning every board's entries (same row shape).
-                        ld_ctx = await _db.get_leaderboard_by_board(mentioned_weapon)
+                        # Targeted, index-backed fetch of just this board.
+                        ld_ctx = await _db.get_leaderboard_by_board(_mw)
                         weapon_entries = []
                         for r in ld_ctx:
-                            if len(r) < 4 or r[0].strip() != mentioned_weapon:
+                            if len(r) < 4 or r[0].strip() != _mw:
                                 continue
                             if ' - ' in r[0]:
                                 continue
@@ -2801,12 +2831,13 @@ class PersonalityCog(commands.Cog):
                                 continue
                         weapon_entries.sort(key=lambda x: -x[1])
                         if weapon_entries:
-                            board_lines = []
                             medals = {1: '🥇', 2: '🥈', 3: '🥉'}
-                            for i, (pname, score) in enumerate(weapon_entries[:5], 1):
-                                medal = medals.get(i, f'#{i}')
-                                board_lines.append(f"{medal} {pname}: {score} TDs")
-                            player_stats_ctx += f"\n\n{mentioned_weapon} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
+                            board_lines = [
+                                f"{medals.get(i, f'#{i}')} {pname}: {score} TDs"
+                                for i, (pname, score) in enumerate(weapon_entries[:5], 1)]
+                            player_stats_ctx += f"\n\n{_mw} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
+                        else:
+                            player_stats_ctx += f"\n\n{_mw} leaderboard: no entries recorded yet."
                     except Exception:
                         pass
 
