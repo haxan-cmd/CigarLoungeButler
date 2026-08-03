@@ -2012,8 +2012,8 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     return _embs
 
 
-def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None, kills_rows=None):
-    if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows and not kills_rows):
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None):
+    if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
     def _fld(rows, fmt):
@@ -2022,15 +2022,6 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
             out.append(f"`{i}.` `{p}` \u2014 {fmt(sc)}")
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
-    if kills_rows:
-        _kout = []
-        for i, _kr in enumerate(kills_rows[:10], 1):
-            _p, _sc = _kr[0], _kr[1]
-            _lnk = _kr[2] if len(_kr) > 2 else ''
-            _scs = f"[{_sc}]({_lnk})" if _lnk else f"{_sc}"
-            _kout.append(f"│ {i}. `{_p}` \u2014 {_scs}")
-        tail.add_field(name="Kills",
-                       value="\n".join(_kout) if _kout else "*No kills yet.*", inline=False)
     _le = te.get('Lethality', '🧪')
     _we = te.get('Warlord', '🛡️')
     if lethality_rows is not None:
@@ -2065,7 +2056,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
-        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, kills_rows=kills_rows)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
         return [e]
 
     lines = []
@@ -2084,6 +2075,16 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
 
     if is_map and lines:
         lines.insert(0, "**Takedowns**")
+    # Kills list lives in the DESCRIPTION (3800 headroom), NOT an embed field (1024):
+    # 10 hyperlinked rows with full message URLs overflow a field and 400 the embed.
+    if is_map and kills_rows:
+        lines.append("")
+        lines.append("**Kills**")
+        for _i, _kr in enumerate(kills_rows[:10], 1):
+            _kp, _ksc = _kr[0], _kr[1]
+            _klnk = _kr[2] if len(_kr) > 2 else ''
+            _kscs = f"[{_ksc}]({_klnk})" if _klnk else f"{_ksc}"
+            lines.append(f"│ {_i}. `{_kp}` \u2014 {_kscs}")
 
     embeds = []
     current_lines = []
@@ -2104,7 +2105,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
-    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, kills_rows=kills_rows)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
     return embeds
 
 
