@@ -2857,6 +2857,18 @@ class PersonalityCog(commands.Cog):
         except Exception as _mre:
             print(f"[BUTLER] map roster ctx error: {_mre}")
 
+        # Playstyle archetype — a neutral, descriptive label from where the player's
+        # marks concentrate (e.g. Knight Main, Generalist, Messer Specialist). Data
+        # questions only; wrapped so a stats hiccup never blocks the reply.
+        if _is_data_q:
+            try:
+                from cogs.registry import get_player_archetype
+                _arch = await get_player_archetype(discord_id_str)
+                if _arch:
+                    player_stats_ctx += f"\nPlaystyle archetype: {_arch}."
+            except Exception as _ae:
+                print(f"[BUTLER] archetype ctx error: {_ae}")
+
         return player_stats_ctx
 
     @commands.Cog.listener()

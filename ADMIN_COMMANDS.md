@@ -43,7 +43,7 @@
 - `/consolidate_hundred_handed` **[Mod]** — Merge duplicate Hundred-Handed identities per player.
 - `/ledger_refresh` **[Mod]** — Rebuild the ledger entrance + all forum indexes. (Indexes also auto-refresh daily and whenever a new board thread is created, so they no longer drift between manual runs.)
 - `/refresh_entrance` **[Mod]** — Refresh just the ledger entrance links.
-- `/setup_forum_tags` **[Admin]** — Add the recommended emoji filter tags (class tags on weapon forums; feat/faction tags elsewhere) to the board forums for native mobile filtering. Preserves any existing tags; needs Manage Channels.
+- `/clear_forum_tags` **[Admin]** — Remove the class/feat filter tags from the board forums (weapon indexes list alphabetically, so class tags were dropped). Needs Manage Channels.
 - `/alltime_refresh` **[Admin]** — Refresh the all-time archive (legacy).
 
 ## Registry Cards

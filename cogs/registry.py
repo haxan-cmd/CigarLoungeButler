@@ -18,6 +18,7 @@ from config import (
 import utils.db as _db
 import utils.tilt as _tiltmod
 from utils.helpers import format_weapon_marks, nerve_log_error
+from utils.archetype import derive_archetype
 
 
 async def _player_name_ac(interaction: discord.Interaction, current: str):
@@ -276,6 +277,25 @@ async def calculate_registry_stats(discord_id, cached_data=None):
         }
 
     return class_stats, weapon_marks
+
+
+def archetype_label(class_stats, weapon_marks):
+    """Descriptive playstyle label (e.g. 'Knight Main', 'Generalist', 'Messer
+    Specialist') from a player's marks distribution. Pure — takes the already
+    computed registry stats, so the card path adds no extra I/O. Returns None
+    when there aren't enough marks to characterise."""
+    class_marks = {c: (d or {}).get('class_marks', 0) for c, d in (class_stats or {}).items()}
+    return derive_archetype(class_marks, weapon_marks)
+
+
+async def get_player_archetype(discord_id, cached_data=None):
+    """Async convenience wrapper for callers that only have a discord_id (the
+    Butler). Computes registry stats then the label; None on any failure."""
+    try:
+        class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
+        return archetype_label(class_stats, weapon_marks)
+    except Exception:
+        return None
 
 async def get_player_bounties_completed(discord_id):
     """Count distinct bounties completed by player."""
@@ -1103,6 +1123,9 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     # --- Message 1: Header card ---
     lines = []
     lines.append(f"*{player_title}*")
+    _arch = archetype_label(class_stats, weapon_marks)
+    if _arch:
+        lines.append(f"*{_arch}*")
     lines.append("")
     lines.append("**Titles:**")
     for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):

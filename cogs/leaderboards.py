@@ -388,39 +388,29 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         is_map_index    = index_label in ("Map Records",)
 
         if is_weapon_index:
-            CLASS_GROUPS = [
-                ("⚔️ Knight",   ["Officer", "Guardian", "Crusader"]),
-                ("🗡️ Vanguard", ["Devastator", "Raider", "Ambusher"]),
-                ("🛡️ Footman",  ["Poleman", "Man-at-Arms", "Field Engineer"]),
-                ("🏹 Archer",   ["Longbowman", "Crossbowman", "Skirmisher"]),
-            ]
-            archer_weapons = set()
-            for ws in _cfg.MARKSMAN_SUBCLASSES.values():
-                archer_weapons.update(ws)
-
+            # Alphabetical, matching the map + feat indexes. Weapons are deliberately
+            # NOT grouped by class: many are shared across classes (e.g. Executioner's
+            # Axe = Knight + Vanguard), so a single-class bucket was inaccurate and
+            # listing under every class duplicated half the roster. A plain A–Z
+            # directory is unambiguous and consistent with the other indexes.
+            alpha_groups = [("A – M", "A", "M"), ("N – Z", "N", "Z")]
             placed = set()
-            for group_label, subclasses in CLASS_GROUPS:
-                group_weapons = archer_weapons if group_label.startswith("🏹") else set()
-                for sc in subclasses:
-                    group_weapons.update(_cfg.CLASS_WEAPON_MAP.get(sc, []))
-                group_items = [(n, t) for n, t in deduped if n in group_weapons and n not in placed]
-                if not group_items:
-                    continue
-                group_items.sort(key=lambda x: x[0])
-                placed.update(n for n, _ in group_items)
-                # Newline-separated links, one weapon per line
+            for gname, start, end in alpha_groups:
+                grp = [(n, t) for n, t in deduped if n and start <= n[0].upper() <= end]
+                if grp:
+                    val = "\n".join(
+                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        for name, t in grp
+                    )
+                    embed_fields.append((gname, val))
+                    placed.update(n for n, _ in grp)
+            other = [(n, t) for n, t in deduped if n not in placed]
+            if other:
                 val = "\n".join(
                     f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
-                    for name, t in group_items
+                    for name, t in sorted(other, key=lambda x: x[0])
                 )
-                embed_fields.append((group_label, val))
-            remainder = [(n, t) for n, t in deduped if n not in placed]
-            if remainder:
-                val = "\n".join(
-                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
-                    for name, t in sorted(remainder, key=lambda x: x[0])
-                )
-                embed_fields.append(("Other", val))
+                embed_fields.append(("#", val))
 
         elif is_map_index:
             # Alphabetical groups, one map per line
@@ -2824,44 +2814,38 @@ class LeaderboardsCog(commands.Cog):
             except Exception as e:
                 print(f"[INDEX] debounce flush error for {fid}: {e}")
 
-    @app_commands.command(name="setup_forum_tags", description="Add the recommended emoji filter tags to the board forums (admin only).")
+    @app_commands.command(name="clear_forum_tags", description="Remove the class/feat filter tags from the board forums (admin only).")
     @app_commands.checks.has_permissions(administrator=True)
-    async def setup_forum_tags(self, interaction: discord.Interaction):
+    async def clear_forum_tags(self, interaction: discord.Interaction):
+        # The board indexes list weapons alphabetically (weapons are shared across
+        # classes, so class tags were inaccurate). This strips the now-orphaned tags.
         await interaction.response.defer(ephemeral=True)
-        tagsets = {
-            WEAPON_FORUM_1H:      [("Knight", "\u2694\ufe0f"), ("Vanguard", "\U0001F5E1\ufe0f"), ("Footman", "\U0001F6E1\ufe0f"), ("Archer", "\U0001F3F9")],
-            WEAPON_FORUM_2H:      [("Knight", "\u2694\ufe0f"), ("Vanguard", "\U0001F5E1\ufe0f"), ("Footman", "\U0001F6E1\ufe0f"), ("Archer", "\U0001F3F9")],
-            MAP_RECORDS_FORUM_ID: [("Agatha", "\U0001F985"), ("Mason", "\U0001F417")],
-            FEATS_FORUM_ID:       [("100 Kills", "\U0001F4AF"), ("200 TD", "\U0001F5E1\ufe0f"), ("Triple", "\U0001F3AF"), ("Flawless", "\u2728"), ("TUFF", "\U0001F525"), ("Score", "\U0001F3C6"), ("Peasant", "\U0001F33E")],
+        remove_names = {
+            "Knight", "Vanguard", "Footman", "Archer",
+            "Agatha", "Mason",
+            "100 Kills", "200 TD", "Triple", "Flawless", "TUFF", "Score", "Peasant",
         }
         lines = []
-        for fid, tags in tagsets.items():
+        for fid in {WEAPON_FORUM_1H, WEAPON_FORUM_2H, MAP_RECORDS_FORUM_ID, FEATS_FORUM_ID}:
             try:
                 forum = interaction.guild.get_channel(fid) or await interaction.guild.fetch_channel(fid)
             except Exception:
                 forum = None
             if not isinstance(forum, discord.ForumChannel):
-                lines.append(f"- forum {fid}: not found / not a forum, skipped")
                 continue
-            existing = {t.name for t in forum.available_tags}
-            merged = list(forum.available_tags)
-            added = []
-            for name, emoji in tags:
-                if name in existing or len(merged) >= 20:
-                    continue
-                merged.append(discord.ForumTag(name=name, emoji=emoji))
-                added.append(name)
-            if not added:
-                lines.append(f"- {forum.name}: already tagged")
+            keep = [t for t in forum.available_tags if t.name not in remove_names]
+            if len(keep) == len(forum.available_tags):
+                lines.append(f"- {forum.name}: nothing to remove")
                 continue
+            removed = [t.name for t in forum.available_tags if t.name in remove_names]
             try:
-                await forum.edit(available_tags=merged)
-                lines.append(f"- {forum.name}: added {', '.join(added)}")
+                await forum.edit(available_tags=keep)
+                lines.append(f"- {forum.name}: removed {', '.join(removed)}")
             except discord.Forbidden:
                 lines.append(f"- {forum.name}: missing Manage Channels")
             except Exception as e:
                 lines.append(f"- {forum.name}: {e}")
-        await interaction.followup.send("Forum tags:\n" + "\n".join(lines), ephemeral=True)
+        await interaction.followup.send(("Forum tags:\n" + "\n".join(lines)) if lines else "Nothing to do.", ephemeral=True)
 
 
     @app_commands.command(name="season_reset", description="Snapshot this month's Lethality/Warlord boards to the Hall of Fame (admin only). Non-destructive.")
