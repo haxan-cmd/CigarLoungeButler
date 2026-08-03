@@ -1948,11 +1948,12 @@ def _map_kills_ranking(lb_name, all_subs, top=10):
         key = did if did else (f"legacy:{name.lower()}" if name else '')
         if not key:
             continue
+        link = (s[12] or '').strip() if len(s) > 12 else ''
         cur = best.get(key)
         if cur is None or k > cur[0]:
-            best[key] = (k, name)
+            best[key] = (k, name, link)
     rows = sorted(best.values(), key=lambda t: -t[0])[:top]
-    return [(name, k) for k, name in rows]
+    return [(name, k, link) for k, name, link in rows]
 
 
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
@@ -2022,8 +2023,13 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
     if kills_rows:
-        _kout = [f"`{i}.` `{p}` \u2014 {sc}" for i, (p, sc) in enumerate(kills_rows[:10], 1)]
-        tail.add_field(name="\U0001F5E1\ufe0f Kills",
+        _kout = []
+        for i, _kr in enumerate(kills_rows[:10], 1):
+            _p, _sc = _kr[0], _kr[1]
+            _lnk = _kr[2] if len(_kr) > 2 else ''
+            _scs = f"[{_sc}]({_lnk})" if _lnk else f"{_sc}"
+            _kout.append(f"│ {i}. `{_p}` \u2014 {_scs}")
+        tail.add_field(name="Kills",
                        value="\n".join(_kout) if _kout else "*No kills yet.*", inline=False)
     _le = te.get('Lethality', '🧪')
     _we = te.get('Warlord', '🛡️')
@@ -2075,6 +2081,9 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
             lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
+
+    if is_map and lines:
+        lines.insert(0, "**Takedowns**")
 
     embeds = []
     current_lines = []

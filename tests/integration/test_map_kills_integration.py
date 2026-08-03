@@ -45,11 +45,12 @@ def test_inline_map_kills_ranking(make_sub):
     # The Kills section rendered inside the map embed: best kills per player on
     # that map/faction, VIP included, unlisted excluded, other factions ignored.
     subs = [
-        make_sub(did="1", name="Alice", kills=90, map_=_MAP, faction="Agatha"),
-        make_sub(did="1", name="Alice", kills=70, map_=_MAP, faction="Agatha"),   # lower, dropped
-        make_sub(did="2", name="Bob", kills=110, map_=_MAP, faction="Agatha", vip="Yes"),  # VIP counts
-        make_sub(did="3", name="Cara", kills=200, map_=_MAP, faction="Mason"),    # other faction
-        make_sub(did="4", name="Dan", kills=95, map_=_MAP, faction="Agatha", feats="Unlisted"),  # excluded
+        make_sub(did="1", name="Alice", kills=90, map_=_MAP, faction="Agatha", link="a90"),
+        make_sub(did="1", name="Alice", kills=70, map_=_MAP, faction="Agatha", link="a70"),  # lower, dropped
+        make_sub(did="2", name="Bob", kills=110, map_=_MAP, faction="Agatha", vip="Yes", link="b110"),
+        make_sub(did="3", name="Cara", kills=200, map_=_MAP, faction="Mason", link="c"),   # other faction
+        make_sub(did="4", name="Dan", kills=95, map_=_MAP, faction="Agatha", feats="Unlisted", link="d"),
     ]
     ranking = _map_kills_ranking(f"{_MAP} - Agatha", subs)
-    assert ranking == [("Bob", 110), ("Alice", 90)]
+    # (name, best_kills, link-of-that-run) — Alice's link is her 90 run, not the 70.
+    assert ranking == [("Bob", 110, "b110"), ("Alice", 90, "a90")]
