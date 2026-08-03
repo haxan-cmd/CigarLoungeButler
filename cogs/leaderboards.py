@@ -500,13 +500,13 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                     add = ln if not cur else "\n" + ln
                     if len(cur) + len(add) > 1024:
                         if cur:
-                            out.append((fname if first else "\u200b", cur[:1024]))
+                            out.append((fname if first else f"{fname} (cont.)", cur[:1024]))
                             first = False
                         cur = ln[:1024]
                     else:
                         cur += add
                 if cur:
-                    out.append((fname if first else "\u200b", cur[:1024]))
+                    out.append((fname if first else f"{fname} (cont.)", cur[:1024]))
             return out or [("No boards yet", "*Nothing here yet.*")]
 
         if not embed_fields:

@@ -283,9 +283,18 @@ def archetype_label(class_stats, weapon_marks):
     """Descriptive playstyle label (e.g. 'Knight Main', 'Generalist', 'Messer
     Specialist') from a player's marks distribution. Pure — takes the already
     computed registry stats, so the card path adds no extra I/O. Returns None
-    when there aren't enough marks to characterise."""
-    class_marks = {c: (d or {}).get('class_marks', 0) for c, d in (class_stats or {}).items()}
-    return derive_archetype(class_marks, weapon_marks)
+    when there aren't enough marks to characterise.
+
+    Class weight uses RAW weapon marks summed per class, not the class *level*
+    count. Levels only tick when a whole subclass meter fills, so a genuinely
+    active one-weapon player scored 0 levels and got no label; raw marks reflect
+    real activity, so anyone with a handful of marks gets an accurate label."""
+    def _raw_class_marks(cd):
+        return sum(wd.get('marks', 0)
+                   for sd in ((cd or {}).get('subclasses') or {}).values()
+                   for wd in ((sd or {}).get('weapons') or {}).values())
+    class_marks = {c: _raw_class_marks(d) for c, d in (class_stats or {}).items()}
+    return derive_archetype(class_marks, weapon_marks, min_total=5)
 
 
 async def get_player_archetype(discord_id, cached_data=None):
