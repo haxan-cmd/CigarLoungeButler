@@ -2878,6 +2878,17 @@ class PersonalityCog(commands.Cog):
                     player_stats_ctx += (
                         f"\nDamage-type lean: {_dmg} (based on which weapons' marks they've earned "
                         f"— Cut/Chop/Blunt/Ranged). Fair game to reference.")
+                # Most-played maps — colour only, NEVER the archetype itself.
+                _msubs = await _db.get_submissions_by_player(discord_id_str)
+                _mc = {}
+                for _mr in _msubs:
+                    if len(_mr) > 5 and _mr[5].strip():
+                        _mc[_mr[5].strip()] = _mc.get(_mr[5].strip(), 0) + 1
+                if _mc:
+                    _tm = sorted(_mc.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+                    player_stats_ctx += (
+                        "\nMost-played maps: " + ", ".join(f"{m} ({n})" for m, n in _tm) +
+                        " (background colour you may weave in, NOT their archetype).")
             except Exception as _ae:
                 print(f"[BUTLER] archetype ctx error: {_ae}")
 
@@ -3092,6 +3103,20 @@ class PersonalityCog(commands.Cog):
                         pass
                 if result:
                     response_text, needs_eyeball = result
+                    # Deterministic archetype anchor: on a direct "what's my archetype /
+                    # playstyle" question the low-effort model sometimes invents a title
+                    # (e.g. "Galencourt Executioner"). If the reply doesn't already state
+                    # the real label, prepend it so the answer is always correct — the
+                    # Butler's own colour still follows.
+                    if 'archetype' in content_lower or 'playstyle' in content_lower:
+                        try:
+                            from cogs.registry import get_player_descriptors
+                            _ra, _rd = await get_player_descriptors(discord_id_str)
+                            if _ra and _ra.lower() not in response_text.lower():
+                                _lab = _ra + (f", {_rd}" if _rd else "")
+                                response_text = f"You're a **{_lab}**. " + response_text.lstrip()
+                        except Exception:
+                            pass
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     if _is_rules_q:
                         response_text = response_text.rstrip() + f"\n\nIt's all on record in the information centre. <#{config.CHALLENGE_RULES_CHANNEL_ID}>"
