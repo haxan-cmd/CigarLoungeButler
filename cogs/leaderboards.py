@@ -3175,6 +3175,31 @@ class LeaderboardsCog(commands.Cog):
                     done.extend(order)
                     await asyncio.sleep(1.5)   # heavy op -> let buckets recover
                 else:
+                    # Reframe thinks the thread is structurally fine, but it can still
+                    # carry a DUPLICATE nav-button row — a leftover standalone bottom
+                    # decoration from when a kills board's baked frame was added. Enforce
+                    # exactly one nav row here (the case reframe silently skips).
+                    try:
+                        _meid = guild.me.id if guild.me else None
+                        _tracked_ids = set(id_to_board.keys())
+                        _navs = []
+                        async for _nm in thread.history(limit=50):
+                            if (_meid is None or _nm.author.id == _meid) and _nm.components:
+                                _navs.append(_nm)
+                        if len(_navs) > 1:
+                            _tnav = [m for m in _navs if m.id in _tracked_ids]
+                            _to_del = ([m for m in _navs if m.id not in _tracked_ids] if _tnav
+                                       else sorted(_navs, key=lambda m: m.created_at, reverse=True)[1:])
+                            for _dm in _to_del:
+                                try:
+                                    await _dm.delete()
+                                    await asyncio.sleep(0.3)
+                                except Exception:
+                                    pass
+                            if _to_del:
+                                done.append(f"#{tid} nav-dedup ({len(_to_del)})")
+                    except Exception as _nd_err:
+                        print(f"[REFRESH_ALL] nav dedup #{tid}: {_nd_err}")
                     skipped += 1
                     await asyncio.sleep(0.3)   # already correct, just move on
                 continue
