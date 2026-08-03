@@ -3003,8 +3003,12 @@ class LeaderboardsCog(commands.Cog):
             attack_header = _map_header(attack_name)
             defense_header = _map_header(defense_name)
 
-            attack_embeds = format_leaderboard_embeds(attack_name, attack_entries, show_title=False)
-            defense_embeds = format_leaderboard_embeds(defense_name, defense_entries, show_title=False)
+            # Go through _rated_embeds (not format_leaderboard_embeds directly) so a
+            # freshly set-up map carries the same Kills / Kill Share / Warlord sections
+            # as every other render path — otherwise a new map looked bare until a
+            # later /refresh_maps repainted it.
+            attack_embeds = await _rated_embeds(attack_name, attack_entries, True, None, 0, False, "", False)
+            defense_embeds = await _rated_embeds(defense_name, defense_entries, True, None, 0, False, "", False)
 
             await thread.send(file=discord.File(DECORATION_TOP))
             attack_ids = []
@@ -3164,45 +3168,6 @@ class LeaderboardsCog(commands.Cog):
         except Exception:
             pass
 
-    @app_commands.command(name="refresh_maps", description="Refresh only the MAP boards (Kill Share + Warlord) at once (mod only).")
-    async def refresh_map_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
-            return
-        await interaction.response.send_message("Refreshing map boards...", ephemeral=True)
-        all_lb_rows = await _get_lb_records()
-        guild = interaction.guild
-        done, failed = [], []
-        async with _board_lock():
-            for lb_row in all_lb_rows:
-                lb_name = lb_row.get('Leaderboard Name')
-                thread_id_raw = lb_row.get('Thread ID')
-                msg_id_raw = lb_row.get('Message ID')
-                if not lb_name or not thread_id_raw or not msg_id_raw:
-                    continue
-                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                if not is_map:
-                    continue
-                try:
-                    entries = await get_leaderboard_entries(lb_name)
-                    entries = await _sort_board_entries(lb_name, entries)
-                    embeds = await _rated_embeds(lb_name, entries, True, None, 0, False, "", False)
-                    header_content = _map_header(lb_name)
-                    thread_id = int(thread_id_raw)
-                    message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(msg_id_raw))]
-                    thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
-                    if new_ids != message_ids:
-                        await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
-                    done.append(lb_name)
-                except Exception as e:
-                    nerve_log_error(f"Map board refresh {lb_name}", e)
-                    failed.append(lb_name)
-        summary = f"\u2705 Refreshed {len(done)} map boards (Kill Share + Warlord)."
-        if failed:
-            summary += f"\n\u274c Failed: {', '.join(failed)}"
-        await interaction.edit_original_response(content=summary)
-
     @app_commands.command(name="top", description="Show the top 10 for a weapon or class leaderboard.")
     @app_commands.describe(name="Weapon or leaderboard name e.g. Messer, Halberd")
     @app_commands.autocomplete(name=_rank_name_ac)
@@ -3260,67 +3225,6 @@ class LeaderboardsCog(commands.Cog):
             lines.append(f"{prefix}**{e['player']}** — {e['score']}")
 
         await interaction.followup.send("\n".join(lines))
-
-    @app_commands.command(name="migrate_boards", description="Convert all leaderboard boards from text to embeds (admin only).")
-    async def migrate_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        all_lb_rows = await _get_lb_records()
-        all_ld = await _db.get_all_leaderboard_data()
-        guild = interaction.guild
-        done, skipped, failed = [], [], []
-
-        for lb_row in all_lb_rows:
-            lb_name = lb_row['Leaderboard Name']
-            thread_id_str = lb_row['Thread ID']
-            if not thread_id_str:
-                skipped.append(lb_name)
-                continue
-            try:
-                thread_id = int(thread_id_str)
-                thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            except Exception as e:
-                failed.append(f"{lb_name}: can't fetch thread ({e})")
-                continue
-
-            entries = []
-            for row in all_ld:
-                if row[0] == lb_name:
-                    entries.append({
-                        'player': row[1] if len(row) > 1 else '',
-                        'did': row[2] if len(row) > 2 else '',
-                        'score': int(row[3]) if len(row) > 3 and row[3] else 0,
-                        'link': row[4] if len(row) > 4 else '',
-                        'weapon': row[5] if len(row) > 5 else '',
-                    })
-            entries.sort(key=lambda x: x['score'], reverse=True)
-
-            show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-            score_prefix = "+" if lb_name == "TUFF" else ""
-            is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-            embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-            header_content = _board_header(lb_name)
-
-            old_ids_str = lb_row['Message ID']
-            old_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(old_ids_str))]
-
-            try:
-                new_ids = await _sync_board_messages(thread, embeds, old_ids, msg_content=header_content)
-                await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
-                done.append(lb_name)
-                await asyncio.sleep(0.4)
-            except Exception as e:
-                failed.append(f"{lb_name}: {e}")
-
-        report = f"✅ Migrated {len(done)} boards."
-        if skipped:
-            report += f"\n⚠️ Skipped (no thread): {len(skipped)}"
-        if failed:
-            report += f"\n❌ Failed:\n" + "\n".join(failed[:10])
-        await interaction.edit_original_response(content=report)
 
     @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
     async def create_missing_boards(self, interaction: discord.Interaction):
@@ -3610,37 +3514,6 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content=summary[:1900])
 
-    @app_commands.command(name="reframe_thread", description="Clean-rebuild THIS thread's boards from the template (mod only).")
-    async def reframe_thread_cmd(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        thread = interaction.channel
-        tid = str(getattr(thread, "id", "") or "")
-        recs = [r for r in await _get_lb_records() if str(r.get("Thread ID") or "").strip() == tid]
-        if not recs:
-            await interaction.followup.send("No boards are registered to this thread.", ephemeral=True)
-            return
-        # Derive display order from the current message positions (before wiping).
-        id_to_board = {}
-        for r in recs:
-            for mid in _re.findall(r"\d{17,20}", str(r.get("Message ID") or "")):
-                id_to_board[int(mid)] = r['Leaderboard Name']
-        order = []
-        try:
-            async for m in thread.history(limit=400, oldest_first=True):
-                b = id_to_board.get(m.id)
-                if b and b not in order:
-                    order.append(b)
-        except Exception:
-            pass
-        for r in recs:
-            if r['Leaderboard Name'] not in order:
-                order.append(r['Leaderboard Name'])
-        await _reframe_thread(interaction.guild, thread, order)
-        await interaction.followup.send(f"\u2705 Reframed {len(order)} board(s): {', '.join(order)}", ephemeral=True)
-
     @app_commands.command(name="fix_board_decoration", description="Re-frame a single (non-map) board with fresh top/bottom decoration (mod only).")
     @app_commands.describe(name="Exact leaderboard name, e.g. 'Messer' or 'Glaive'")
     async def fix_board_decoration(self, interaction: discord.Interaction, name: str):
@@ -3813,7 +3686,7 @@ class LeaderboardsCog(commands.Cog):
         await interaction.edit_original_response(
             content=f"\u2705 Removed {n} junk board entr{'y' if n == 1 else 'ies'} (missing map/weapon names).")
 
-    @app_commands.command(name="rebuild_boards", description="Rebuild weapon + map boards from full submission history (mod only).")
+    @app_commands.command(name="rebuild_boards", description="THE rebuild: recompute a board (or all) from full submission history AND repaint it correctly \u2014 maps, weapons, kills sections, ratings (mod only).")
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
     async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):

@@ -24,15 +24,17 @@
 - `/force_finalize_season` **[Mod]** — Post/refresh the current season's Hall of Fame entry.
 
 ## Leaderboards & Boards
-- `/refresh` **[Mod]** — Refresh the board in this thread (or by name).
-- `/refresh_all` **[Mod]** — Refresh every leaderboard at once.
+**Which render command? →** `/rebuild_boards` is THE one: it recomputes a board's entries from full submission history AND repaints it correctly (maps, weapons, kills sections, ratings). Reach for it whenever a board is wrong or a render change needs to land. `/refresh_all` only reframes threads whose *structure* changed — it skips threads that already look right, so it will NOT apply a content-only change (e.g. a new embed section). `/refresh` repaints a single board in place.
+
+- `/refresh` **[Mod]** — Repaint the board in this thread (or by name) from current data.
+- `/refresh_all` **[Mod]** — Reframe every thread whose structure drifted from the template (skips unchanged ones). Not for content-only changes — use `/rebuild_boards` for those.
 - `/refresh_monthly` **[Admin]** — Rebuild all Monthly Report boards + pinned index.
 - `/setup` **[Mod]** — Set up a bot-owned leaderboard in this thread.
 - `/setup_score_board` **[Mod]** — Create the Score board (highest match points, one row/player, top-50) in the feats forum.
-- `/remove_map_kills_boards` **[Mod]** — Remove the old SEPARATE map Kills boards. Map kills now render as a section INSIDE each map embed (top 10 by kills, VIP included), so no separate board is needed. Deletes the stray board embeds/records only — never the map thread. Run `/refresh_all` afterwards to repaint.
+- `/remove_map_kills_boards` **[Mod]** — Remove the old SEPARATE map Kills boards. Map kills now render as a section INSIDE each map embed (top 10 by kills, VIP included), so no separate board is needed. Deletes the stray board embeds/records only — never the map thread. Run `/rebuild_boards` afterwards to repaint the map boards with the inline Kills section.
 - `/backfill_feat_boards` also seeds the Score board from submission history.
 - `/create_missing_boards` **[Admin]** — Create board threads for primary weapons that lack one.
-- `/rebuild_boards` **[Mod]** — Rebuild weapon + map boards from full submission history.
+- `/rebuild_boards` **[Mod]** — THE rebuild. Recompute a board (or all, if no name) from full submission history AND repaint it correctly — maps, weapons, kills sections, ratings. Force-renders, so it applies content changes `/refresh_all` skips. (Retired: `/refresh_maps`, `/migrate_boards`, `/reframe_thread` — all covered by this + `/refresh_all`.)
 - `/cleanup_boards` **[Mod]** — Remove junk board entries with missing map/weapon names.
 - `/add_board_score` **[Mod]** — Manually add/restore a single board entry.
 - `/remove_board_score` **[Mod]** — Remove a player's entry from a board.
