@@ -1148,17 +1148,15 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     # --- Message 1: Header card ---
     lines = []
     lines.append(f"*{player_title}*")
-    # Archetype gets its own emphasised line so it doesn't get lost in the italics:
-    # bold the archetype (the headline), damage-style trails in normal weight.
+    # Archetype is its own labelled section (like Titles) so it reads as the
+    # Archetype system rather than floating loose above the badges.
     _arch = archetype_label(class_stats, weapon_marks)
     _dmg = damage_style_label(weapon_marks)
     if _arch or _dmg:
-        if _arch:
-            _line = f"🎭 **{_arch}**" + (f" · {_dmg}" if _dmg else "")
-        else:
-            _line = f"🎭 **{_dmg}**"
+        _val = f"**{_arch}** · {_dmg}" if (_arch and _dmg) else f"**{_arch or _dmg}**"
         lines.append("")
-        lines.append(_line)
+        lines.append("**🎭 Archetype**")
+        lines.append(_val)
     lines.append("")
     lines.append("**Titles:**")
     for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):
