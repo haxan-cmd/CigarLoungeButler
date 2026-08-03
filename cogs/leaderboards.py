@@ -663,6 +663,28 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
         except Exception as deco_err:
             print(f"Decoration repost failed in #{thread.id}: {deco_err}")
 
+    # Baked-frame threads (a kills board carries its own bottom spacer + nav in the
+    # embed) must NOT also keep a standalone bottom decoration message left over
+    # from before the kills board existed — that leftover is the "double buttons".
+    # Delete any UNTRACKED bot message carrying BOTH a nav row and an attachment
+    # (the old bottom deco); the baked board message is in new_ids, so it's skipped
+    # and exactly one frame remains. After the first pass there's nothing to delete,
+    # so the ongoing cost is a short history scan.
+    if any(_baked_deco(e) for e in embeds):
+        try:
+            _me = thread.guild.me.id if thread.guild and thread.guild.me else None
+            async for _old in thread.history(limit=8):
+                if _old.id in new_ids:
+                    continue
+                if (_me is None or _old.author.id == _me) and _old.components and _old.attachments:
+                    try:
+                        await _old.delete()
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+        except Exception as _bake_err:
+            print(f"[SYNC] baked-frame dedup skipped in #{thread.id}: {_bake_err}")
+
     # If the tracked message_ids list was longer than the number of embeds we
     # actually have (leftover from an older posting scheme that tracked more
     # messages per board than it should have), the leftover IDs were never
