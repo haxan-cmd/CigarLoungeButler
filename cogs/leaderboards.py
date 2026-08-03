@@ -8,7 +8,7 @@ import discord
 import random
 import unicodedata
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 import utils.db as _db
@@ -2732,9 +2732,137 @@ async def seed_alltime_from_current(guild):
     return len(boards)
 
 
+BOARD_INDEX_TARGETS = [
+    (WEAPON_FORUM_1H,      "1H Weapons"),
+    (WEAPON_FORUM_2H,      "2H Weapons"),
+    (MAP_RECORDS_FORUM_ID, "Map Records"),
+    (FEATS_FORUM_ID,       "Feats of War"),
+]
+
+_SUBMIT_LINE = (f"To land on a board, post your scorecard in <#{config.SUBMISSIONS_CHANNEL_ID}> "
+                "and press Submit; the Butler logs the run and updates the board automatically.")
+
+# Short how-to-read / how-to-submit blurb folded into each pinned index post.
+INDEX_BLURBS = {
+    "1H Weapons":   "Every one-handed weapon's board, grouped by class. Each shows the top 10 takedown runs. " + _SUBMIT_LINE,
+    "2H Weapons":   "Every two-handed weapon's board, grouped by class. Each shows the top 10 takedown runs. " + _SUBMIT_LINE,
+    "Map Records":  "Best runs on every map, split by faction. Each board shows the top 10. " + _SUBMIT_LINE,
+    "Feats of War": "The feat boards: 100 Kills, 200 Takedowns, Triple, Flawless, TUFF, Score and more. " + _SUBMIT_LINE,
+}
+
+
+async def rebuild_all_forum_indexes(guild, *, sleep=0.5):
+    """Rebuild the pinned index post for every board forum, folding the how-to
+    blurb into each. Shared by /ledger_refresh, the daily auto-refresh loop, and
+    the on_thread_create hook, so the directory can never silently drift from the
+    live boards. Returns how many indexes were rebuilt."""
+    done = 0
+    for forum_id, label in BOARD_INDEX_TARGETS:
+        try:
+            await update_leaderboard_index(guild, forum_id, label, blurb=INDEX_BLURBS.get(label))
+            done += 1
+            if sleep:
+                await asyncio.sleep(sleep)
+        except Exception as e:
+            print(f"[INDEX] rebuild error for {label}: {e}")
+    return done
+
+
 class LeaderboardsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._index_dirty = set()      # forum ids touched since the last debounce flush
+        self._index_debounce = None    # in-flight debounce task
+        self.auto_index_refresh.start()
+
+    def cog_unload(self):
+        try:
+            self.auto_index_refresh.cancel()
+        except Exception:
+            pass
+
+    @tasks.loop(hours=24)
+    async def auto_index_refresh(self):
+        # Keep every forum directory current without waiting on a manual
+        # /ledger_refresh — the index otherwise drifts the moment a board is added.
+        for guild in list(self.bot.guilds):
+            try:
+                await rebuild_all_forum_indexes(guild)
+            except Exception as e:
+                print(f"[INDEX] auto refresh error: {e}")
+
+    @auto_index_refresh.before_loop
+    async def _before_auto_index(self):
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread):
+        # A new board thread means the directory is now stale. Debounce a per-forum
+        # rebuild so a burst of new boards collapses into a single refresh.
+        try:
+            parent_id = getattr(thread, "parent_id", None)
+            if parent_id not in {fid for fid, _ in BOARD_INDEX_TARGETS}:
+                return
+            if (thread.name or "").startswith("\U0001F4CB"):   # our own index thread
+                return
+            self._index_dirty.add(parent_id)
+            if self._index_debounce and not self._index_debounce.done():
+                return
+            self._index_debounce = asyncio.create_task(self._flush_index_debounce(thread.guild))
+        except Exception as e:
+            print(f"[INDEX] on_thread_create error: {e}")
+
+    async def _flush_index_debounce(self, guild):
+        await asyncio.sleep(30)   # let a burst of new threads settle
+        dirty = list(self._index_dirty)
+        self._index_dirty.clear()
+        label_by_id = {fid: label for fid, label in BOARD_INDEX_TARGETS}
+        for fid in dirty:
+            try:
+                await update_leaderboard_index(guild, fid, label_by_id[fid], blurb=INDEX_BLURBS.get(label_by_id[fid]))
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"[INDEX] debounce flush error for {fid}: {e}")
+
+    @app_commands.command(name="setup_forum_tags", description="Add the recommended emoji filter tags to the board forums (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setup_forum_tags(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        tagsets = {
+            WEAPON_FORUM_1H:      [("Knight", "\u2694\ufe0f"), ("Vanguard", "\U0001F5E1\ufe0f"), ("Footman", "\U0001F6E1\ufe0f"), ("Archer", "\U0001F3F9")],
+            WEAPON_FORUM_2H:      [("Knight", "\u2694\ufe0f"), ("Vanguard", "\U0001F5E1\ufe0f"), ("Footman", "\U0001F6E1\ufe0f"), ("Archer", "\U0001F3F9")],
+            MAP_RECORDS_FORUM_ID: [("Agatha", "\U0001F985"), ("Mason", "\U0001F417")],
+            FEATS_FORUM_ID:       [("100 Kills", "\U0001F4AF"), ("200 TD", "\U0001F5E1\ufe0f"), ("Triple", "\U0001F3AF"), ("Flawless", "\u2728"), ("TUFF", "\U0001F525"), ("Score", "\U0001F3C6"), ("Peasant", "\U0001F33E")],
+        }
+        lines = []
+        for fid, tags in tagsets.items():
+            try:
+                forum = interaction.guild.get_channel(fid) or await interaction.guild.fetch_channel(fid)
+            except Exception:
+                forum = None
+            if not isinstance(forum, discord.ForumChannel):
+                lines.append(f"- forum {fid}: not found / not a forum, skipped")
+                continue
+            existing = {t.name for t in forum.available_tags}
+            merged = list(forum.available_tags)
+            added = []
+            for name, emoji in tags:
+                if name in existing or len(merged) >= 20:
+                    continue
+                merged.append(discord.ForumTag(name=name, emoji=emoji))
+                added.append(name)
+            if not added:
+                lines.append(f"- {forum.name}: already tagged")
+                continue
+            try:
+                await forum.edit(available_tags=merged)
+                lines.append(f"- {forum.name}: added {', '.join(added)}")
+            except discord.Forbidden:
+                lines.append(f"- {forum.name}: missing Manage Channels")
+            except Exception as e:
+                lines.append(f"- {forum.name}: {e}")
+        await interaction.followup.send("Forum tags:\n" + "\n".join(lines), ephemeral=True)
+
 
     @app_commands.command(name="season_reset", description="Snapshot this month's Lethality/Warlord boards to the Hall of Fame (admin only). Non-destructive.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -3249,18 +3377,7 @@ class LeaderboardsCog(commands.Cog):
             await interaction.followup.send(f"❌ Entrance build failed: {e}", ephemeral=True)
             return
 
-        index_targets = [
-            (WEAPON_FORUM_1H,    "1H Weapons"),
-            (WEAPON_FORUM_2H,    "2H Weapons"),
-            (MAP_RECORDS_FORUM_ID, "Map Records"),
-            (FEATS_FORUM_ID,     "Feats of War"),
-        ]
-        for forum_id, label in index_targets:
-            try:
-                await update_leaderboard_index(guild, forum_id, label)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                print(f"ledger_refresh: index error for {label}: {e}")
+        await rebuild_all_forum_indexes(guild)
 
         await interaction.followup.send("✅ Ledger entrance and all indexes rebuilt.", ephemeral=True)
 
