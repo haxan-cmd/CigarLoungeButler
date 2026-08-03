@@ -1915,6 +1915,950 @@ class PersonalityCog(commands.Cog):
             f"record {record}, {total} valid counts, {len(users)} counters.",
             ephemeral=True)
 
+    async def _build_player_stats_ctx(self, message, discord_id_str, player_name, resolved_message, content_lower, _is_data_q):
+        """Assemble the Butler's bounded per-player context string.
+
+        Extracted verbatim from on_message so it is unit-testable against a fake DB.
+        Behaviour-preserving: every cap and gate that keeps the prompt under the
+        model's small budget (standings top-20, per-weapon list caps, data-question
+        gating) lives here. Returns the assembled context string.
+        """
+        player_stats_ctx = ''
+        try:
+            p_rows = await _db.get_all_players()
+            # Current player stats
+            for p_row in p_rows:
+                if p_row and p_row[0].strip() == discord_id_str:
+                    total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
+                    # Truncate the "Weapon: N, ..." list on a comma boundary, not
+                    # a hard char count — a mid-entry cut left dangling fragments
+                    # like "Dagger: ." in the Butler's context.
+                    _tw_raw = p_row[6].strip() if len(p_row) > 6 else ''
+                    if len(_tw_raw) > 120:
+                        _tw_cut = _tw_raw[:120].rsplit(',', 1)[0].rstrip(', ')
+                        top_weapons = _tw_cut or _tw_raw[:120]
+                    else:
+                        top_weapons = _tw_raw
+                    # Find the player's best games from their submission history.
+                    # We track best-by-TD and best-by-kills separately because they
+                    # might be different games — Butler needs weapon+map to answer
+                    # "what's my best game" correctly, not just the raw numbers.
+                    pb_kills = 0
+                    pb_td = 0
+                    best_td_game = None    # full row of their highest-TD submission
+                    best_kills_game = None # full row of their highest-kills submission
+                    try:
+                        # Targeted per-player fetch instead of scanning every submission
+                        player_subs_pb = [
+                            r for r in await _db.get_submissions_by_player(discord_id_str)
+                            if len(r) > 8
+                        ]
+                        for pb_row in player_subs_pb:
+                            try:
+                                row_kills = int(pb_row[8])
+                                row_td = int(pb_row[7])
+                            except ValueError:
+                                continue
+                            if row_td > pb_td:
+                                pb_td = row_td
+                                best_td_game = pb_row
+                            if row_kills > pb_kills:
+                                pb_kills = row_kills
+                                best_kills_game = pb_row
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx personal-bests error: {_e}")
+
+                    # Also check LeaderboardData for legacy entries that predate
+                    # the database — a player's actual best game might
+                    # only exist there, not in submissions.
+                    player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
+                    ld_for_pb = await _db.get_all_leaderboard_data()
+                    # Only genuine weapon TAKEDOWN boards feed the "best TD game".
+                    # Feat boards aren't takedown-ranked — Score/Pacifist are POINTS
+                    # (10k-25k), TUFF is a kill margin, Kills boards are kills — and
+                    # letting them in made the Score board's huge point value the
+                    # player's "best takedown game". Exclude all of them + map boards.
+                    from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN, _is_kills_board as _is_kb
+                    try:
+                        for ld_row in ld_for_pb:
+                            if len(ld_row) < 4:
+                                continue
+                            if ld_row[1].strip() != player_name_for_ld:
+                                continue
+                            lb_name = ld_row[0].strip()
+                            # 'Top Score' is the pre-rename name of the Score board;
+                            # exclude it too until stale rows are cleaned.
+                            if ' - ' in lb_name or lb_name in _FBN or _is_kb(lb_name) or lb_name == 'Top Score':
+                                continue
+                            try:
+                                ld_td = int(ld_row[3])
+                            except ValueError:
+                                continue
+                            if ld_td > pb_td:
+                                pb_td = ld_td
+                                best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?', '?']
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx legacy-bests error: {_e}")
+
+                    def _placement_str(weapon, player_name, ld_rows):
+                        # Find player's rank on this weapon's board and return a label
+                        entries = []
+                        for r in ld_rows:
+                            if len(r) < 4 or r[0].strip() != weapon:
+                                continue
+                            try:
+                                entries.append((r[1].strip(), int(r[3])))
+                            except ValueError:
+                                continue
+                        entries.sort(key=lambda x: -x[1])
+                        for i, (pname, score) in enumerate(entries):
+                            if pname == player_name:
+                                pos = i + 1
+                                medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(pos, f'#{pos}')
+                                return f"{medal} on the {weapon} board ({score} TDs, {len(entries)} entries)"
+                        return None
+
+                    def _game_str(row, player_name='', ld_rows=None):
+                        is_legacy = row[0] == 'legacy'
+                        weapon = row[3].strip() if len(row) > 3 else '?'
+                        tds    = row[7].strip() if len(row) > 7 else '?'
+                        if is_legacy:
+                            lb_ctx = ''
+                            if ld_rows and player_name:
+                                placement = _placement_str(weapon, player_name, ld_rows)
+                                if placement:
+                                    lb_ctx = f', {placement}'
+                            return f"{weapon} — {tds} TDs (legacy entry, no map/deaths data){lb_ctx}"
+                        map_    = row[5].strip() if len(row) > 5 else '?'
+                        kills   = row[8].strip() if len(row) > 8 else '?'
+                        deaths  = row[9].strip() if len(row) > 9 else '?'
+                        lb_ctx = ''
+                        if ld_rows and player_name:
+                            placement = _placement_str(weapon, player_name, ld_rows)
+                            if placement:
+                                lb_ctx = f', {placement}'
+                        return f"{weapon} on {map_} — {tds} TDs / {kills} kills / {deaths} deaths{lb_ctx}"
+
+                    pb_parts = []
+                    if best_td_game is not None:
+                        pb_parts.append(f"Best TD game: {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}")
+                    if best_kills_game is not None and best_kills_game is not best_td_game:
+                        pb_parts.append(f"Best kills game: {_game_str(best_kills_game, player_name_for_ld, ld_for_pb)}")
+                    elif best_kills_game is not None and best_kills_game is best_td_game:
+                        pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
+                    pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
+                    logged_runs = len(player_subs_pb)
+                    # Lead with runs and performance; marks demoted to a
+                    # mention-only footnote — the Butler was crediting
+                    # everything in marks because they headlined this sheet.
+                    player_stats_ctx = (
+                        f"Player stats — Logged runs: {logged_runs}{pb_str}\n"
+                        f"(Career marks: {total_marks}; top weapons by marks: {top_weapons}. "
+                        f"Only bring up marks if the player asks about marks or weapon ranks — "
+                        f"otherwise talk in runs, stats, and season form.)")
+                    # True best single-run lethality (highest kills/TD ratio of ANY run) plus
+                    # the average kill rate, matching the registry card. The Butler used to
+                    # DERIVE "best lethality" from the best-TD game, which is a different, wrong
+                    # number — Ascension's best-TD Heavy Mace game is not their most-lethal run.
+                    try:
+                        _leth_runs = []
+                        _best_leth = None
+                        for _lr in player_subs_pb:
+                            try:
+                                _ltd = int(_lr[7]); _lk = int(_lr[8])
+                            except (ValueError, IndexError):
+                                continue
+                            if _ltd > 0 and _lk >= 0 and not (_lk == 0 and _ltd <= 10):
+                                _ratio = _lk / _ltd * 100
+                                _leth_runs.append(_ratio)
+                                if _best_leth is None or _ratio > _best_leth[0]:
+                                    _best_leth = (_ratio,
+                                                  _lr[3].strip() if len(_lr) > 3 else "?",
+                                                  _lr[5].strip() if len(_lr) > 5 else "?",
+                                                  _ltd, _lk)
+                        if _best_leth:
+                            player_stats_ctx += (
+                                f"\nBest single-run lethality (highest kills/TD ratio of any run, "
+                                f"NOT the best-TD game): {_best_leth[0]:.1f}% on {_best_leth[1]} at "
+                                f"{_best_leth[2]} ({_best_leth[4]} kills / {_best_leth[3]} TD)."
+                            )
+                        if _leth_runs:
+                            player_stats_ctx += (
+                                f"\nAverage kill rate across all {len(_leth_runs)} runs: "
+                                f"{sum(_leth_runs) / len(_leth_runs):.1f}%."
+                            )
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx lethality error: {_e}")
+
+                    # Difficulty profile: hard-lobby valor runs (100-TD runs
+                    # posted while the player's team was outkilled, role-adjusted).
+                    # Genuine credit if they have them; a jab if they only farm.
+                    try:
+                        _dc = {'Uphill': 0, 'Outmatched': 0, 'Brutal': 0}
+                        for _dr in player_subs_pb:
+                            _df = [f.strip() for f in (_dr[11] or '').split(',')] if len(_dr) > 11 else []
+                            for _dk in _dc:
+                                if _dk in _df:
+                                    _dc[_dk] += 1
+                        if _dc['Outmatched'] or _dc['Brutal'] or _dc['Uphill']:
+                            player_stats_ctx += (
+                                f"\n(Background info, do not quote verbatim.) Valor runs, "
+                                f"strong games logged while their side was being outkilled "
+                                f"(genuinely hard, worth crediting): "
+                                f"{_dc['Brutal']} Brutal, {_dc['Outmatched']} Outmatched, "
+                                f"{_dc['Uphill']} Slightly Uphill.")
+                        else:
+                            player_stats_ctx += (
+                                "\n(Background info, do not quote verbatim.) Valor runs: none. "
+                                "Every logged game came in an even or favourable lobby; they have never "
+                                "put up a strong game while their side was losing the kill war. Fair to needle.")
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx difficulty error: {_e}")
+
+                    # Build explicit leaderboard standings for this player.
+                    # Group all LD entries by weapon, sort each board by score,
+                    # find the player's rank. This is the authoritative source —
+                    # Claude should use these standings when answering rank questions.
+                    try:
+                        boards = {}
+                        for ld_r in ld_for_pb:
+                            if len(ld_r) < 4:
+                                continue
+                            weapon = ld_r[0].strip()
+                            if not weapon or ' - ' in weapon:
+                                continue
+                            try:
+                                score = int(ld_r[3])
+                            except ValueError:
+                                continue
+                            boards.setdefault(weapon, []).append(
+                                (ld_r[1].strip(), (ld_r[2] or '').strip() if len(ld_r) > 2 else '', score))
+                        # Board values aren't all takedowns: the Score board is
+                        # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
+                        # margin. Label each with its real unit so the Butler
+                        # doesn't call 25,078 points "takedowns".
+                        _UNIT = {"Score": "points", "Top Score": "points",
+                                 "Pacifist": "points",
+                                 "100 Kills": "kills", "TUFF": "kill margin"}
+                        standings = []
+                        _on_weapons = set()
+                        for weapon, entries in boards.items():
+                            entries.sort(key=lambda x: -x[2])
+                            for rank, (pname, pdid, score) in enumerate(entries, 1):
+                                # Match on EITHER discord_id OR name — an entry may
+                                # carry a stale/other id (matched by name) or a name
+                                # variant (matched by id); requiring id-only, or
+                                # name-only-when-blank, missed a player's own boards.
+                                if (pdid and pdid == discord_id_str) or (pname and pname == player_name_for_ld):
+                                    medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
+                                    _u = _UNIT.get(weapon, "TDs")
+                                    standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
+                                    _on_weapons.add(weapon)
+                                    break
+                        if standings:
+                            # Cap the list — a 77-board player otherwise bloats the
+                            # prompt to ~8k chars and the model (reasoning 'none') chokes
+                            # and deflects. Specific-weapon rank questions get their own
+                            # board injection, so trimming here is safe.
+                            _shown = standings[:20]
+                            _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
+                            player_stats_ctx += (f"\nLeaderboard standings (on {len(standings)} boards, showing top 20): "
+                                                 + ", ".join(_shown) + _more)
+                        else:
+                            player_stats_ctx += "\nLeaderboard standings: none recorded"
+                        # Exact complement for "what boards am I NOT on" — computed by
+                        # discord_id, WEAPON boards only (feat/kills boards excluded).
+                        try:
+                            from utils.boards import is_feat_board as _isfeat, is_kills_board as _iskb
+                            _weapon_boards = {w for w in boards if not _isfeat(w) and not _iskb(w)}
+                            _absent = sorted(_weapon_boards - _on_weapons)
+                            if _absent:
+                                player_stats_ctx += (
+                                    f"\nWeapon boards this player has NO entry on ({len(_absent)}): "
+                                    + ", ".join(_absent)
+                                    + ". [This is the authoritative list for 'which boards am I not on' — use it exactly, do not guess.]")
+                            elif _weapon_boards:
+                                player_stats_ctx += "\nThis player has an entry on EVERY weapon board."
+                        except Exception as _abe:
+                            print(f"[BUTLER] ctx absent-boards error: {_abe}")
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx standings error: {_e}")
+
+                    # Title strategy — when the player asks about the board TITLES, hand
+                    # over their rank + lead on each and their MAP-board gaps (weapon gaps
+                    # are listed above), so the Butler can advise concretely how to extend.
+                    if any(_k in content_lower for _k in
+                           ('title', 'grand marshal', 'weapons master', 'campaign master', 'marshal')):
+                        try:
+                            _tstats = await calculate_butler_stats()
+                            _ldn = player_name_for_ld
+                            _title_lines = []
+                            for _lbl, _key, _minb in (("Grand Marshal", "_combined_placements", 15),
+                                                      ("Weapons Master", "_weapon_placements", 9),
+                                                      ("Campaign Master", "_map_placements", 6)):
+                                _dct = _tstats.get(_key) or {}
+                                _ranked = sorted(((p, len(v), sum(v) / len(v))
+                                                  for p, v in _dct.items() if len(v) >= _minb),
+                                                 key=lambda t: (-t[1], t[2]))
+                                _mi = next((i for i, (p, c, a) in enumerate(_ranked) if p == _ldn), None)
+                                if _mi is None:
+                                    _cnt = len(_dct.get(_ldn) or [])
+                                    _title_lines.append(f"{_lbl}: not yet qualified ({_cnt}/{_minb} boards needed).")
+                                elif _mi == 0:
+                                    _gap = (f", leads #2 ({_ranked[1][0]}, {_ranked[1][1]}) by {_ranked[0][1] - _ranked[1][1]} board(s)"
+                                            if len(_ranked) > 1 else ", uncontested")
+                                    _title_lines.append(f"{_lbl}: #1 HOLDER — {_ranked[0][1]} boards{_gap}.")
+                                else:
+                                    _ahead = _ranked[_mi - 1]
+                                    _title_lines.append(
+                                        f"{_lbl}: #{_mi + 1} — {_ranked[_mi][1]} boards, "
+                                        f"{_ahead[1] - _ranked[_mi][1]} behind #{_mi} ({_ahead[0]}).")
+                            if _title_lines:
+                                player_stats_ctx += (
+                                    "\nAll-time title standings for this player:\n" + "\n".join(_title_lines)
+                                    + "\n[To EXTEND a title, place on MORE of its boards: weapon boards for Weapons "
+                                      "Master, map boards for Campaign Master, either for Grand Marshal. Use the "
+                                      "board-gap lists in this context to advise which specific boards to chase.]")
+                            # Map-board gaps (Campaign Master), matched by discord_id.
+                            _map_on, _map_all = set(), set()
+                            for _r in ld_for_pb:
+                                _b = _r[0].strip() if _r else ''
+                                if ' - ' not in _b or _b.split(' - ')[0] not in getattr(config, 'MAP_ATTACK_DEFENSE', {}):
+                                    continue
+                                _map_all.add(_b)
+                                _rd = (_r[2] or '').strip() if len(_r) > 2 else ''
+                                _rn = _r[1].strip() if len(_r) > 1 else ''
+                                if (_rd and _rd == discord_id_str) or (_rn and _rn == _ldn):
+                                    _map_on.add(_b)
+                            _map_absent = sorted(_map_all - _map_on)
+                            if _map_absent:
+                                player_stats_ctx += (f"\nMap boards this player has NO entry on ({len(_map_absent)}): "
+                                                     + ", ".join(_map_absent)
+                                                     + ". [Authoritative for Campaign Master gaps.]")
+                        except Exception as _tse:
+                            print(f"[BUTLER] ctx title-strategy error: {_tse}")
+
+                    # Per-weapon best takedowns — lets the Butler answer "which weapons do I still
+                    # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
+                    # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
+                    try:
+                        # Only real weapon TD boards count as "weapons" here —
+                        # exclude every feat board (Score=points, TUFF=margin,
+                        # etc.), kills boards, map boards, and the pre-rename
+                        # 'Top Score'. Otherwise the Score board's point value
+                        # surfaced as a weapon with 13k+ takedowns.
+                        from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN2, _is_kills_board as _is_kb2
+                        weapon_boards = set()
+                        for _lr in ld_for_pb:
+                            _b = _lr[0].strip() if _lr else ''
+                            if (_b and ' - ' not in _b and _b not in _FBN2
+                                    and not _is_kb2(_b) and _b != 'Top Score'):
+                                weapon_boards.add(_b)
+                        best_td_by_weapon = {}
+                        for _r in player_subs_pb:
+                            if len(_r) < 8:
+                                continue
+                            _w = _r[3].strip() if len(_r) > 3 else ''
+                            try:
+                                _td = int(_r[7])
+                            except (ValueError, IndexError):
+                                continue
+                            if _w:
+                                best_td_by_weapon[_w] = max(best_td_by_weapon.get(_w, 0), _td)
+                        for _lr in ld_for_pb:
+                            if len(_lr) < 4:
+                                continue
+                            _b = _lr[0].strip()
+                            if _b in weapon_boards and _lr[1].strip() == player_name_for_ld:
+                                try:
+                                    best_td_by_weapon[_b] = max(best_td_by_weapon.get(_b, 0), int(_lr[3]))
+                                except ValueError:
+                                    pass
+                        # Only inject this (long) per-weapon list when the question is
+                        # actually about takedown targets — it's noise for board/title
+                        # questions and bloats the prompt.
+                        if weapon_boards and any(_k in content_lower for _k in
+                                                 ('takedown', ' td', 'how many', 'need', 'to get on', 'to place')):
+                            _have = sorted((w for w in weapon_boards if best_td_by_weapon.get(w, 0) > 0),
+                                           key=lambda w: -best_td_by_weapon[w])
+                            _have_str = ", ".join(f"{w}: {best_td_by_weapon[w]}" for w in _have) or "none"
+                            player_stats_ctx += (
+                                "\n\nPer-weapon best takedowns (best single-run TD on each weapon board): "
+                                + _have_str
+                            )
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx per-weapon bests error: {_e}")
+
+                    # Hundred-Handed — use the SAME source as the registry card:
+                    # PRIMARY weapon/subclass combos for non-archer subclasses (HH_TOTAL,
+                    # i.e. out of 46, not the all-weapons CLASS_WEAPON_MAP count).
+                    try:
+                        from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+                        _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+                        # Source completion from the SAME data as the card (100+ TD runs +
+                        # legacy marks) so the Butler can never disagree with a player's card.
+                        _hh_done = await _db.get_hh_done_combos(discord_id_str, player_name) & _hh_required
+                        _hh_matched = len(_hh_done)
+                        if _hh_required and _hh_required.issubset(_hh_done):
+                            hh_str = f"Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) — a 100-takedown run with every primary weapon on every non-archer subclass."
+                        else:
+                            hh_str = f"Hundred-Handed progress: {_hh_matched}/{HH_TOTAL} (needs a 100-takedown run with each primary weapon on each non-archer subclass)."
+                            # When they ask about Hundred-Handed / what they are missing, hand the
+                            # Butler the EXACT gaps (grouped by subclass, <=9 groups) so it can bullet
+                            # them out instead of deferring to /progress.
+                            if ('hundred' in content_lower or 'handed' in content_lower or 'missing' in content_lower):
+                                _hh_missing = _hh_required - _hh_done
+                                _by_sub = {}
+                                for _sc, _w in sorted(_hh_missing):
+                                    _by_sub.setdefault(_sc, []).append(_w)
+                                _miss_str = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by_sub.items()))
+                                hh_str += (f" Still missing ({len(_hh_missing)}) by subclass: {_miss_str}. "
+                                           "[If the player asks what they are missing, YOU HAVE the exact gaps: list them as a bullet "
+                                           "list grouped by subclass, one bullet per subclass with its missing weapons after it. Do NOT "
+                                           "defer to /progress, and do not truncate the list. IMPORTANT: Hundred-Handed counts ONLY each "
+                                           "subclass PRIMARY weapons, never secondaries. A weapon can be a primary on one subclass and only a "
+                                           "secondary sidearm on others, and secondary use never counts. Cudgel and Short Sword, for instance, "
+                                           "are primaries only on Ambusher, so having swung them as a sidearm elsewhere earns nothing here. If "
+                                           "the player protests they already did a weapon, note dryly that they used it as a secondary or on "
+                                           "another subclass, and the listed subclass still owes the primary run.]")
+                        player_stats_ctx += f"\n{hh_str}"
+                        # Nearest goal across tracks — for the Butler to drop IN
+                        # PASSING when it fits a stats-adjacent reply. Gated on
+                        # data questions (keeps the marks scan off pure banter),
+                        # reusing the HH sets just computed.
+                        if _is_data_q:
+                            try:
+                                from cogs.registry import calculate_weapon_marks_for_player
+                                from utils.goals import next_goals
+                                _gm = await calculate_weapon_marks_for_player(int(discord_id_str))
+                                _flat = {}
+                                for _k, _v in (_gm or {}).items():
+                                    _w = _k[0] if isinstance(_k, tuple) else _k
+                                    if _w and _w not in ('Other', 'Multiple Weapons', 'Hybrid'):
+                                        _flat[_w] = _flat.get(_w, 0) + _v
+                                _goals = next_goals(
+                                    _flat, _hh_required - _hh_done,
+                                    mastery_threshold=config.MASTERY_THRESHOLD,
+                                    virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
+                                    rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
+                                    hh_total=HH_TOTAL)
+                                if _goals.get('nearest'):
+                                    player_stats_ctx += (
+                                        f"\nAsker's nearest goal right now: {_goals['nearest']['label']}. "
+                                        "[Optional colour: you MAY fold this into ONE short clause if it fits "
+                                        "naturally (after a strong game, a stats question, or some trash talk). "
+                                        "Never force it, never lead with it or make it the whole reply, and drop "
+                                        "it if it doesn't fit.]")
+                            except Exception as _ge:
+                                print(f"[BUTLER] ctx next-goal error: {_ge}")
+                    except Exception as _e:
+                        print(f"[BUTLER] ctx hundred-handed error: {_e}")
+
+                    # Per-weapon avg Kill Share / Warlord / Lethality — the same three
+                    # ratings the boards and registry cards show. Returns THREE dicts;
+                    # unpacking two silently killed this whole block for months.
+                    # Only when the question is about ratings — this block runs a DB
+                    # scan and lists a line PER weapon (~2k chars for a 40-weapon
+                    # player), which ballooned the prompt on unrelated questions.
+                    if any(_k in content_lower for _k in
+                           ('lethal', 'warlord', 'kill share', 'killshare', 'rating', 'ratio', 'best weapon', 'most lethal')):
+                      try:
+                        from cogs.registry import calculate_weapon_shares_for_player
+                        w_kill, w_warlord, w_leth = await calculate_weapon_shares_for_player(discord_id_str)
+                        all_weapons = set(w_kill) | set(w_warlord) | set(w_leth)
+                        if all_weapons:
+                            # If a specific weapon is named, lead with it; cap the rest.
+                            _named = set(extract_weapons_from_message(resolved_message))
+                            _ordered = sorted(all_weapons, key=lambda w: (w not in _named, w))
+                            share_lines = []
+                            for w in _ordered[:25]:
+                                parts = []
+                                if w in w_warlord:
+                                    parts.append(f"{w_warlord[w]}% Warlord")
+                                if w in w_kill:
+                                    parts.append(f"{w_kill[w]}% Kill Share")
+                                if w in w_leth:
+                                    parts.append(f"{w_leth[w]}% Lethality")
+                                share_lines.append(f"{w}: {', '.join(parts)}")
+                            _rmore = f" (+{len(all_weapons) - 25} more weapons)" if len(all_weapons) > 25 else ""
+                            player_stats_ctx += (
+                                "\nPer-weapon board ratings (rolling averages, only weapons with 2+ runs; "
+                                "Warlord = takedowns/team kills, Kill Share = kills/team kills, "
+                                "Lethality = kills/takedowns): " + '; '.join(share_lines) + _rmore)
+                      except Exception as _we:
+                        print(f"[BUTLER] weapon shares error: {_we}")
+
+                    # Lobbymates — only when the asker mentions the lobby/match/who
+                    # they played with. Reads their most recent run's lobby and lists
+                    # who else logged it (teammates vs opponents), so the Butler can do
+                    # "you were in NJ's lobby, he outscored you". Skipped otherwise to
+                    # keep the prompt lean.
+                    try:
+                        _lm_q = resolved_message.lower()
+                        if any(w in _lm_q for w in ('lobby', 'same game', 'same match',
+                                                    'played with', 'against', 'teammate',
+                                                    'who was i', 'who else')):
+                            _recent = next((r for r in (player_subs_pb or [])
+                                            if len(r) > 12 and r[12].strip()), None)
+                            if _recent:
+                                _mates = await _db.get_lobbymates(discord_id_str, _recent[12].strip())
+                                if _mates:
+                                    _ml = []
+                                    for _m in _mates[:6]:
+                                        _side = ('teammate' if _m['same_team'] is True
+                                                 else 'opponent' if _m['same_team'] is False
+                                                 else 'same lobby')
+                                        _ml.append(f"{_m['player_name']} ({_side}, "
+                                                   f"{_m['takedowns']} TD / {_m['kills']} K)")
+                                    player_stats_ctx += (
+                                        "\nMost recent logged match lobbymates (players who "
+                                        "submitted the SAME game): " + "; ".join(_ml))
+                                else:
+                                    player_stats_ctx += ("\nNo one else has logged the asker's "
+                                                         "most recent match.")
+                    except Exception as _lme:
+                        print(f"[BUTLER] ctx lobbymate error: {_lme}")
+
+                    # Nemesis / Friend — aggregate head-to-head across ALL of the
+                    # asker's fingerprinted matches (who they clash with / play beside
+                    # most). On-demand only, since it scans submissions.
+                    try:
+                        _rv_q = resolved_message.lower()
+                        if any(w in _rv_q for w in ('rival', 'nemesis', 'enemy', 'arch ',
+                                                    'archenemy', 'friend', ' ally', 'allies', 'closest',
+                                                    'best teammate', 'head to head', 'head-to-head',
+                                                    'who beats me', 'who do i beat', 'who do i lose',
+                                                    'play with', 'played with', 'play against', 'played against')):
+                            from utils.rivalries import compute_rivalries, rivalry_context
+                            _rv = compute_rivalries(discord_id_str, await _db.get_all_submissions())
+                            _rvctx = rivalry_context(player_name, _rv)
+                            if _rvctx:
+                                player_stats_ctx += "\n" + _rvctx
+                    except Exception as _rve:
+                        print(f"[BUTLER] ctx rivalry error: {_rve}")
+
+                    break
+            # Build rich per-player summary for comparisons — data questions
+            # only. For banter these stay empty, so every roster loop below
+            # no-ops and the ~2000-token roster dump never enters the prompt.
+            subs_all = await _db.get_all_submissions() if _is_data_q else []
+            ld_all = await _db.get_all_leaderboard_data() if _is_data_q else []
+
+            # Unique weapons and subclasses per player from submissions
+            player_weapon_diversity = {}  # name -> set of weapons
+            player_subclass_diversity = {}  # name -> set of subclasses
+            player_sub_counts = {}  # name -> submission count
+            player_best_sub = {}   # name -> best submission row by TD
+            player_td_totals = {}  # name -> [td values] for avg
+            player_kill_totals = {}  # name -> [kills values] for avg + lethality
+            name_lookup = {p_row[0].strip(): p_row[1].strip() for p_row in p_rows if len(p_row) > 1}
+            for row in subs_all:
+                if len(row) < 9:
+                    continue
+                pid = row[2].strip()
+                pname = name_lookup.get(pid, '')
+                if not pname:
+                    continue
+                weapon = row[3].strip()
+                subclass = row[4].strip()
+                if pname not in player_weapon_diversity:
+                    player_weapon_diversity[pname] = set()
+                    player_subclass_diversity[pname] = set()
+                    player_sub_counts[pname] = 0
+                    player_td_totals[pname] = []
+                    player_kill_totals[pname] = []
+                player_weapon_diversity[pname].add(weapon)
+                player_subclass_diversity[pname].add(subclass)
+                player_sub_counts[pname] += 1
+                try:
+                    row_td = int(row[7])
+                    row_kills = int(row[8])
+                    player_td_totals[pname].append(row_td)
+                    player_kill_totals[pname].append(row_kills)
+                    current_best = player_best_sub.get(pname)
+                    current_best_td = int(current_best[7]) if current_best and len(current_best) > 7 else 0
+                    if row_td > current_best_td:
+                        player_best_sub[pname] = row
+                except (ValueError, TypeError):
+                    pass
+
+            # Weapons on leaderboards per player
+            player_lb_weapons = {}  # name -> set of weapons with board entries
+            for row in ld_all:
+                if len(row) < 2:
+                    continue
+                pname = row[1].strip()
+                weapon = row[0].strip()
+                if pname not in player_lb_weapons:
+                    player_lb_weapons[pname] = set()
+                player_lb_weapons[pname].add(weapon)
+
+            # Build summary lines
+            all_players_summary = []
+            for p_row in p_rows:
+                if len(p_row) > 1 and p_row[1].strip():
+                    pname = p_row[1].strip()
+                    marks = int(p_row[3]) if len(p_row) > 3 and p_row[3].strip().isdigit() else 0
+                    unique_weapons = len(player_weapon_diversity.get(pname, set()))
+                    unique_subclasses = len(player_subclass_diversity.get(pname, set()))
+                    lb_weapons = len(player_lb_weapons.get(pname, set()))
+                    sub_count = player_sub_counts.get(pname, 0)
+                    all_players_summary.append((pname, marks, sub_count, unique_weapons, unique_subclasses, lb_weapons))
+
+            # Rank the roster by logged runs (activity), not career marks —
+            # legacy mark piles were making inactive players headline the sheet.
+            all_players_summary.sort(key=lambda x: (-x[2], -x[1]))
+            def _lethality_str(pname):
+                tds = player_td_totals.get(pname, [])
+                kills = player_kill_totals.get(pname, [])
+                if len(tds) < 3:
+                    return ''
+                avg_td = sum(tds) / len(tds)
+                avg_k = sum(kills) / len(kills)
+                kill_rate = (avg_k / avg_td * 100) if avg_td > 0 else 0
+                td_per_kill = (avg_td / avg_k) if avg_k > 0 else 0
+                return f", avg {avg_td:.0f} TD/{avg_k:.0f}K per run, {kill_rate:.0f}% kill rate"
+            def _bestgame(pname):
+                bs = player_best_sub.get(pname)
+                if bs and len(bs) > 8:
+                    try:
+                        return f", best {bs[3].strip()} {int(bs[7])}/{int(bs[8])}"
+                    except Exception:
+                        return ""
+                return ""
+            summary_lines = [
+                f"{n}: {s} runs, {lw} on boards{_bestgame(n)}{_lethality_str(n)}, {m} career marks"
+                for n, m, s, uw, us, lw in all_players_summary[:10]
+            ]
+            # Only emit the roster when the underlying scans actually ran (data
+            # questions). For banter subs_all/ld_all are empty, so every player would
+            # read "0 runs, 0 on boards" — the Butler then states that as fact.
+            if summary_lines and _is_data_q:
+                player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
+
+            # Season board — championship standings + category form. This is
+            # what the Butler should lean on when talking performance.
+            try:
+                from cogs.favourites import season_total
+                # Season standings are comparison context — data questions only.
+                _season = await _db.get_current_season() if _is_data_q else None
+                if _season:
+                    _standings, _sstats, _ = await season_total(_season)
+                    _lbl = _season.get('label') or f"Season {_season['id']}"
+                    _top8 = ", ".join(f"{i}. {nm} {pts} GP"
+                                      for i, (nm, pts) in enumerate(_standings[:8], 1))
+                    player_stats_ctx += f"\n\nSeason championship ({_lbl}): {_top8}"
+                    if player_name not in [nm for nm, _ in _standings[:8]]:
+                        _mine = next((f"{player_name} is {i}. with {pts} GP"
+                                      for i, (nm, pts) in enumerate(_standings, 1)
+                                      if nm == player_name), None)
+                        if _mine:
+                            player_stats_ctx += f" … {_mine}"
+
+                    def _lead(key):
+                        v = _sstats.get(key) or []
+                        if not v:
+                            return "—"
+                        it = v[0]
+                        if isinstance(it, str):
+                            return it.split(" -- ")[0].strip()
+                        return f"{it[0]} ({it[1]})"
+                    player_stats_ctx += (
+                        "\nSeason category leaders: "
+                        f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
+                        f"Lethality {_lead('lethality_list')}; "
+                        f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
+                        f"Highest TD {_lead('top_td_list')}")
+                    player_stats_ctx += (
+                        "\n[Titles: the Executioner role goes to the Lethality leader "
+                        "(kills/takedowns); the Warlord role to the Warlord leader "
+                        "(takedowns/team kills). Kill Share (kills/team kills) is a "
+                        "scored season category but carries no role.]")
+            except Exception as _sce:
+                print(f"[BUTLER] season ctx error: {_sce}")
+
+            # Live bounty state. The system prompt explains how bounties WORK
+            # but carried no current data, so the Butler could not name this
+            # month's weapons or tell anyone how they were doing.
+            try:
+                if _is_data_q:
+                    from cogs.bounty import (get_active_bounty,
+                                             get_player_bounty_progress,
+                                             _count_special_runs, _parse_special)
+                    _b = await get_active_bounty()
+                    if _b:
+                        _bw = _b.get('weapons') or {}
+                        def _tot(v):
+                            return v.get('total', 0) if isinstance(v, dict) else v
+                        def _cur(v):
+                            return v.get('current', 0) if isinstance(v, dict) else (v or 0)
+                        player_stats_ctx += (
+                            f"\n\nActive bounty: {_b['title']}. A run counts when it "
+                            f"hits 100+ takedowns. Required per weapon: "
+                            + ", ".join(f"{k} {_tot(v)}" for k, v in _bw.items()))
+                        _spec = _parse_special(_b)
+                        _need = _spec['need'] if _spec else 1
+                        if _b.get('special_challenge'):
+                            player_stats_ctx += (
+                                f"\nSpecial challenge: {_b['special_challenge']} "
+                                f"({_need} qualifying run(s) needed)")
+                        _comps = _b.get('completions') or []
+                        player_stats_ctx += (
+                            "\nCompleted by: " + ", ".join(
+                                f"{i}. {c.get('name')}" for i, c in enumerate(_comps, 1))
+                            if _comps else "\nNobody has completed it yet.")
+                        _pr = await get_player_bounty_progress(
+                            _b['title'], discord_id_str)
+                        _prog = (_pr or {}).get('progress') or {}
+                        _mine_b = ", ".join(
+                            f"{k} {_cur(_prog.get(k, 0))}/{_tot(v)}" for k, v in _bw.items())
+                        _sc = await _count_special_runs(_b, discord_id_str)
+                        player_stats_ctx += (
+                            f"\n{player_name}'s bounty progress: {_mine_b or 'nothing yet'}"
+                            f"; special challenge {min(_sc, _need)}/{_need}")
+            except Exception as _bce:
+                print(f"[BUTLER] bounty ctx error: {_bce}")
+
+            # On-demand: if the message names a registered player who isn't the
+            # asker and isn't already in the top-10 above, surface THEIR stats too --
+            # people constantly ask "how does <X> compare". Capped to keep it lean.
+            try:
+                _shown_top = {n for n, *_ in all_players_summary[:10]}
+                _ml = resolved_message.lower()
+                _extra_players = []
+                for _pn, _pm, _ps, _puw, _pus, _plw in all_players_summary:
+                    if _pn in _shown_top or _pn == player_name or len(_pn) < 3:
+                        continue
+                    if re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
+                        _extra_players.append(
+                            f"{_pn}: {_ps} runs, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}, {_pm} career marks")
+                        if len(_extra_players) >= 3:
+                            break
+                if _extra_players:
+                    player_stats_ctx += "\n\nAsked-about player(s):\n" + "\n".join(_extra_players)
+            except Exception as _ame:
+                print(f"[BUTLER] named-player lookup error: {_ame}")
+
+            # Per-player personal bests from LeaderboardData
+            player_pb_td = {}  # name -> best TD score
+            player_pb_kills = {}  # name -> best kills score
+            for row in ld_all:
+                if len(row) < 4:
+                    continue
+                lb_name = row[0].strip()
+                pname = row[1].strip()
+                try:
+                    score = int(row[3])
+                except ValueError:
+                    continue
+                if lb_name == '100 Kills':
+                    player_pb_kills[pname] = max(player_pb_kills.get(pname, 0), score)
+                elif ' - ' not in lb_name and lb_name not in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns'}:
+                    player_pb_td[pname] = max(player_pb_td.get(pname, 0), score)
+
+            pb_lines = []
+            all_pb_names = set(player_pb_td) | set(player_pb_kills) | set(player_best_sub)
+            for pname in sorted(all_pb_names):
+                td = player_pb_td.get(pname, 0)
+                parts = []
+                best_sub = player_best_sub.get(pname)
+                if best_sub and len(best_sub) > 8:
+                    sub_td = int(best_sub[7]) if best_sub[7].strip().isdigit() else 0
+                    sub_kills = best_sub[8].strip() if best_sub[8].strip().isdigit() else '?'
+                    sub_weapon = best_sub[3].strip() if len(best_sub) > 3 else '?'
+                    # Use whichever TD is higher — submission or LeaderboardData (legacy)
+                    best_td = max(td, sub_td)
+                    if best_td == sub_td and sub_td > 0:
+                        parts.append(f"best game: {sub_weapon} — {sub_td} TDs / {sub_kills} kills")
+                    elif td > sub_td:
+                        parts.append(f"best TD: {td} (legacy entry, weapon not tracked per-game here)")
+                elif td:
+                    parts.append(f"best TD: {td}")
+                kills_pb = player_pb_kills.get(pname, 0)
+                if kills_pb:
+                    parts.append(f"best kills score: {kills_pb}")
+                if parts:
+                    pb_lines.append(f"{pname}: {', '.join(parts)}")
+            # Full per-player personal-bests dump removed to slim the prompt —
+            # each top player's best game is already folded into the roster above.
+
+            # SpecialOps achievements per player
+            try:
+                so_rows = await _db.get_all_special_ops()
+                if so_rows:
+                    so_by_player = {}
+                    for so_row in so_rows:
+                        if len(so_row) > 2:
+                            pname = so_row[1].strip()
+                            achievement = so_row[2].strip()
+                            if pname not in so_by_player:
+                                so_by_player[pname] = []
+                            so_by_player[pname].append(achievement)
+                    if so_by_player:
+                        pass  # special-achievements dump removed to slim the prompt
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        # Try to find a matching submission if player mentioned stats
+        msg_kills, msg_tds = extract_stats_from_message(resolved_message)
+        if msg_kills or msg_tds:
+            sub_ctx = await find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
+            if sub_ctx:
+                player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
+
+        # Add weapon bomb count if message asks about it
+        if any(w in resolved_message.lower() for w in ['how many', 'count', 'most kills', 'highest', 'most takedowns', '100 takedown']):
+            _bw = extract_weapon_from_message(resolved_message)
+            if _bw:
+                bomb_count = await count_qualifying_runs(_bw, 100)
+                if bomb_count is not None:
+                    player_stats_ctx += f"\nServer-wide 100+ TD runs with {_bw}: {bomb_count}"
+
+        # If a weapon is mentioned in any context, surface its leaderboard rankings
+        # so the Butler can answer "who's #1 on Messer" correctly
+        msg_lower = resolved_message.lower()
+        # "How many kills / takedowns submitted today?" -> server-wide daily totals.
+        if 'today' in msg_lower and any(w in msg_lower for w in ('kill', 'takedown', 'total', 'submitted', 'count', 'how many')):
+            try:
+                _cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                _tsubs = await _db.get_all_submissions()
+                _t_td = _t_k = _t_n = 0
+                for _r in _tsubs:
+                    if len(_r) < 9 or not _r[0].strip():
+                        continue
+                    try:
+                        _dt = datetime.strptime(_r[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    except (ValueError, TypeError):
+                        continue
+                    if _dt < _cutoff:
+                        continue
+                    try:
+                        _t_td += int(_r[7]); _t_k += int(_r[8]); _t_n += 1
+                    except (ValueError, TypeError):
+                        pass
+                player_stats_ctx += (f"\nServer totals over the last 24 hours: {_t_n} submissions, "
+                                     f"{_t_td} takedowns, {_t_k} kills.")
+            except Exception as _te:
+                print(f"[BUTLER] today-totals error: {_te}")
+        # Aggregate / meta stats across weapons, maps, subclasses + community totals.
+        if any(_kw in msg_lower for _kw in _AGG_TRIGGERS):
+            try:
+                player_stats_ctx += "\n\n" + _server_aggregates(await _db.get_all_submissions())
+            except Exception as _ae:
+                print(f"[BUTLER] aggregate stats error: {_ae}")
+        # Counting-channel stats, surfaced when someone talks counting
+        if 'count' in msg_lower:
+            try:
+                _cst = await _db.counting_state()
+                if _cst['record'] or _cst['current']:
+                    _tc = await _db.counting_top('counts', 3)
+                    _tb = await _db.counting_top('breaks', 3)
+                    _tcs = ", ".join(f"{n} ({v})" for n, v in _tc) or "nobody yet"
+                    _tbs = ", ".join(f"{n} ({v})" for n, v in _tb) or "nobody yet"
+                    player_stats_ctx += (
+                        f"\n\nCounting channel: current run {_cst['current']}, record {_cst['record']}, "
+                        f"{_cst['total_counts']} lifetime valid counts. Top counters: {_tcs}. "
+                        f"Most breaks (the record of shame): {_tbs}.")
+            except Exception as _cse:
+                print(f"[BUTLER] counting ctx error: {_cse}")
+        # Inject EVERY weapon board named in the message (not just the first),
+        # so "who's king of battle axe, messer, and heavy mace" gets all three.
+        for _mw in extract_weapons_from_message(resolved_message):
+            try:
+                # Targeted, index-backed fetch of just this board.
+                ld_ctx = await _db.get_leaderboard_by_board(_mw)
+                weapon_entries = []
+                for r in ld_ctx:
+                    if len(r) < 4 or r[0].strip() != _mw:
+                        continue
+                    if ' - ' in r[0]:
+                        continue
+                    try:
+                        weapon_entries.append((r[1].strip(), int(r[3])))
+                    except ValueError:
+                        continue
+                weapon_entries.sort(key=lambda x: -x[1])
+                if weapon_entries:
+                    medals = {1: '🥇', 2: '🥈', 3: '🥉'}
+                    board_lines = [
+                        f"{medals.get(i, f'#{i}')} {pname}: {score} TDs"
+                        for i, (pname, score) in enumerate(weapon_entries[:5], 1)]
+                    player_stats_ctx += f"\n\n{_mw} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
+                else:
+                    player_stats_ctx += f"\n\n{_mw} leaderboard: no entries recorded yet."
+            except Exception:
+                pass
+
+        # Robust Hundred-Handed gap injection. The deep per-player block above only
+        # runs when the ASKER matches a players row and is nested 6 levels deep, so
+        # it silently misses (the Butler then says "I don't have the records"). Here,
+        # for any Hundred-Handed question, resolve WHOSE progress is asked about —
+        # the asker (first person) OR a named registered player (e.g. "how many does
+        # Coors have left") — and inject that player's exact gaps + count.
+        try:
+            _cl = content_lower
+            if (('hundred' in _cl or 'handed' in _cl)
+                    and 'HUNDRED-HANDED' not in player_stats_ctx.upper()):
+                _tid, _tname = None, None
+                if any(t in _cl for t in (' i ', "i'm", 'am i', ' my ', ' me ', 'do i', 'what do i')):
+                    _tid, _tname = str(message.author.id), player_name
+                else:
+                    for _pr in await _db.get_all_players():
+                        _pnm = (_pr[1] or '').strip() if len(_pr) > 1 else ''
+                        if _pnm and len(_pnm) >= 3 and re.search(
+                                r"(?<!\w)" + re.escape(_pnm.lower()) + r"(?:'?s)?(?!\w)", _cl):
+                            _tid = (_pr[0] or '').strip() if len(_pr) > 0 else ''
+                            _tname = _pnm
+                            break
+                if _tname:
+                    from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+                    _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+                    _done = await _db.get_hh_done_combos(_tid or '', _tname) & _req
+                    _missing = _req - _done
+                    _who = "You" if _tid == str(message.author.id) else _tname
+                    if _req and _req.issubset(_done):
+                        player_stats_ctx += f"\n\n{_who} Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL})."
+                    elif _missing:
+                        _by = {}
+                        for _sc, _w in sorted(_missing):
+                            _by.setdefault(_sc, []).append(_w)
+                        _ms = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by.items()))
+                        player_stats_ctx += (
+                            f"\n\n{_who} Hundred-Handed: {len(_done)}/{HH_TOTAL} done, {len(_missing)} PRIMARY "
+                            f"combos left, by subclass: {_ms}. "
+                            "[You HAVE the exact count AND the gaps. If asked how many are left, give the number; "
+                            "if they want specifics, bullet the combos grouped by subclass. Do NOT defer to "
+                            "/progress or the archive. Hundred-Handed counts ONLY each subclass's PRIMARY weapons; "
+                            "secondary use never counts, so a weapon can still be owed where it's only a sidearm.]")
+        except Exception as _hhe:
+            print(f"[BUTLER] hh gap error: {_hhe}")
+
+        # Full map roster injection. Asked for a map tier list / ranking, the
+        # Butler otherwise improvises from the few maps named in its prompt and
+        # silently drops the rest. Hand it the complete roster so every map is placed.
+        try:
+            _cl2 = content_lower
+            if ('map' in _cl2 and any(k in _cl2 for k in (
+                    'tier', 'rank', 'ranking', 'best', 'worst', 'favourite',
+                    'favorite', 'list', 'rate', 'rating', 'top map', 'good map',
+                    'bad map'))
+                    and 'FULL MAP ROSTER' not in player_stats_ctx.upper()):
+                _maps = sorted(getattr(config, 'MAPS', []) or [])
+                if _maps:
+                    player_stats_ctx += (
+                        "\n\nFULL MAP ROSTER (every map in the pool, all "
+                        f"{len(_maps)}): " + ", ".join(_maps) +
+                        ". [If asked to rank, tier, or list the maps, place EVERY "
+                        "map on this roster, none skipped. Your existing map opinions "
+                        "stand; slot the rest by your own taste. Use these exact map "
+                        "names.]")
+        except Exception as _mre:
+            print(f"[BUTLER] map roster ctx error: {_mre}")
+
+        return player_stats_ctx
+
     @commands.Cog.listener()
     async def on_message(self, message):
         # Counting channel FIRST — the counting bot's own messages carry the
@@ -2108,940 +3052,10 @@ class PersonalityCog(commands.Cog):
                 _is_data_q = _looks_like_data_question(resolved_message)
 
                 # Pull player stats for context — lets Butler roast braggers with receipts
-                player_stats_ctx = ''
-                try:
-                    p_rows = await _db.get_all_players()
-                    # Current player stats
-                    for p_row in p_rows:
-                        if p_row and p_row[0].strip() == discord_id_str:
-                            total_marks = p_row[3].strip() if len(p_row) > 3 else '0'
-                            # Truncate the "Weapon: N, ..." list on a comma boundary, not
-                            # a hard char count — a mid-entry cut left dangling fragments
-                            # like "Dagger: ." in the Butler's context.
-                            _tw_raw = p_row[6].strip() if len(p_row) > 6 else ''
-                            if len(_tw_raw) > 120:
-                                _tw_cut = _tw_raw[:120].rsplit(',', 1)[0].rstrip(', ')
-                                top_weapons = _tw_cut or _tw_raw[:120]
-                            else:
-                                top_weapons = _tw_raw
-                            # Find the player's best games from their submission history.
-                            # We track best-by-TD and best-by-kills separately because they
-                            # might be different games — Butler needs weapon+map to answer
-                            # "what's my best game" correctly, not just the raw numbers.
-                            pb_kills = 0
-                            pb_td = 0
-                            best_td_game = None    # full row of their highest-TD submission
-                            best_kills_game = None # full row of their highest-kills submission
-                            try:
-                                # Targeted per-player fetch instead of scanning every submission
-                                player_subs_pb = [
-                                    r for r in await _db.get_submissions_by_player(discord_id_str)
-                                    if len(r) > 8
-                                ]
-                                for pb_row in player_subs_pb:
-                                    try:
-                                        row_kills = int(pb_row[8])
-                                        row_td = int(pb_row[7])
-                                    except ValueError:
-                                        continue
-                                    if row_td > pb_td:
-                                        pb_td = row_td
-                                        best_td_game = pb_row
-                                    if row_kills > pb_kills:
-                                        pb_kills = row_kills
-                                        best_kills_game = pb_row
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx personal-bests error: {_e}")
-
-                            # Also check LeaderboardData for legacy entries that predate
-                            # the database — a player's actual best game might
-                            # only exist there, not in submissions.
-                            player_name_for_ld = p_row[1].strip() if len(p_row) > 1 else ''
-                            ld_for_pb = await _db.get_all_leaderboard_data()
-                            # Only genuine weapon TAKEDOWN boards feed the "best TD game".
-                            # Feat boards aren't takedown-ranked — Score/Pacifist are POINTS
-                            # (10k-25k), TUFF is a kill margin, Kills boards are kills — and
-                            # letting them in made the Score board's huge point value the
-                            # player's "best takedown game". Exclude all of them + map boards.
-                            from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN, _is_kills_board as _is_kb
-                            try:
-                                for ld_row in ld_for_pb:
-                                    if len(ld_row) < 4:
-                                        continue
-                                    if ld_row[1].strip() != player_name_for_ld:
-                                        continue
-                                    lb_name = ld_row[0].strip()
-                                    # 'Top Score' is the pre-rename name of the Score board;
-                                    # exclude it too until stale rows are cleaned.
-                                    if ' - ' in lb_name or lb_name in _FBN or _is_kb(lb_name) or lb_name == 'Top Score':
-                                        continue
-                                    try:
-                                        ld_td = int(ld_row[3])
-                                    except ValueError:
-                                        continue
-                                    if ld_td > pb_td:
-                                        pb_td = ld_td
-                                        best_td_game = ['legacy', player_name_for_ld, '', lb_name, '', '', '', str(ld_td), '?', '?']
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx legacy-bests error: {_e}")
-
-                            def _placement_str(weapon, player_name, ld_rows):
-                                # Find player's rank on this weapon's board and return a label
-                                entries = []
-                                for r in ld_rows:
-                                    if len(r) < 4 or r[0].strip() != weapon:
-                                        continue
-                                    try:
-                                        entries.append((r[1].strip(), int(r[3])))
-                                    except ValueError:
-                                        continue
-                                entries.sort(key=lambda x: -x[1])
-                                for i, (pname, score) in enumerate(entries):
-                                    if pname == player_name:
-                                        pos = i + 1
-                                        medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(pos, f'#{pos}')
-                                        return f"{medal} on the {weapon} board ({score} TDs, {len(entries)} entries)"
-                                return None
-
-                            def _game_str(row, player_name='', ld_rows=None):
-                                is_legacy = row[0] == 'legacy'
-                                weapon = row[3].strip() if len(row) > 3 else '?'
-                                tds    = row[7].strip() if len(row) > 7 else '?'
-                                if is_legacy:
-                                    lb_ctx = ''
-                                    if ld_rows and player_name:
-                                        placement = _placement_str(weapon, player_name, ld_rows)
-                                        if placement:
-                                            lb_ctx = f', {placement}'
-                                    return f"{weapon} — {tds} TDs (legacy entry, no map/deaths data){lb_ctx}"
-                                map_    = row[5].strip() if len(row) > 5 else '?'
-                                kills   = row[8].strip() if len(row) > 8 else '?'
-                                deaths  = row[9].strip() if len(row) > 9 else '?'
-                                lb_ctx = ''
-                                if ld_rows and player_name:
-                                    placement = _placement_str(weapon, player_name, ld_rows)
-                                    if placement:
-                                        lb_ctx = f', {placement}'
-                                return f"{weapon} on {map_} — {tds} TDs / {kills} kills / {deaths} deaths{lb_ctx}"
-
-                            pb_parts = []
-                            if best_td_game is not None:
-                                pb_parts.append(f"Best TD game: {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}")
-                            if best_kills_game is not None and best_kills_game is not best_td_game:
-                                pb_parts.append(f"Best kills game: {_game_str(best_kills_game, player_name_for_ld, ld_for_pb)}")
-                            elif best_kills_game is not None and best_kills_game is best_td_game:
-                                pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
-                            pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
-                            logged_runs = len(player_subs_pb)
-                            # Lead with runs and performance; marks demoted to a
-                            # mention-only footnote — the Butler was crediting
-                            # everything in marks because they headlined this sheet.
-                            player_stats_ctx = (
-                                f"Player stats — Logged runs: {logged_runs}{pb_str}\n"
-                                f"(Career marks: {total_marks}; top weapons by marks: {top_weapons}. "
-                                f"Only bring up marks if the player asks about marks or weapon ranks — "
-                                f"otherwise talk in runs, stats, and season form.)")
-                            # True best single-run lethality (highest kills/TD ratio of ANY run) plus
-                            # the average kill rate, matching the registry card. The Butler used to
-                            # DERIVE "best lethality" from the best-TD game, which is a different, wrong
-                            # number — Ascension's best-TD Heavy Mace game is not their most-lethal run.
-                            try:
-                                _leth_runs = []
-                                _best_leth = None
-                                for _lr in player_subs_pb:
-                                    try:
-                                        _ltd = int(_lr[7]); _lk = int(_lr[8])
-                                    except (ValueError, IndexError):
-                                        continue
-                                    if _ltd > 0 and _lk >= 0 and not (_lk == 0 and _ltd <= 10):
-                                        _ratio = _lk / _ltd * 100
-                                        _leth_runs.append(_ratio)
-                                        if _best_leth is None or _ratio > _best_leth[0]:
-                                            _best_leth = (_ratio,
-                                                          _lr[3].strip() if len(_lr) > 3 else "?",
-                                                          _lr[5].strip() if len(_lr) > 5 else "?",
-                                                          _ltd, _lk)
-                                if _best_leth:
-                                    player_stats_ctx += (
-                                        f"\nBest single-run lethality (highest kills/TD ratio of any run, "
-                                        f"NOT the best-TD game): {_best_leth[0]:.1f}% on {_best_leth[1]} at "
-                                        f"{_best_leth[2]} ({_best_leth[4]} kills / {_best_leth[3]} TD)."
-                                    )
-                                if _leth_runs:
-                                    player_stats_ctx += (
-                                        f"\nAverage kill rate across all {len(_leth_runs)} runs: "
-                                        f"{sum(_leth_runs) / len(_leth_runs):.1f}%."
-                                    )
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx lethality error: {_e}")
-
-                            # Difficulty profile: hard-lobby valor runs (100-TD runs
-                            # posted while the player's team was outkilled, role-adjusted).
-                            # Genuine credit if they have them; a jab if they only farm.
-                            try:
-                                _dc = {'Uphill': 0, 'Outmatched': 0, 'Brutal': 0}
-                                for _dr in player_subs_pb:
-                                    _df = [f.strip() for f in (_dr[11] or '').split(',')] if len(_dr) > 11 else []
-                                    for _dk in _dc:
-                                        if _dk in _df:
-                                            _dc[_dk] += 1
-                                if _dc['Outmatched'] or _dc['Brutal'] or _dc['Uphill']:
-                                    player_stats_ctx += (
-                                        f"\n(Background info, do not quote verbatim.) Valor runs, "
-                                        f"strong games logged while their side was being outkilled "
-                                        f"(genuinely hard, worth crediting): "
-                                        f"{_dc['Brutal']} Brutal, {_dc['Outmatched']} Outmatched, "
-                                        f"{_dc['Uphill']} Slightly Uphill.")
-                                else:
-                                    player_stats_ctx += (
-                                        "\n(Background info, do not quote verbatim.) Valor runs: none. "
-                                        "Every logged game came in an even or favourable lobby; they have never "
-                                        "put up a strong game while their side was losing the kill war. Fair to needle.")
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx difficulty error: {_e}")
-
-                            # Build explicit leaderboard standings for this player.
-                            # Group all LD entries by weapon, sort each board by score,
-                            # find the player's rank. This is the authoritative source —
-                            # Claude should use these standings when answering rank questions.
-                            try:
-                                boards = {}
-                                for ld_r in ld_for_pb:
-                                    if len(ld_r) < 4:
-                                        continue
-                                    weapon = ld_r[0].strip()
-                                    if not weapon or ' - ' in weapon:
-                                        continue
-                                    try:
-                                        score = int(ld_r[3])
-                                    except ValueError:
-                                        continue
-                                    boards.setdefault(weapon, []).append(
-                                        (ld_r[1].strip(), (ld_r[2] or '').strip() if len(ld_r) > 2 else '', score))
-                                # Board values aren't all takedowns: the Score board is
-                                # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
-                                # margin. Label each with its real unit so the Butler
-                                # doesn't call 25,078 points "takedowns".
-                                _UNIT = {"Score": "points", "Top Score": "points",
-                                         "Pacifist": "points",
-                                         "100 Kills": "kills", "TUFF": "kill margin"}
-                                standings = []
-                                _on_weapons = set()
-                                for weapon, entries in boards.items():
-                                    entries.sort(key=lambda x: -x[2])
-                                    for rank, (pname, pdid, score) in enumerate(entries, 1):
-                                        # Match on EITHER discord_id OR name — an entry may
-                                        # carry a stale/other id (matched by name) or a name
-                                        # variant (matched by id); requiring id-only, or
-                                        # name-only-when-blank, missed a player's own boards.
-                                        if (pdid and pdid == discord_id_str) or (pname and pname == player_name_for_ld):
-                                            medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
-                                            _u = _UNIT.get(weapon, "TDs")
-                                            standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
-                                            _on_weapons.add(weapon)
-                                            break
-                                if standings:
-                                    # Cap the list — a 77-board player otherwise bloats the
-                                    # prompt to ~8k chars and the model (reasoning 'none') chokes
-                                    # and deflects. Specific-weapon rank questions get their own
-                                    # board injection, so trimming here is safe.
-                                    _shown = standings[:20]
-                                    _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
-                                    player_stats_ctx += (f"\nLeaderboard standings (on {len(standings)} boards, showing top 20): "
-                                                         + ", ".join(_shown) + _more)
-                                else:
-                                    player_stats_ctx += "\nLeaderboard standings: none recorded"
-                                # Exact complement for "what boards am I NOT on" — computed by
-                                # discord_id, WEAPON boards only (feat/kills boards excluded).
-                                try:
-                                    from utils.boards import is_feat_board as _isfeat, is_kills_board as _iskb
-                                    _weapon_boards = {w for w in boards if not _isfeat(w) and not _iskb(w)}
-                                    _absent = sorted(_weapon_boards - _on_weapons)
-                                    if _absent:
-                                        player_stats_ctx += (
-                                            f"\nWeapon boards this player has NO entry on ({len(_absent)}): "
-                                            + ", ".join(_absent)
-                                            + ". [This is the authoritative list for 'which boards am I not on' — use it exactly, do not guess.]")
-                                    elif _weapon_boards:
-                                        player_stats_ctx += "\nThis player has an entry on EVERY weapon board."
-                                except Exception as _abe:
-                                    print(f"[BUTLER] ctx absent-boards error: {_abe}")
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx standings error: {_e}")
-
-                            # Title strategy — when the player asks about the board TITLES, hand
-                            # over their rank + lead on each and their MAP-board gaps (weapon gaps
-                            # are listed above), so the Butler can advise concretely how to extend.
-                            if any(_k in content_lower for _k in
-                                   ('title', 'grand marshal', 'weapons master', 'campaign master', 'marshal')):
-                                try:
-                                    _tstats = await calculate_butler_stats()
-                                    _ldn = player_name_for_ld
-                                    _title_lines = []
-                                    for _lbl, _key, _minb in (("Grand Marshal", "_combined_placements", 15),
-                                                              ("Weapons Master", "_weapon_placements", 9),
-                                                              ("Campaign Master", "_map_placements", 6)):
-                                        _dct = _tstats.get(_key) or {}
-                                        _ranked = sorted(((p, len(v), sum(v) / len(v))
-                                                          for p, v in _dct.items() if len(v) >= _minb),
-                                                         key=lambda t: (-t[1], t[2]))
-                                        _mi = next((i for i, (p, c, a) in enumerate(_ranked) if p == _ldn), None)
-                                        if _mi is None:
-                                            _cnt = len(_dct.get(_ldn) or [])
-                                            _title_lines.append(f"{_lbl}: not yet qualified ({_cnt}/{_minb} boards needed).")
-                                        elif _mi == 0:
-                                            _gap = (f", leads #2 ({_ranked[1][0]}, {_ranked[1][1]}) by {_ranked[0][1] - _ranked[1][1]} board(s)"
-                                                    if len(_ranked) > 1 else ", uncontested")
-                                            _title_lines.append(f"{_lbl}: #1 HOLDER — {_ranked[0][1]} boards{_gap}.")
-                                        else:
-                                            _ahead = _ranked[_mi - 1]
-                                            _title_lines.append(
-                                                f"{_lbl}: #{_mi + 1} — {_ranked[_mi][1]} boards, "
-                                                f"{_ahead[1] - _ranked[_mi][1]} behind #{_mi} ({_ahead[0]}).")
-                                    if _title_lines:
-                                        player_stats_ctx += (
-                                            "\nAll-time title standings for this player:\n" + "\n".join(_title_lines)
-                                            + "\n[To EXTEND a title, place on MORE of its boards: weapon boards for Weapons "
-                                              "Master, map boards for Campaign Master, either for Grand Marshal. Use the "
-                                              "board-gap lists in this context to advise which specific boards to chase.]")
-                                    # Map-board gaps (Campaign Master), matched by discord_id.
-                                    _map_on, _map_all = set(), set()
-                                    for _r in ld_for_pb:
-                                        _b = _r[0].strip() if _r else ''
-                                        if ' - ' not in _b or _b.split(' - ')[0] not in getattr(config, 'MAP_ATTACK_DEFENSE', {}):
-                                            continue
-                                        _map_all.add(_b)
-                                        _rd = (_r[2] or '').strip() if len(_r) > 2 else ''
-                                        _rn = _r[1].strip() if len(_r) > 1 else ''
-                                        if (_rd and _rd == discord_id_str) or (_rn and _rn == _ldn):
-                                            _map_on.add(_b)
-                                    _map_absent = sorted(_map_all - _map_on)
-                                    if _map_absent:
-                                        player_stats_ctx += (f"\nMap boards this player has NO entry on ({len(_map_absent)}): "
-                                                             + ", ".join(_map_absent)
-                                                             + ". [Authoritative for Campaign Master gaps.]")
-                                except Exception as _tse:
-                                    print(f"[BUTLER] ctx title-strategy error: {_tse}")
-
-                            # Per-weapon best takedowns — lets the Butler answer "which weapons do I still
-                            # need N takedowns with". Every weapon that HAS a leaderboard counts; a weapon
-                            # with no recorded run is best TD 0. Raw numbers so it works for any threshold.
-                            try:
-                                # Only real weapon TD boards count as "weapons" here —
-                                # exclude every feat board (Score=points, TUFF=margin,
-                                # etc.), kills boards, map boards, and the pre-rename
-                                # 'Top Score'. Otherwise the Score board's point value
-                                # surfaced as a weapon with 13k+ takedowns.
-                                from cogs.leaderboards import _FEAT_BOARD_NAMES as _FBN2, _is_kills_board as _is_kb2
-                                weapon_boards = set()
-                                for _lr in ld_for_pb:
-                                    _b = _lr[0].strip() if _lr else ''
-                                    if (_b and ' - ' not in _b and _b not in _FBN2
-                                            and not _is_kb2(_b) and _b != 'Top Score'):
-                                        weapon_boards.add(_b)
-                                best_td_by_weapon = {}
-                                for _r in player_subs_pb:
-                                    if len(_r) < 8:
-                                        continue
-                                    _w = _r[3].strip() if len(_r) > 3 else ''
-                                    try:
-                                        _td = int(_r[7])
-                                    except (ValueError, IndexError):
-                                        continue
-                                    if _w:
-                                        best_td_by_weapon[_w] = max(best_td_by_weapon.get(_w, 0), _td)
-                                for _lr in ld_for_pb:
-                                    if len(_lr) < 4:
-                                        continue
-                                    _b = _lr[0].strip()
-                                    if _b in weapon_boards and _lr[1].strip() == player_name_for_ld:
-                                        try:
-                                            best_td_by_weapon[_b] = max(best_td_by_weapon.get(_b, 0), int(_lr[3]))
-                                        except ValueError:
-                                            pass
-                                # Only inject this (long) per-weapon list when the question is
-                                # actually about takedown targets — it's noise for board/title
-                                # questions and bloats the prompt.
-                                if weapon_boards and any(_k in content_lower for _k in
-                                                         ('takedown', ' td', 'how many', 'need', 'to get on', 'to place')):
-                                    _have = sorted((w for w in weapon_boards if best_td_by_weapon.get(w, 0) > 0),
-                                                   key=lambda w: -best_td_by_weapon[w])
-                                    _have_str = ", ".join(f"{w}: {best_td_by_weapon[w]}" for w in _have) or "none"
-                                    player_stats_ctx += (
-                                        "\n\nPer-weapon best takedowns (best single-run TD on each weapon board): "
-                                        + _have_str
-                                    )
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx per-weapon bests error: {_e}")
-
-                            # Hundred-Handed — use the SAME source as the registry card:
-                            # PRIMARY weapon/subclass combos for non-archer subclasses (HH_TOTAL,
-                            # i.e. out of 46, not the all-weapons CLASS_WEAPON_MAP count).
-                            try:
-                                from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-                                _hh_required = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
-                                # Source completion from the SAME data as the card (100+ TD runs +
-                                # legacy marks) so the Butler can never disagree with a player's card.
-                                _hh_done = await _db.get_hh_done_combos(discord_id_str, player_name) & _hh_required
-                                _hh_matched = len(_hh_done)
-                                if _hh_required and _hh_required.issubset(_hh_done):
-                                    hh_str = f"Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) — a 100-takedown run with every primary weapon on every non-archer subclass."
-                                else:
-                                    hh_str = f"Hundred-Handed progress: {_hh_matched}/{HH_TOTAL} (needs a 100-takedown run with each primary weapon on each non-archer subclass)."
-                                    # When they ask about Hundred-Handed / what they are missing, hand the
-                                    # Butler the EXACT gaps (grouped by subclass, <=9 groups) so it can bullet
-                                    # them out instead of deferring to /progress.
-                                    if ('hundred' in content_lower or 'handed' in content_lower or 'missing' in content_lower):
-                                        _hh_missing = _hh_required - _hh_done
-                                        _by_sub = {}
-                                        for _sc, _w in sorted(_hh_missing):
-                                            _by_sub.setdefault(_sc, []).append(_w)
-                                        _miss_str = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by_sub.items()))
-                                        hh_str += (f" Still missing ({len(_hh_missing)}) by subclass: {_miss_str}. "
-                                                   "[If the player asks what they are missing, YOU HAVE the exact gaps: list them as a bullet "
-                                                   "list grouped by subclass, one bullet per subclass with its missing weapons after it. Do NOT "
-                                                   "defer to /progress, and do not truncate the list. IMPORTANT: Hundred-Handed counts ONLY each "
-                                                   "subclass PRIMARY weapons, never secondaries. A weapon can be a primary on one subclass and only a "
-                                                   "secondary sidearm on others, and secondary use never counts. Cudgel and Short Sword, for instance, "
-                                                   "are primaries only on Ambusher, so having swung them as a sidearm elsewhere earns nothing here. If "
-                                                   "the player protests they already did a weapon, note dryly that they used it as a secondary or on "
-                                                   "another subclass, and the listed subclass still owes the primary run.]")
-                                player_stats_ctx += f"\n{hh_str}"
-                                # Nearest goal across tracks — for the Butler to drop IN
-                                # PASSING when it fits a stats-adjacent reply. Gated on
-                                # data questions (keeps the marks scan off pure banter),
-                                # reusing the HH sets just computed.
-                                if _is_data_q:
-                                    try:
-                                        from cogs.registry import calculate_weapon_marks_for_player
-                                        from utils.goals import next_goals
-                                        _gm = await calculate_weapon_marks_for_player(int(discord_id_str))
-                                        _flat = {}
-                                        for _k, _v in (_gm or {}).items():
-                                            _w = _k[0] if isinstance(_k, tuple) else _k
-                                            if _w and _w not in ('Other', 'Multiple Weapons', 'Hybrid'):
-                                                _flat[_w] = _flat.get(_w, 0) + _v
-                                        _goals = next_goals(
-                                            _flat, _hh_required - _hh_done,
-                                            mastery_threshold=config.MASTERY_THRESHOLD,
-                                            virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
-                                            rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
-                                            hh_total=HH_TOTAL)
-                                        if _goals.get('nearest'):
-                                            player_stats_ctx += (
-                                                f"\nAsker's nearest goal right now: {_goals['nearest']['label']}. "
-                                                "[Optional colour: you MAY fold this into ONE short clause if it fits "
-                                                "naturally (after a strong game, a stats question, or some trash talk). "
-                                                "Never force it, never lead with it or make it the whole reply, and drop "
-                                                "it if it doesn't fit.]")
-                                    except Exception as _ge:
-                                        print(f"[BUTLER] ctx next-goal error: {_ge}")
-                            except Exception as _e:
-                                print(f"[BUTLER] ctx hundred-handed error: {_e}")
-
-                            # Per-weapon avg Kill Share / Warlord / Lethality — the same three
-                            # ratings the boards and registry cards show. Returns THREE dicts;
-                            # unpacking two silently killed this whole block for months.
-                            # Only when the question is about ratings — this block runs a DB
-                            # scan and lists a line PER weapon (~2k chars for a 40-weapon
-                            # player), which ballooned the prompt on unrelated questions.
-                            if any(_k in content_lower for _k in
-                                   ('lethal', 'warlord', 'kill share', 'killshare', 'rating', 'ratio', 'best weapon', 'most lethal')):
-                              try:
-                                from cogs.registry import calculate_weapon_shares_for_player
-                                w_kill, w_warlord, w_leth = await calculate_weapon_shares_for_player(discord_id_str)
-                                all_weapons = set(w_kill) | set(w_warlord) | set(w_leth)
-                                if all_weapons:
-                                    # If a specific weapon is named, lead with it; cap the rest.
-                                    _named = set(extract_weapons_from_message(resolved_message))
-                                    _ordered = sorted(all_weapons, key=lambda w: (w not in _named, w))
-                                    share_lines = []
-                                    for w in _ordered[:25]:
-                                        parts = []
-                                        if w in w_warlord:
-                                            parts.append(f"{w_warlord[w]}% Warlord")
-                                        if w in w_kill:
-                                            parts.append(f"{w_kill[w]}% Kill Share")
-                                        if w in w_leth:
-                                            parts.append(f"{w_leth[w]}% Lethality")
-                                        share_lines.append(f"{w}: {', '.join(parts)}")
-                                    _rmore = f" (+{len(all_weapons) - 25} more weapons)" if len(all_weapons) > 25 else ""
-                                    player_stats_ctx += (
-                                        "\nPer-weapon board ratings (rolling averages, only weapons with 2+ runs; "
-                                        "Warlord = takedowns/team kills, Kill Share = kills/team kills, "
-                                        "Lethality = kills/takedowns): " + '; '.join(share_lines) + _rmore)
-                              except Exception as _we:
-                                print(f"[BUTLER] weapon shares error: {_we}")
-
-                            # Lobbymates — only when the asker mentions the lobby/match/who
-                            # they played with. Reads their most recent run's lobby and lists
-                            # who else logged it (teammates vs opponents), so the Butler can do
-                            # "you were in NJ's lobby, he outscored you". Skipped otherwise to
-                            # keep the prompt lean.
-                            try:
-                                _lm_q = resolved_message.lower()
-                                if any(w in _lm_q for w in ('lobby', 'same game', 'same match',
-                                                            'played with', 'against', 'teammate',
-                                                            'who was i', 'who else')):
-                                    _recent = next((r for r in (player_subs_pb or [])
-                                                    if len(r) > 12 and r[12].strip()), None)
-                                    if _recent:
-                                        _mates = await _db.get_lobbymates(discord_id_str, _recent[12].strip())
-                                        if _mates:
-                                            _ml = []
-                                            for _m in _mates[:6]:
-                                                _side = ('teammate' if _m['same_team'] is True
-                                                         else 'opponent' if _m['same_team'] is False
-                                                         else 'same lobby')
-                                                _ml.append(f"{_m['player_name']} ({_side}, "
-                                                           f"{_m['takedowns']} TD / {_m['kills']} K)")
-                                            player_stats_ctx += (
-                                                "\nMost recent logged match lobbymates (players who "
-                                                "submitted the SAME game): " + "; ".join(_ml))
-                                        else:
-                                            player_stats_ctx += ("\nNo one else has logged the asker's "
-                                                                 "most recent match.")
-                            except Exception as _lme:
-                                print(f"[BUTLER] ctx lobbymate error: {_lme}")
-
-                            # Nemesis / Friend — aggregate head-to-head across ALL of the
-                            # asker's fingerprinted matches (who they clash with / play beside
-                            # most). On-demand only, since it scans submissions.
-                            try:
-                                _rv_q = resolved_message.lower()
-                                if any(w in _rv_q for w in ('rival', 'nemesis', 'enemy', 'arch ',
-                                                            'archenemy', 'friend', ' ally', 'allies', 'closest',
-                                                            'best teammate', 'head to head', 'head-to-head',
-                                                            'who beats me', 'who do i beat', 'who do i lose',
-                                                            'play with', 'played with', 'play against', 'played against')):
-                                    from utils.rivalries import compute_rivalries, rivalry_context
-                                    _rv = compute_rivalries(discord_id_str, await _db.get_all_submissions())
-                                    _rvctx = rivalry_context(player_name, _rv)
-                                    if _rvctx:
-                                        player_stats_ctx += "\n" + _rvctx
-                            except Exception as _rve:
-                                print(f"[BUTLER] ctx rivalry error: {_rve}")
-
-                            break
-                    # Build rich per-player summary for comparisons — data questions
-                    # only. For banter these stay empty, so every roster loop below
-                    # no-ops and the ~2000-token roster dump never enters the prompt.
-                    subs_all = await _db.get_all_submissions() if _is_data_q else []
-                    ld_all = await _db.get_all_leaderboard_data() if _is_data_q else []
-
-                    # Unique weapons and subclasses per player from submissions
-                    player_weapon_diversity = {}  # name -> set of weapons
-                    player_subclass_diversity = {}  # name -> set of subclasses
-                    player_sub_counts = {}  # name -> submission count
-                    player_best_sub = {}   # name -> best submission row by TD
-                    player_td_totals = {}  # name -> [td values] for avg
-                    player_kill_totals = {}  # name -> [kills values] for avg + lethality
-                    name_lookup = {p_row[0].strip(): p_row[1].strip() for p_row in p_rows if len(p_row) > 1}
-                    for row in subs_all:
-                        if len(row) < 9:
-                            continue
-                        pid = row[2].strip()
-                        pname = name_lookup.get(pid, '')
-                        if not pname:
-                            continue
-                        weapon = row[3].strip()
-                        subclass = row[4].strip()
-                        if pname not in player_weapon_diversity:
-                            player_weapon_diversity[pname] = set()
-                            player_subclass_diversity[pname] = set()
-                            player_sub_counts[pname] = 0
-                            player_td_totals[pname] = []
-                            player_kill_totals[pname] = []
-                        player_weapon_diversity[pname].add(weapon)
-                        player_subclass_diversity[pname].add(subclass)
-                        player_sub_counts[pname] += 1
-                        try:
-                            row_td = int(row[7])
-                            row_kills = int(row[8])
-                            player_td_totals[pname].append(row_td)
-                            player_kill_totals[pname].append(row_kills)
-                            current_best = player_best_sub.get(pname)
-                            current_best_td = int(current_best[7]) if current_best and len(current_best) > 7 else 0
-                            if row_td > current_best_td:
-                                player_best_sub[pname] = row
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Weapons on leaderboards per player
-                    player_lb_weapons = {}  # name -> set of weapons with board entries
-                    for row in ld_all:
-                        if len(row) < 2:
-                            continue
-                        pname = row[1].strip()
-                        weapon = row[0].strip()
-                        if pname not in player_lb_weapons:
-                            player_lb_weapons[pname] = set()
-                        player_lb_weapons[pname].add(weapon)
-
-                    # Build summary lines
-                    all_players_summary = []
-                    for p_row in p_rows:
-                        if len(p_row) > 1 and p_row[1].strip():
-                            pname = p_row[1].strip()
-                            marks = int(p_row[3]) if len(p_row) > 3 and p_row[3].strip().isdigit() else 0
-                            unique_weapons = len(player_weapon_diversity.get(pname, set()))
-                            unique_subclasses = len(player_subclass_diversity.get(pname, set()))
-                            lb_weapons = len(player_lb_weapons.get(pname, set()))
-                            sub_count = player_sub_counts.get(pname, 0)
-                            all_players_summary.append((pname, marks, sub_count, unique_weapons, unique_subclasses, lb_weapons))
-
-                    # Rank the roster by logged runs (activity), not career marks —
-                    # legacy mark piles were making inactive players headline the sheet.
-                    all_players_summary.sort(key=lambda x: (-x[2], -x[1]))
-                    def _lethality_str(pname):
-                        tds = player_td_totals.get(pname, [])
-                        kills = player_kill_totals.get(pname, [])
-                        if len(tds) < 3:
-                            return ''
-                        avg_td = sum(tds) / len(tds)
-                        avg_k = sum(kills) / len(kills)
-                        kill_rate = (avg_k / avg_td * 100) if avg_td > 0 else 0
-                        td_per_kill = (avg_td / avg_k) if avg_k > 0 else 0
-                        return f", avg {avg_td:.0f} TD/{avg_k:.0f}K per run, {kill_rate:.0f}% kill rate"
-                    def _bestgame(pname):
-                        bs = player_best_sub.get(pname)
-                        if bs and len(bs) > 8:
-                            try:
-                                return f", best {bs[3].strip()} {int(bs[7])}/{int(bs[8])}"
-                            except Exception:
-                                return ""
-                        return ""
-                    summary_lines = [
-                        f"{n}: {s} runs, {lw} on boards{_bestgame(n)}{_lethality_str(n)}, {m} career marks"
-                        for n, m, s, uw, us, lw in all_players_summary[:10]
-                    ]
-                    # Only emit the roster when the underlying scans actually ran (data
-                    # questions). For banter subs_all/ld_all are empty, so every player would
-                    # read "0 runs, 0 on boards" — the Butler then states that as fact.
-                    if summary_lines and _is_data_q:
-                        player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
-
-                    # Season board — championship standings + category form. This is
-                    # what the Butler should lean on when talking performance.
-                    try:
-                        from cogs.favourites import season_total
-                        # Season standings are comparison context — data questions only.
-                        _season = await _db.get_current_season() if _is_data_q else None
-                        if _season:
-                            _standings, _sstats, _ = await season_total(_season)
-                            _lbl = _season.get('label') or f"Season {_season['id']}"
-                            _top8 = ", ".join(f"{i}. {nm} {pts} GP"
-                                              for i, (nm, pts) in enumerate(_standings[:8], 1))
-                            player_stats_ctx += f"\n\nSeason championship ({_lbl}): {_top8}"
-                            if player_name not in [nm for nm, _ in _standings[:8]]:
-                                _mine = next((f"{player_name} is {i}. with {pts} GP"
-                                              for i, (nm, pts) in enumerate(_standings, 1)
-                                              if nm == player_name), None)
-                                if _mine:
-                                    player_stats_ctx += f" … {_mine}"
-
-                            def _lead(key):
-                                v = _sstats.get(key) or []
-                                if not v:
-                                    return "—"
-                                it = v[0]
-                                if isinstance(it, str):
-                                    return it.split(" -- ")[0].strip()
-                                return f"{it[0]} ({it[1]})"
-                            player_stats_ctx += (
-                                "\nSeason category leaders: "
-                                f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
-                                f"Lethality {_lead('lethality_list')}; "
-                                f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
-                                f"Highest TD {_lead('top_td_list')}")
-                            player_stats_ctx += (
-                                "\n[Titles: the Executioner role goes to the Lethality leader "
-                                "(kills/takedowns); the Warlord role to the Warlord leader "
-                                "(takedowns/team kills). Kill Share (kills/team kills) is a "
-                                "scored season category but carries no role.]")
-                    except Exception as _sce:
-                        print(f"[BUTLER] season ctx error: {_sce}")
-
-                    # Live bounty state. The system prompt explains how bounties WORK
-                    # but carried no current data, so the Butler could not name this
-                    # month's weapons or tell anyone how they were doing.
-                    try:
-                        if _is_data_q:
-                            from cogs.bounty import (get_active_bounty,
-                                                     get_player_bounty_progress,
-                                                     _count_special_runs, _parse_special)
-                            _b = await get_active_bounty()
-                            if _b:
-                                _bw = _b.get('weapons') or {}
-                                def _tot(v):
-                                    return v.get('total', 0) if isinstance(v, dict) else v
-                                def _cur(v):
-                                    return v.get('current', 0) if isinstance(v, dict) else (v or 0)
-                                player_stats_ctx += (
-                                    f"\n\nActive bounty: {_b['title']}. A run counts when it "
-                                    f"hits 100+ takedowns. Required per weapon: "
-                                    + ", ".join(f"{k} {_tot(v)}" for k, v in _bw.items()))
-                                _spec = _parse_special(_b)
-                                _need = _spec['need'] if _spec else 1
-                                if _b.get('special_challenge'):
-                                    player_stats_ctx += (
-                                        f"\nSpecial challenge: {_b['special_challenge']} "
-                                        f"({_need} qualifying run(s) needed)")
-                                _comps = _b.get('completions') or []
-                                player_stats_ctx += (
-                                    "\nCompleted by: " + ", ".join(
-                                        f"{i}. {c.get('name')}" for i, c in enumerate(_comps, 1))
-                                    if _comps else "\nNobody has completed it yet.")
-                                _pr = await get_player_bounty_progress(
-                                    _b['title'], discord_id_str)
-                                _prog = (_pr or {}).get('progress') or {}
-                                _mine_b = ", ".join(
-                                    f"{k} {_cur(_prog.get(k, 0))}/{_tot(v)}" for k, v in _bw.items())
-                                _sc = await _count_special_runs(_b, discord_id_str)
-                                player_stats_ctx += (
-                                    f"\n{player_name}'s bounty progress: {_mine_b or 'nothing yet'}"
-                                    f"; special challenge {min(_sc, _need)}/{_need}")
-                    except Exception as _bce:
-                        print(f"[BUTLER] bounty ctx error: {_bce}")
-
-                    # On-demand: if the message names a registered player who isn't the
-                    # asker and isn't already in the top-10 above, surface THEIR stats too --
-                    # people constantly ask "how does <X> compare". Capped to keep it lean.
-                    try:
-                        _shown_top = {n for n, *_ in all_players_summary[:10]}
-                        _ml = resolved_message.lower()
-                        _extra_players = []
-                        for _pn, _pm, _ps, _puw, _pus, _plw in all_players_summary:
-                            if _pn in _shown_top or _pn == player_name or len(_pn) < 3:
-                                continue
-                            if re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
-                                _extra_players.append(
-                                    f"{_pn}: {_ps} runs, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}, {_pm} career marks")
-                                if len(_extra_players) >= 3:
-                                    break
-                        if _extra_players:
-                            player_stats_ctx += "\n\nAsked-about player(s):\n" + "\n".join(_extra_players)
-                    except Exception as _ame:
-                        print(f"[BUTLER] named-player lookup error: {_ame}")
-
-                    # Per-player personal bests from LeaderboardData
-                    player_pb_td = {}  # name -> best TD score
-                    player_pb_kills = {}  # name -> best kills score
-                    for row in ld_all:
-                        if len(row) < 4:
-                            continue
-                        lb_name = row[0].strip()
-                        pname = row[1].strip()
-                        try:
-                            score = int(row[3])
-                        except ValueError:
-                            continue
-                        if lb_name == '100 Kills':
-                            player_pb_kills[pname] = max(player_pb_kills.get(pname, 0), score)
-                        elif ' - ' not in lb_name and lb_name not in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns'}:
-                            player_pb_td[pname] = max(player_pb_td.get(pname, 0), score)
-
-                    pb_lines = []
-                    all_pb_names = set(player_pb_td) | set(player_pb_kills) | set(player_best_sub)
-                    for pname in sorted(all_pb_names):
-                        td = player_pb_td.get(pname, 0)
-                        parts = []
-                        best_sub = player_best_sub.get(pname)
-                        if best_sub and len(best_sub) > 8:
-                            sub_td = int(best_sub[7]) if best_sub[7].strip().isdigit() else 0
-                            sub_kills = best_sub[8].strip() if best_sub[8].strip().isdigit() else '?'
-                            sub_weapon = best_sub[3].strip() if len(best_sub) > 3 else '?'
-                            # Use whichever TD is higher — submission or LeaderboardData (legacy)
-                            best_td = max(td, sub_td)
-                            if best_td == sub_td and sub_td > 0:
-                                parts.append(f"best game: {sub_weapon} — {sub_td} TDs / {sub_kills} kills")
-                            elif td > sub_td:
-                                parts.append(f"best TD: {td} (legacy entry, weapon not tracked per-game here)")
-                        elif td:
-                            parts.append(f"best TD: {td}")
-                        kills_pb = player_pb_kills.get(pname, 0)
-                        if kills_pb:
-                            parts.append(f"best kills score: {kills_pb}")
-                        if parts:
-                            pb_lines.append(f"{pname}: {', '.join(parts)}")
-                    # Full per-player personal-bests dump removed to slim the prompt —
-                    # each top player's best game is already folded into the roster above.
-
-                    # SpecialOps achievements per player
-                    try:
-                        so_rows = await _db.get_all_special_ops()
-                        if so_rows:
-                            so_by_player = {}
-                            for so_row in so_rows:
-                                if len(so_row) > 2:
-                                    pname = so_row[1].strip()
-                                    achievement = so_row[2].strip()
-                                    if pname not in so_by_player:
-                                        so_by_player[pname] = []
-                                    so_by_player[pname].append(achievement)
-                            if so_by_player:
-                                pass  # special-achievements dump removed to slim the prompt
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-                # Try to find a matching submission if player mentioned stats
-                msg_kills, msg_tds = extract_stats_from_message(resolved_message)
-                if msg_kills or msg_tds:
-                    sub_ctx = await find_submission_from_stats(discord_id_str, msg_kills, msg_tds, player_name_ref=player_name)
-                    if sub_ctx:
-                        player_stats_ctx = (player_stats_ctx + '\n' + sub_ctx).strip()
-
-                # Add weapon bomb count if message asks about it
-                if any(w in resolved_message.lower() for w in ['how many', 'count', 'most kills', 'highest', 'most takedowns', '100 takedown']):
-                    _bw = extract_weapon_from_message(resolved_message)
-                    if _bw:
-                        bomb_count = await count_qualifying_runs(_bw, 100)
-                        if bomb_count is not None:
-                            player_stats_ctx += f"\nServer-wide 100+ TD runs with {_bw}: {bomb_count}"
-
-                # If a weapon is mentioned in any context, surface its leaderboard rankings
-                # so the Butler can answer "who's #1 on Messer" correctly
-                msg_lower = resolved_message.lower()
-                # "How many kills / takedowns submitted today?" -> server-wide daily totals.
-                if 'today' in msg_lower and any(w in msg_lower for w in ('kill', 'takedown', 'total', 'submitted', 'count', 'how many')):
-                    try:
-                        _cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-                        _tsubs = await _db.get_all_submissions()
-                        _t_td = _t_k = _t_n = 0
-                        for _r in _tsubs:
-                            if len(_r) < 9 or not _r[0].strip():
-                                continue
-                            try:
-                                _dt = datetime.strptime(_r[0].strip()[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                            except (ValueError, TypeError):
-                                continue
-                            if _dt < _cutoff:
-                                continue
-                            try:
-                                _t_td += int(_r[7]); _t_k += int(_r[8]); _t_n += 1
-                            except (ValueError, TypeError):
-                                pass
-                        player_stats_ctx += (f"\nServer totals over the last 24 hours: {_t_n} submissions, "
-                                             f"{_t_td} takedowns, {_t_k} kills.")
-                    except Exception as _te:
-                        print(f"[BUTLER] today-totals error: {_te}")
-                # Aggregate / meta stats across weapons, maps, subclasses + community totals.
-                if any(_kw in msg_lower for _kw in _AGG_TRIGGERS):
-                    try:
-                        player_stats_ctx += "\n\n" + _server_aggregates(await _db.get_all_submissions())
-                    except Exception as _ae:
-                        print(f"[BUTLER] aggregate stats error: {_ae}")
-                # Counting-channel stats, surfaced when someone talks counting
-                if 'count' in msg_lower:
-                    try:
-                        _cst = await _db.counting_state()
-                        if _cst['record'] or _cst['current']:
-                            _tc = await _db.counting_top('counts', 3)
-                            _tb = await _db.counting_top('breaks', 3)
-                            _tcs = ", ".join(f"{n} ({v})" for n, v in _tc) or "nobody yet"
-                            _tbs = ", ".join(f"{n} ({v})" for n, v in _tb) or "nobody yet"
-                            player_stats_ctx += (
-                                f"\n\nCounting channel: current run {_cst['current']}, record {_cst['record']}, "
-                                f"{_cst['total_counts']} lifetime valid counts. Top counters: {_tcs}. "
-                                f"Most breaks (the record of shame): {_tbs}.")
-                    except Exception as _cse:
-                        print(f"[BUTLER] counting ctx error: {_cse}")
-                # Inject EVERY weapon board named in the message (not just the first),
-                # so "who's king of battle axe, messer, and heavy mace" gets all three.
-                for _mw in extract_weapons_from_message(resolved_message):
-                    try:
-                        # Targeted, index-backed fetch of just this board.
-                        ld_ctx = await _db.get_leaderboard_by_board(_mw)
-                        weapon_entries = []
-                        for r in ld_ctx:
-                            if len(r) < 4 or r[0].strip() != _mw:
-                                continue
-                            if ' - ' in r[0]:
-                                continue
-                            try:
-                                weapon_entries.append((r[1].strip(), int(r[3])))
-                            except ValueError:
-                                continue
-                        weapon_entries.sort(key=lambda x: -x[1])
-                        if weapon_entries:
-                            medals = {1: '🥇', 2: '🥈', 3: '🥉'}
-                            board_lines = [
-                                f"{medals.get(i, f'#{i}')} {pname}: {score} TDs"
-                                for i, (pname, score) in enumerate(weapon_entries[:5], 1)]
-                            player_stats_ctx += f"\n\n{_mw} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
-                        else:
-                            player_stats_ctx += f"\n\n{_mw} leaderboard: no entries recorded yet."
-                    except Exception:
-                        pass
-
-                # Robust Hundred-Handed gap injection. The deep per-player block above only
-                # runs when the ASKER matches a players row and is nested 6 levels deep, so
-                # it silently misses (the Butler then says "I don't have the records"). Here,
-                # for any Hundred-Handed question, resolve WHOSE progress is asked about —
-                # the asker (first person) OR a named registered player (e.g. "how many does
-                # Coors have left") — and inject that player's exact gaps + count.
-                try:
-                    _cl = content_lower
-                    if (('hundred' in _cl or 'handed' in _cl)
-                            and 'HUNDRED-HANDED' not in player_stats_ctx.upper()):
-                        _tid, _tname = None, None
-                        if any(t in _cl for t in (' i ', "i'm", 'am i', ' my ', ' me ', 'do i', 'what do i')):
-                            _tid, _tname = str(message.author.id), player_name
-                        else:
-                            for _pr in await _db.get_all_players():
-                                _pnm = (_pr[1] or '').strip() if len(_pr) > 1 else ''
-                                if _pnm and len(_pnm) >= 3 and re.search(
-                                        r"(?<!\w)" + re.escape(_pnm.lower()) + r"(?:'?s)?(?!\w)", _cl):
-                                    _tid = (_pr[0] or '').strip() if len(_pr) > 0 else ''
-                                    _tname = _pnm
-                                    break
-                        if _tname:
-                            from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
-                            _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
-                            _done = await _db.get_hh_done_combos(_tid or '', _tname) & _req
-                            _missing = _req - _done
-                            _who = "You" if _tid == str(message.author.id) else _tname
-                            if _req and _req.issubset(_done):
-                                player_stats_ctx += f"\n\n{_who} Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL})."
-                            elif _missing:
-                                _by = {}
-                                for _sc, _w in sorted(_missing):
-                                    _by.setdefault(_sc, []).append(_w)
-                                _ms = "; ".join(f"{_sc}: {', '.join(_ws)}" for _sc, _ws in sorted(_by.items()))
-                                player_stats_ctx += (
-                                    f"\n\n{_who} Hundred-Handed: {len(_done)}/{HH_TOTAL} done, {len(_missing)} PRIMARY "
-                                    f"combos left, by subclass: {_ms}. "
-                                    "[You HAVE the exact count AND the gaps. If asked how many are left, give the number; "
-                                    "if they want specifics, bullet the combos grouped by subclass. Do NOT defer to "
-                                    "/progress or the archive. Hundred-Handed counts ONLY each subclass's PRIMARY weapons; "
-                                    "secondary use never counts, so a weapon can still be owed where it's only a sidearm.]")
-                except Exception as _hhe:
-                    print(f"[BUTLER] hh gap error: {_hhe}")
-
-                # Full map roster injection. Asked for a map tier list / ranking, the
-                # Butler otherwise improvises from the few maps named in its prompt and
-                # silently drops the rest. Hand it the complete roster so every map is placed.
-                try:
-                    _cl2 = content_lower
-                    if ('map' in _cl2 and any(k in _cl2 for k in (
-                            'tier', 'rank', 'ranking', 'best', 'worst', 'favourite',
-                            'favorite', 'list', 'rate', 'rating', 'top map', 'good map',
-                            'bad map'))
-                            and 'FULL MAP ROSTER' not in player_stats_ctx.upper()):
-                        _maps = sorted(getattr(config, 'MAPS', []) or [])
-                        if _maps:
-                            player_stats_ctx += (
-                                "\n\nFULL MAP ROSTER (every map in the pool, all "
-                                f"{len(_maps)}): " + ", ".join(_maps) +
-                                ". [If asked to rank, tier, or list the maps, place EVERY "
-                                "map on this roster, none skipped. Your existing map opinions "
-                                "stand; slot the rest by your own taste. Use these exact map "
-                                "names.]")
-                except Exception as _mre:
-                    print(f"[BUTLER] map roster ctx error: {_mre}")
-
+                # Bounded per-player context for the Butler prompt (extracted to
+                # _build_player_stats_ctx so the ~8k-char balloon guardrails are testable).
+                player_stats_ctx = await self._build_player_stats_ctx(
+                    message, discord_id_str, player_name, resolved_message, content_lower, _is_data_q)
                 # Detect rude messages — force idiot emoji regardless of AI response
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
