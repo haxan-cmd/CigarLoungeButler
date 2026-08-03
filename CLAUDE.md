@@ -18,17 +18,23 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `utils/ranks.py` | Pure rank/title/Hundred-Handed math. Unit-tested. |
 | `utils/tilt.py` | Pure lobby-difficulty ladder: raw kill gap to band to tiered valor marks. Single source for the difficulty label and the mark payout, so they cannot drift. Unit-tested. |
 | `utils/challenges.py` | Pure parser for bounty special-challenge strings. Unit-tested. |
+| `utils/feats.py` | Pure feat/mark derivation (triple, stat feats, tilt valor mark). Shared by the finalise and edit paths. Unit-tested. |
+| `utils/boards.py` | Pure board classification — THE single source of truth for which boards are feat/weapon/map/kills, which count toward the board titles (`non_weapon_feat_boards()`), and each board's score unit (`board_unit()`). Route new board-name checks through here, not hand-typed sets. Unit-tested. |
+| `utils/goals.py` | Pure "what's next" goal picker across next weapon rank / mastery / Hundred-Handed. Feeds `/next` and the Butler's in-passing goal nudge. Unit-tested. |
+| `utils/rivalries.py` | Pure shared-lobby aggregation: nemesis/ally, `head_to_head` (powers `/versus`), Bitter-Rivals/Inseparable pair awards. Deliberately NO per-game win/loss (a scoreboard is a snapshot). Unit-tested. |
+| `utils/wrapped.py` | Pure season-recap + superlatives aggregation (`/wrapped`, `/superlatives`). Unit-tested. |
+| `utils/validation.py` | Pure impossible-submission guard — rejects contradictory data (e.g. Agatha on Askandir) while passing incomplete data. Unit-tested. |
 | `utils/charts.py` | Themed matplotlib charts, rendered off the event loop via `render_async`: tilt ladder, weapon-lethality charge, `/explore` breakdown and trend lines, macro season graphs. |
 | `cogs/submissions.py` | The submission pipeline: on_message trigger, vision, confirm UI views, finalise worker, reactions/blurb (incl. the lethality percentile and lobby-difficulty marker), background updates. Also the edit flow and the isolated Peasant Run flow. |
-| `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, the Peasant board, `/top`, `/refresh*`, `/remove_board_score`. |
-| `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation (incl. difficulty valor marks), `/playerstats`, `/refreshcard`, legacy imports. |
+| `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, the Peasant board, the **Score** board (highest match points, one row/player, top-50, `/setup_score_board`), `/top`, `/refresh*`, `/rebuild_boards`, `/remove_board_score`. Imports `_FEAT_BOARD_NAMES` from `utils/boards`. |
+| `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation (incl. difficulty valor + High Score + Score marks), `/playerstats`, `/refreshcard`, `/versus` (head-to-head), `/next` (goal nudge), legacy imports. |
 | `cogs/bounty.py` | Monthly bounty: progress tracking, forum cards, completion, `/bounty_*` commands. |
 | `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles, seasons/Hall of Fame, the combined All-Time Titles board (`/setup_titles_board`, `refresh_all_time_titles_board`), `/report`, `/standings`, `/season`, `/titles`. |
 | `cogs/personality.py` | Butler AI chat (on_message, with lore injection), task loops (polls, digest, dry-spell, daily cycle), `/explore`, `/tilt_stats`, `/serverstats`, `/help`, bounty channel placeholders. |
 | `cogs/admin.py` | Mod tooling: `/remove_submission`, `/unlist_submission`, backups, rules posts, `/award_marks`, `/set_feat_count`. |
 | `cogs/kofi.py` | Ko-fi donations: webhook handler (route lives in bot.py), dashboard embed. |
 | `schema.sql` | Canonical table definitions. Post-launch columns/tables are added by `_ensure_schema` in db.py. |
-| `tests/` | Pure-logic tests (`pytest -q`): parsing, ranks, config integrity. |
+| `tests/` | Pure-logic tests (`pytest -q`, 89): parsing, ranks, tilt, feats, challenges, config integrity, boards, goals, rivalries, wrapped, validation. Tests import only `utils/*` + `config` (never cogs — CI installs just pytest+dotenv). |
 
 ## What happens on a submission (the hot path)
 
@@ -65,9 +71,20 @@ Sheets era). Cogs index into them positionally. Key maps:
   - `Resubmit`: an old run re-uploaded. Excluded from weekly stats, bounty, ratings.
   - `Unlisted`: mod-toggled via `/unlist_submission`. Excluded from ALL boards,
     records, rebuilds, backfills, and ratings, but still counts for marks + bounty.
+- Board classification is single-sourced in `utils/boards.py` (feat set, weapon vs
+  map vs kills, which count toward titles, score units). NEVER re-type a feat-board
+  set inline — a stale copy is exactly how the Score board nearly got wiped on season
+  reset and inflated the Weapons Master title. Route new checks through `utils/boards`.
+- A weapon's Highest-Kills companion board (`"{Weapon} Kills"`) does NOT count as a
+  separate weapon board for the titles (Weapons Master / Grand Marshal) — one board
+  per weapon. `is_kills_board()` gates this everywhere (board, card, playerstats, butler).
+- The **Score** board (`Score`) ranks the highest scoreboard POINTS in a single match,
+  one row per player, capped at top-50, +1 mark on board movement (like High Score).
+  It is a feat board; its value is POINTS, never takedowns.
 - Board names: weapon boards are the weapon name; map boards are
   `"{Map} - {Faction}"`; feat boards are `100 Kills`, `200 Takedowns`, `Triple`,
-  `TUFF`, `Flawless`, `Mallet`, `Knife`, `Healing Horn`, `Healing Banner`, `Pacifist`.
+  `TUFF`, `Flawless`, `Mallet`, `Knife`, `Healing Horn`, `Healing Banner`, `Pacifist`,
+  `Hybrid`, `Score`.
   Feat boards are per-run ("unlimited") except Mallet/Knife/Healing Horn/Healing Banner
   (personal-best). Flawless is unlimited (every no-death run stacks, ranked by TD); the
   player card counts it ×N like 100 Kills. Healing Horn and Healing Banner also accept manual submissions:
@@ -112,6 +129,14 @@ Sheets era). Cogs index into them positionally. Key maps:
 - Butler lore: `lore/chiv2_lore.md` holds the Chiv 2 faction and world lore; it is
   injected into the Butler chat context on relevant keywords (`personality.py`
   `_lore_context`), not held permanently in the system prompt.
+- Butler chat context (`player_stats_ctx`) must stay BOUNDED. The model runs at
+  `reasoning_effort='none'` with a small budget; a heavy player's data (e.g. 77
+  boards, 40 weapons) once ballooned the prompt to ~8k chars and the model deflected
+  ("I don't have your data") even though everything was present. Any per-weapon or
+  per-board list injected here must be CAPPED (standings top-20) and/or GATED to the
+  relevant question (per-weapon TDs → TD questions; per-weapon ratings → rating
+  questions). Match a player's board rows on EITHER discord_id OR name (a stale
+  non-blank id or a name variant will otherwise miss their own boards).
 
 ## Environment variables
 

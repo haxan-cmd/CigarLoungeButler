@@ -28,6 +28,8 @@
 - `/refresh_all` **[Mod]** — Refresh every leaderboard at once.
 - `/refresh_monthly` **[Admin]** — Rebuild all Monthly Report boards + pinned index.
 - `/setup` **[Mod]** — Set up a bot-owned leaderboard in this thread.
+- `/setup_score_board` **[Mod]** — Create the Score board (highest match points, one row/player, top-50) in the feats forum.
+- `/backfill_feat_boards` also seeds the Score board from submission history.
 - `/create_missing_boards` **[Admin]** — Create board threads for primary weapons that lack one.
 - `/rebuild_boards` **[Mod]** — Rebuild weapon + map boards from full submission history.
 - `/cleanup_boards` **[Mod]** — Remove junk board entries with missing map/weapon names.
@@ -55,6 +57,7 @@
 - `/award_marks` **[Mod]** — Manually award marks on a weapon to a player.
 - `/set_feat_count` **[Mod]** — Set a player's 100 Kills / 200 Takedowns / Triple count.
 - `/remove_submission` **[Admin]** — Remove a fake/erroneous submission and roll back all tables.
+- `/backfill_players` **[Admin]** — Create a `players` row for anyone who submitted but has no row (fixes Butler "unregistered" / missing stats).
 
 ## Player Commands (everyone)
 - `/help` — List the commands you can use, grouped by what they do.
@@ -67,6 +70,9 @@
 - `/titles` — Board count + average placement for the all-time titles.
 - `/report` — Summon the Butler Monthly report.
 - `/refreshcard` — Refresh your own registry card.
+- `/versus` — Your head-to-head history with another player: shared lobbies, teammate/opponent split, comparative averages (no win/loss).
+- `/next` — Your nearest goal on each track: next weapon rank, mastery, and Hundred-Handed.
+- `/wrapped` — Your season recap (signature weapon, best game, streaks). `/superlatives` — the season's tongue-in-cheek awards.
 - `/rules` — Show the challenge rules.
 - `/aliases` — Who has the most in-game names (the witness-protection board).
 
