@@ -80,6 +80,13 @@ Sheets era). Cogs index into them positionally. Key maps:
 - A weapon's Highest-Kills companion board (`"{Weapon} Kills"`) does NOT count as a
   separate weapon board for the titles (Weapons Master / Grand Marshal) — one board
   per weapon. `is_kills_board()` gates this everywhere (board, card, playerstats, butler).
+- Maps have the same Highest-Kills companion: `"{Map} - {Faction} Kills"`, created by
+  `/setup_map_kills_boards`, shares the map's thread, ranks by KILLS, and (like map TD
+  boards) INCLUDES VIP runs. Because its name has BOTH `' - '` and `' Kills'`,
+  `_classify_board` checks kills BEFORE map and returns `map_kills` (via the stored
+  `map_kills` Type or the name pattern), so it is not miscounted as a map board for
+  Campaign Master. Backfill/finalise handled in `rebuild_score_boards` (`map_kills`
+  branch) and `update_leaderboards`.
 - The **Score** board (`Score`) ranks the highest scoreboard POINTS in a single match,
   one row per player, capped at top-50, +1 mark on board movement (like High Score).
   It is a feat board; its value is POINTS, never takedowns.
