@@ -2858,17 +2858,22 @@ class PersonalityCog(commands.Cog):
             print(f"[BUTLER] map roster ctx error: {_mre}")
 
         # Playstyle archetype — a neutral, descriptive label from where the player's
-        # marks concentrate (e.g. Knight Main, Generalist, Messer Specialist). Data
-        # questions only; wrapped so a stats hiccup never blocks the reply.
-        if _is_data_q:
+        # marks concentrate (e.g. Knight Main, Generalist, Messer Specialist). Injected
+        # on data questions AND whenever archetype/playstyle is asked about directly, so
+        # "what's my archetype" always gets the real label instead of an invented one.
+        _arch_asked = any(k in content_lower for k in (
+            'archetype', 'playstyle', 'play style', 'what am i', 'what class',
+            'which class', 'my class', 'my main', 'damage type', 'what type'))
+        if _is_data_q or _arch_asked:
             try:
                 from cogs.registry import get_player_descriptors
                 _arch, _dmg = await get_player_descriptors(discord_id_str)
                 if _arch:
                     player_stats_ctx += (
-                        f"\nPlaystyle archetype: {_arch}. If they ask what archetype or "
-                        f"playstyle they are, lead with this exact term ('{_arch}'), then add "
-                        f"your own colour. Do not invent a different archetype name.")
+                        f"\nPlaystyle archetype: {_arch}. This IS the answer to 'what is my "
+                        f"archetype/playstyle'. State it verbatim as their archetype ('{_arch}'); "
+                        f"you may add colour after, but do NOT invent a different archetype name "
+                        f"or title (no made-up epithets like 'Arbiter of Lethality').")
                 if _dmg:
                     player_stats_ctx += (
                         f"\nDamage-type lean: {_dmg} (based on which weapons' marks they've earned "
