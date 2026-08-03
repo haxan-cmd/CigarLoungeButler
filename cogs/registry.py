@@ -18,7 +18,7 @@ from config import (
 import utils.db as _db
 import utils.tilt as _tiltmod
 from utils.helpers import format_weapon_marks, nerve_log_error
-from utils.archetype import derive_archetype
+from utils.archetype import derive_archetype, derive_damage_style
 
 
 async def _player_name_ac(interaction: discord.Interaction, current: str):
@@ -297,6 +297,12 @@ def archetype_label(class_stats, weapon_marks):
     return derive_archetype(class_marks, weapon_marks, min_total=5)
 
 
+def damage_style_label(weapon_marks):
+    """Descriptive damage-type label (e.g. 'Blunt specialist', 'Chop-leaning',
+    'Mixed damage') from where a player's weapon marks land. None when too few."""
+    return derive_damage_style(weapon_marks, getattr(config, 'WEAPON_DAMAGE_TYPES', {}))
+
+
 async def get_player_archetype(discord_id, cached_data=None):
     """Async convenience wrapper for callers that only have a discord_id (the
     Butler). Computes registry stats then the label; None on any failure."""
@@ -305,6 +311,16 @@ async def get_player_archetype(discord_id, cached_data=None):
         return archetype_label(class_stats, weapon_marks)
     except Exception:
         return None
+
+
+async def get_player_descriptors(discord_id, cached_data=None):
+    """(class_archetype, damage_style) from a single registry-stats pass — used
+    by the Butler so it can mention both. (None, None) on any failure."""
+    try:
+        class_stats, weapon_marks = await calculate_registry_stats(discord_id, cached_data)
+        return archetype_label(class_stats, weapon_marks), damage_style_label(weapon_marks)
+    except Exception:
+        return None, None
 
 async def get_player_bounties_completed(discord_id):
     """Count distinct bounties completed by player."""
@@ -1132,9 +1148,10 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     # --- Message 1: Header card ---
     lines = []
     lines.append(f"*{player_title}*")
-    _arch = archetype_label(class_stats, weapon_marks)
-    if _arch:
-        lines.append(f"*{_arch}*")
+    _desc = " · ".join(x for x in (archetype_label(class_stats, weapon_marks),
+                                   damage_style_label(weapon_marks)) if x)
+    if _desc:
+        lines.append(f"*{_desc}*")
     lines.append("")
     lines.append("**Titles:**")
     for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):

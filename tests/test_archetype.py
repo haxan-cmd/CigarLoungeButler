@@ -1,4 +1,33 @@
-from utils.archetype import derive_archetype
+from utils.archetype import derive_archetype, derive_damage_style
+
+_DMG = {"Maul": "Blunt", "War Club": "Blunt", "Mace": "Blunt",
+        "Axe": "Chop", "War Axe": "Chop",
+        "Sword": "Cut", "Messer": "Cut",
+        "Bow": "Ranged"}
+
+
+def test_damage_none_below_min():
+    assert derive_damage_style({"Maul": 3}, _DMG) is None
+
+
+def test_damage_specialist():
+    assert derive_damage_style({"Maul": 8, "Mace": 4}, _DMG) == "Blunt specialist"
+
+
+def test_damage_leaning():
+    # Blunt 10 / total 22 = 45% -> leaning, not specialist.
+    wm = {"Maul": 10, "Axe": 7, "Sword": 5}
+    assert derive_damage_style(wm, _DMG) == "Blunt-leaning"
+
+
+def test_damage_mixed():
+    wm = {"Maul": 5, "Axe": 5, "Sword": 5}   # 33% each
+    assert derive_damage_style(wm, _DMG) == "Mixed damage"
+
+
+def test_damage_ignores_unmapped_weapons():
+    wm = {"Maul": 8, "Unknownium": 100}      # unmapped weapon dropped
+    assert derive_damage_style(wm, _DMG) == "Blunt specialist"
 
 
 def test_none_below_min_total():

@@ -2862,10 +2862,17 @@ class PersonalityCog(commands.Cog):
         # questions only; wrapped so a stats hiccup never blocks the reply.
         if _is_data_q:
             try:
-                from cogs.registry import get_player_archetype
-                _arch = await get_player_archetype(discord_id_str)
+                from cogs.registry import get_player_descriptors
+                _arch, _dmg = await get_player_descriptors(discord_id_str)
                 if _arch:
-                    player_stats_ctx += f"\nPlaystyle archetype: {_arch}."
+                    player_stats_ctx += (
+                        f"\nPlaystyle archetype: {_arch}. If they ask what archetype or "
+                        f"playstyle they are, lead with this exact term ('{_arch}'), then add "
+                        f"your own colour. Do not invent a different archetype name.")
+                if _dmg:
+                    player_stats_ctx += (
+                        f"\nDamage-type lean: {_dmg} (based on which weapons' marks they've earned "
+                        f"— Cut/Chop/Blunt/Ranged). Fair game to reference.")
             except Exception as _ae:
                 print(f"[BUTLER] archetype ctx error: {_ae}")
 

@@ -625,3 +625,52 @@ LEADERBOARD_NAME_OVERRIDES = {
     "833823649676394516": "massive egglant",  # Massive Eggplant (real submission id)
 }
 LEADERBOARD_NAME_CONTAINS = []
+
+
+# Weapon damage-type map (Chivalry 2: Cut / Chop / Blunt; ranged weapons = Ranged).
+# Confirmed by Zphulbod. Feeds the damage-style player attribute (utils/archetype).
+WEAPON_DAMAGE_TYPES = {
+    'Axe': 'Chop',
+    'Battle Axe': 'Chop',
+    'Bow': 'Ranged',
+    'Crossbow': 'Ranged',
+    'Cudgel': 'Blunt',
+    'Dagger': 'Cut',
+    'Dane Axe': 'Chop',
+    "Executioner's Axe": 'Chop',
+    'Falchion': 'Chop',
+    'Glaive': 'Cut',
+    'Goedendag': 'Blunt',
+    'Greatsword': 'Cut',
+    'Halberd': 'Chop',
+    'Hatchet': 'Chop',
+    'Heavy Cavalry Sword': 'Cut',
+    'Heavy Mace': 'Blunt',
+    'Highland Sword': 'Cut',
+    'Javelin': 'Ranged',
+    'Katars': 'Cut',
+    'Knife': 'Cut',
+    'Longsword': 'Cut',
+    'Mace': 'Blunt',
+    'Maul': 'Blunt',
+    'Messer': 'Cut',
+    'Morning Star': 'Blunt',
+    'One-Handed Spear': 'Cut',
+    'Pick Axe': 'Chop',
+    'Pole Axe': 'Chop',
+    'Polehammer': 'Blunt',
+    'Quarterstaff': 'Blunt',
+    'Rapier': 'Cut',
+    'Short Sword': 'Cut',
+    'Shovel': 'Blunt',
+    'Siege Crossbow': 'Ranged',
+    'Sledge Hammer': 'Blunt',
+    'Spear': 'Cut',
+    'Sword': 'Cut',
+    'Throwing Axe': 'Ranged',
+    'Two-Handed Hammer': 'Blunt',
+    'War Axe': 'Chop',
+    'War Bow': 'Ranged',
+    'War Club': 'Blunt',
+    'Warhammer': 'Blunt',
+}
