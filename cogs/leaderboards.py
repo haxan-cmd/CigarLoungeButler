@@ -885,11 +885,6 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             and faction and str(faction).strip() and takedowns > 0
             and not is_pacifist):
         updates.append((map_lb_name, takedowns, True, True, False))
-        # Companion Highest Kills board for this map (shares the map thread; only
-        # exists once /setup_map_kills_boards has created its row). VIP included,
-        # matching the map TD board.
-        if kills and kills > 0:
-            updates.append((f"{map_lb_name} Kills", kills, True, True, False))
 
     if "Flawless" in feats:
         # Unlimited board: every no-death run stacks (ranked by takedowns), like
@@ -1430,7 +1425,7 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
     for rec in all_lb_records:
         nm = rec['Leaderboard Name']
         kind = _classify_board(nm, rec.get('Type', ''))
-        if kind not in ('weapon', 'map', 'weapon_kills', 'map_kills'):
+        if kind not in ('weapon', 'map', 'weapon_kills'):
             continue
         if board_names is not None and nm not in board_names:
             continue
@@ -1465,14 +1460,6 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                     continue
                 if (s[10] or '').strip().lower() == 'yes':  # VIP excluded, same as TD boards
                     continue
-                try:
-                    score = int(s[8]) if s[8] else 0
-                except (ValueError, TypeError):
-                    score = 0
-            elif kind == 'map_kills':
-                if f"{s[5]} - {s[6]}" != nm[:-6]:  # strip " Kills" -> map board name
-                    continue
-                # Map boards include VIP runs, so their kills companion does too.
                 try:
                     score = int(s[8]) if s[8] else 0
                 except (ValueError, TypeError):
@@ -1755,18 +1742,12 @@ def _map_header(lb_name: str) -> str:
     """
     if ' - ' not in lb_name:
         return lb_name
-    # A map's Kills companion ("{Map} - {Faction} Kills") reuses this header; strip the
-    # suffix and label the board type so the Takedowns board and the Kills board below
-    # it read clearly as a pair.
-    _is_kills = lb_name.endswith(' Kills')
-    _core = lb_name[:-6] if _is_kills else lb_name
-    map_name, faction = _core.split(' - ', 1)
+    map_name, faction = lb_name.split(' - ', 1)
     emoji = FACTION_EMOJIS.get(faction, '⚔️')
     map_info = config.MAP_ATTACK_DEFENSE.get(map_name)
     is_attack = bool(map_info) and map_info[0] == faction
     suffix = "<:weapon_hs:1350656128635375698>" if is_attack else "🛡️"
-    kind = "Kills" if _is_kills else "Takedowns"
-    return f"{emoji} **{map_name} {faction}** {suffix} · {kind}"
+    return f"{emoji} **{map_name} {faction}** {suffix}"
 
 _LB_EMOJI = {
     "TUFF":             "<a:TUFF2:1520779243879927898>",
@@ -1944,6 +1925,36 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     return _peak(leth), _peak(warl), min_games
 
 
+def _map_kills_ranking(lb_name, all_subs, top=10):
+    """Top-N players by their best KILLS on a map board ("{Map} - {Faction}"),
+    computed live from submissions (VIP included, matching the map TD board).
+    Rendered as a section INSIDE the map embed, not a separate board."""
+    best = {}
+    for s in (all_subs or []):
+        if len(s) < 9:
+            continue
+        if len(s) > 11 and s[11] and 'Unlisted' in str(s[11]):
+            continue
+        if f"{(s[5] or '').strip()} - {(s[6] or '').strip()}" != lb_name:
+            continue
+        try:
+            k = int(s[8]) if s[8] else 0
+        except (ValueError, TypeError):
+            k = 0
+        if k <= 0:
+            continue
+        did = (s[2] or '').strip()
+        name = (s[1] or '').strip()
+        key = did if did else (f"legacy:{name.lower()}" if name else '')
+        if not key:
+            continue
+        cur = best.get(key)
+        if cur is None or k > cur[0]:
+            best[key] = (k, name)
+    rows = sorted(best.values(), key=lambda t: -t[0])[:top]
+    return [(name, k) for k, name in rows]
+
+
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Takedown board embeds WITH live rating fields appended: weapon boards show
     Lethality (kills/TD) + Warlord (takedowns/team kills); map boards show
@@ -1981,9 +1992,16 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
         lr = None
     if not _want_war:
         wr = None
+    _kills_rows = None
+    if is_map:
+        try:
+            _kmk_subs = all_subs if all_subs is not None else await _db.get_all_submissions()
+            _kills_rows = _map_kills_ranking(lb_name, _kmk_subs)
+        except Exception as e:
+            print(f"[BOARD] map kills compute error for {lb_name}: {e}")
     _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                       lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
-                                      kill_share_rows=_ksr)
+                                      kill_share_rows=_ksr, kills_rows=_kills_rows)
     # Kills boards close the thread's decorative frame themselves: the bottom
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
@@ -1993,8 +2011,8 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     return _embs
 
 
-def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None):
-    if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows):
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None, kills_rows=None):
+    if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows and not kills_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
     def _fld(rows, fmt):
@@ -2003,6 +2021,10 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
             out.append(f"`{i}.` `{p}` \u2014 {fmt(sc)}")
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
+    if kills_rows:
+        _kout = [f"`{i}.` `{p}` \u2014 {sc}" for i, (p, sc) in enumerate(kills_rows[:10], 1)]
+        tail.add_field(name="\U0001F5E1\ufe0f Kills",
+                       value="\n".join(_kout) if _kout else "*No kills yet.*", inline=False)
     _le = te.get('Lethality', '🧪')
     _we = te.get('Warlord', '🛡️')
     if lethality_rows is not None:
@@ -2030,14 +2052,14 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     )
 
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None):
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
-        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, kills_rows=kills_rows)
         return [e]
 
     lines = []
@@ -2073,7 +2095,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
-    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, kills_rows=kills_rows)
     return embeds
 
 
@@ -4195,93 +4217,44 @@ class LeaderboardsCog(commands.Cog):
             f"({len(knames)} weapon threads). New submissions update them automatically.",
             ephemeral=True)
 
-    @app_commands.command(name="setup_map_kills_boards", description="Create a Highest Kills board under every map TD board and backfill from history (mod only).")
-    async def setup_map_kills_boards(self, interaction: discord.Interaction):
+    @app_commands.command(name="remove_map_kills_boards", description="Remove the old SEPARATE map Kills boards (kills now render inside the map embed) (mod only).")
+    async def remove_map_kills_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         recs = await _get_lb_records()
-        map_recs = [r for r in recs
-                    if _classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'map'
-                    and str(r.get('Thread ID') or '').strip()]
-        existing = {r['Leaderboard Name'] for r in recs}
-        created, rendered = [], 0
-        # 1. Ensure a kills board row per map, sharing the map's thread.
-        for rec in map_recs:
-            kname = _kills_board_name(rec['Leaderboard Name'])
-            if kname not in existing:
-                await _db.upsert_leaderboard(kname, rec['Thread ID'], '', 'map_kills')
-                created.append(kname)
-        # 2. Backfill entries from full submission history (no render yet).
-        knames = [_kills_board_name(r['Leaderboard Name']) for r in map_recs]
-        await rebuild_score_boards(interaction.guild, board_names=knames, render=False)
-        # 3. Render below the map TD board in the same thread.
-        recs = await _get_lb_records()
-        for rec in recs:
+        targets = [r for r in recs
+                   if _classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'map_kills']
+        removed = 0
+        for rec in targets:
             nm = rec['Leaderboard Name']
-            if nm not in knames:
-                continue
-            msg_raw = str(rec.get('Message ID') or '').strip()
+            # Delete the stray rendered embed(s) from the SHARED map thread — never
+            # the thread itself (that would take the map's Takedowns board with it).
             try:
-                thread = (interaction.guild.get_channel(int(rec['Thread ID']))
-                          or await interaction.guild.fetch_channel(int(rec['Thread ID'])))
+                tid = int(rec['Thread ID'])
+                thread = interaction.guild.get_channel(tid) or await interaction.guild.fetch_channel(tid)
+                for mid in _re.findall(r'\d{17,20}', str(rec.get('Message ID') or '')):
+                    try:
+                        m = await thread.fetch_message(int(mid))
+                        await m.delete()
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
             except Exception as e:
-                print(f"[MAP KILLS SETUP] thread fetch error ({nm}): {e}")
-                continue
-            def _is_spacer(m):
-                return (m.author.id == interaction.client.user.id and m.attachments
-                        and not m.embeds and not (m.content or '').strip())
-            if msg_raw:
-                await _render_board(interaction.guild, rec, nm)
-                rendered += 1
-                try:
-                    _ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
-                    _first_msg = await thread.fetch_message(_ids[0])
-                    async for _m in thread.history(limit=4, before=_first_msg):
-                        if _is_spacer(_m):
-                            await _m.delete()
-                            await asyncio.sleep(0.3)
-                        break
-                    async for _m in thread.history(limit=6, after=_first_msg):
-                        if _is_spacer(_m):
-                            await _m.delete()
-                            await asyncio.sleep(0.3)
-                except Exception as e:
-                    print(f"[MAP KILLS SETUP] frame fix error ({nm}): {e}")
-                continue
+                print(f"[MAP KILLS REMOVE] thread/msg error ({nm}): {e}")
             try:
-                try:
-                    _tail = [m async for m in thread.history(limit=2)]
-                    for _m in _tail:
-                        if _is_spacer(_m):
-                            await _m.delete()
-                            await asyncio.sleep(0.3)
-                        break
-                except Exception:
-                    pass
-                board_rows = await _db.get_leaderboard_by_board(nm)
-                entries = [{'player': r[1], 'did': r[2], 'score': _safe_int(r[3]),
-                            'link': r[4] if len(r) > 4 else '', 'weapon': r[5] if len(r) > 5 else ''}
-                           for r in board_rows]
-                entries.sort(key=lambda x: -x['score'])
-                embeds = await _rated_embeds(nm, entries, False)
-                ids = []
-                for emb in embeds:
-                    _has_deco = bool(emb.image and str(emb.image.url or '').startswith('attachment://'))
-                    msg = await thread.send(
-                        embed=emb,
-                        file=discord.File(DECORATION_BOTTOM) if _has_deco else discord.utils.MISSING,
-                        view=_nav_view(interaction.guild.id) if _has_deco else discord.utils.MISSING)
-                    ids.append(str(msg.id))
-                    await asyncio.sleep(0.4)
-                await _db.update_leaderboard_messages(nm, '|'.join(ids))
-                rendered += 1
+                await _db.clear_leaderboard_boards([nm])
             except Exception as e:
-                print(f"[MAP KILLS SETUP] render error ({nm}): {e}")
+                print(f"[MAP KILLS REMOVE] clear entries error ({nm}): {e}")
+            try:
+                await _db.delete_leaderboard(nm)
+                removed += 1
+            except Exception as e:
+                print(f"[MAP KILLS REMOVE] delete record error ({nm}): {e}")
         await interaction.followup.send(
-            f"\u2705 Map kills boards: {len(created)} created, {rendered} rendered "
-            f"({len(knames)} map threads). New submissions update them automatically.",
+            f"\u2705 Removed {removed} separate map Kills board(s). Kills now render INSIDE each "
+            f"map embed \u2014 run /refresh_all to repaint the map boards.",
             ephemeral=True)
 
     @app_commands.command(name="delete_board", description="Delete a stray leaderboard board + its thread (mod only). Preview first.")

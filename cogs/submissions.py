@@ -1972,9 +1972,7 @@ async def _apply_edit(interaction, ev):
             # pre-edit weapon/map boards explicitly, keyed by discord_id.
             _extra_old = set()
             _old_kills = f"{_old_weapon} Kills" if (_old_weapon and not ev.vip) else None
-            # Map kills companion includes VIP (like the map TD board), so no VIP gate.
-            _old_map_kills = f"{_old_map_board} Kills" if _old_map_board else None
-            for _ob in ((None if ev.vip else _old_weapon), _old_kills, _old_map_board, _old_map_kills):
+            for _ob in ((None if ev.vip else _old_weapon), _old_kills, _old_map_board):
                 if _ob:
                     try:
                         await _db.delete_leaderboard_entries_by_board_and_discord(_ob, str(ev.author.id))
@@ -1999,8 +1997,7 @@ async def _apply_edit(interaction, ev):
                     pass
             _new_boards = {b for b in (None if ev.vip else ev.weapon,
                                        None if ev.vip else f"{ev.weapon} Kills",
-                                       f"{ev.map_name} - {ev.faction}",
-                                       f"{ev.map_name} - {ev.faction} Kills") if b}
+                                       f"{ev.map_name} - {ev.faction}") if b}
             _affected = set(_old_boards) | _new_boards | _extra_old
             if _affected:
                 await rebuild_score_boards(

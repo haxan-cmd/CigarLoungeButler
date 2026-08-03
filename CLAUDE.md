@@ -80,13 +80,15 @@ Sheets era). Cogs index into them positionally. Key maps:
 - A weapon's Highest-Kills companion board (`"{Weapon} Kills"`) does NOT count as a
   separate weapon board for the titles (Weapons Master / Grand Marshal) — one board
   per weapon. `is_kills_board()` gates this everywhere (board, card, playerstats, butler).
-- Maps have the same Highest-Kills companion: `"{Map} - {Faction} Kills"`, created by
-  `/setup_map_kills_boards`, shares the map's thread, ranks by KILLS, and (like map TD
-  boards) INCLUDES VIP runs. Because its name has BOTH `' - '` and `' Kills'`,
-  `_classify_board` checks kills BEFORE map and returns `map_kills` (via the stored
-  `map_kills` Type or the name pattern), so it is not miscounted as a map board for
-  Campaign Master. Backfill/finalise handled in `rebuild_score_boards` (`map_kills`
-  branch) and `update_leaderboards`.
+- Map kills are NOT a separate board — they render as a section INSIDE the map embed,
+  right under the takedowns list and before Kill Share/Warlord. `_map_kills_ranking`
+  computes top-10 by best kills per player for that `"{Map} - {Faction}"` live from
+  submissions (VIP included, unlisted excluded), threaded through `_rated_embeds` →
+  `format_leaderboard_embeds` → `_append_rating_fields` as `kills_rows`. (An earlier
+  separate-board approach was reverted; `/remove_map_kills_boards` cleans up any stray
+  `map_kills` boards a prior `/setup_map_kills_boards` run created. `_classify_board`
+  still recognises `map_kills` so those strays are found and stay out of the Campaign
+  Master count.)
 - The **Score** board (`Score`) ranks the highest scoreboard POINTS in a single match,
   one row per player, capped at top-50, +1 mark on board movement (like High Score).
   It is a feat board; its value is POINTS, never takedowns.

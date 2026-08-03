@@ -12,7 +12,7 @@ pytest.importorskip("discord")
 pytest.importorskip("asyncpg")
 
 import config
-from cogs.leaderboards import _classify_board
+from cogs.leaderboards import _classify_board, _map_kills_ranking
 from cogs.favourites import _calculate_butler_stats_uncached
 
 _MAP = next(iter(config.MAP_ATTACK_DEFENSE))
@@ -39,3 +39,17 @@ def test_map_kills_not_counted_in_campaign_master_total(fake_db):
     fake_db.leaderboard_data = [lb(f"{_MAP} - Agatha"), lb(f"{_MAP} - Agatha Kills")]
     s = run(_calculate_butler_stats_uncached())
     assert s["_map_board_total"] == 1   # the kills companion is not a second map board
+
+
+def test_inline_map_kills_ranking(make_sub):
+    # The Kills section rendered inside the map embed: best kills per player on
+    # that map/faction, VIP included, unlisted excluded, other factions ignored.
+    subs = [
+        make_sub(did="1", name="Alice", kills=90, map_=_MAP, faction="Agatha"),
+        make_sub(did="1", name="Alice", kills=70, map_=_MAP, faction="Agatha"),   # lower, dropped
+        make_sub(did="2", name="Bob", kills=110, map_=_MAP, faction="Agatha", vip="Yes"),  # VIP counts
+        make_sub(did="3", name="Cara", kills=200, map_=_MAP, faction="Mason"),    # other faction
+        make_sub(did="4", name="Dan", kills=95, map_=_MAP, faction="Agatha", feats="Unlisted"),  # excluded
+    ]
+    ranking = _map_kills_ranking(f"{_MAP} - Agatha", subs)
+    assert ranking == [("Bob", 110), ("Alice", 90)]

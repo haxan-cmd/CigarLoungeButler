@@ -29,7 +29,7 @@
 - `/refresh_monthly` **[Admin]** — Rebuild all Monthly Report boards + pinned index.
 - `/setup` **[Mod]** — Set up a bot-owned leaderboard in this thread.
 - `/setup_score_board` **[Mod]** — Create the Score board (highest match points, one row/player, top-50) in the feats forum.
-- `/setup_map_kills_boards` **[Mod]** — Create a Highest Kills board under every map TD board (shares the map thread) and backfill from history. New submissions update them automatically. Mirrors `/setup_kills_boards` for weapons.
+- `/remove_map_kills_boards` **[Mod]** — Remove the old SEPARATE map Kills boards. Map kills now render as a section INSIDE each map embed (top 10 by kills, VIP included), so no separate board is needed. Deletes the stray board embeds/records only — never the map thread. Run `/refresh_all` afterwards to repaint.
 - `/backfill_feat_boards` also seeds the Score board from submission history.
 - `/create_missing_boards` **[Admin]** — Create board threads for primary weapons that lack one.
 - `/rebuild_boards` **[Mod]** — Rebuild weapon + map boards from full submission history.
