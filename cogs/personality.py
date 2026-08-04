@@ -2052,10 +2052,12 @@ class PersonalityCog(commands.Cog):
                     # mention-only footnote — the Butler was crediting
                     # everything in marks because they headlined this sheet.
                     player_stats_ctx = (
-                        f"Player stats — Logged runs: {logged_runs}{pb_str}\n"
+                        f"Player stats (REFERENCE ONLY — do NOT volunteer these) — Logged runs: {logged_runs}{pb_str}\n"
                         f"(Career marks: {total_marks}; top weapons by marks: {top_weapons}. "
-                        f"Only bring up marks if the player asks about marks or weapon ranks — "
-                        f"otherwise talk in runs, stats, and season form.)")
+                        f"Bring up their runs, records, marks, boards or ranks ONLY when they ask about their own "
+                        f"performance, or when they brag and you're calling them out. For anything neutral — a "
+                        f"summary, lore, a question about someone else, general chat — leave their numbers out "
+                        f"entirely. Do NOT tack their record onto an answer as a flourish.)")
                     # True best single-run lethality (highest kills/TD ratio of ANY run) plus
                     # the average kill rate, matching the registry card. The Butler used to
                     # DERIVE "best lethality" from the best-TD game, which is a different, wrong
