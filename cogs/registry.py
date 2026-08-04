@@ -1719,6 +1719,14 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     thread = None
             if thread:
                 try:
+                    # Forum posts auto-archive after inactivity; editing a message in an
+                    # archived thread 400s (50083 "Thread is archived") and skipped the
+                    # whole card update. Unarchive our own card thread first, then edit.
+                    if getattr(thread, 'archived', False):
+                        try:
+                            await thread.edit(archived=False)
+                        except Exception as _unarch_err:
+                            print(f"Registry unarchive failed for {player_name}: {_unarch_err}")
                     _meid = guild.me.id if guild.me else None
                     # Skip system messages (pin notices etc.) — editing/deleting them
                     # 403s (50021) and aborted the whole card update for the player
