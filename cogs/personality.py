@@ -2963,6 +2963,9 @@ class PersonalityCog(commands.Cog):
 
         channel_id = message.channel.id
         is_main = channel_id == MAIN_CHANNEL_ID
+        # Channels where the Butler answers free-text (main + any extras like skynet).
+        # is_main stays reserved for the main-only PROACTIVE behaviours below.
+        _butler_chat_ok = channel_id in getattr(config, 'BUTLER_CHAT_CHANNEL_IDS', {MAIN_CHANNEL_ID})
         is_pinged = self.bot.user in message.mentions
 
         # Engagement signal: someone replied directly to a Butler line. Counts
@@ -3011,8 +3014,8 @@ class PersonalityCog(commands.Cog):
                 _RULES_LINK_COOLDOWNS[message.author.id] = _rt
                 _proactive_rules = True
 
-        # ── Main only — only respond if pinged or butler/clanker mentioned ────────
-        if not is_main:
+        # ── Chat channels — only respond if pinged or butler/clanker mentioned ────
+        if not _butler_chat_ok:
             return
         should_respond = (is_pinged or mentions_butler or mentions_bald_female
                           or mentions_manager or mentions_stats or _proactive_rules)

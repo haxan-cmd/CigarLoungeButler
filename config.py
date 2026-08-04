@@ -19,6 +19,10 @@ DECORATION_BOTTOM = os.getenv('DECORATION_BOTTOM', 'WMMR_Spacer_Bottom.png')
 # ── Channel IDs ───────────────────────────────────────────────────────────────
 SUBMISSIONS_CHANNEL_ID      = 1328832440927518920
 MAIN_CHANNEL_ID             = 1324447691467526338
+SKYNET_CHANNEL_ID           = 1525101978034901002   # skynet — Butler answers text chat here too
+# Channels where the Butler answers free-text chat (when pinged or named "butler"/"clanker").
+# Main plus any extras (e.g. skynet). Slash commands work everywhere regardless of this.
+BUTLER_CHAT_CHANNEL_IDS     = {MAIN_CHANNEL_ID} | ({SKYNET_CHANNEL_ID} if SKYNET_CHANNEL_ID else set())
 REGISTRY_FORUM_CHANNEL_ID   = 1519127645286170654   # butlers-archive
 MAP_RECORDS_FORUM_ID        = 1460730790559092888
 WEAPONS_2H_FORUM_ID         = 1456639902077812868
