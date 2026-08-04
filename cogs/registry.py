@@ -1721,8 +1721,11 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                 try:
                     # Forum posts auto-archive after inactivity; editing a message in an
                     # archived thread 400s (50083 "Thread is archived") and skipped the
-                    # whole card update. Unarchive our own card thread first, then edit.
-                    if getattr(thread, 'archived', False):
+                    # whole card update. Unarchive our own card thread to edit it, then
+                    # RE-archive at the end — the short auto-archive is set on purpose to
+                    # keep the registry sidebar tidy, so we leave the card collapsed.
+                    _was_archived = bool(getattr(thread, 'archived', False))
+                    if _was_archived:
                         try:
                             await thread.edit(archived=False)
                         except Exception as _unarch_err:
@@ -1768,6 +1771,14 @@ async def create_or_update_registry_card(guild, discord_id, player_name, cached_
                     if thread.name != player_name:
                         await thread.edit(name=player_name)
                     await save_registry_thread_id(discord_id, player_name, thread.id)
+                    # Re-collapse the card if it was archived before, so updating it
+                    # doesn't clutter the sidebar (the forum's short auto-archive is
+                    # deliberate). Content is now current; the thread just re-archives.
+                    if _was_archived:
+                        try:
+                            await thread.edit(archived=True)
+                        except Exception:
+                            pass
                     print(f"Registry card updated for {player_name}")
                     if not skip_index:
                         asyncio.create_task(update_archive_index(guild))
