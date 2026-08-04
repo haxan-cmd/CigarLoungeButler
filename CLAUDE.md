@@ -80,6 +80,11 @@ Sheets era). Cogs index into them positionally. Key maps:
 - A weapon's Highest-Kills companion board (`"{Weapon} Kills"`) does NOT count as a
   separate weapon board for the titles (Weapons Master / Grand Marshal) — one board
   per weapon. `is_kills_board()` gates this everywhere (board, card, playerstats, butler).
+- Archer/ranged weapons (Bow, War Bow, Crossbow, Siege Crossbow, Javelin, Throwing Axe)
+  are excluded BY POLICY from the melee titles (Weapons Master / Grand Marshal) —
+  `utils.boards.is_archer_weapon()` (derived from `REGISTRY_CLASS_MAP['Archer']`), gated
+  in `favourites._calculate_butler_stats_uncached`. The ranged boards still rank on their
+  own; they just don't count toward those titles or their board denominators.
 - Map kills are NOT a separate board — they render as a section INSIDE the map embed,
   right under the takedowns list and before Kill Share/Warlord. `_map_kills_ranking`
   computes top-10 by best kills per player for that `"{Map} - {Faction}"` live from

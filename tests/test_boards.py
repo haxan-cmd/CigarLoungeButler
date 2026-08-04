@@ -9,6 +9,15 @@ import config
 from utils import boards as b
 
 
+def test_archer_weapons_detected():
+    aw = b.archer_weapons()
+    assert "Bow" in aw and "Crossbow" in aw and "Throwing Axe" in aw
+    assert b.is_archer_weapon("War Bow") is True
+    assert b.is_archer_weapon("Messer") is False   # melee weapon
+    assert b.is_archer_weapon("Falmire - Agatha") is False  # map board
+    assert b.is_archer_weapon("") is False
+
+
 def test_feat_set_contains_the_new_boards():
     for name in ("Score", "Hybrid", "Mallet", "Knife", "TUFF", "Pacifist",
                  "100 Kills", "200 Takedowns", "Triple", "Flawless"):

@@ -60,6 +60,22 @@ def non_weapon_feat_boards():
     return FEAT_BOARD_NAMES - WEAPON_FEAT_BOARDS - _KILLS_OR_TD - _PROGRESS_BOARDS
 
 
+def archer_weapons():
+    """The Archer-class weapons (Bow, Crossbow, Javelin, Throwing Axe, ...), derived
+    from config.REGISTRY_CLASS_MAP. Excluded BY POLICY from the melee title placements
+    (Weapons Master / Grand Marshal): a ranged board is still ranked on its own, it
+    just doesn't count toward those titles."""
+    out = set()
+    for _sub in getattr(config, "REGISTRY_CLASS_MAP", {}).get("Archer", []):
+        out.update(getattr(config, "REGISTRY_WEAPON_MAP", {}).get(_sub, []))
+    return out
+
+
+def is_archer_weapon(name):
+    """True if `name` is an Archer-class weapon board (excluded from melee titles)."""
+    return bool(name) and name in archer_weapons()
+
+
 def board_unit(name):
     """Display unit for a board's stored score value ('points'/'kills'/'kill
     margin'/'TDs'). Prevents reporting Score points as takedowns."""

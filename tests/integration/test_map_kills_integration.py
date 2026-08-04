@@ -41,6 +41,18 @@ def test_map_kills_not_counted_in_campaign_master_total(fake_db):
     assert s["_map_board_total"] == 1   # the kills companion is not a second map board
 
 
+def test_archer_weapons_excluded_from_melee_titles(fake_db):
+    # Two melee weapon boards + two Archer/ranged boards. Only the melee ones count
+    # toward Weapons Master / Grand Marshal.
+    fake_db.leaderboard_data = [
+        lb("Messer"), lb("Maul"),          # melee -> count
+        lb("Bow"), lb("Crossbow"),         # archer -> excluded
+    ]
+    s = run(_calculate_butler_stats_uncached())
+    assert s["_weapon_board_total"] == 2
+    assert s["_combined_board_total"] == 2   # combined = weapon + map, archer not in either
+
+
 def test_inline_map_kills_ranking(make_sub):
     # The Kills section rendered inside the map embed: best kills per player on
     # that map/faction, VIP included, unlisted excluded, other factions ignored.

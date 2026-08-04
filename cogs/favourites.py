@@ -258,7 +258,7 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     map_placements = {}
     non_weapon_feat_placements = {}
 
-    from utils.boards import non_weapon_feat_boards, is_kills_board
+    from utils.boards import non_weapon_feat_boards, is_kills_board, is_archer_weapon
     SKIP_LB = {'100 Kills', '200 Takedowns'}
     # Non-weapon feat boards (Score, TUFF, Pacifist, Triple, Hybrid, Flawless,
     # Healing…) count toward Grand Marshal but NOT Weapons Master. Single source in
@@ -287,6 +287,9 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
             continue
         if is_kills_board(lb_name):
             continue   # a weapon's Highest-Kills companion is NOT a separate weapon board
+        if is_archer_weapon(lb_name):
+            continue   # Archer/ranged weapons don't count toward the melee titles
+                       # (Weapons Master / Grand Marshal) by policy
         is_map = ' - ' in lb_name
         if is_map:
             _map_board_set.add(lb_name)
