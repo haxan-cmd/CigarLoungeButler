@@ -2219,6 +2219,20 @@ class PersonalityCog(commands.Cog):
                                     + "\n[To EXTEND a title, place on MORE of its boards: weapon boards for Weapons "
                                       "Master, map boards for Campaign Master, either for Grand Marshal. Use the "
                                       "board-gap lists in this context to advise which specific boards to chase.]")
+                            # Weapon-board gaps that COUNT toward the melee titles — Archer/ranged
+                            # boards are excluded from Weapons Master / Grand Marshal by policy, so
+                            # they must NOT appear as a title gap.
+                            try:
+                                from utils.boards import is_archer_weapon as _isarch
+                                _title_wgaps = [w for w in _absent if not _isarch(w)]
+                                player_stats_ctx += (
+                                    f"\nWeapon boards NOT on that count toward Weapons Master / Grand Marshal "
+                                    f"({len(_title_wgaps)}): " + (", ".join(_title_wgaps) if _title_wgaps else "none")
+                                    + ". [For TITLE questions use THIS list, not the full 'boards not on' above. "
+                                      "Archer/ranged boards (Bow, War Bow, Crossbow, Siege Crossbow, Javelin, "
+                                      "Throwing Axe) do NOT count toward the melee titles — never name them as a title gap.]")
+                            except Exception as _twg:
+                                print(f"[BUTLER] ctx title weapon-gap error: {_twg}")
                             # Map-board gaps (Campaign Master), matched by discord_id.
                             _map_on, _map_all = set(), set()
                             for _r in ld_for_pb:
