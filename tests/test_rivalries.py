@@ -70,14 +70,30 @@ def test_excludes_resubmit():
     assert compute_rivalries("1", subs)['nemesis'] is None
 
 
-def test_no_banner_totals_names_no_false_ally_but_keeps_foe():
-    # Without banner totals side can't be confirmed -> NO ally claimed, but the shared
-    # lobby (matched by total_lobby_kills) still surfaces B as a frequent foe.
+def test_no_banner_totals_is_neither_ally_nor_nemesis():
+    # Without banner totals the side can't be confirmed -> NO ally claimed AND no
+    # nemesis. A frequent lobby-mate with unconfirmable sides must NOT be a false
+    # nemesis (that was the "@X you play with every game is your nemesis" bug).
     a = row("2026-07-27 12:00:00", "A", "1"); a[25] = ""; a[26] = ""; a[18] = "600"
     b = row("2026-07-27 12:02:00", "B", "2"); b[25] = ""; b[26] = ""; b[18] = "600"
     d = compute_rivalries("1", [a, b])
     assert d['ally'] is None
-    assert d['nemesis'] and d['nemesis']['name'] == "B" and d['nemesis']['meetings'] == 1
+    assert d['nemesis'] is None
+
+
+def test_frequent_teammate_is_not_nemesis():
+    # A plays WITH B every game (same banner orientation = teammate) and faces C once
+    # as a confirmed opponent. The nemesis must be C, never the constant teammate B.
+    subs = []
+    for i in range(4):
+        ts = f"2026-07-2{i+1} 12:00:00"
+        subs.append(row(ts, "A", "1", team_total=300, enemy_total=280))
+        subs.append(row(ts, "B", "2", team_total=300, enemy_total=280))   # same side = ally
+    subs.append(row("2026-07-26 12:00:00", "A", "1", team_total=250, enemy_total=240))
+    subs.append(row("2026-07-26 12:01:00", "C", "3", team_total=240, enemy_total=250))  # swapped = foe
+    d = compute_rivalries("1", subs)
+    assert d['ally']['name'] == "B"
+    assert d['nemesis'] and d['nemesis']['name'] == "C"
 
 
 def test_pair_awards_bitter_rivals_and_inseparable():
@@ -149,8 +165,8 @@ def test_context_uses_averages_not_winloss():
     ]
     ctx = rivalry_context("A", compute_rivalries("1", subs))
     assert "Nemesis" in ctx and "B" in ctx
-    assert "60" in ctx and "40" in ctx           # comparative averages present
-    assert "meeting" in ctx and "average" in ctx  # framed as meetings + averages
+    assert "60" in ctx and "40" in ctx              # comparative averages present
+    assert "opponent" in ctx and "average" in ctx   # framed as opponents + averages
     # the nemesis LINE never claims a beaten opponent (header may mention "no win/loss")
     nem_line = next(l for l in ctx.splitlines() if l.startswith("- Nemesis"))
     assert "beat" not in nem_line.lower() and "-" not in nem_line.split(":", 1)[1]

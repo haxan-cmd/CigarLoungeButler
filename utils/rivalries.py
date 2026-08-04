@@ -96,7 +96,7 @@ def compute_rivalries(target_key, all_subs, window_min=45):
     banner-confirmed teammate."""
     subs = [r for r in all_subs if len(r) > 9 and not _excluded(r)]
     target_runs = [r for r in subs if ident(r)[0] == target_key]
-    enc = defaultdict(lambda: {'key': '', 'name': '', 'meetings': 0, 'ally': 0,
+    enc = defaultdict(lambda: {'key': '', 'name': '', 'meetings': 0, 'ally': 0, 'opp': 0,
                                'my_td': 0, 'my_k': 0, 'their_td': 0, 'their_k': 0})
     for tr in target_runs:
         _mtd, _mk = _i(tr[7]) or 0, _i(tr[8]) or 0
@@ -112,21 +112,27 @@ def compute_rivalries(target_key, all_subs, window_min=45):
             e['my_k'] += _mk
             e['their_td'] += (_i(r[7]) or 0)
             e['their_k'] += (_i(r[8]) or 0)
-            if _same_team(tr, r) is True:
+            _st = _same_team(tr, r)
+            if _st is True:
                 e['ally'] += 1
+            elif _st is False:
+                e['opp'] += 1
     if not enc:
         return {'nemesis': None, 'ally': None, 'foes': [], 'allies': []}
 
     def _shaped(e):
         n = e['meetings'] or 1
         return {'key': e['key'], 'name': e['name'], 'meetings': e['meetings'],
+                'clashes': e['opp'],
                 'my_td': round(e['my_td'] / n, 1), 'my_k': round(e['my_k'] / n, 1),
                 'their_td': round(e['their_td'] / n, 1), 'their_k': round(e['their_k'] / n, 1)}
 
-    def _foe_score(e):
-        return e['meetings'] - e['ally']   # shared lobbies not confirmed as teammate
-
-    foes = sorted((e for e in enc.values() if _foe_score(e) > 0), key=lambda e: -_foe_score(e))
+    # Nemesis = the most-faced CONFIRMED opponent. Only games whose banner totals put the
+    # two on OPPOSITE sides count (e['opp']); a frequent TEAMMATE whose side merely can't
+    # be confirmed no longer floats up as a false nemesis (the "@X you play with every
+    # game" bug). Require opp >= ally so someone you mostly team with is never a nemesis.
+    foes = sorted((e for e in enc.values() if e['opp'] > 0 and e['opp'] >= e['ally']),
+                  key=lambda e: (-e['opp'], -e['meetings']))
     allies = sorted((e for e in enc.values() if e['ally'] > 0), key=lambda e: -e['ally'])
     return {
         'nemesis': _shaped(foes[0]) if foes else None,
@@ -203,9 +209,10 @@ def rivalry_context(display_name, data, top=3):
         return ''
     lines = [f"RIVALRY DATA for {display_name} (shared-lobby history, approximate; NO per-game win/loss):"]
     if nem:
-        _mt = f"{nem['meetings']} meeting{'s' if nem['meetings'] != 1 else ''}"
-        lines.append(f"- Nemesis (the foe met most): {nem['name']}, {_mt}. Across those games {display_name} "
-                     f"averages {nem['my_td']} TD / {nem['my_k']} K to {nem['name']}'s "
+        _c = nem.get('clashes', nem['meetings'])
+        _mt = f"{_c} time{'s' if _c != 1 else ''} as opponents"
+        lines.append(f"- Nemesis (most-faced opponent): {nem['name']}, faced {_mt}. Across your shared games "
+                     f"{display_name} averages {nem['my_td']} TD / {nem['my_k']} K to {nem['name']}'s "
                      f"{nem['their_td']} TD / {nem['their_k']} K (who tends to show up bigger).")
     if al:
         _m = f"{al['matches']} time{'s' if al['matches'] != 1 else ''}"
@@ -230,7 +237,7 @@ def compute_pair_awards(all_subs, window_min=45, min_meetings=2):
         mp = (r[5] or '').strip().lower()
         if mp and _ts(r[0]):
             by_map[mp].append(r)
-    pair = defaultdict(lambda: {'a': '', 'b': '', 'meetings': 0, 'ally': 0})
+    pair = defaultdict(lambda: {'a': '', 'b': '', 'meetings': 0, 'ally': 0, 'opp': 0})
     for runs in by_map.values():
         runs.sort(key=lambda r: _ts(r[0]))
         for i in range(len(runs)):
@@ -251,17 +258,19 @@ def compute_pair_awards(all_subs, window_min=45, min_meetings=2):
                 else:
                     p['a'], p['b'] = (n2 or p['a']), (n1 or p['b'])
                 p['meetings'] += 1
-                if _same_team(r1, r2) is True:
+                _st = _same_team(r1, r2)
+                if _st is True:
                     p['ally'] += 1
+                elif _st is False:
+                    p['opp'] += 1
 
-    def _clash(p):
-        return p['meetings'] - p['ally']
-
-    rivals = [p for p in pair.values() if p['meetings'] >= min_meetings and _clash(p) > 0]
+    # Bitter Rivals = the pair confirmed on OPPOSITE sides most often (not just frequent
+    # lobby-mates), so two constant teammates can't win it and require opp >= ally.
+    rivals = [p for p in pair.values() if p['opp'] >= min_meetings and p['opp'] >= p['ally']]
     duos = [p for p in pair.values() if p['ally'] >= min_meetings]
-    br = max(rivals, key=_clash) if rivals else None
+    br = max(rivals, key=lambda p: p['opp']) if rivals else None
     ins = max(duos, key=lambda p: p['ally']) if duos else None
     return {
-        'bitter_rivals': ({'a': br['a'], 'b': br['b'], 'clashes': _clash(br)} if br else None),
+        'bitter_rivals': ({'a': br['a'], 'b': br['b'], 'clashes': br['opp']} if br else None),
         'inseparable': ({'a': ins['a'], 'b': ins['b'], 'matches': ins['ally']} if ins else None),
     }
