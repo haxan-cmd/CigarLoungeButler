@@ -12,11 +12,18 @@ def is_pacifist(kills, takedowns):
 
 
 def is_triple_run(kills, takedowns, score, confirmed=False):
-    """A Triple: 150+ takedowns AND 100+ kills AND the 20,000-point bar met. The bar
-    is met either by an explicit confirmation at submit/edit time (the '20k+?' prompt,
-    or an existing Triple tag on an edit) or by a scorecard score >= 20000."""
-    return (takedowns >= 150 and kills >= 100
-            and (bool(confirmed) or (score is not None and score >= 20000)))
+    """A Triple: 150+ takedowns AND 100+ kills AND the 20,000-point bar met.
+
+    The PARSED scoreboard score is authoritative: when a score was actually read, the
+    Triple stands only if score >= 20000. A manual '20k+?' confirmation can NOT override
+    a score we read below the bar — that hole let 19,500-point 'Triples' through.
+    Confirmation (the prompt, or an existing Triple tag on an edit) is the fallback ONLY
+    when the score is unknown/unreadable (None)."""
+    if not (takedowns >= 150 and kills >= 100):
+        return False
+    if score is not None:
+        return score >= 20000
+    return bool(confirmed)
 
 
 def derive_stat_feats(kills, takedowns, deaths, weapon, feat_weapons, triple):

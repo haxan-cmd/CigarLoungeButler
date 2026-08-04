@@ -2427,16 +2427,18 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     is_triple = is_triple_run(kills, takedowns, _score, confirmed=score_over_20k)
     # Flag to nerve centre when a Triple was self-confirmed (manual "20k+?" -> yes) but the
     # scorecard vision read a score UNDER 20k — a possible inflated claim worth a look.
-    if is_triple and score_over_20k and _score is not None and _score < 20000:
+    if (score_over_20k and _score is not None and _score < 20000
+            and takedowns >= 150 and kills >= 100):
         try:
             _nc = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
                   or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
             if _nc:
                 _mlink = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
                 await _nc.send(
-                    f"\u26a0\ufe0f **Triple score mismatch \u2014 {interaction.user.display_name}**\n"
-                    f"Confirmed 20k+ manually, but the scorecard vision read **{_score:,}** "
-                    f"({selected_weapon}, {takedowns} TD / {kills} K). Worth a look.\n{_mlink}"
+                    f"\u26a0\ufe0f **Triple downgraded \u2014 {interaction.user.display_name}**\n"
+                    f"Confirmed 20k+ manually, but the scorecard read **{_score:,}** (under 20k), "
+                    f"so it was NOT counted as a Triple ({selected_weapon}, {takedowns} TD / {kills} K). "
+                    f"Edit the run if the score was misread.\n{_mlink}"
                 )
         except Exception as _e_tm:
             print(f"[TRIPLE] score-mismatch flag error: {_e_tm}")

@@ -44,6 +44,11 @@ def test_triple_requires_all_three_gates():
     assert is_triple_run(99, 150, 25000) is False          # kills short
     assert is_triple_run(100, 149, 25000) is False         # takedowns short
     assert is_triple_run(100, 150, None) is False          # no score, no confirm
+    # A READ score below the bar can't be overridden by a manual 20k+ confirmation
+    # (the Nildain case: confirmed YES but the scorecard read 19,500).
+    assert is_triple_run(100, 150, 19500, confirmed=True) is False
+    # Confirmation only fills in when the score is unreadable (None).
+    assert is_triple_run(100, 150, None, confirmed=True) is True
 
 
 def test_triple_supersedes_100k_200td():
