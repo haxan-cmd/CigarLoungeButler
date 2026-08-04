@@ -3734,7 +3734,7 @@ class LeaderboardsCog(commands.Cog):
         await interaction.edit_original_response(
             content=f"\u2705 Removed {n} junk board entr{'y' if n == 1 else 'ies'} (missing map/weapon names).")
 
-    @app_commands.command(name="rebuild_boards", description="THE rebuild: recompute a board (or all) from full submission history AND repaint it correctly \u2014 maps, weapons, kills sections, ratings (mod only).")
+    @app_commands.command(name="rebuild_boards", description="THE rebuild: recompute a board (or all) from submissions and repaint it correctly (mod only).")
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
     async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
