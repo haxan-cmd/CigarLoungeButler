@@ -807,6 +807,57 @@ class AdminCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"❌ Error during removal: {e}", ephemeral=True)
 
+    @app_commands.command(name="purge_low_td_runs", description="Remove a player's runs under the takedown minimum + roll back boards/marks (admin only).")
+    @app_commands.describe(player="Player name exactly as it appears on submissions.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def purge_low_td_runs(self, interaction: discord.Interaction, player: str):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        _min = getattr(config, 'MIN_SUBMISSION_TAKEDOWNS', 100)
+        from utils.validation import below_takedown_minimum
+        from cogs.leaderboards import rebuild_score_boards, _board_lock
+        from cogs.registry import create_or_update_registry_card
+        subs = await _db.get_all_submissions()
+        targets, did = [], ''
+        for r in subs:
+            if len(r) < 13 or (r[1] or '').strip().lower() != player.strip().lower():
+                continue
+            try:
+                td, k = int(r[7]), int(r[8])
+            except (ValueError, TypeError):
+                continue
+            if below_takedown_minimum(td, k, _min):
+                link = (r[12] or '').strip()
+                if link:
+                    targets.append(link)
+                    did = did or (r[2] or '').strip()
+        if not targets:
+            await interaction.followup.send(f"No under-{_min}-TD runs found for **{player}**.", ephemeral=True)
+            return
+        affected, removed = set(), 0
+        for link in targets:
+            try:
+                await _db.delete_submission_by_link(link)
+                affected.update(await _db.delete_leaderboard_entries_by_link(link) or [])
+                removed += 1
+            except Exception as e:
+                print(f"[PURGE-LOW-TD] {link}: {e}")
+        try:
+            if affected:
+                async with _board_lock():
+                    await rebuild_score_boards(guild, board_names=list(affected), force_render=True)
+        except Exception as e:
+            print(f"[PURGE-LOW-TD] board rebuild: {e}")
+        try:
+            if did:
+                await create_or_update_registry_card(guild, did, player)
+        except Exception as e:
+            print(f"[PURGE-LOW-TD] card refresh: {e}")
+        await interaction.followup.send(
+            f"✅ Removed **{removed}** under-{_min}-TD run(s) for **{player}**, rebuilt "
+            f"{len(affected)} affected board(s), refreshed their card. (Marks recompute from "
+            f"the remaining runs; bounty progress is NOT auto-adjusted.)", ephemeral=True)
+
     @app_commands.command(name="unlist_submission", description="Toggle a run off/on all boards & records — still counts for marks and bounty (mod only).")
     @app_commands.describe(message_link="Discord message link to the original scorecard post")
     async def unlist_submission(self, interaction: discord.Interaction, message_link: str):

@@ -2127,22 +2127,23 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         return [e]
 
     _nl = name_links or {}
+    _MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
     lines = []
     for idx, e in enumerate(entries, 1):
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         _dn = _lb_display_name(e['player'], e.get('did', ''))
-        # Hyperlink the name to the player's registry card when they have one; a
-        # carded name renders as a blue link, a legacy/uncarded one stays a `chip`.
+        # Name links to the card; the SCORE renders bold-white (not a blue link) and the
+        # jump-to-run link moves to a small ↗ — keeps both jumps but halves the blue.
+        # Top 3 get medals for hierarchy.
         _url = _name_link(_nl, e.get('did', ''), e['player'])
         _name_md = f"[{_dn}]({_url})" if _url else f"`{_dn}`"
+        _rank = _MEDAL.get(idx, f"{idx}.")
         if lb_name == "Pacifist" and e.get('td') is not None:
             score_str = f"{e['td']} TD · {e['score']}"
         else:
             score_str = f"{score_prefix}{e['score']}"
-        if e['link']:
-            lines.append(f"│ {idx}. {_name_md} — [{score_str}]({e['link']}){weapon_str}")
-        else:
-            lines.append(f"│ {idx}. {_name_md} — {score_str}{weapon_str}")
+        _run = f" [↗]({e['link']})" if e['link'] else ""
+        lines.append(f"│ {_rank} {_name_md} — **{score_str}**{weapon_str}{_run}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
 
@@ -2157,10 +2158,11 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
             _kp, _ksc = _kr[0], _kr[1]
             _klnk = _kr[2] if len(_kr) > 2 else ''
             _kdid = _kr[3] if len(_kr) > 3 else ''
-            _kscs = f"[{_ksc}]({_klnk})" if _klnk else f"{_ksc}"
             _kurl = _name_link(_nl, _kdid, _kp)
             _knm = f"[{_kp}]({_kurl})" if _kurl else f"`{_kp}`"
-            lines.append(f"│ {_i}. {_knm} \u2014 {_kscs}")
+            _krank = _MEDAL.get(_i, f"{_i}.")
+            _krun = f" [↗]({_klnk})" if _klnk else ""
+            lines.append(f"│ {_krank} {_knm} \u2014 **{_ksc}**{_krun}")
 
     embeds = []
     current_lines = []

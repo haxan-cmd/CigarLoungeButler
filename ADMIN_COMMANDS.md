@@ -61,6 +61,7 @@
 - `/award_marks` **[Mod]** — Manually award marks on a weapon to a player.
 - `/set_feat_count` **[Mod]** — Set a player's 100 Kills / 200 Takedowns / Triple count.
 - `/remove_submission` **[Admin]** — Remove a fake/erroneous submission and roll back all tables.
+- `/purge_low_td_runs` **[Admin]** — Remove ALL of one player's runs under the takedown minimum (`config.MIN_SUBMISSION_TAKEDOWNS`, default 100; Pacifist 0-kill runs exempt), strip them from boards, rebuild affected boards, and refresh their card. Marks recompute from remaining runs; bounty progress is not auto-adjusted. (New submissions under the minimum are now blocked at submit time.)
 - `/backfill_players` **[Admin]** — Create a `players` row for anyone who submitted but has no row (fixes Butler "unregistered" / missing stats).
 
 ## Player Commands (everyone)

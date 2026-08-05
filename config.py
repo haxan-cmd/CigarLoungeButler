@@ -18,6 +18,7 @@ DECORATION_BOTTOM = os.getenv('DECORATION_BOTTOM', 'WMMR_Spacer_Bottom.png')
 
 # ── Channel IDs ───────────────────────────────────────────────────────────────
 SUBMISSIONS_CHANNEL_ID      = 1328832440927518920
+MIN_SUBMISSION_TAKEDOWNS    = 100   # runs under this are rejected (Pacifist 0-kill runs exempt); 0 disables
 MAIN_CHANNEL_ID             = 1324447691467526338
 SKYNET_CHANNEL_ID           = 1525101978034901002   # skynet — Butler answers text chat here too
 # Channels where the Butler answers free-text chat (when pinged or named "butler"/"clanker").

@@ -30,3 +30,19 @@ def impossible_submission_reason(selected_map, faction, map_factions):
         return (f"{faction} isn't a team on {selected_map} "
                 f"(that map is {' vs '.join(valid)}).")
     return None
+
+
+def below_takedown_minimum(takedowns, kills, minimum):
+    """True if a run is under the takedown minimum and should be rejected. The one
+    exemption is a true Pacifist run (0 kills, <=10 takedowns) — objective/support
+    play with its own board. `minimum` of None or <=0 disables the gate. Non-numeric
+    input passes (don't block on an unreadable value)."""
+    try:
+        td = int(takedowns)
+        k = int(kills)
+    except (ValueError, TypeError):
+        return False
+    if not minimum or minimum <= 0:
+        return False
+    is_pacifist = (k == 0 and td <= 10)
+    return td < minimum and not is_pacifist

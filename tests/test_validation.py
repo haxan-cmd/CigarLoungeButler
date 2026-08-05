@@ -4,7 +4,18 @@ Rejects genuinely contradictory (map, faction) pairs; passes anything merely
 incomplete. Uses the real config.MAP_FACTIONS so the tests track the map pool.
 """
 import config
-from utils.validation import impossible_submission_reason
+from utils.validation import impossible_submission_reason, below_takedown_minimum
+
+
+def test_below_takedown_minimum():
+    assert below_takedown_minimum(80, 40, 100) is True      # under the bar -> reject
+    assert below_takedown_minimum(100, 40, 100) is False    # exactly the bar -> ok
+    assert below_takedown_minimum(150, 40, 100) is False    # over the bar -> ok
+    # Pacifist runs (0 kills, <=10 TD) are exempt even though they're under the bar
+    assert below_takedown_minimum(8, 0, 100) is False
+    assert below_takedown_minimum(50, 0, 100) is True       # 0 kills but 50 TD is NOT pacifist
+    assert below_takedown_minimum(80, 40, 0) is False       # gate disabled
+    assert below_takedown_minimum("x", 40, 100) is False    # unreadable -> pass
 
 MF = config.MAP_FACTIONS
 

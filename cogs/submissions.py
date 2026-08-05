@@ -2384,6 +2384,30 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # data. A blank faction (one side of the scoreboard), missing lobby totals,
     # etc. all pass. On a real contradiction the scorecard was misread or faked,
     # so we don't log it — we ask for a resubmit and offer a one-tap manager flag.
+    # Takedown-minimum gate: runs under the bar aren't tracked (spam / low games).
+    # True Pacifist runs (0 kills, <=10 TD) are exempt — they have their own board.
+    from utils.validation import below_takedown_minimum as _below_min
+    _min_td = getattr(config, 'MIN_SUBMISSION_TAKEDOWNS', 100)
+    if _below_min(takedowns, kills, _min_td):
+        try:
+            await interaction.edit_original_response(
+                content=(f"⛔ That run is under the **{_min_td}-takedown minimum** "
+                         f"({takedowns} TD). The boards only track {_min_td}+ TD games, so "
+                         f"nothing was logged. (Pacifist runs are the one exception.)"),
+                embed=None, view=None)
+        except Exception as _e_mtd:
+            print(f"[REJECT] min-TD notice failed: {_e_mtd}")
+        try:
+            _ncm = original_message.guild.get_channel(config.NERVE_CENTER_CHANNEL_ID) \
+                   or await original_message.guild.fetch_channel(config.NERVE_CENTER_CHANNEL_ID)
+            if _ncm:
+                _rl3 = f"https://discord.com/channels/{original_message.guild.id}/{original_message.channel.id}/{original_message.id}"
+                await _ncm.send(f"⛔ **Under-{_min_td}-TD submission blocked — {interaction.user.display_name}**: "
+                                f"{takedowns} TD ({selected_weapon}, {selected_map}/{faction})\n{_rl3}")
+        except Exception as _e_ncm:
+            print(f"[REJECT] min-TD nerve trail failed: {_e_ncm}")
+        return
+
     _reject_reason = impossible_submission_reason(selected_map, faction, config.MAP_FACTIONS)
     if _reject_reason:
         try:
