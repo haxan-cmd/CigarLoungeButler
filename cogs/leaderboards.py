@@ -1392,6 +1392,14 @@ async def _render_board(guild, lb_row, lb_name):
     if lb_name == getattr(config, 'PEASANT_BOARD', 'Peasant'):
         await render_peasant_board(guild)
         return
+    # Special boards (All-Time Titles, Hundred Handed) own their whole post via a
+    # dedicated renderer — a rebuild must DELEGATE, never paint an empty generic board
+    # over them. This is the path /rebuild_boards uses; it was missing the check that
+    # the reframe/refresh paths already have, so a full rebuild drew the stray
+    # "Titles board - Takedowns / No entries yet" over the real board.
+    if lb_name in _SPECIAL_BOARD_NAMES:
+        await _render_special_board(guild, lb_name)
+        return
     # A board with no thread/message ids was never set up in Discord — skip it
     # rather than crashing the whole rebuild on int('').
     thread_raw = str(lb_row.get('Thread ID') or '').strip()
