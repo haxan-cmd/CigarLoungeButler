@@ -1429,7 +1429,7 @@ async def _render_board(guild, lb_row, lb_name):
         print(f"Discord update error for {lb_name}: {e}")
 
 
-async def rebuild_score_boards(guild, board_names=None, only_player=None, render=True):
+async def rebuild_score_boards(guild, board_names=None, only_player=None, render=True, force_render=False):
     """Rebuild weapon + map boards from the full submission history.
 
     Additive by design: recovers each player's best qualifying score per board
@@ -1442,7 +1442,7 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
     """
     all_lb_records = await _get_lb_records()
     all_subs = await _db.get_all_submissions()
-    summary = {'boards': 0, 'added': 0, 'updated': 0, 'evicted': 0}
+    summary = {'boards': 0, 'added': 0, 'updated': 0, 'evicted': 0, 'skipped': 0}
 
     for rec in all_lb_records:
         nm = rec['Leaderboard Name']
@@ -1451,6 +1451,10 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
             continue
         if board_names is not None and nm not in board_names:
             continue
+        # Snapshot the change counters so we can SKIP re-rendering (the slow, rate-
+        # limited Discord edit) any board whose rows did not actually change. A render-
+        # logic change (e.g. new hyperlinks) needs force_render=True to repaint anyway.
+        _snap = (summary['added'], summary['updated'], summary['evicted'])
 
         # 1. Best qualifying submission per player for this board.
         best = {}  # discord_id -> (score, player_name, link, weapon)
@@ -1534,7 +1538,11 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
 
         summary['boards'] += 1
         if render:
-            await _render_board(guild, rec, nm)
+            _changed = (summary['added'], summary['updated'], summary['evicted']) != _snap
+            if force_render or _changed:
+                await _render_board(guild, rec, nm)
+            else:
+                summary['skipped'] += 1
 
     return summary
 
@@ -1973,9 +1981,9 @@ def _map_kills_ranking(lb_name, all_subs, top=10):
         link = (s[12] or '').strip() if len(s) > 12 else ''
         cur = best.get(key)
         if cur is None or k > cur[0]:
-            best[key] = (k, name, link)
+            best[key] = (k, name, link, did)
     rows = sorted(best.values(), key=lambda t: -t[0])[:top]
-    return [(name, k, link) for k, name, link in rows]
+    return [(name, k, link, did) for k, name, link, did in rows]
 
 
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
@@ -2035,14 +2043,16 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
     return _embs
 
 
-def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None):
+def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=False, kill_share_rows=None, name_links=None):
     if not embeds or (not lethality_rows and not warlord_rows and not kill_share_rows):
         return
     te = getattr(config, 'TITLE_EMOJIS', {})
     def _fld(rows, fmt):
         out = []
         for i, (p, sc) in enumerate((rows or [])[:5], 1):
-            out.append(f"`{i}.` `{p}` \u2014 {fmt(sc)}")
+            _u = _name_link(name_links, '', p)
+            _nm = f"[{p}]({_u})" if _u else f"`{p}`"
+            out.append(f"`{i}.` {_nm} \u2014 {fmt(sc)}")
         return "\n".join(out) if out else "*Not enough games yet.*"
     tail = embeds[-1]
     _le = te.get('Lethality', '🧪')
@@ -2073,19 +2083,37 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
 
 
 async def _card_link_map():
-    """{discord_id: registry-card URL} for hyperlinking board names to their cards.
-    Players without a card thread are omitted (their name renders as a plain chip)."""
+    """Lookup for hyperlinking board names to their registry card. Keyed by BOTH the
+    discord_id and the lowercased name (prefixed 'name:'), so a row that only has a
+    name (rating rows) still resolves. Uncarded players are omitted."""
     gid = getattr(config, 'GUILD_ID', 0)
     out = {}
     try:
         for prow in await _db.get_all_players():
             did = (prow[0] or '').strip() if prow else ''
+            name = (prow[1] or '').strip() if len(prow) > 1 else ''
             tid = (prow[2] or '').strip() if len(prow) > 2 else ''
-            if did and tid:
-                out[did] = f"https://discord.com/channels/{gid}/{tid}"
+            if not tid:
+                continue
+            url = f"https://discord.com/channels/{gid}/{tid}"
+            if did:
+                out[did] = url
+            if name:
+                out['name:' + name.lower()] = url
     except Exception as e:
         print(f"[BOARD] card-link map error: {e}")
     return out
+
+
+def _name_link(nl, did='', name=''):
+    """Registry-card URL for a board row (discord_id first, then name), or None."""
+    if not nl:
+        return None
+    d = str(did or '').strip()
+    if d and d in nl:
+        return nl[d]
+    n = str(name or '').strip().lower()
+    return nl.get('name:' + n) if n else None
 
 
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None, name_links=None):
@@ -2095,7 +2123,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
         e.timestamp = datetime.now(timezone.utc)
-        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
+        _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, name_links=name_links)
         return [e]
 
     _nl = name_links or {}
@@ -2103,10 +2131,10 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     for idx, e in enumerate(entries, 1):
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
         _dn = _lb_display_name(e['player'], e.get('did', ''))
-        _did = str(e.get('did', '') or '').strip()
         # Hyperlink the name to the player's registry card when they have one; a
         # carded name renders as a blue link, a legacy/uncarded one stays a `chip`.
-        _name_md = f"[{_dn}]({_nl[_did]})" if (_did and _did in _nl) else f"`{_dn}`"
+        _url = _name_link(_nl, e.get('did', ''), e['player'])
+        _name_md = f"[{_dn}]({_url})" if _url else f"`{_dn}`"
         if lb_name == "Pacifist" and e.get('td') is not None:
             score_str = f"{e['td']} TD · {e['score']}"
         else:
@@ -2128,8 +2156,11 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         for _i, _kr in enumerate(kills_rows[:10], 1):
             _kp, _ksc = _kr[0], _kr[1]
             _klnk = _kr[2] if len(_kr) > 2 else ''
+            _kdid = _kr[3] if len(_kr) > 3 else ''
             _kscs = f"[{_ksc}]({_klnk})" if _klnk else f"{_ksc}"
-            lines.append(f"│ {_i}. `{_kp}` \u2014 {_kscs}")
+            _kurl = _name_link(_nl, _kdid, _kp)
+            _knm = f"[{_kp}]({_kurl})" if _kurl else f"`{_kp}`"
+            lines.append(f"│ {_i}. {_knm} \u2014 {_kscs}")
 
     embeds = []
     current_lines = []
@@ -2150,7 +2181,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _e.set_footer(text="Last updated")
         _e.timestamp = datetime.now(timezone.utc)
         embeds.append(_e)
-    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
+    _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows, name_links=name_links)
     return embeds
 
 
@@ -3758,8 +3789,9 @@ class LeaderboardsCog(commands.Cog):
             content=f"\u2705 Removed {n} junk board entr{'y' if n == 1 else 'ies'} (missing map/weapon names).")
 
     @app_commands.command(name="rebuild_boards", description="THE rebuild: recompute a board (or all) from submissions and repaint it correctly (mod only).")
-    @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
-    async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None):
+    @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.",
+                           full="Repaint EVERY board even if unchanged (slower). Use after a render-logic change.")
+    async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None, full: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -3767,14 +3799,16 @@ class LeaderboardsCog(commands.Cog):
         board_names = [name] if name else None
         try:
             async with _board_lock():
-                summary = await rebuild_score_boards(interaction.guild, board_names=board_names)
+                summary = await rebuild_score_boards(interaction.guild, board_names=board_names, force_render=full)
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Rebuild failed: {e}")
             return
+        _sk = summary.get('skipped', 0)
+        _sk_txt = f" Skipped {_sk} unchanged (use `full:True` to repaint those)." if _sk else ""
         await interaction.edit_original_response(content=(
             f"✅ Rebuilt **{summary['boards']}** board(s) from submissions. "
             f"Added {summary['added']}, updated {summary['updated']}, "
-            f"evicted {summary['evicted']} beyond top-10."
+            f"evicted {summary['evicted']} beyond top-10.{_sk_txt}"
         ))
 
     @app_commands.command(name="board_audit", description="Read-only: list submission scores missing from weapon/map boards (mod only).")

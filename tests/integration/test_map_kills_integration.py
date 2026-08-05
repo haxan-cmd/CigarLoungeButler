@@ -64,5 +64,5 @@ def test_inline_map_kills_ranking(make_sub):
         make_sub(did="4", name="Dan", kills=95, map_=_MAP, faction="Agatha", feats="Unlisted", link="d"),
     ]
     ranking = _map_kills_ranking(f"{_MAP} - Agatha", subs)
-    # (name, best_kills, link-of-that-run) — Alice's link is her 90 run, not the 70.
-    assert ranking == [("Bob", 110, "b110"), ("Alice", 90, "a90")]
+    # (name, best_kills, link-of-that-run, did) — Alice's link is her 90 run, not the 70.
+    assert ranking == [("Bob", 110, "b110", "2"), ("Alice", 90, "a90", "1")]
