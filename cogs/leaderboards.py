@@ -2022,9 +2022,10 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
             _kills_rows = _map_kills_ranking(lb_name, _kmk_subs)
         except Exception as e:
             print(f"[BOARD] map kills compute error for {lb_name}: {e}")
+    _name_links = await _card_link_map()
     _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                       lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
-                                      kill_share_rows=_ksr, kills_rows=_kills_rows)
+                                      kill_share_rows=_ksr, kills_rows=_kills_rows, name_links=_name_links)
     # Kills boards close the thread's decorative frame themselves: the bottom
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
@@ -2071,7 +2072,23 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
     )
 
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None):
+async def _card_link_map():
+    """{discord_id: registry-card URL} for hyperlinking board names to their cards.
+    Players without a card thread are omitted (their name renders as a plain chip)."""
+    gid = getattr(config, 'GUILD_ID', 0)
+    out = {}
+    try:
+        for prow in await _db.get_all_players():
+            did = (prow[0] or '').strip() if prow else ''
+            tid = (prow[2] or '').strip() if len(prow) > 2 else ''
+            if did and tid:
+                out[did] = f"https://discord.com/channels/{gid}/{tid}"
+    except Exception as e:
+        print(f"[BOARD] card-link map error: {e}")
+    return out
+
+
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None, name_links=None):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     if not entries:
@@ -2081,17 +2098,23 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         _append_rating_fields([e], lethality_rows, warlord_rows, rating_min, is_map=is_map, kill_share_rows=kill_share_rows)
         return [e]
 
+    _nl = name_links or {}
     lines = []
     for idx, e in enumerate(entries, 1):
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
+        _dn = _lb_display_name(e['player'], e.get('did', ''))
+        _did = str(e.get('did', '') or '').strip()
+        # Hyperlink the name to the player's registry card when they have one; a
+        # carded name renders as a blue link, a legacy/uncarded one stays a `chip`.
+        _name_md = f"[{_dn}]({_nl[_did]})" if (_did and _did in _nl) else f"`{_dn}`"
         if lb_name == "Pacifist" and e.get('td') is not None:
             score_str = f"{e['td']} TD · {e['score']}"
         else:
             score_str = f"{score_prefix}{e['score']}"
         if e['link']:
-            lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — [{score_str}]({e['link']}){weapon_str}")
+            lines.append(f"│ {idx}. {_name_md} — [{score_str}]({e['link']}){weapon_str}")
         else:
-            lines.append(f"│ {idx}. `{_lb_display_name(e['player'], e.get('did', ''))}` — {score_str}{weapon_str}")
+            lines.append(f"│ {idx}. {_name_md} — {score_str}{weapon_str}")
     if overflow > 0:
         lines.append(f"*...and {overflow} more*")
 
