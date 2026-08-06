@@ -1397,6 +1397,7 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
     all_lb_records = await _get_lb_records()
     all_subs = await _db.get_all_submissions()
     summary = {'boards': 0, 'added': 0, 'updated': 0, 'evicted': 0, 'skipped': 0}
+    _to_render = []   # (rec, board_name) collected here, rendered in bounded parallel below
 
     for rec in all_lb_records:
         nm = rec['Leaderboard Name']
@@ -1494,9 +1495,33 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
         if render:
             _changed = (summary['added'], summary['updated'], summary['evicted']) != _snap
             if force_render or _changed:
-                await _render_board(guild, rec, nm)
+                _to_render.append((rec, nm))
             else:
                 summary['skipped'] += 1
+
+    # Render the changed boards. The DB compute above is sequential; the slow part is the
+    # Discord message edits, so fan those out. Boards that SHARE a thread (a weapon's
+    # TD + Kills, a map's two factions) must render sequentially so they can't race the
+    # thread's bottom-frame / message edits; DIFFERENT threads render in parallel. discord.py
+    # paces each channel's own rate-limit bucket for us, so we just cap the fan-out to stay
+    # well clear of the per-IP Cloudflare invalid-request (429) ceiling. This turns a serial
+    # ~15-min full rebuild into a few minutes without a second bot.
+    if render and _to_render:
+        _by_thread = {}
+        for _rec, _nm in _to_render:
+            _tid = str(_rec.get('Thread ID') or '').strip()
+            _by_thread.setdefault(_tid, []).append((_rec, _nm))
+        _sem = asyncio.Semaphore(max(1, int(getattr(config, 'REBUILD_RENDER_CONCURRENCY', 8))))
+
+        async def _render_group(_group):
+            async with _sem:
+                for _rec, _nm in _group:
+                    try:
+                        await _render_board(guild, _rec, _nm)
+                    except Exception as _rre:
+                        print(f"[REBUILD] render error for {_nm}: {_rre}")
+
+        await asyncio.gather(*(_render_group(_g) for _g in _by_thread.values()))
 
     return summary
 

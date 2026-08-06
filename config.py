@@ -260,6 +260,13 @@ FEATURED_MIN_RUNS = 15
 # quips rarely name that many, so prose stays readable.
 BUTLER_MAX_LINKS = 25
 
+# How many board threads /rebuild_boards renders to Discord in parallel. Boards that
+# share a thread still render sequentially; this only caps DISTINCT-thread fan-out.
+# discord.py paces each channel's bucket, so this is a safety cap against a burst of
+# 429s tripping the per-IP Cloudflare ban, not a correctness knob. 8 is a safe start;
+# raise cautiously if rebuilds still feel slow, lower to 1 to get the old serial behaviour.
+REBUILD_RENDER_CONCURRENCY = 8
+
 # Minimum runs before a bar appears on an /explore RATE chart (lethality, kill
 # share, warlord, avg TD/kills). At 3, three-run outliers topped the boards --
 # a junk "Other" subclass led avg lethality on 3 runs. Volume metrics (run
