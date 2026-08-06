@@ -4120,8 +4120,13 @@ class LeaderboardsCog(commands.Cog):
         # Belt and braces: only REAL config weapons get a kills twin — a stray
         # special board classified as 'weapon' must not (The Hundred Handed did)
         _real_weapons = set(config.WEAPONS_1H) | set(config.WEAPONS_2H) | set(config.FEAT_WEAPONS)
+        # Weapon-specific FEAT boards (Knife, Mallet) classify as 'feat', not 'weapon',
+        # but they're single-weapon boards ranked like weapon boards, so they get a Kills
+        # companion too (a "Knife Kills" under the Knife board).
+        from utils.boards import WEAPON_FEAT_BOARDS as _WFB
         weapon_recs = [r for r in recs
-                       if _classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'weapon'
+                       if (_classify_board(r['Leaderboard Name'], r.get('Type', '')) == 'weapon'
+                           or r['Leaderboard Name'] in _WFB)
                        and r['Leaderboard Name'] in _real_weapons
                        and str(r.get('Thread ID') or '').strip()]
         existing = {r['Leaderboard Name'] for r in recs}
