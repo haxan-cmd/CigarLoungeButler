@@ -2062,9 +2062,12 @@ def _append_rating_fields(embeds, lethality_rows, warlord_rows, rating_min, is_m
 async def _card_link_map():
     """Lookup for hyperlinking board names to their registry card. Keyed by BOTH the
     discord_id and the lowercased name (prefixed 'name:'), so a row that only has a
-    name (rating rows) still resolves. Uncarded players are omitted."""
+    name (rating rows) still resolves. ALSO keyed by every known IGN/alias of a carded
+    player, so a board row posted under an in-game name (not the primary name) still
+    links to that player's card. Uncarded players are omitted."""
     gid = getattr(config, 'GUILD_ID', 0)
     out = {}
+    by_did = {}   # carded discord_id -> url, for alias resolution
     try:
         for prow in await _db.get_all_players():
             did = (prow[0] or '').strip() if prow else ''
@@ -2075,8 +2078,18 @@ async def _card_link_map():
             url = f"https://discord.com/channels/{gid}/{tid}"
             if did:
                 out[did] = url
+                by_did[did] = url
             if name:
                 out['name:' + name.lower()] = url
+        # Alias pass: name/IGN -> discord_id, then id -> card url. setdefault so a real
+        # primary-name key is never overwritten by an alias that resolves elsewhere.
+        try:
+            for _nm, _did in (await _db.get_name_to_id_map()).items():
+                _u = by_did.get(str(_did).strip())
+                if _u and _nm:
+                    out.setdefault('name:' + str(_nm).strip().lower(), _u)
+        except Exception as _ae:
+            print(f"[BOARD] alias link map error: {_ae}")
     except Exception as e:
         print(f"[BOARD] card-link map error: {e}")
     return out
@@ -3939,30 +3952,15 @@ class LeaderboardsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         ld = await _db.get_all_leaderboard_data()
-        players = await _db.get_all_players()
+        # Reuse the REAL board-link map so the audit matches what actually links on a
+        # board (includes IGN/alias keys). name/IGN -> id tells us who has a Discord
+        # account on file (so a card CAN be built) even when none exists yet.
+        _nl = await _card_link_map()
+        _name2id = await _db.get_name_to_id_map()
 
-        # Carded universe (would link on a board) == players with a forum_thread_id,
-        # matched by discord_id OR lowercased name — the same keys _card_link_map uses.
-        carded_ids, carded_names = set(), set()
-        account_by_name = {}   # lower(name) -> discord_id from the players table (may be '')
-        account_ids = set()    # every discord_id known in the players table
-        for p in players:
-            did = (p[0] or '').strip() if p else ''
-            name = (p[1] or '').strip() if len(p) > 1 else ''
-            tid = (p[2] or '').strip() if len(p) > 2 else ''
-            if did:
-                account_ids.add(did)
-            if name:
-                account_by_name[name.lower()] = did
-            if tid:
-                if did:
-                    carded_ids.add(did)
-                if name:
-                    carded_names.add(name.lower())
-
-        # Aggregate distinct board players. linked = already resolves to a card;
-        # account = we know a Discord id for them (so a card CAN be built) even if
-        # none exists yet; neither = pure legacy name-only row, un-linkable.
+        # Aggregate distinct board players. linked = resolves to a card (primary name,
+        # id, OR a known alias); account = we know a Discord id for them; neither =
+        # pure legacy name-only row, un-linkable.
         info = {}
         for r in ld:
             if len(r) < 4:
@@ -3977,9 +3975,9 @@ class LeaderboardsCog(commands.Cog):
                 continue   # junk board row
             nl = name.lower()
             rec = info.setdefault(nl, {'name': name, 'linked': False, 'account': False})
-            if (did and did in carded_ids) or (nl in carded_names):
+            if _name_link(_nl, did, name):
                 rec['linked'] = True
-            if did or account_by_name.get(nl) or nl in account_ids:
+            if did or _name2id.get(nl):
                 rec['account'] = True
 
         needs = sorted((v['name'] for v in info.values() if not v['linked'] and v['account']), key=str.lower)
