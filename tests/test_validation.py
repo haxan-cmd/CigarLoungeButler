@@ -4,7 +4,18 @@ Rejects genuinely contradictory (map, faction) pairs; passes anything merely
 incomplete. Uses the real config.MAP_FACTIONS so the tests track the map pool.
 """
 import config
-from utils.validation import impossible_submission_reason, below_takedown_minimum
+from utils.validation import impossible_submission_reason, below_takedown_minimum, scoreboard_looks_incomplete
+
+
+def test_scoreboard_looks_incomplete():
+    # Both faction totals read -> complete, no nudge.
+    assert scoreboard_looks_incomplete(531, 678) is False
+    # Cropped top: one or both totals missing -> incomplete.
+    assert scoreboard_looks_incomplete(None, None) is True
+    assert scoreboard_looks_incomplete(531, None) is True
+    assert scoreboard_looks_incomplete(None, 678) is True
+    # A 0 total is a real reading (shutout), not missing.
+    assert scoreboard_looks_incomplete(0, 0) is False
 
 
 def test_below_takedown_minimum():

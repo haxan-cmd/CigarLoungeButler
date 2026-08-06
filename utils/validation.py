@@ -32,6 +32,15 @@ def impossible_submission_reason(selected_map, faction, map_factions):
     return None
 
 
+def scoreboard_looks_incomplete(team_total_kills, enemy_total_kills):
+    """True when a submitted scoreboard is missing the top-of-screen faction KILL
+    TOTALS (one or both). Those two big numbers set the lobby-difficulty read, and a
+    cropped or photographed board (top of the screen cut off) loses them even when the
+    player's own row read fine. This drives a SOFT nudge to capture the whole board next
+    time, never a rejection."""
+    return not (isinstance(team_total_kills, int) and isinstance(enemy_total_kills, int))
+
+
 def below_takedown_minimum(takedowns, kills, minimum):
     """True if a run is under the takedown minimum and should be rejected. The one
     exemption is a true Pacifist run (0 kills, <=10 takedowns) — objective/support

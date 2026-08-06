@@ -576,6 +576,18 @@ class SubmitView(discord.ui.View):
                                  f"you'll be asked for {'those' if len(_real_missing) > 1 else 'that'} next{_suffix}.*")
                 elif _need_pick:
                     lines.append(f"\n*Next: pick your {' and '.join(_need_pick)}.*")
+                # Cropped / photographed board: the faction KILL TOTALS at the top didn't
+                # read, so there's no lobby-difficulty context. Soft nudge, never a block.
+                try:
+                    from utils.validation import scoreboard_looks_incomplete
+                    if scoreboard_looks_incomplete(parsed.get('team_total_kills'), parsed.get('enemy_total_kills')):
+                        lines.append(
+                            "\n\U0001f4f8 *This screenshot is missing some information: I couldn't read the "
+                            "faction KILL TOTALS at the top of the scoreboard (they set the lobby difficulty). "
+                            "It's okay to submit as-is, but next time try to grab a full screenshot of the "
+                            "whole scoreboard, including the team totals up top.*")
+                except Exception as _ice:
+                    print(f"[VISION] incomplete-scoreboard note error: {_ice}")
                 await interaction.followup.send(content="\n".join(lines), view=view, ephemeral=True)
             else:
                 # Vision got nothing useful \u2014 caption parse then full form
