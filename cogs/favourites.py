@@ -256,13 +256,15 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     # Title calculations from LeaderboardData
     weapon_placements = {}
     map_placements = {}
-    non_weapon_feat_placements = {}
 
     from utils.boards import non_weapon_feat_boards, is_kills_board, is_archer_weapon
     SKIP_LB = {'100 Kills', '200 Takedowns'}
     # Non-weapon feat boards (Score, TUFF, Pacifist, Triple, Hybrid, Flawless,
-    # Healing…) count toward Grand Marshal but NOT Weapons Master. Single source in
-    # utils.boards (tested) — a new feat board can't silently inflate the weapon count.
+    # Healing…) are their own category: they count toward NEITHER Weapons Master NOR
+    # Grand Marshal. Grand Marshal is exactly Weapons Master (weapon boards) + Campaign
+    # Master (map boards), so its count always reconciles as weapons + maps and never
+    # exceeds the weapon+map denominator. Single source in utils.boards (tested) so a new
+    # feat board can't silently leak into the weapon count.
     NON_WEAPON_FEAT_BOARDS = non_weapon_feat_boards()
 
     lb_groups = {}
@@ -301,7 +303,7 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
             if is_map:
                 map_placements.setdefault(player, []).append(placement)
             elif lb_name in NON_WEAPON_FEAT_BOARDS:
-                non_weapon_feat_placements.setdefault(player, []).append(placement)
+                continue   # feat boards count toward no all-time title (kept out of both)
             else:
                 weapon_placements.setdefault(player, []).append(placement)
 
@@ -316,12 +318,13 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
         else:
             return min(qualified.keys(), key=lambda p: (sum(qualified[p]) / len(qualified[p]), -len(qualified[p])))
 
+    # Grand Marshal = Weapons Master boards + Campaign Master boards, nothing else, so
+    # a player's combined count is always weapon placements + map placements and can
+    # never exceed the weapon+map total (feat boards are deliberately excluded).
     combined = {}
     for p, v in weapon_placements.items():
         combined.setdefault(p, []).extend(v)
     for p, v in map_placements.items():
-        combined.setdefault(p, []).extend(v)
-    for p, v in non_weapon_feat_placements.items():
         combined.setdefault(p, []).extend(v)
 
     grand_marshal = best_placement_title(combined, min_boards=15, breadth_first=True)

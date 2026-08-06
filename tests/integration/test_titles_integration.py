@@ -60,11 +60,28 @@ def test_map_board_counted_separately_from_weapons(fake_db):
 
 def test_feat_board_excluded_from_weapon_count(fake_db):
     # Score / TUFF / Pacifist etc. are non-weapon feat boards: they count toward
-    # Grand Marshal placement but must NOT inflate the weapon-board total.
+    # NEITHER Weapons Master nor Grand Marshal, and must not inflate any board total.
     fake_db.leaderboard_data = [lb("Score", "Alice"), lb("TUFF", "Alice")]
     s = stats(fake_db)
     assert s["_weapon_board_total"] == 0
     assert s["_map_board_total"] == 0
+
+
+def test_grand_marshal_count_is_weapons_plus_maps_only(fake_db):
+    # Regression: Grand Marshal's per-player count must equal weapon + map placements,
+    # never inflated by feat boards (the 62/64-vs-59 mismatch). Alice sits on 2 weapon
+    # boards + 1 map board + 2 feat boards; her combined placement list must be length 3.
+    fake_db.leaderboard_data = [
+        lb("Messer", "Alice"), lb("Maul", "Alice"),
+        lb("Falmire - Agatha", "Alice"),
+        lb("Score", "Alice"), lb("TUFF", "Alice"),
+    ]
+    s = stats(fake_db)
+    assert len(s["_combined_placements"]["Alice"]) == 3
+    assert len(s["_weapon_placements"]["Alice"]) == 2
+    assert len(s["_map_placements"]["Alice"]) == 1
+    # And the count never exceeds the denominator.
+    assert len(s["_combined_placements"]["Alice"]) <= s["_combined_board_total"]
 
 
 def test_hundred_kills_and_takedowns_boards_excluded(fake_db):
