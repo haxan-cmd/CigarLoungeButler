@@ -562,54 +562,49 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         print(f"Leaderboard index error ({index_label}): {e}")
 
 
-async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
+async def _sync_board_messages(thread, embeds, message_ids, msg_content="", close_frame=False):
     """Render a board as a SINGLE message carrying ALL its section embeds (a map board's
     Takedowns + Kills embeds, a weapon board's single embed, etc.). Edits the first
     tracked message in place and deletes any EXTRA tracked messages left from the old
     one-message-per-embed scheme, so a board is always exactly one message. Returns the
-    new message-id list (one id). Kills boards bake the bottom spacer into the last embed
-    (set_image) and carry the nav row on that message.
+    new message-id list (one id).
+
+    The bottom decoration is its OWN message below the board (mirroring the top
+    decoration), never baked into the embed. For a frame-closing board (close_frame=True,
+    i.e. the last board in the thread -- a weapon's Kills companion) we guarantee exactly
+    one standalone bottom-decoration + nav message sits under it.
     """
     if not embeds:
         return list(message_ids)
     embeds = list(embeds)
-
-    def _baked_deco(e):
-        try:
-            return bool(e.image and str(e.image.url or '').startswith('attachment://'))
-        except Exception:
-            return False
-
-    _deco = any(_baked_deco(e) for e in embeds)
-    _nav = _nav_view(thread.guild.id) if _deco else None
+    # Strip any legacy baked bottom-decoration image so an in-place edit clears it
+    # (the decoration is a separate message now).
+    try:
+        embeds[-1].set_image(url=None)
+    except Exception:
+        pass
     new_ids = []
-    recreated = False
     _primary = message_ids[0] if message_ids else None
 
     if _primary is not None:
         try:
             msg = await thread.fetch_message(_primary)
-            if _deco:
-                await msg.edit(content=msg_content, embeds=embeds,
-                               attachments=[discord.File(DECORATION_BOTTOM)], view=_nav)
-            else:
-                await msg.edit(content=msg_content, embeds=embeds)
+            # attachments=[] drops any legacy baked-decoration file; view=None drops the
+            # nav row that used to ride the baked message (nav lives on the standalone
+            # bottom decoration now).
+            await msg.edit(content=msg_content, embeds=embeds, attachments=[], view=None)
             new_ids = [_primary]
         except discord.NotFound:
-            msg = await thread.send(content=msg_content, embeds=embeds,
-                                    file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
-                                    view=_nav if _deco else discord.utils.MISSING)
-            new_ids = [msg.id]; recreated = True
+            msg = await thread.send(content=msg_content, embeds=embeds)
+            new_ids = [msg.id]
         except Exception as edit_err:
             # Transient failure (rate limit / 5xx): keep the existing message, next
             # refresh retries, rather than risk a duplicate.
             print(f"Leaderboard edit failed for msg {_primary} in #{thread.id}, keeping it: {edit_err}")
             new_ids = [_primary]
     else:
-        msg = await thread.send(content=msg_content, embeds=embeds,
-                                file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
-                                view=_nav if _deco else discord.utils.MISSING)
-        new_ids = [msg.id]; recreated = True
+        msg = await thread.send(content=msg_content, embeds=embeds)
+        new_ids = [msg.id]
 
     # Collapse EXTRA tracked messages (old one-embed-per-message scheme / continuation).
     for extra_id in message_ids[1:]:
@@ -619,38 +614,37 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
         except Exception:
             pass
 
-    # Recreated a non-baked board -> ensure exactly one standalone bottom deco/nav.
-    if recreated and not _deco:
-        try:
-            _me = thread.guild.me.id if thread.guild and thread.guild.me else None
-            async for _old in thread.history(limit=10):
-                if _old.id in new_ids:
-                    continue
-                if (_me is None or _old.author.id == _me) and _old.components:
-                    try:
-                        await _old.delete(); await asyncio.sleep(0.3)
-                    except Exception:
-                        pass
-            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
-        except Exception as deco_err:
-            print(f"Decoration repost failed in #{thread.id}: {deco_err}")
-
-    # Baked-frame threads must not ALSO keep a standalone bottom deco (double buttons).
-    if _deco:
-        try:
-            _me = thread.guild.me.id if thread.guild and thread.guild.me else None
-            async for _old in thread.history(limit=8):
-                if _old.id in new_ids:
-                    continue
-                if (_me is None or _old.author.id == _me) and _old.components and _old.attachments:
-                    try:
-                        await _old.delete(); await asyncio.sleep(0.3)
-                    except Exception:
-                        pass
-        except Exception as _bake_err:
-            print(f"[SYNC] baked-frame dedup skipped in #{thread.id}: {_bake_err}")
-
+    if close_frame:
+        await _ensure_bottom_frame(thread, new_ids)
     return new_ids
+
+
+async def _ensure_bottom_frame(thread, board_ids):
+    """Guarantee exactly one standalone bottom-decoration + nav message at the foot of the
+    thread (its own message, mirroring the top decoration). The bottom decoration is the
+    only bot message carrying BOTH a nav row (components) AND a file (attachment), so it is
+    unambiguous; the top decoration has a file but no components and is never touched.
+    board_ids = the message ids that ARE the board itself (never deleted)."""
+    try:
+        me = thread.guild.me.id if thread.guild and thread.guild.me else None
+        board_set = set(board_ids)
+        deco_msgs = []
+        async for m in thread.history(limit=20):
+            if m.id in board_set:
+                continue
+            if (me is None or m.author.id == me) and m.components and m.attachments:
+                deco_msgs.append(m)
+        if not deco_msgs:
+            await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
+        else:
+            # Keep the newest, delete any duplicate nav rows.
+            for dm in sorted(deco_msgs, key=lambda m: m.created_at, reverse=True)[1:]:
+                try:
+                    await dm.delete(); await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[SYNC] bottom-frame ensure failed in #{thread.id}: {e}")
 
 
 _WEAPON_THUMB_URLS = {}   # weapon key -> stashed grey-silhouette URL (reused)
@@ -1037,7 +1031,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
         try:
             thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-            new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+            new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
             if new_ids != message_ids:
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
         except Exception as e:
@@ -1382,7 +1376,7 @@ async def _render_board(guild, lb_row, lb_name):
         return
     try:
         thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-        new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+        new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
         if new_ids != message_ids:
             await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
     except Exception as e:
@@ -1714,7 +1708,7 @@ async def submit_manual_pb_score(guild, lb_name, player_name, discord_id, score,
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
     try:
         thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-        new_ids = await _sync_board_messages(thread, embeds, message_ids)
+        new_ids = await _sync_board_messages(thread, embeds, message_ids, close_frame=_is_kills_board(lb_name))
         if new_ids != message_ids:
             await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
     except Exception as e:
@@ -2004,12 +1998,8 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
                                       lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
                                       kill_share_rows=_ksr, kills_rows=_kills_rows, name_links=_name_links,
                                       related_field=_related)
-    # Kills boards close the thread's decorative frame themselves: the bottom
-    # spacer is baked into the last embed (set_image renders at the embed's
-    # bottom; the referenced attachment is consumed, not shown separately).
-    # _sync_board_messages sees the attachment:// marker and uploads the file.
-    if _embs and _is_kills_board(lb_name):
-        _embs[-1].set_image(url=f"attachment://{os.path.basename(DECORATION_BOTTOM)}")
+    # The bottom decoration is a separate message under the board (handled by
+    # _sync_board_messages / _ensure_bottom_frame), never baked into the embed.
     return _embs
 
 
@@ -3185,7 +3175,7 @@ class LeaderboardsCog(commands.Cog):
                 try:
                     guild = interaction.guild
                     thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content)
+                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
                     if new_ids != message_ids:
                         await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
 
