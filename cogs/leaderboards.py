@@ -2135,7 +2135,6 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         return [e]
 
     _nl = name_links or {}
-    _MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
     lines = []
     for idx, e in enumerate(entries, 1):
         weapon_str = f" *{e['weapon']}*" if show_weapon and e.get('weapon') else ""
@@ -2145,7 +2144,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         # Top 3 get medals for hierarchy.
         _url = _name_link(_nl, e.get('did', ''), e['player'])
         _name_md = f"[{_dn}]({_url})" if _url else f"`{_dn}`"
-        _rank = _MEDAL.get(idx, f"{idx}.")
+        _rank = f"{idx}."
         if lb_name == "Pacifist" and e.get('td') is not None:
             score_str = f"{e['td']} TD · {e['score']}"
         else:
@@ -2168,7 +2167,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
             _kdid = _kr[3] if len(_kr) > 3 else ''
             _kurl = _name_link(_nl, _kdid, _kp)
             _knm = f"[{_kp}]({_kurl})" if _kurl else f"`{_kp}`"
-            _krank = _MEDAL.get(_i, f"{_i}.")
+            _krank = f"{_i}."
             _krun = f" [↗]({_klnk})" if _klnk else ""
             lines.append(f"│ {_krank} {_knm} \u2014 **{_ksc}**{_krun}")
 
