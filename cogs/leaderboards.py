@@ -3931,6 +3931,81 @@ class LeaderboardsCog(commands.Cog):
             msg = msg[:1900] + "\n... (truncated - run with a board name for detail)"
         await interaction.edit_original_response(content=msg)
 
+    @app_commands.command(name="board_card_audit", description="List board players with no registry card, split into fixable vs legacy (mod only).")
+    async def board_card_audit_cmd(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        ld = await _db.get_all_leaderboard_data()
+        players = await _db.get_all_players()
+
+        # Carded universe (would link on a board) == players with a forum_thread_id,
+        # matched by discord_id OR lowercased name — the same keys _card_link_map uses.
+        carded_ids, carded_names = set(), set()
+        account_by_name = {}   # lower(name) -> discord_id from the players table (may be '')
+        account_ids = set()    # every discord_id known in the players table
+        for p in players:
+            did = (p[0] or '').strip() if p else ''
+            name = (p[1] or '').strip() if len(p) > 1 else ''
+            tid = (p[2] or '').strip() if len(p) > 2 else ''
+            if did:
+                account_ids.add(did)
+            if name:
+                account_by_name[name.lower()] = did
+            if tid:
+                if did:
+                    carded_ids.add(did)
+                if name:
+                    carded_names.add(name.lower())
+
+        # Aggregate distinct board players. linked = already resolves to a card;
+        # account = we know a Discord id for them (so a card CAN be built) even if
+        # none exists yet; neither = pure legacy name-only row, un-linkable.
+        info = {}
+        for r in ld:
+            if len(r) < 4:
+                continue
+            board = (r[0] or '').strip()
+            name = (r[1] or '').strip()
+            did = (r[2] or '').strip() if len(r) > 2 else ''
+            if not board or not name:
+                continue
+            _lo = board.lower()
+            if _lo == 'none' or _lo.startswith('none -') or board.startswith(' - ') or board.endswith(' - '):
+                continue   # junk board row
+            nl = name.lower()
+            rec = info.setdefault(nl, {'name': name, 'linked': False, 'account': False})
+            if (did and did in carded_ids) or (nl in carded_names):
+                rec['linked'] = True
+            if did or account_by_name.get(nl) or nl in account_ids:
+                rec['account'] = True
+
+        needs = sorted((v['name'] for v in info.values() if not v['linked'] and v['account']), key=str.lower)
+        legacy = sorted((v['name'] for v in info.values() if not v['linked'] and not v['account']), key=str.lower)
+        linked_n = sum(1 for v in info.values() if v['linked'])
+
+        def _block(title, names, tip):
+            if not names:
+                return f"{title}: none. ✅"
+            shown = names[:50]
+            more = f" (+{len(names) - 50} more)" if len(names) > 50 else ""
+            return f"{title} ({len(names)}) — {tip}\n" + ", ".join(shown) + more
+
+        parts = [
+            f"**Board card audit** — {len(info)} distinct board players, {linked_n} already linked.\n",
+            _block("\U0001f527 Needs a card built", needs,
+                   "have a Discord account on file. Run `/bulk_refresh_cards` (or `/create_card` each) and they'll link."),
+            "",
+            _block("\U0001f9ff Pure legacy, un-linkable", legacy,
+                   "name-only rows with no Discord account on record — nothing to link to unless you attach an account via `/create_card`."),
+        ]
+        msg = "\n".join(parts)
+        if len(msg) > 1950:
+            msg = msg[:1900] + "\n... (truncated)"
+        await interaction.edit_original_response(content=msg)
+
     @app_commands.command(name="add_board_score", description="Manually add/restore a single board entry (mod only).")
     @app_commands.describe(board="Exact board name (e.g. War Axe, Heavy Mace, Rudhelm - Mason)",
                            player="Player name as shown on the board",
