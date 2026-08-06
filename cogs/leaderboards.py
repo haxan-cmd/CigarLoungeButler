@@ -563,114 +563,80 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
 
 
 async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
-    """Edit each board message in place; on edit failure, delete the orphaned
-    original (best-effort) and post a fresh message instead of leaving a stale
-    duplicate behind. If anything had to be recreated, also repost a fresh
-    DECORATION_BOTTOM so the new message doesn't end up sitting outside the
-    board's decorative frame (the top/bottom spacer images are only posted once,
-    by /setup_leaderboard — none of the refresh paths ever touched them, so a
-    recreated message looked like a bare, undecorated leaderboard post). Returns
-    the new list of message IDs, same length/order as embeds.
-
-    Consolidated from update_leaderboards / refresh_leaderboard /
-    refresh_all_leaderboards, which each had this loop duplicated with the same
-    orphan-on-failure bug (Glaive board duplicate, found 2026-06-30).
+    """Render a board as a SINGLE message carrying ALL its section embeds (a map board's
+    Takedowns + Kills embeds, a weapon board's single embed, etc.). Edits the first
+    tracked message in place and deletes any EXTRA tracked messages left from the old
+    one-message-per-embed scheme, so a board is always exactly one message. Returns the
+    new message-id list (one id). Kills boards bake the bottom spacer into the last embed
+    (set_image) and carry the nav row on that message.
     """
-    new_ids = []
-    recreated = False
+    if not embeds:
+        return list(message_ids)
+    embeds = list(embeds)
 
     def _baked_deco(e):
-        # Kills-board embeds bake the bottom spacer in via set_image with an
-        # attachment:// url — those messages must (re)upload the file each write.
         try:
             return bool(e.image and str(e.image.url or '').startswith('attachment://'))
         except Exception:
             return False
 
-    for i, emb in enumerate(embeds):
-        _deco = _baked_deco(emb)
-        # The deco-marked message is the thread's bottom — it also carries the
-        # nav row (stateless link buttons, safe to reattach on every edit)
-        _nav = _nav_view(thread.guild.id) if _deco else None
-        if i < len(message_ids):
-            edited = False
-            gone = False
-            try:
-                msg = await thread.fetch_message(message_ids[i])
-                # Preserve the Related Weapons/Maps cross-link. The incremental
-                # update path (update_leaderboards -> _rated_embeds) rebuilds the
-                # embed WITHOUT this field, which silently stripped it whenever a
-                # submission touched the board that carries it. Reframe embeds
-                # already include it, so this only fires on the incremental path
-                # and never double-adds.
-                try:
-                    _REL_NAMES = ("Related Weapons", "Related Maps")
-                    if not any((f.name or "") in _REL_NAMES for f in emb.fields):
-                        for _of in (msg.embeds[0].fields if msg.embeds else []):
-                            if (_of.name or "") in _REL_NAMES and _of.value:
-                                emb.add_field(name=_of.name, value=_of.value, inline=False)
-                                break
-                except Exception as _rel_carry_err:
-                    print(f"[SYNC] related-field carry-over skipped: {_rel_carry_err}")
-                if _deco:
-                    await msg.edit(content=msg_content, embed=emb,
-                                   attachments=[discord.File(DECORATION_BOTTOM)],
-                                   view=_nav)
-                else:
-                    await msg.edit(content=msg_content, embed=emb)
-                new_ids.append(message_ids[i])
-                edited = True
-            except discord.NotFound:
-                gone = True   # message truly deleted -> safe to recreate
-            except Exception as edit_err:
-                # Transient failure (rate limit / 5xx). KEEP the existing message
-                # rather than risk a duplicate; the next refresh will catch it.
-                print(f"Leaderboard edit failed for msg {message_ids[i]} in #{thread.id}, keeping it: {edit_err}")
-                new_ids.append(message_ids[i])
-                edited = True
-            if not edited and gone:
-                msg = await thread.send(content=msg_content, embed=emb,
-                                        file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
-                                        view=_nav if _deco else discord.utils.MISSING)
-                new_ids.append(msg.id)
-                recreated = True
-        else:
-            msg = await thread.send(content=msg_content, embed=emb,
+    _deco = any(_baked_deco(e) for e in embeds)
+    _nav = _nav_view(thread.guild.id) if _deco else None
+    new_ids = []
+    recreated = False
+    _primary = message_ids[0] if message_ids else None
+
+    if _primary is not None:
+        try:
+            msg = await thread.fetch_message(_primary)
+            if _deco:
+                await msg.edit(content=msg_content, embeds=embeds,
+                               attachments=[discord.File(DECORATION_BOTTOM)], view=_nav)
+            else:
+                await msg.edit(content=msg_content, embeds=embeds)
+            new_ids = [_primary]
+        except discord.NotFound:
+            msg = await thread.send(content=msg_content, embeds=embeds,
                                     file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
                                     view=_nav if _deco else discord.utils.MISSING)
-            new_ids.append(msg.id)
-            recreated = True
+            new_ids = [msg.id]; recreated = True
+        except Exception as edit_err:
+            # Transient failure (rate limit / 5xx): keep the existing message, next
+            # refresh retries, rather than risk a duplicate.
+            print(f"Leaderboard edit failed for msg {_primary} in #{thread.id}, keeping it: {edit_err}")
+            new_ids = [_primary]
+    else:
+        msg = await thread.send(content=msg_content, embeds=embeds,
+                                file=discord.File(DECORATION_BOTTOM) if _deco else discord.utils.MISSING,
+                                view=_nav if _deco else discord.utils.MISSING)
+        new_ids = [msg.id]; recreated = True
 
-    # Boards with a baked-in border never need the standalone spacer repost.
-    if recreated and not any(_baked_deco(e) for e in embeds):
+    # Collapse EXTRA tracked messages (old one-embed-per-message scheme / continuation).
+    for extra_id in message_ids[1:]:
         try:
-            # The standalone bottom deco/nav message isn't tracked in message_ids,
-            # so the recreate path can't reuse it — left alone it stacks a SECOND
-            # nav row. Drop any existing untracked bot message that carries the nav
-            # (link buttons live only on the bottom deco in a non-baked thread)
-            # before posting the fresh one, so there's always exactly one.
+            _m = await thread.fetch_message(extra_id)
+            await _m.delete(); await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
+    # Recreated a non-baked board -> ensure exactly one standalone bottom deco/nav.
+    if recreated and not _deco:
+        try:
             _me = thread.guild.me.id if thread.guild and thread.guild.me else None
             async for _old in thread.history(limit=10):
                 if _old.id in new_ids:
                     continue
                 if (_me is None or _old.author.id == _me) and _old.components:
                     try:
-                        await _old.delete()
-                        await asyncio.sleep(0.3)
+                        await _old.delete(); await asyncio.sleep(0.3)
                     except Exception:
                         pass
             await thread.send(file=discord.File(DECORATION_BOTTOM), view=_nav_view(thread.guild.id))
         except Exception as deco_err:
             print(f"Decoration repost failed in #{thread.id}: {deco_err}")
 
-    # Baked-frame threads (a kills board carries its own bottom spacer + nav in the
-    # embed) must NOT also keep a standalone bottom decoration message left over
-    # from before the kills board existed — that leftover is the "double buttons".
-    # Delete any UNTRACKED bot message carrying BOTH a nav row and an attachment
-    # (the old bottom deco); the baked board message is in new_ids, so it's skipped
-    # and exactly one frame remains. After the first pass there's nothing to delete,
-    # so the ongoing cost is a short history scan.
-    if any(_baked_deco(e) for e in embeds):
+    # Baked-frame threads must not ALSO keep a standalone bottom deco (double buttons).
+    if _deco:
         try:
             _me = thread.guild.me.id if thread.guild and thread.guild.me else None
             async for _old in thread.history(limit=8):
@@ -678,25 +644,11 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content=""):
                     continue
                 if (_me is None or _old.author.id == _me) and _old.components and _old.attachments:
                     try:
-                        await _old.delete()
-                        await asyncio.sleep(0.3)
+                        await _old.delete(); await asyncio.sleep(0.3)
                     except Exception:
                         pass
         except Exception as _bake_err:
             print(f"[SYNC] baked-frame dedup skipped in #{thread.id}: {_bake_err}")
-
-    # If the tracked message_ids list was longer than the number of embeds we
-    # actually have (leftover from an older posting scheme that tracked more
-    # messages per board than it should have), the leftover IDs were never
-    # touched by the loop above and would sit in the thread forever as an
-    # orphan no one ever edits or deletes again — found 2026-06-30 on map
-    # boards as a duplicate plain-text header sitting above the real embed.
-    for extra_id in message_ids[len(embeds):]:
-        try:
-            extra_msg = await thread.fetch_message(extra_id)
-            await extra_msg.delete()
-        except Exception:
-            pass
 
     return new_ids
 
@@ -2127,6 +2079,43 @@ def _name_link(nl, did='', name=''):
 def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None, name_links=None):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
+    _nlx = name_links or {}
+    if is_map:
+        # Map boards render as TWO section embeds in one message: Takedowns (+ Warlord)
+        # and Kills (+ Kill Share). Warlord rides with Takedowns, Kill Share with Kills.
+        _te = getattr(config, 'TITLE_EMOJIS', {})
+        _wl_e = _te.get('Warlord', '\U0001f6e1\ufe0f')
+        _ks_e = _te.get('Lethality', '\U0001f9ea')
+        def _mrow(idx, player, did, score, link):
+            _dn = _lb_display_name(player, did)
+            _url = _name_link(_nlx, did, player)
+            _nm = f"[{_dn}]({_url})" if _url else f"`{_dn}`"
+            _run = f" [\u2197]({link})" if link else ""
+            return f"\u2502 {idx}. {_nm} \u2014 **{score}**{_run}"
+        def _mrating(rows):
+            _out = []
+            for _i, (_p, _sc) in enumerate((rows or [])[:5], 1):
+                _u = _name_link(_nlx, '', _p)
+                _pn = f"[{_p}]({_u})" if _u else f"`{_p}`"
+                _out.append(f"`{_i}.` {_pn} \u2014 {_sc:.0f}%")
+            return "\n".join(_out) if _out else "*Not enough games yet.*"
+        _td_lines = [_mrow(_i, _e['player'], _e.get('did', ''), f"{score_prefix}{_e['score']}", _e.get('link'))
+                     for _i, _e in enumerate(entries, 1)]
+        e_td = discord.Embed(title="Takedowns",
+                             description=("\n".join(_td_lines) or "*No entries yet.*")[:4096], colour=colour)
+        if warlord_rows:
+            e_td.add_field(name=f"{_wl_e} Warlord",
+                           value=_mrating(warlord_rows), inline=False)
+        _k_lines = [_mrow(_i, _kr[0], (_kr[3] if len(_kr) > 3 else ''), _kr[1], (_kr[2] if len(_kr) > 2 else ''))
+                    for _i, _kr in enumerate((kills_rows or [])[:10], 1)]
+        e_k = discord.Embed(title="Kills",
+                            description=("\n".join(_k_lines) or "*No kills yet.*")[:4096], colour=colour)
+        if lethality_rows:   # for map boards lethality_rows carries Kill Share
+            e_k.add_field(name=f"{_ks_e} Kill Share",
+                          value=_mrating(lethality_rows), inline=False)
+        e_k.set_footer(text="Best 5-game average, a separate ranking that never drops \u00b7 Last updated")
+        e_k.timestamp = datetime.now(timezone.utc)
+        return [e_td, e_k]
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
@@ -3810,7 +3799,16 @@ class LeaderboardsCog(commands.Cog):
             async with _board_lock():
                 summary = await rebuild_score_boards(interaction.guild, board_names=board_names, force_render=full)
         except Exception as e:
-            await interaction.edit_original_response(content=f"❌ Rebuild failed: {e}")
+            # Log the REAL error first — if this ran into a redeploy the interaction/
+            # aiohttp session may already be closed, and the edit below would raise a
+            # second exception ("Session is closed") that buries the original.
+            import traceback
+            traceback.print_exc()
+            nerve_log_error("rebuild_boards", e)
+            try:
+                await interaction.edit_original_response(content=f"❌ Rebuild failed: {e}")
+            except Exception as _e2:
+                print(f"[REBUILD] failure report couldn't be delivered (interaction dead): {_e2}")
             return
         _sk = summary.get('skipped', 0)
         _sk_txt = f" Skipped {_sk} unchanged (use `full:True` to repaint those)." if _sk else ""
