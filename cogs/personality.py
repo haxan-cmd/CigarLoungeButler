@@ -2135,37 +2135,34 @@ class PersonalityCog(commands.Cog):
                                 continue
                             boards.setdefault(weapon, []).append(
                                 (ld_r[1].strip(), (ld_r[2] or '').strip() if len(ld_r) > 2 else '', score))
-                        # Board values aren't all takedowns: the Score board is
-                        # scoreboard POINTS, 100 Kills is kills, TUFF is a kill
-                        # margin. Label each with its real unit so the Butler
-                        # doesn't call 25,078 points "takedowns".
-                        _UNIT = {"Score": "points", "Top Score": "points",
-                                 "Pacifist": "points",
-                                 "100 Kills": "kills", "TUFF": "kill margin"}
-                        standings = []
+                        # Which WEAPON boards this player is on — drives the "boards I'm
+                        # NOT on" complement below.
                         _on_weapons = set()
                         for weapon, entries in boards.items():
-                            entries.sort(key=lambda x: -x[2])
-                            for rank, (pname, pdid, score) in enumerate(entries, 1):
-                                # Match on EITHER discord_id OR name — an entry may
-                                # carry a stale/other id (matched by name) or a name
-                                # variant (matched by id); requiring id-only, or
-                                # name-only-when-blank, missed a player's own boards.
+                            for pname, pdid, score in entries:
                                 if (pdid and pdid == discord_id_str) or (pname and pname == player_name_for_ld):
-                                    medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'#{rank}')
-                                    _u = _UNIT.get(weapon, "TDs")
-                                    standings.append(f"{weapon}: {medal} ({score} {_u}, {rank}/{len(entries)})")
                                     _on_weapons.add(weapon)
                                     break
+                        # Placements rendered in the SAME style as the registry card:
+                        # per-type emoji + "board — #rank", "+gap" at #1, maps and feat
+                        # boards included. Built from the SAME source the card uses so the
+                        # two can never disagree. Still capped at 20 shown so a heavy player
+                        # can't balloon the prompt (specific-weapon rank Qs get their own
+                        # board injection, so trimming here is safe).
+                        from cogs.registry import get_best_placements_for_player
+                        _bp_all = await get_best_placements_for_player(
+                            discord_id_str, top_n=None, cached_data={'leaderboard_data': ld_for_pb})
+                        standings = []
+                        for _pos, _lbn, _emj, _gap in _bp_all:
+                            _g = f" (+{_gap})" if _gap is not None else ""
+                            standings.append(f"{_emj} {_lbn} — #{_pos}{_g}")
                         if standings:
-                            # Cap the list — a 77-board player otherwise bloats the
-                            # prompt to ~8k chars and the model (reasoning 'none') chokes
-                            # and deflects. Specific-weapon rank questions get their own
-                            # board injection, so trimming here is safe.
                             _shown = standings[:20]
                             _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
-                            player_stats_ctx += (f"\nLeaderboard standings (on {len(standings)} boards, showing top 20): "
-                                                 + ", ".join(_shown) + _more)
+                            player_stats_ctx += (
+                                "\nLeaderboard placements (on " + str(len(standings)) + " boards, showing top 20; "
+                                "when listing placements, present them in THIS exact style: keep each board's emoji, "
+                                "write the rank as '#N', one per line): " + " | ".join(_shown) + _more)
                         else:
                             player_stats_ctx += "\nLeaderboard standings: none recorded"
                         # Exact complement for "what boards am I NOT on" — computed by

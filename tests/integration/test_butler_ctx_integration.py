@@ -63,10 +63,10 @@ def test_player_core_stats_present(fake_db, make_sub):
 
 
 def _listed_boards(ctx):
-    # Every listed standing ends in "…, rank/entries)"; our synthetic boards all
-    # have exactly one entry, so each rendered entry ends with "/1)". Counting them
-    # is the real test of the cap — the label text is emitted regardless.
-    return ctx.count("/1)")
+    # Placements render in the card style now: "{emoji} {board} — #{rank}". Each shown
+    # entry contains exactly one "— #", and the "+N more boards" tail/label do not, so
+    # counting "— #" is the real test of the 20-entry cap.
+    return ctx.count("— #")
 
 
 def test_standings_capped_at_twenty_for_heavy_player(fake_db, make_sub):
