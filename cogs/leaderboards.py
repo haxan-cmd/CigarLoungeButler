@@ -3835,11 +3835,23 @@ class LeaderboardsCog(commands.Cog):
             return
         _sk = summary.get('skipped', 0)
         _sk_txt = f" Skipped {_sk} unchanged (use `full:True` to repaint those)." if _sk else ""
-        await interaction.edit_original_response(content=(
+        _done_txt = (
             f"✅ Rebuilt **{summary['boards']}** board(s) from submissions. "
             f"Added {summary['added']}, updated {summary['updated']}, "
             f"evicted {summary['evicted']} beyond top-10.{_sk_txt}"
-        ))
+        )
+        # A full rebuild can run past the 15-min interaction-token lifetime; the boards
+        # still rebuilt fine, only the status reply can't be delivered. Deliver it
+        # best-effort (edit -> channel message) and never let an expired token bubble up
+        # as a "Critical Error" (was firing a false 50027 Invalid Webhook Token alert).
+        try:
+            await interaction.edit_original_response(content=_done_txt)
+        except Exception as _re:
+            print(f"[REBUILD] status reply undeliverable (interaction likely expired): {_re}")
+            try:
+                await interaction.channel.send(_done_txt)
+            except Exception as _re2:
+                print(f"[REBUILD] channel fallback also failed: {_re2}")
 
     @app_commands.command(name="board_audit", description="Read-only: list submission scores missing from weapon/map boards (mod only).")
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")

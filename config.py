@@ -255,8 +255,10 @@ FEATURED_MIN_RUNS = 15
 
 # Max masked links the Butler may insert into one reply. Low values keep prose
 # readable, but a bulleted list of 8 bounty weapons looked broken when only the
-# first 5 (longest names first) got linked.
-BUTLER_MAX_LINKS = 14
+# first 5 (longest names first) got linked. Raised to 25 so a full "top 20
+# placements" list links every board (a heavy player is on ~20+ boards); casual
+# quips rarely name that many, so prose stays readable.
+BUTLER_MAX_LINKS = 25
 
 # Minimum runs before a bar appears on an /explore RATE chart (lethality, kill
 # share, warlord, avg TD/kills). At 3, three-run outliers topped the boards --
