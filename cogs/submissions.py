@@ -3067,9 +3067,16 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                                 _GREY_CHARGE_URLS[_wkey] = _leth_thumb
     except Exception as _lce:
         print(f"[LETHALITY] charge stash failed: {_lce}")
-    summary_reply = await original_message.reply(
-        embed=_blurb_embed(summary + marks_summary, thumb=_leth_thumb),
-        mention_author=False, view=edit_view)
+    _blurb = _blurb_embed(summary + marks_summary, thumb=_leth_thumb)
+    try:
+        summary_reply = await original_message.reply(
+            embed=_blurb, mention_author=False, view=edit_view)
+    except discord.HTTPException:
+        # The original screenshot was deleted before finalise replied, so the reply
+        # reference is dead (50035 Unknown message). Post the blurb WITHOUT a reference
+        # so the run still lands and the Edit button still works, instead of crashing
+        # the submission worker.
+        summary_reply = await original_message.channel.send(embed=_blurb, view=edit_view)
     edit_view._message = summary_reply
 
     # The blurb below was edited up to five times in a row, each with its own
