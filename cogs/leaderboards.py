@@ -1985,19 +1985,36 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
         except Exception as e:
             print(f"[BOARD] map kills compute error for {lb_name}: {e}")
     _name_links = await _card_link_map()
+    # Related-boards field on the thread's LAST board (the frame closer), matching the
+    # reframe path so /rebuild_boards doesn't drop it: Related Maps on a map board;
+    # Related Weapons on a weapon's Kills companion (or the weapon board itself when it
+    # has no Kills board). Computed from the WEAPON name, not the "{weapon} Kills" name.
     _related = None
-    if is_map:
-        try:
-            _recs = await _get_lb_records()
-            _rel_names = {r['Leaderboard Name'] for r in _recs}
-            _rel_tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+    try:
+        _recs = await _get_lb_records()
+        _rel_names = {r['Leaderboard Name'] for r in _recs}
+        _rel_tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+        if is_map:
             _related = _related_boards_field(lb_name, _rel_names, _rel_tby)
-        except Exception as e:
-            print(f"[BOARD] related-maps compute error for {lb_name}: {e}")
+        elif lb_name not in _FEAT_BOARD_NAMES:
+            _wsrc = lb_name[:-6] if _is_kills_board(lb_name) else lb_name
+            _is_last = _is_kills_board(lb_name) or _kills_board_name(lb_name) not in _rel_names
+            if _is_last:
+                _related = _related_boards_field(_wsrc, _rel_names, _rel_tby)
+    except Exception as e:
+        print(f"[BOARD] related-links compute error for {lb_name}: {e}")
     _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                       lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
                                       kill_share_rows=_ksr, kills_rows=_kills_rows, name_links=_name_links,
                                       related_field=_related)
+    # Map boards embed the related field inside their Kills section (in
+    # format_leaderboard_embeds); weapon boards get it appended to the last embed here,
+    # after the rating fields, mirroring the reframe layout.
+    if _related and not is_map and _embs:
+        try:
+            _embs[-1].add_field(name=_related[0], value=_related[1][:1024], inline=False)
+        except Exception:
+            pass
     # The bottom decoration is a separate message under the board (handled by
     # _sync_board_messages / _ensure_bottom_frame), never baked into the embed.
     return _embs
