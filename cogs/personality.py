@@ -3076,6 +3076,10 @@ class PersonalityCog(commands.Cog):
             now_ts = time.time()
             last = BUTLER_AI_COOLDOWNS.get(message.author.id, 0)
             if now_ts - last > BUTLER_AI_COOLDOWN_SECONDS:
+                # Stamp the cooldown NOW, before building context / awaiting the model.
+                # Setting it after the await left a race where a fast double-message from
+                # one user passed the check twice and fired two concurrent AI calls.
+                BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                 ctx_messages = []
                 try:
                     async for msg in message.channel.history(limit=10, before=message):
@@ -3169,13 +3173,16 @@ class PersonalityCog(commands.Cog):
                     # can exceed it) and a deleted reply-reference — either used to crash
                     # the whole on_message handler here.
                     _chunks = _chunk_message(response_text)
+                    # Model-generated text: never let an injected @everyone/role mention
+                    # actually ping (belt-and-suspenders alongside the bot-wide default).
+                    _am = discord.AllowedMentions(everyone=False, roles=False, users=True)
                     try:
-                        sent_msg = await message.reply(_chunks[0], mention_author=False)
+                        sent_msg = await message.reply(_chunks[0], mention_author=False, allowed_mentions=_am)
                     except discord.HTTPException:
-                        sent_msg = await message.channel.send(_chunks[0])
+                        sent_msg = await message.channel.send(_chunks[0], allowed_mentions=_am)
                     for _ch in _chunks[1:]:
                         try:
-                            await message.channel.send(_ch)
+                            await message.channel.send(_ch, allowed_mentions=_am)
                         except Exception:
                             pass
                     # Label by what was ASKED, not by whether stats happened to be

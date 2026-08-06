@@ -10,6 +10,31 @@ the given map, e.g. Agatha on Askandir) gets rejected.
 Kept pure (no discord/db imports) so it's unit-tested and reused wherever a run
 is validated.
 """
+import hmac
+
+
+def kofi_verification_result(expected_token, provided_token):
+    """Decide a Ko-fi webhook's fate from the configured token vs the payload token:
+      'reject_unconfigured' — no token set on our side. FAIL CLOSED: without a token we
+                              can't tell a real webhook from a spoof, so don't process.
+      'reject_bad_token'    — token set but the payload's token doesn't match.
+      'ok'                  — verified.
+    Failing closed on an unset token stops the public /kofi URL being used to inject
+    spoofed donations. Uses a timing-safe compare."""
+    if not expected_token:
+        return 'reject_unconfigured'
+    if not hmac.compare_digest(str(provided_token or ''), str(expected_token)):
+        return 'reject_bad_token'
+    return 'ok'
+
+
+def clean_donation_amount(raw):
+    """A non-negative float from a webhook's amount field; 0.0 on missing/garbage or a
+    negative value (a spoof can't drive the recorded total below zero)."""
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def impossible_submission_reason(selected_map, faction, map_factions):

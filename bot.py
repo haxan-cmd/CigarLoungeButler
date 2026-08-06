@@ -91,7 +91,13 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# Safe mention default: the Butler's AI replies echo user-influenced text, so a
+# prompt-injected "@everyone" must never actually ping. everyone/roles OFF blocks
+# the mass-ping vector; users ON keeps legitimate <@id> references working.
+bot = commands.Bot(
+    command_prefix="!", intents=intents,
+    allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True),
+)
 
 COGS = [
     "cogs.registry",

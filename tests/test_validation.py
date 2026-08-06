@@ -4,7 +4,30 @@ Rejects genuinely contradictory (map, faction) pairs; passes anything merely
 incomplete. Uses the real config.MAP_FACTIONS so the tests track the map pool.
 """
 import config
-from utils.validation import impossible_submission_reason, below_takedown_minimum, scoreboard_looks_incomplete
+from utils.validation import (impossible_submission_reason, below_takedown_minimum,
+                              scoreboard_looks_incomplete, kofi_verification_result,
+                              clean_donation_amount)
+
+
+def test_kofi_verification_fails_closed_when_unconfigured():
+    # No token set on our side -> refuse, so a public /kofi URL can't inject spoofs.
+    assert kofi_verification_result("", "anything") == 'reject_unconfigured'
+    assert kofi_verification_result(None, "anything") == 'reject_unconfigured'
+
+
+def test_kofi_verification_matches_token():
+    assert kofi_verification_result("secret", "secret") == 'ok'
+    assert kofi_verification_result("secret", "nope") == 'reject_bad_token'
+    assert kofi_verification_result("secret", None) == 'reject_bad_token'
+    assert kofi_verification_result("secret", "") == 'reject_bad_token'
+
+
+def test_clean_donation_amount():
+    assert clean_donation_amount("5.00") == 5.0
+    assert clean_donation_amount(10) == 10.0
+    assert clean_donation_amount(-3) == 0.0        # a spoof can't drive the total negative
+    assert clean_donation_amount(None) == 0.0
+    assert clean_donation_amount("garbage") == 0.0
 
 
 def test_scoreboard_looks_incomplete():

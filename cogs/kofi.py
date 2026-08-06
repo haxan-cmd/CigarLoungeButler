@@ -82,24 +82,27 @@ class KofiCog(commands.Cog, name="KofiCog"):
             # Verify token. Accept either env-var spelling — the Railway var was
             # created as KOFI-TOKEN (hyphen) while the code read KOFI_TOKEN, so
             # verification was silently skipped (expected="" short-circuits).
-            import hmac as _hmac
+            from utils.validation import kofi_verification_result, clean_donation_amount
             expected = (os.environ.get("KOFI_TOKEN")
                         or os.environ.get("KOFI-TOKEN") or "")
-            if expected:
-                _got = payload.get("verification_token") or ""
-                if not _hmac.compare_digest(_got, expected):
-                    log.warning("[KOFI] Invalid verification token")
-                    return web.Response(status=403, text="forbidden")
-            else:
-                log.warning("[KOFI] No KOFI_TOKEN set — webhook is UNVERIFIED")
+            _verdict = kofi_verification_result(expected, payload.get("verification_token"))
+            if _verdict == 'reject_unconfigured':
+                # Fail CLOSED: with no token configured we cannot tell a real Ko-fi
+                # webhook from a spoof, so record nothing. Set KOFI_TOKEN (or KOFI-TOKEN)
+                # in the environment to enable donation recording.
+                log.warning("[KOFI] No token set — refusing UNVERIFIED webhook (set KOFI_TOKEN to enable).")
+                return web.Response(status=503, text="unverified webhook disabled")
+            if _verdict == 'reject_bad_token':
+                log.warning("[KOFI] Invalid verification token")
+                return web.Response(status=403, text="forbidden")
 
             # Only handle donations (not shop orders etc.)
             if payload.get("type") not in ("Donation", "Subscription"):
                 return web.Response(text="ok")
 
             transaction_id = payload.get("kofi_transaction_id", "")
-            donor_name = payload.get("from_name", "Anonymous")
-            amount = float(payload.get("amount", 0))
+            donor_name = str(payload.get("from_name") or "Anonymous")[:80]
+            amount = clean_donation_amount(payload.get("amount", 0))
             currency = payload.get("currency", "USD")
 
             inserted = await add_kofi_donation(transaction_id, donor_name, amount, currency)
