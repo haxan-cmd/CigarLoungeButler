@@ -1736,7 +1736,7 @@ def _map_header(lb_name: str) -> str:
     emoji = FACTION_EMOJIS.get(faction, '⚔️')
     map_info = config.MAP_ATTACK_DEFENSE.get(map_name)
     is_attack = bool(map_info) and map_info[0] == faction
-    suffix = "<:weapon_hs:1350656128635375698>" if is_attack else "🛡️"
+    suffix = "⚔️" if is_attack else "🛡️"
     return f"{emoji} **{map_name} {faction}** {suffix}"
 
 _LB_EMOJI = {
@@ -2118,7 +2118,7 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
                            value=_mrating(warlord_rows), inline=False)
         # Both section embeds carry a footer + timestamp; without one, Discord renders
         # the footer-less embed narrower than its sibling (the "shrinking" the user saw).
-        e_td.set_footer(text="Last updated")
+        e_td.set_footer(text="Best 5-game average, a separate ranking that never drops \u00b7 Last updated")
         e_td.timestamp = datetime.now(timezone.utc)
         _k_lines = [_mrow(_i, _kr[0], (_kr[3] if len(_kr) > 3 else ''), _kr[1], (_kr[2] if len(_kr) > 2 else ''))
                     for _i, _kr in enumerate((kills_rows or [])[:10], 1)]
