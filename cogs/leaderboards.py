@@ -3980,9 +3980,52 @@ class LeaderboardsCog(commands.Cog):
             if did or _name2id.get(nl):
                 rec['account'] = True
 
-        needs = sorted((v['name'] for v in info.values() if not v['linked'] and v['account']), key=str.lower)
-        legacy = sorted((v['name'] for v in info.values() if not v['linked'] and not v['account']), key=str.lower)
+        # Alias detection: flag any unlinked name whose NORMALIZED form (lowercased,
+        # clan tags / "(spicy)" style suffixes and punctuation stripped) matches a player
+        # who ALREADY holds a card. Those don't need a NEW card — the board name just
+        # needs attaching as an alias to the existing one. High-threshold fuzzy fallback
+        # catches near-misses without merging genuinely distinct people.
+        from difflib import SequenceMatcher as _SM
+        def _norm(x):
+            x = _re.sub(r'\(.*?\)', '', x or '')
+            return _re.sub(r'[^a-z0-9]', '', x.lower())
+        _carded_dids = {str(k) for k in _nl if str(k).isdigit()}
+        _carded_by_norm = {}
+        for _p in await _db.get_all_players():
+            _pn = (_p[1] or '').strip() if len(_p) > 1 else ''
+            _pt = (_p[2] or '').strip() if len(_p) > 2 else ''
+            if _pt and _pn:
+                _carded_by_norm.setdefault(_norm(_pn), _pn)
+        for _anm, _adid in _name2id.items():
+            if str(_adid).strip() in _carded_dids and _anm:
+                _carded_by_norm.setdefault(_norm(_anm), _anm)
+
+        def _alias_of(name):
+            n = _norm(name)
+            if not n:
+                return None
+            hit = _carded_by_norm.get(n)
+            if hit and hit.lower() != name.lower():
+                return hit
+            _best, _br = None, 0.0
+            for _cn, _disp in _carded_by_norm.items():
+                if not _cn:
+                    continue
+                _r = _SM(None, n, _cn).ratio()
+                if _r > _br:
+                    _br, _best = _r, _disp
+            return _best if _br >= 0.88 else None
+
+        def _fmt(name):
+            _h = _alias_of(name)
+            return f"{name} → likely **{_h}**" if _h else name
+
+        needs = [_fmt(v['name']) for v in sorted((v for v in info.values() if not v['linked'] and v['account']),
+                                                 key=lambda v: v['name'].lower())]
+        legacy = [_fmt(v['name']) for v in sorted((v for v in info.values() if not v['linked'] and not v['account']),
+                                                  key=lambda v: v['name'].lower())]
         linked_n = sum(1 for v in info.values() if v['linked'])
+        _alias_hits = sum(1 for x in needs + legacy if '→ likely' in x)
 
         def _block(title, names, tip):
             if not names:
@@ -3991,6 +4034,9 @@ class LeaderboardsCog(commands.Cog):
             more = f" (+{len(names) - 50} more)" if len(names) > 50 else ""
             return f"{title} ({len(names)}) — {tip}\n" + ", ".join(shown) + more
 
+        _alias_note = (f"\n\n\U0001f50e {_alias_hits} of these look like aliases of a player who "
+                       f"ALREADY has a card (marked `→ likely NAME`) — attach the board name to that "
+                       f"card instead of building a new one." if _alias_hits else "")
         parts = [
             f"**Board card audit** — {len(info)} distinct board players, {linked_n} already linked.\n",
             _block("\U0001f527 Needs a card built", needs,
@@ -3998,6 +4044,7 @@ class LeaderboardsCog(commands.Cog):
             "",
             _block("\U0001f9ff Pure legacy, un-linkable", legacy,
                    "name-only rows with no Discord account on record — nothing to link to unless you attach an account via `/create_card`."),
+            _alias_note,
         ]
         msg = "\n".join(parts)
         if len(msg) > 1950:
