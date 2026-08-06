@@ -1030,7 +1030,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             continue
         is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
         embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-        header_content = _board_header(lb_name)
+        header_content = _map_header(lb_name) if is_map else _board_header(lb_name)
 
         thread_id = int(lb_row['Thread ID'])
         message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
@@ -1374,7 +1374,7 @@ async def _render_board(guild, lb_row, lb_name):
     score_prefix = "+" if lb_name == "TUFF" else ""
     is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
     embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-    header_content = _board_header(lb_name)
+    header_content = _map_header(lb_name) if is_map else _board_header(lb_name)
     thread_id = int(thread_raw)
     message_ids = [int(m) for m in _re.findall(r'\d{17,20}', msg_raw)]
     if not message_ids:
@@ -1991,9 +1991,19 @@ async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, sho
         except Exception as e:
             print(f"[BOARD] map kills compute error for {lb_name}: {e}")
     _name_links = await _card_link_map()
+    _related = None
+    if is_map:
+        try:
+            _recs = await _get_lb_records()
+            _rel_names = {r['Leaderboard Name'] for r in _recs}
+            _rel_tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
+            _related = _related_boards_field(lb_name, _rel_names, _rel_tby)
+        except Exception as e:
+            print(f"[BOARD] related-maps compute error for {lb_name}: {e}")
     _embs = format_leaderboard_embeds(lb_name, entries, overflow, show_weapon, score_prefix, show_title,
                                       lethality_rows=lr, warlord_rows=wr, rating_min=rmin, is_map=is_map,
-                                      kill_share_rows=_ksr, kills_rows=_kills_rows, name_links=_name_links)
+                                      kill_share_rows=_ksr, kills_rows=_kills_rows, name_links=_name_links,
+                                      related_field=_related)
     # Kills boards close the thread's decorative frame themselves: the bottom
     # spacer is baked into the last embed (set_image renders at the embed's
     # bottom; the referenced attachment is consumed, not shown separately).
@@ -2076,7 +2086,7 @@ def _name_link(nl, did='', name=''):
     return nl.get('name:' + n) if n else None
 
 
-def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None, name_links=None):
+def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, score_prefix="", show_title=True, lethality_rows=None, warlord_rows=None, rating_min=5, is_map=False, kill_share_rows=None, kills_rows=None, name_links=None, related_field=None):
     """Return a list of discord.Embeds for a leaderboard board, splitting if description is too long."""
     colour = _embed_colour(lb_name)
     _nlx = name_links or {}
@@ -2106,6 +2116,10 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         if warlord_rows:
             e_td.add_field(name=f"{_wl_e} Warlord",
                            value=_mrating(warlord_rows), inline=False)
+        # Both section embeds carry a footer + timestamp; without one, Discord renders
+        # the footer-less embed narrower than its sibling (the "shrinking" the user saw).
+        e_td.set_footer(text="Last updated")
+        e_td.timestamp = datetime.now(timezone.utc)
         _k_lines = [_mrow(_i, _kr[0], (_kr[3] if len(_kr) > 3 else ''), _kr[1], (_kr[2] if len(_kr) > 2 else ''))
                     for _i, _kr in enumerate((kills_rows or [])[:10], 1)]
         e_k = discord.Embed(title="Kills",
@@ -2113,6 +2127,8 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
         if lethality_rows:   # for map boards lethality_rows carries Kill Share
             e_k.add_field(name=f"{_ks_e} Kill Share",
                           value=_mrating(lethality_rows), inline=False)
+        if related_field:    # links to the other map threads (one entry per map)
+            e_k.add_field(name=related_field[0], value=related_field[1][:1024], inline=False)
         e_k.set_footer(text="Best 5-game average, a separate ranking that never drops \u00b7 Last updated")
         e_k.timestamp = datetime.now(timezone.utc)
         return [e_td, e_k]
@@ -3161,7 +3177,7 @@ class LeaderboardsCog(commands.Cog):
                 score_prefix = "+" if lb_name == "TUFF" else ""
                 is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
                 embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-                header_content = _board_header(lb_name)
+                header_content = _map_header(lb_name) if is_map else _board_header(lb_name)
 
                 thread_id = int(lb_row['Thread ID'])
                 message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
