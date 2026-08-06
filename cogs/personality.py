@@ -648,6 +648,32 @@ async def _linkify_reply(text, guild):
         return text
 
 
+def _chunk_message(text, limit=1990):
+    """Split a reply into <=limit-char pieces for Discord's 2000-char message cap.
+    Splits on newlines first (a masked link never spans one, so links stay intact);
+    only an over-long single line is hard-wrapped on spaces. A long, link-heavy answer
+    (e.g. a 20-board placements list) otherwise 400s the whole on_message handler."""
+    if not text:
+        return [text]
+    if len(text) <= limit:
+        return [text]
+    chunks, cur = [], ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            cut = line.rfind(" ", 0, limit)
+            cut = cut if cut > 0 else limit
+            if cur:
+                chunks.append(cur); cur = ""
+            chunks.append(line[:cut]); line = line[cut:].lstrip()
+        if cur and len(cur) + len(line) + 1 > limit:
+            chunks.append(cur); cur = line
+        else:
+            cur = (cur + "\n" + line) if cur else line
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 _POLL_STATS_CATEGORIES = ("map", "weapon", "faction", "subclass")
 
 
@@ -3139,7 +3165,19 @@ class PersonalityCog(commands.Cog):
                     # Linkify board/player mentions to their threads (deterministic,
                     # post-hoc — the model never writes URLs itself)
                     response_text = await _linkify_reply(response_text, message.guild)
-                    sent_msg = await message.reply(response_text, mention_author=False)
+                    # Guard Discord's 2000-char cap (a long, link-heavy placements answer
+                    # can exceed it) and a deleted reply-reference — either used to crash
+                    # the whole on_message handler here.
+                    _chunks = _chunk_message(response_text)
+                    try:
+                        sent_msg = await message.reply(_chunks[0], mention_author=False)
+                    except discord.HTTPException:
+                        sent_msg = await message.channel.send(_chunks[0])
+                    for _ch in _chunks[1:]:
+                        try:
+                            await message.channel.send(_ch)
+                        except Exception:
+                            pass
                     # Label by what was ASKED, not by whether stats happened to be
                     # attached — registered players always carry stats, so the old
                     # 'stats if player_stats_ctx' test marked every joke as a stats answer.
