@@ -635,6 +635,8 @@ def build_manual_embed():
         value=(
             "`/playerstats` — Your all-time profile: title, weapon ranks and marks. `/playerstats [name]` for anyone.\n"
             "`/season` — Your season GP: rank, where each point came from, and how far off the next place.\n"
+            "`/next` — Your nearest goal on each track: next weapon rank, mastery, and Hundred-Handed.\n"
+            "`/versus` — Your head-to-head with another player: shared lobbies, teammate/opponent split, comparative averages.\n"
             "`/refreshcard` — Refresh your registry card in Butler's Archive."
         ),
         inline=False,
@@ -645,7 +647,8 @@ def build_manual_embed():
             "`/top` — Top 10 for any weapon or class board. e.g. `/top Messer`\n"
             "`/standings` — Live standings for the current season.\n"
             "`/titles` — Who leads each all-time title (Grand Marshal, Weapons Master, Campaign Master).\n"
-            "`/report` — Current-standings snapshot: season champions, records, all-time titles."
+            "`/report` — Current-standings snapshot: season champions, records, all-time titles.\n"
+            "`/wrapped` — Your season recap: signature weapon, best game, streaks. `/superlatives` — the season's tongue-in-cheek awards."
         ),
         inline=False,
     )
@@ -655,6 +658,7 @@ def build_manual_embed():
             "`/serverstats` — Server activity dashboard over 24h / 7d / 30d.\n"
             "`/explore` — Any metric (runs, lethality, kill share, warlord, totals, best run) grouped any "
             "way (weapon, player, map, subclass, feat), filtered by feat or season. e.g. 100 Kills by weapon.\n"
+            "`/tilt_stats` — The lobby-difficulty ladder (kill gap between the teams) across every logged game.\n"
             "`/aliases` — Who has the most in-game names (the witness-protection board)."
         ),
         inline=False,
