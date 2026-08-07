@@ -89,7 +89,8 @@ How the systems work (answer players' questions about these accurately and speci
 - Boards: every weapon and map has a takedown leaderboard for your best game. Feat boards exist for 100 Kills, 200 Takedowns, Triple, Flawless, and TUFF. Map boards allow VIP, weapon boards do not.
 - TUFF is a hard-carry board. You score TUFF when your KILLS beat your best teammate's TAKEDOWNS, and it ranks the margin (+N): how far your kill count topped the next-highest player on your own team. TUFF has nothing to do with deaths, streaks, or unbroken runs. Never describe it that way.
 - Lethality and Warlord ratings: every weapon and map board also ranks two live ratings, Lethality (kills per takedown) and Warlord (your takedowns as a share of your team's total kills). A player's rating is their best 5-consecutive-game average ever with that weapon or map, so it never drops for a bad game. Minimum 5 games on weapons, rarely-played maps need fewer (the minimum scales with the map's popularity). These ratings rank EVERY player who meets the game minimum and are SEPARATE from the takedown board — a player does NOT need to be in the takedown top 10 to rank on Lethality or Warlord.
-- Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Kill Share (highest share of your team's KILLS, red-skull emoji), Warlord (your takedowns as a share of your team's total kills). The per-weapon Lethality rating (kills per takedown) still lives on the weapon/map boards and is NOT a season title. Players also carry a bounty role while taking part in the active monthly bounty.
+- Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Kill Share (highest share of your team's KILLS, red-skull emoji), Warlord (your takedowns as a share of your team's total kills), and Executioner (best Dominance, defined next). Players also carry a bounty role while taking part in the active monthly bounty.
+- Dominance and the Executioner title: Dominance is the HARMONIC MEAN of a player's peak Kill Share (kills / team kills) and peak Warlord (takedowns / team kills), taken over their best 5-consecutive-game run. It rewards genuine two-way impact, you have to be high in BOTH at once, so it cannot be gamed by min-maxing one axis (ratting for kills, or farming takedowns) while tanking the other. Executioner is the SEASON TITLE held by the current Dominance leader. Raw Lethality (kills per takedown) is kept only as a descriptive CONTEXT stat, it is NOT competed for and carries no title, because a low takedown count inflates it. When asked who is "dominant" or who the Executioner is, answer from Dominance, never from raw lethality.
 - Player titles climb by TOTAL bounties completed: Lounger (0), Insider (1), Regular (2), Made Man (3), High Roller (4), Kingpin (5), Legend (6+).
 - The monthly cycle: each month a new bounty and season start together and run about a month. Complete the bounty's weapon objectives to climb your player title. When the month ends, the season champions are enshrined in the Hall of Fame and the season titles reset. Weapon ranks, marks, and all-time titles carry over forever.
 
@@ -2957,14 +2958,15 @@ class PersonalityCog(commands.Cog):
                     player_stats_ctx += (
                         "\nSeason category leaders: "
                         f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
-                        f"Lethality {_lead('lethality_list')}; "
+                        f"Dominance {_lead('dominance_list')}; "
                         f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
                         f"Highest TD {_lead('top_td_list')}")
                     player_stats_ctx += (
-                        "\n[Titles: the Executioner role goes to the Lethality leader "
-                        "(kills/takedowns); the Warlord role to the Warlord leader "
-                        "(takedowns/team kills). Kill Share (kills/team kills) is a "
-                        "scored season category but carries no role.]")
+                        "\n[Titles: the Executioner role goes to the DOMINANCE leader (harmonic "
+                        "mean of Kill Share and Warlord, i.e. two-way impact); the Warlord role to "
+                        "the Warlord leader (takedowns/team kills). Kill Share (kills/team kills) is "
+                        "a scored season category but carries no role. Raw Lethality (kills/takedowns) "
+                        "is context only, no title.]")
             except Exception as _sce:
                 print(f"[BUTLER] season ctx error: {_sce}")
 

@@ -223,13 +223,26 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     most_dominant = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dom[:5]]
     warlord_player = dom_ranked[0] if dom_ranked else None
 
-    # ── EXECUTIONER / LETHALITY -- weapon-agnostic kills ÷ takedowns % ──
-    # The Executioner role is awarded on THIS. It used to be awarded on Kill Share
-    # above while being named most_lethal_*, so the holder never matched the
-    # Lethality board and nobody could work out why.
+    # ── LETHALITY -- weapon-agnostic kills ÷ takedowns %. CONTEXT ONLY now: it's a ratio
+    # you can inflate by taking FEWER takedowns, so it's shown but no longer competed for
+    # (the Executioner title moved to Dominance below).
     _true_leth = _peak_rank(lethal_ratios)
     lethality_list = [f"{p} -- {adj * 100:.1f} ({n})" for p, adj, n in _true_leth[:5]]
-    most_lethal_player = _true_leth[0][0] if _true_leth else None
+
+    # ── DOMINANCE -- harmonic mean of peak Kill Share% and peak Warlord%. The Executioner
+    # title is decided on THIS: genuine two-way impact you can't fake by min-maxing one axis
+    # (rat for kills, or farm takedowns) while tanking the other. Needs 5+ games on BOTH,
+    # which _peak_rank already enforces for each.
+    from utils.ratings import dominance as _dom_fn
+    _ks_peak = {p: v for p, v, _n in _leth}   # _leth = peak Kill Share
+    _wl_peak = {p: v for p, v, _n in _dom}    # _dom  = peak Warlord
+    _wl_n = {p: n for p, _v, n in _dom}
+    _dominance = sorted(
+        ((p, _dom_fn(_wl_peak[p], _ks_peak[p]), _wl_n.get(p, 0))
+         for p in (set(_ks_peak) & set(_wl_peak))),
+        key=lambda t: (-t[1], t[0]))
+    dominance_list = [f"{p} -- {adj:.1f} ({n})" for p, adj, n in _dominance[:5]]
+    dominance_player = _dominance[0][0] if _dominance else None
 
     # Some players have scores in LeaderboardData that predate the Submissions tab —
     # backfill their counts and best scores so they show up correctly in the report.
@@ -401,13 +414,14 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
         'frenzied': frenzied or "N/A",
         'top_total_tally': top_total_tally,
         'high_lethality': most_lethal_top5 if most_lethal_top5 else [],   # Kill Share board
-        'most_lethal_player': most_lethal_player,                         # Executioner = Lethality #1
+        'most_lethal_player': dominance_player,                           # Executioner = Dominance #1
         'warlord_player': warlord_player,
         'most_dominant': most_dominant if most_dominant else [],
-        'lethality_list': lethality_list if lethality_list else [],
-        # Incumbency margin compares like with like: Executioner is decided on
-        # Lethality, so its scores must come from _true_leth, not Kill Share.
-        '_lethal_adj': {p: adj for p, adj, _n in _true_leth},
+        'lethality_list': lethality_list if lethality_list else [],       # context only, no title
+        'dominance_list': dominance_list if dominance_list else [],
+        # Incumbency margin compares like with like: the Executioner is now decided on
+        # Dominance, so its scores must come from _dominance (not raw lethality).
+        '_lethal_adj': {p: adj for p, adj, _n in _dominance},
         '_warlord_adj': {p: adj for p, adj, _n in _dom},
         'top_weapons_by_kill_share': top_weapons_by_kill_share,
         'top_weapons_by_td_share': top_weapons_by_td_share,
@@ -503,9 +517,12 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · best 5-game run)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="🩸 Lethality  *(kills per takedown · best 5-game run)* — 🗡️ Executioner",
-                    value=_table(_rows(stats.get("lethality_list"), plain=True)) if stats.get("lethality_list") else "```\n— not enough data —\n```",
+    embed.add_field(name="⚔️ Dominance  *(Warlord + Kill Share · best 5-game run)* — 🗡️ Executioner",
+                    value=_table(_rows(stats.get("dominance_list"), plain=True)) if stats.get("dominance_list") else "```\n— not enough data —\n```",
                     inline=False)
+    # Lethality dropped from the MONTHLY board: it carries no title or GP here, and as a
+    # ratio it's gameable, so competing for it on the season board was misleading. It's
+    # still shown everywhere it's descriptive (run blurbs, the registry card, all-time boards).
 
     _tt = stats.get("top_total_tally") or []
     embed.add_field(name="<a:200tkd:1363648828414230538> Total Tally  *(takedowns)*",
@@ -541,8 +558,8 @@ async def update_title_roles(guild, stats, include_weekly=True):
          "It appears the armory has a new curator. {old}, your weapons have been... redistributed. {new}, the Weapons Master title is yours. Do try to keep the blades sharp."),
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
-        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Lethality',
-         "The kill tallies have been reviewed. {old}, your edge has dulled. {new}, the Executioner's title is yours. The butler is mildly impressed."),
+        ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Dominance',
+         "The two-way tallies have been reviewed. {old}, your grip has slipped. {new}, the Executioner's title is yours. Takedowns and kills both, no min-maxing. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]

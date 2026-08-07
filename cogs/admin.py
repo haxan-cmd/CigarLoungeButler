@@ -233,7 +233,14 @@ def build_challenge_rules_embeds():
         "<a:topkill:1360314538364240024> **Apex** — best average kills\n"
         "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
         "<a:mostlethal:1520490418817601658> **Kill Share** — biggest share of your team's kills\n"
-        "<:warlord:1520490364039860347> **Warlord** — your takedowns vs your team's total kills"
+        "<:warlord:1520490364039860347> **Warlord** — your takedowns vs your team's total kills\n"
+        "🗡️ **Executioner** — best **Dominance**: the harmonic mean of your Kill Share and Warlord, "
+        "so you must be high in BOTH. Can't be won by maxing one and tanking the other."
+    ), inline=False)
+    e.add_field(name="A note on Lethality", value=(
+        "Lethality (kills per takedown) still rides the weapon boards and your card as a "
+        "*descriptive* stat, but it is **not** a season title — it's a ratio you can inflate by "
+        "taking fewer takedowns, so Dominance is what you compete for."
     ), inline=False)
     e.add_field(name="🎯 Bounty", value=(
         "You also carry the **bounty role** while you're taking part in the active monthly bounty."
@@ -308,7 +315,7 @@ def build_challenge_rules_embeds():
     )
     e.add_field(name="When the month ends", value=(
         "The season's champions are enshrined in the **Hall of Fame**, and the season titles "
-        "(Apex, Frenzied, Most Lethal, Warlord) reset — always up for grabs. Weapon ranks, marks, "
+        "(Apex, Frenzied, Kill Share, Warlord, Executioner) reset — always up for grabs. Weapon ranks, marks, "
         "and all-time titles carry over forever."
     ), inline=False)
     embeds.append(e)
