@@ -712,3 +712,48 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
     fig.savefig(buf, format='png', dpi=120, facecolor=BG, bbox_inches='tight', pad_inches=0.15)
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, trend=None) -> bytes:
+    """Scatter of per-run (x, y) points with a least-squares trend line and the Pearson r
+    annotated (with a plain-language strength/direction). Powers /explore's 'does X track
+    with Y' correlation view. BLOCKING: call via render_async."""
+    plt, fig = _new_figure((10, 6.8))
+
+    def _y(inches_from_top):
+        return 1.0 - (inches_from_top / 6.8)
+
+    fig.subplots_adjust(left=0.10, right=0.955, top=_y(1.15), bottom=0.13)
+    fig.text(0.055, _y(0.36), title, color=FG, fontsize=21, fontweight='bold', ha='left', va='center')
+    fig.text(0.055, _y(0.66), subtitle, color=MUT, fontsize=12.5, ha='left', va='center')
+    fig.add_artist(plt.Line2D([0.055, 0.955], [_y(0.86), _y(0.86)], color=GOLD, linewidth=1.4, alpha=0.55))
+
+    ax = fig.add_subplot(111)
+    _style_axis(ax, grid_axis='both')
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    ax.scatter(xs, ys, s=44, color=GOLD, edgecolor=BG, linewidth=0.7, alpha=0.85, zorder=3)
+    if trend is not None and len(points) >= 2:
+        m, b = trend
+        x0, x1 = min(xs), max(xs)
+        ax.plot([x0, x1], [m * x0 + b, m * x1 + b], color=CORAL, linewidth=2.4, alpha=0.9, zorder=2)
+    ax.set_xlabel(x_label, color=MUT, fontsize=11, labelpad=6)
+    ax.set_ylabel(y_label, color=MUT, fontsize=11, labelpad=6)
+
+    if r is None:
+        _txt = "r = n/a"
+    else:
+        _mag = abs(r)
+        _strength = ('no' if _mag < 0.15 else 'weak' if _mag < 0.40
+                     else 'moderate' if _mag < 0.70 else 'strong')
+        _dir = '' if _mag < 0.15 else (' positive' if r > 0 else ' negative')
+        _txt = f"r = {r:+.2f}   ({_strength}{_dir})"
+    ax.text(0.98, 0.97, _txt, transform=ax.transAxes, ha='right', va='top',
+            color=FG, fontsize=12.5, fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.45', fc=PANEL, ec='none'))
+    fig.text(0.955, _y(0.66), footer, color=MUT, fontsize=8.5, ha='right', va='center')
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    return buf.getvalue()

@@ -492,9 +492,8 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
                     value=_table(_rows(stats.get("top_kills_list"))), inline=False)
     embed.add_field(name="<a:toptkd:1360312666475728958> Highest Takedowns",
                     value=_table(_rows(stats.get("top_td_list"))), inline=False)
-    embed.add_field(name="🏃 Busiest",
-                    value=_table([(_short(n), str(v)) for n, v in (stats.get("top_busiest") or [])[:5]]),
-                    inline=False)
+    # 'Busiest' (most submissions) was dropped: it double-counted volume with Total Tally
+    # above (same grinders, same order), so Total Tally is the single volume stat now.
 
     embed.add_field(name="─── Meta ───", value="​", inline=False)
     embed.add_field(name="🗡️ Top Weapons", value=_table(_rows(stats.get("top_weapons"))), inline=False)
@@ -1705,8 +1704,6 @@ class FavouritesCog(commands.Cog):
             if _mt: _records.append(f"<a:toptkd:1360312666475728958> Highest TD \u2014 {_mt}")
             _tt = _top1(stats.get('top_total_tally'))
             if _tt: _records.append(f"<a:200tkd:1363648828414230538> Total Tally \u2014 {_tt}")
-            _bz = _top1(stats.get('top_busiest'))
-            if _bz: _records.append(f"🏃 Busiest \u2014 {_bz}")
             if _records:
                 summary.add_field(name="🎯 Season Records", value="\n".join(_records), inline=False)
 

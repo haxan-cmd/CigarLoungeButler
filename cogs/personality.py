@@ -1626,7 +1626,9 @@ class PersonalityCog(commands.Cog):
         feat="Only count runs with this feat (optional)",
         window="All-time or just this season",
         side="Only count runs attacking, or defending (optional)",
-        player="Scope to one player: their weapon distribution, maps, etc. (optional)")
+        player="Scope to one player: their weapon distribution, maps, etc. (optional)",
+        weapon="Scope to one weapon, e.g. Messer (optional)",
+        vs="Correlate: scatter each run's metric against this 2nd stat, with a trend line + r")
     @app_commands.choices(
         metric=[
             app_commands.Choice(name="Run count", value="runs"),
@@ -1669,6 +1671,17 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Attacking only", value="Attack"),
             app_commands.Choice(name="Defending only", value="Defense"),
         ],
+        vs=[
+            app_commands.Choice(name="Kill share", value="kill_share"),
+            app_commands.Choice(name="Lethality (K/TD)", value="lethality"),
+            app_commands.Choice(name="Warlord", value="warlord"),
+            app_commands.Choice(name="Takedowns", value="td"),
+            app_commands.Choice(name="Kills", value="kills"),
+            app_commands.Choice(name="Deaths", value="deaths"),
+            app_commands.Choice(name="Score", value="score"),
+            app_commands.Choice(name="Total lobby kills", value="lobby_kills"),
+            app_commands.Choice(name="Lobby kill gap", value="tilt"),
+        ],
     )
     async def explore(self, interaction: discord.Interaction,
                       by: app_commands.Choice[str] = None,
@@ -1676,7 +1689,9 @@ class PersonalityCog(commands.Cog):
                       feat: app_commands.Choice[str] = None,
                       window: app_commands.Choice[str] = None,
                       side: app_commands.Choice[str] = None,
-                      player: discord.Member = None):
+                      player: discord.Member = None,
+                      weapon: str = None,
+                      vs: app_commands.Choice[str] = None):
         await interaction.response.defer()
         _by = by.value if by else "weapon"
         _by_label = by.name if by else "Weapon"
@@ -1720,6 +1735,128 @@ class PersonalityCog(commands.Cog):
                     _win_label = _s.get("label") or "this season"
             except Exception as _we:
                 print(f"[EXPLORE] season window lookup failed: {_we}")
+
+        # ── Correlation / scatter mode ──────────────────────────────────────────
+        # `vs` set -> plot each scoped run as a point (x = metric, y = vs) with a trend
+        # line and Pearson r. Both axes must be PER-RUN stats. Reuses the player/weapon/
+        # feat/window scope above. When `vs` is None the command is unchanged (below).
+        if vs is not None:
+            def _i(s, idx):
+                try:
+                    return int(s[idx]) if len(s) > idx and s[idx] not in (None, '') else None
+                except (ValueError, TypeError):
+                    return None
+
+            def _fl(s, idx):
+                try:
+                    return float(s[idx]) if len(s) > idx and s[idx] not in (None, '') else None
+                except (ValueError, TypeError):
+                    return None
+
+            def _score(s):
+                try:
+                    return int(str(s[24]).replace(',', '').strip()) if len(s) > 24 and s[24] else None
+                except (ValueError, TypeError):
+                    return None
+
+            def _kshare(s):
+                v = _fl(s, 20)
+                return v if (v and 0 < v <= 100) else None
+
+            def _leth(s):
+                td, k = _i(s, 7), _i(s, 8)
+                return (k / td) if (td and k) else None
+
+            def _warl(s):
+                td, k, t = _i(s, 7), _i(s, 8), _fl(s, 20)
+                return (td * t / k) if (td and k and t) else None
+
+            def _lobbyk(s):
+                tot = (_i(s, 25) or 0) + (_i(s, 26) or 0)
+                return tot if tot else _i(s, 18)
+
+            def _gap(s):
+                a, b = _i(s, 25), _i(s, 26)
+                return (a - b) if (a is not None and b is not None) else None
+
+            _PR = {
+                'kill_share': (_kshare, 'Kill share %'), 'lethality': (_leth, 'Lethality (K/TD)'),
+                'warlord': (_warl, 'Warlord %'),
+                'avg_td': (lambda s: _i(s, 7), 'Takedowns'), 'best_td': (lambda s: _i(s, 7), 'Takedowns'),
+                'td': (lambda s: _i(s, 7), 'Takedowns'),
+                'avg_kills': (lambda s: _i(s, 8), 'Kills'), 'best_kills': (lambda s: _i(s, 8), 'Kills'),
+                'kills': (lambda s: _i(s, 8), 'Kills'),
+                'deaths': (lambda s: _i(s, 9), 'Deaths'), 'score': (_score, 'Score'),
+                'lobby_kills': (_lobbyk, 'Total lobby kills'),
+                'avg_tilt': (_gap, 'Lobby kill gap'), 'tilt': (_gap, 'Lobby kill gap'),
+            }
+            _xk, _yk = _metric, vs.value
+            if _xk not in _PR or _yk not in _PR:
+                await interaction.followup.send(
+                    "For a correlation, both the **metric** and **vs** must be per-run stats. "
+                    "Run count and Valor Marks can't be scattered — try e.g. metric: *Avg kill share*, "
+                    "vs: *Total lobby kills*.")
+                return
+            _xf, _xlab = _PR[_xk]
+            _yf, _ylab = _PR[_yk]
+            _all_subs = await _db.get_all_submissions()
+            _pl_lower = {n.lower() for n in (_pnames or [])}
+            _pts = []
+            for s in _all_subs:
+                if len(s) < 21 or 'Unlisted' in (s[11] or ''):
+                    continue
+                if _pid or _pl_lower:
+                    _did = (s[2] or '').strip()
+                    _nm = (s[1] or '').strip().lower()
+                    if not ((_pid and _did == _pid) or (_nm in _pl_lower)):
+                        continue
+                if weapon and (s[3] or '').strip().lower() != weapon.strip().lower():
+                    continue
+                if _feat and _feat not in (s[11] or ''):
+                    continue
+                if _season_start:
+                    try:
+                        _tsv = s[0] if hasattr(s[0], 'year') else __import__('datetime').datetime.fromisoformat(str(s[0]))
+                        if _tsv.replace(tzinfo=None) < _season_start:
+                            continue
+                    except Exception:
+                        pass
+                _x, _y = _xf(s), _yf(s)
+                if _x is not None and _y is not None:
+                    _pts.append((float(_x), float(_y)))
+            if len(_pts) < 5:
+                await interaction.followup.send(
+                    f"Not enough runs to correlate ({len(_pts)}). Widen the scope, drop the weapon "
+                    f"filter, or pick a busier player.")
+                return
+            _n = len(_pts)
+            _mx = sum(p[0] for p in _pts) / _n
+            _my = sum(p[1] for p in _pts) / _n
+            _sxx = sum((p[0] - _mx) ** 2 for p in _pts)
+            _syy = sum((p[1] - _my) ** 2 for p in _pts)
+            _sxy = sum((p[0] - _mx) * (p[1] - _my) for p in _pts)
+            _r = (_sxy / ((_sxx * _syy) ** 0.5)) if (_sxx > 0 and _syy > 0) else None
+            _trend = ((_sxy / _sxx, _my - (_sxy / _sxx) * _mx) if _sxx > 0 else None)
+            _sc_title = (f"{_pscope_label} · {_xlab} vs {_ylab}" if _pscope_label
+                         else f"{_xlab} vs {_ylab}")
+            _sc_bits = []
+            if weapon:
+                _sc_bits.append(weapon.strip())
+            if _feat_label:
+                _sc_bits.append(f"feat: {_feat_label}")
+            _sc_bits.append(_win_label)
+            try:
+                import utils.charts as _charts
+                _png = await _charts.render_async(
+                    _charts.render_scatter, title=_sc_title, subtitle=" · ".join(_sc_bits),
+                    points=_pts, x_label=_xlab, y_label=_ylab, r=_r, trend=_trend,
+                    footer=f"{_n} runs · {_win_label}")
+                await interaction.followup.send(
+                    file=discord.File(io.BytesIO(_png), filename="correlate.png"))
+            except Exception as _sce:
+                print(f"[EXPLORE] scatter render failed: {_sce}")
+                await interaction.followup.send(f"Couldn't render the correlation: {_sce}")
+            return
 
         try:
             if _by in ("week", "month"):
