@@ -1339,6 +1339,91 @@ class PersonalityCog(commands.Cog):
             lines.append(f"{_em} {_nm}: {round(100 * cc.get(_nm, 0) / _N, 1)}% ({cc.get(_nm, 0)}){_mkstr}")
         await interaction.followup.send("\n".join(lines))
 
+    @app_commands.command(name="statscape", description="An abstract-art PNG of your combat stats (or another player's). For vibes.")
+    @app_commands.describe(player="Whose stats to paint (leave blank for your own).")
+    async def statscape(self, interaction: discord.Interaction, player: str = None):
+        await interaction.response.defer()
+        import io as _io
+        all_players = await _db.get_all_players()
+        if player:
+            target = next((row for row in all_players
+                           if len(row) > 1 and row[1].strip().lower() == player.strip().lower()), None)
+            if not target:
+                await interaction.followup.send(f"No player called **{player}** in the registry, sir.")
+                return
+            did = (target[0] or '').strip()
+            pname = (target[1] or '').strip()
+        else:
+            did = str(interaction.user.id)
+            pname = next((r[1].strip() for r in all_players
+                          if r and r[0].strip() == did and len(r) > 1), interaction.user.display_name)
+        try:
+            subs = await _db.get_all_submissions()
+        except Exception:
+            subs = []
+        _mine = [r for r in subs if len(r) >= 7
+                 and ((r[2] or '').strip() == did or (r[1] or '').strip().lower() == pname.lower())]
+        weapon_weights, faction_weights = {}, {}
+        for r in _mine:
+            w = (r[3] or '').strip()
+            fac = (r[6] or '').strip()
+            if w:
+                weapon_weights[w] = weapon_weights.get(w, 0) + 1
+            if fac:
+                faction_weights[fac] = faction_weights.get(fac, 0) + 1
+        if not weapon_weights:
+            await interaction.followup.send(f"**{pname}** has no runs to paint with yet. Tragic, but on brand.")
+            return
+        n_runs = len(_mine)
+        top_weapon = max(weapon_weights, key=weapon_weights.get)
+        arch = ''
+        try:
+            from cogs.registry import get_player_descriptors
+            _a, _d = await get_player_descriptors(did)
+            arch = _a or ''
+        except Exception:
+            pass
+        seed = n_runs * 100003 + sum(ord(c) for c in top_weapon) + sum(ord(c) for c in pname[:8])
+        _rt = random.Random(seed)
+        title = _rt.choice([
+            f"The {pname} Retrospective", f"{pname}: A Life in Blades",
+            f"Portrait of {pname} in Motion", f"{pname}, Studies in Violence",
+            f"The Collected {pname}", f"{pname} (After the Fall)",
+        ])
+        subtitle = f"{n_runs} runs · signature: {top_weapon}" + (f" · {arch}" if arch else "")
+        try:
+            import utils.charts as _charts
+            png = await _charts.render_async(
+                _charts.render_statscape,
+                weapon_weights=weapon_weights,
+                damage_map=getattr(config, 'WEAPON_DAMAGE_TYPES', {}),
+                faction_weights=faction_weights, title=title, subtitle=subtitle,
+                signature=f"{pname}, mixed media on despair, 2026", seed=seed)
+        except Exception as _se:
+            print(f"[STATSCAPE] render error: {_se}")
+            await interaction.followup.send("The muse has abandoned me. (render failed)")
+            return
+        _cap = None
+        try:
+            _cap = await _butler_complete(
+                BUTLER_SYSTEM_PROMPT,
+                f"You are unveiling '{title}', an abstract art piece YOU generated from {pname}'s combat "
+                f"record. Present it in TWO dry, pretentious art-critic sentences. Their signature weapon "
+                f"is {top_weapon}, {n_runs} logged runs"
+                + (f", playstyle {arch}" if arch else "")
+                + ". Roast gently. No em dashes.", 150)
+        except Exception:
+            pass
+        if not _cap:
+            _cap = (f"I present *{title}*. The {top_weapon} dominates the composition, as it dominates "
+                    f"{pname}'s every waking thought; the rest is negative space, much like their defence.")
+        try:
+            await interaction.followup.send(
+                content=_cap[:1900],
+                file=discord.File(_io.BytesIO(png), filename="statscape.png"))
+        except Exception as _fe:
+            print(f"[STATSCAPE] send error: {_fe}")
+
     @app_commands.command(name="help", description="List the commands you can use, grouped by what they do.")
     async def commands_list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

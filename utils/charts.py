@@ -577,3 +577,82 @@ def render_trend(*, title, subtitle, labels, values, value_label, footer,
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subtitle,
+                     signature="Cigar Lounge Butler, mixed media on despair, 2026", seed=0) -> bytes:
+    """A gleefully-silly COLLAGE of a player's (or the server's) real weapon icons: the
+    most-used weapon sits big in the middle, the rest scatter around it, each rotated and
+    sized by how much it's used with a soft damage-type glow behind it. Faction blobs tint
+    the backdrop. Seeded by the stats so it's stable per-state but drifts as data changes.
+    Falls back to coloured polygons for any weapon with no vendored icon. BLOCKING: via
+    render_async."""
+    import io as _io
+    import random as _rnd
+    import math as _math
+    from matplotlib.patches import Circle as _Circle, RegularPolygon as _Reg, Ellipse as _Ell
+    from matplotlib.offsetbox import OffsetImage as _OI, AnnotationBbox as _AB
+    try:
+        from PIL import Image as _Img
+        import numpy as _np
+    except Exception:
+        _Img = None
+    plt, fig = _new_figure((9.6, 9.6))
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(0, 100); ax.axis('off')
+    ax.set_facecolor(BG)
+    rng = _rnd.Random(seed)
+    DMG = {'Cut': BLUE, 'Chop': CORAL, 'Blunt': GOLD, 'Ranged': TEAL}
+    FAC = {'Mason': GOLD, 'Agatha': BLUE, 'Tenosia': CORAL}
+
+    # Faction blobs — soft, low-alpha ellipses tinting the backdrop.
+    _fac = sorted((faction_weights or {}).items(), key=lambda kv: -kv[1])[:4]
+    _fmax = max([v for _, v in _fac] + [1])
+    for fac, cnt in _fac:
+        c = FAC.get(fac, PURPLE)
+        r = 20 + 26 * (cnt / _fmax)
+        ax.add_patch(_Ell((rng.uniform(25, 75), rng.uniform(28, 78)),
+                          r * rng.uniform(1.0, 1.5), r, angle=rng.uniform(0, 180),
+                          color=c, alpha=0.09, zorder=0))
+
+    # Weapon icons — biggest-used near centre, the rest ringed around it.
+    _w = sorted((weapon_weights or {}).items(), key=lambda kv: -kv[1])[:18]
+    _wmax = max([v for _, v in _w] + [1])
+    for idx, (wpn, cnt) in enumerate(_w):
+        frac = cnt / _wmax
+        c = DMG.get((damage_map or {}).get(wpn), PURPLE)
+        if idx == 0:
+            cx, cy = 50 + rng.uniform(-5, 5), 55 + rng.uniform(-5, 5)
+        else:
+            ang = rng.uniform(0, 2 * _math.pi)
+            rad = rng.uniform(20, 42)
+            cx, cy = 50 + rad * _math.cos(ang), 52 + rad * _math.sin(ang)
+        ax.add_patch(_Circle((cx, cy), 6 + 10 * frac, color=c,
+                             alpha=0.16 + 0.12 * frac, zorder=1))
+        ip = _icon_path(wpn)
+        placed = False
+        if _Img and ip:
+            try:
+                img = _Img.open(ip).convert('RGBA').rotate(
+                    rng.uniform(-28, 28), expand=True, resample=_Img.BICUBIC)
+                zoom = 0.5 + 1.7 * _math.sqrt(frac)
+                oi = _OI(_np.asarray(img), zoom=zoom, alpha=0.92 if idx == 0 else 0.82)
+                ax.add_artist(_AB(oi, (cx, cy), frameon=False, xycoords='data', zorder=3))
+                placed = True
+            except Exception:
+                placed = False
+        if not placed:
+            sides = [3, 4, 5, 6][sum(ord(ch) for ch in wpn) % 4]
+            ax.add_patch(_Reg((cx, cy), sides, radius=4 + 7 * frac,
+                              orientation=rng.uniform(0, 6.28), color=c, alpha=0.8,
+                              zorder=3, ec=FG, lw=0.6))
+
+    # Museum placard, bottom-left.
+    ax.add_patch(plt.Rectangle((3, 3), 66, 15, color=BG, alpha=0.74, zorder=6))
+    ax.text(5, 14.2, title, fontsize=17, color=GOLD, weight='bold', zorder=7, va='center')
+    ax.text(5, 9.6, subtitle, fontsize=10.5, color=FG, zorder=7, va='center')
+    ax.text(5, 6.0, signature, fontsize=8.5, color=MUT, style='italic', zorder=7, va='center')
+
+    buf = _io.BytesIO()
+    fig.savefig(buf, format='png', dpi=120, facecolor=BG, bbox_inches='tight', pad_inches=0.15)
+    plt.close(fig)
+    return buf.getvalue()
