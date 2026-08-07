@@ -577,6 +577,15 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content="", clos
     if not embeds:
         return list(message_ids)
     embeds = list(embeds)
+    # Hard safety: Discord rejects a message whose combined embeds exceed 6000 chars
+    # (error 50035, which _sync swallows — so it silently stops repainting a board that
+    # outgrew the cap). Trim trailing embeds so a render can never hard-fail; the per-board
+    # display caps should keep us well under this anyway.
+    try:
+        while len(embeds) > 1 and sum(len(e) for e in embeds) > 5900:
+            embeds.pop()
+    except Exception:
+        pass
     # Strip any legacy baked bottom-decoration image so an in-place edit clears it
     # (the decoration is a separate message now).
     try:
@@ -1216,7 +1225,12 @@ async def _sort_board_entries(lb_name, entries):
         # can never render more than 10. Feat boards are unlimited and pass through.
         if _classify_board(lb_name, '') in ('weapon', 'map', 'weapon_kills'):
             return _sorted[:10]
-        return _sorted
+        # Feat boards (TUFF, 100 Kills, Flawless…) stack unbounded rows. With masked-link
+        # names + run links each line is long, so rendering the FULL list overflows
+        # Discord's 6000-char-per-message embed cap (a 50035 that silently killed every
+        # edit once a board grew). Cap the DISPLAY to a safe top-N; the full history stays
+        # in the DB and still counts for marks/records.
+        return _sorted[:20]
     subs = await _db.get_all_submissions()
     tdl = {}
     for s in subs:
