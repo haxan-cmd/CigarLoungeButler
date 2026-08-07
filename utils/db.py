@@ -298,6 +298,10 @@ def _row_to_submission(r) -> list:
         str(r['second_place_td']) if r['second_place_td'] is not None else '',
         str(r['id']),  # row index equivalent
         str(r['score']) if r['score'] is not None else '',
+        # 25/26 — the two faction banner totals (documented row map). Previously omitted,
+        # so anything indexing [25]/[26] silently got nothing; now exposed for /correlate.
+        str(r['team_total_kills']) if r['team_total_kills'] is not None else '',
+        str(r['enemy_total_kills']) if r['enemy_total_kills'] is not None else '',
     ]
 
 
