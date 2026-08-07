@@ -562,61 +562,70 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
         print(f"Leaderboard index error ({index_label}): {e}")
 
 
-async def _sync_board_messages(thread, embeds, message_ids, msg_content="", close_frame=False):
-    """Render a board as a SINGLE message carrying ALL its section embeds (a map board's
-    Takedowns + Kills embeds, a weapon board's single embed, etc.). Edits the first
-    tracked message in place and deletes any EXTRA tracked messages left from the old
-    one-message-per-embed scheme, so a board is always exactly one message. Returns the
-    new message-id list (one id).
+def _pack_embeds(embeds, limit=5900, max_per=10):
+    """Group embeds into MESSAGES that each stay under Discord's 6000-char and 10-embed
+    per-message caps. A map board's two small sections pack into ONE message; a big stacked
+    feat board (TUFF, 100 Kills…) spreads across several instead of overflowing. Never drops
+    an embed."""
+    groups, cur, cur_len = [], [], 0
+    for e in embeds:
+        try:
+            el = len(e)
+        except Exception:
+            el = 0
+        if cur and (cur_len + el > limit or len(cur) >= max_per):
+            groups.append(cur); cur, cur_len = [], 0
+        cur.append(e); cur_len += el
+    if cur:
+        groups.append(cur)
+    return groups or [list(embeds)]
 
-    The bottom decoration is its OWN message below the board (mirroring the top
-    decoration), never baked into the embed. For a frame-closing board (close_frame=True,
-    i.e. the last board in the thread -- a weapon's Kills companion) we guarantee exactly
-    one standalone bottom-decoration + nav message sits under it.
+
+async def _sync_board_messages(thread, embeds, message_ids, msg_content="", close_frame=False):
+    """Render a board across as FEW messages as fit Discord's caps: embeds are packed into
+    messages that each stay under 6000 chars / 10 embeds, so a map board's Takedowns + Kills
+    sections ride ONE message while a big stacked feat board spreads across several instead
+    of blowing the 6000-char limit. Edits the tracked messages in place, sends more when the
+    board grew, deletes surplus when it shrank. Header content rides the first message only.
+    Returns the new message-id list.
+
+    The bottom decoration is its OWN message below the board; for a frame-closing board
+    (close_frame=True) we guarantee exactly one standalone bottom-decoration + nav under it.
     """
     if not embeds:
         return list(message_ids)
     embeds = list(embeds)
-    # Hard safety: Discord rejects a message whose combined embeds exceed 6000 chars
-    # (error 50035, which _sync swallows — so it silently stops repainting a board that
-    # outgrew the cap). Trim trailing embeds so a render can never hard-fail; the per-board
-    # display caps should keep us well under this anyway.
-    try:
-        while len(embeds) > 1 and sum(len(e) for e in embeds) > 5900:
-            embeds.pop()
-    except Exception:
-        pass
-    # Strip any legacy baked bottom-decoration image so an in-place edit clears it
-    # (the decoration is a separate message now).
+    # Strip any legacy baked bottom-decoration image so an in-place edit clears it.
     try:
         embeds[-1].set_image(url=None)
     except Exception:
         pass
+    groups = _pack_embeds(embeds)
     new_ids = []
-    _primary = message_ids[0] if message_ids else None
+    for i, grp in enumerate(groups):
+        _content = msg_content if i == 0 else None
+        _mid = message_ids[i] if i < len(message_ids) else None
+        if _mid is not None:
+            try:
+                msg = await thread.fetch_message(_mid)
+                # attachments=[]/view=None drop any legacy baked-decoration file + nav row.
+                await msg.edit(content=_content, embeds=grp, attachments=[], view=None)
+                new_ids.append(_mid)
+            except discord.NotFound:
+                msg = await thread.send(content=_content, embeds=grp)
+                new_ids.append(msg.id)
+            except Exception as edit_err:
+                print(f"Leaderboard edit failed for msg {_mid} in #{thread.id}, keeping it: {edit_err}")
+                new_ids.append(_mid)
+        else:
+            # Board grew past its tracked message count -> add a message (the caller reframes
+            # on a count change, so this stays framed; this is the belt-and-suspenders path).
+            msg = await thread.send(content=_content, embeds=grp)
+            new_ids.append(msg.id)
+        await asyncio.sleep(0.2)
 
-    if _primary is not None:
-        try:
-            msg = await thread.fetch_message(_primary)
-            # attachments=[] drops any legacy baked-decoration file; view=None drops the
-            # nav row that used to ride the baked message (nav lives on the standalone
-            # bottom decoration now).
-            await msg.edit(content=msg_content, embeds=embeds, attachments=[], view=None)
-            new_ids = [_primary]
-        except discord.NotFound:
-            msg = await thread.send(content=msg_content, embeds=embeds)
-            new_ids = [msg.id]
-        except Exception as edit_err:
-            # Transient failure (rate limit / 5xx): keep the existing message, next
-            # refresh retries, rather than risk a duplicate.
-            print(f"Leaderboard edit failed for msg {_primary} in #{thread.id}, keeping it: {edit_err}")
-            new_ids = [_primary]
-    else:
-        msg = await thread.send(content=msg_content, embeds=embeds)
-        new_ids = [msg.id]
-
-    # Collapse EXTRA tracked messages (old one-embed-per-message scheme / continuation).
-    for extra_id in message_ids[1:]:
+    # Delete surplus tracked messages (board shrank / old one-embed-per-message scheme).
+    for extra_id in message_ids[len(groups):]:
         try:
             _m = await thread.fetch_message(extra_id)
             await _m.delete(); await asyncio.sleep(0.3)
@@ -812,8 +821,12 @@ async def _reframe_thread_inner(guild, thread, ordered_boards):
             if idx == 0:
                 await thread.send(file=discord.File(DECORATION_TOP)); await asyncio.sleep(0.3)
             ids = []
-            for emb in embeds:
-                _m = await thread.send(embed=emb)
+            # Pack embeds into messages (map board's 2 sections in one; a big feat board
+            # across several) and carry the header content on the first, matching _sync.
+            _is_map_b = (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
+            _hdr = _map_header(lb_name) if _is_map_b else _board_header(lb_name)
+            for _gi, _grp in enumerate(_pack_embeds(embeds)):
+                _m = await thread.send(content=(_hdr if _gi == 0 else None), embeds=_grp)
                 ids.append(str(_m.id)); await asyncio.sleep(0.3)
             _last = (idx == n - 1)
             await thread.send(file=discord.File(DECORATION_BOTTOM),
@@ -1225,14 +1238,12 @@ async def _sort_board_entries(lb_name, entries):
         # can never render more than 10. Feat boards are unlimited and pass through.
         if _classify_board(lb_name, '') in ('weapon', 'map', 'weapon_kills'):
             return _sorted[:10]
-        # Feat boards (TUFF, 100 Kills, Flawless…) stack unbounded rows. With masked-link
-        # names + run links each line is long, so rendering the FULL list overflows
-        # Discord's 6000-char-per-message embed cap (a 50035 that silently killed every
-        # edit once a board grew). Cap the DISPLAY to a safe top-N; the full history stays
-        # in the DB and still counts for marks/records. 15 fits comfortably in ONE embed
-        # (a masked-link line is ~200 chars; ~19 fill the 4096 description limit and spill
-        # the rest into an ugly single-entry "(cont.)" box), so we keep it to a clean top-15.
-        return _sorted[:15]
+        # Feat boards (TUFF, 100 Kills, Flawless…) stack unbounded rows and "go off" like a
+        # full ladder. The render now packs the long list across as many messages as it
+        # needs (see _pack_embeds), so it no longer overflows Discord's 6000-char/message
+        # cap. Keep a generous top-50 so a busy board stays to a few messages rather than
+        # dozens; the full history still lives in the DB and counts for marks/records.
+        return _sorted[:50]
     subs = await _db.get_all_submissions()
     tdl = {}
     for s in subs:
@@ -1415,7 +1426,11 @@ async def _render_board(guild, lb_row, lb_name):
             _alive = False
         except Exception:
             _alive = True   # transient fetch error -> assume alive, let the edit retry
-        if not _alive:
+        # If the tracked message is gone, OR the board now needs a different NUMBER of
+        # messages than it has (it grew/shrank past a 6000-char boundary), a plain edit
+        # can't place the extra/removed messages correctly. Reframe the whole thread so
+        # every message sits in order between the decorations.
+        if (not _alive) or (len(_pack_embeds(embeds)) != len(message_ids)):
             _order = _thread_board_order(await _get_lb_records(), thread_raw)
             await _reframe_thread_inner(guild, thread, _order or [lb_name])
             return
