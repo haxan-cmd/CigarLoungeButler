@@ -265,7 +265,7 @@ def extract_stats_from_message(text):
 
 
 _DATA_QUESTION_WORDS = (
-    'stat', 'rank', 'leaderboard', 'board', 'lethal', 'warlord', 'executioner', 'kill share', 'killshare', 'takedown',
+    'stat', 'rank', 'leaderboard', 'board', 'lethal', 'warlord', 'executioner', 'dominant', 'dominance', 'kill share', 'killshare', 'takedown',
     'kills', 'kill rate', 'marks', 'placement', 'placed', 'record', 'hundred-handed',
     'hundred handed', 'mastery', 'mastered', 'virtuoso', 'highest', 'how many',
     'top 10', 'top ten', 'title', 'predator', 'triple', 'flawless', 'bounty',
@@ -2962,7 +2962,7 @@ class PersonalityCog(commands.Cog):
                         f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
                         f"Highest TD {_lead('top_td_list')}")
                     player_stats_ctx += (
-                        "\n[Titles: the Executioner role goes to the DOMINANCE leader (harmonic "
+                        "\n[Titles: the Most Dominant role goes to the DOMINANCE leader (harmonic "
                         "mean of Kill Share and Warlord, i.e. two-way impact); the Warlord role to "
                         "the Warlord leader (takedowns/team kills). Kill Share (kills/team kills) is "
                         "a scored season category but carries no role. Raw Lethality (kills/takedowns) "

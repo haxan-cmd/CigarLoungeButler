@@ -521,7 +521,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="<:warlord:1520490364039860347> Warlord  *(takedowns ÷ team kills · best 5-game run)*",
                     value=_table(_rows(stats.get("most_dominant"), plain=True)) if stats.get("most_dominant") else "```\n— not enough data —\n```",
                     inline=False)
-    embed.add_field(name="⚔️ Dominance  *(Warlord + Kill Share · best 5-game run)* — 🗡️ Executioner",
+    embed.add_field(name="<a:dominance:1535424879711752233> Dominance  *(Warlord + Kill Share · best 5-game run)*",
                     value=_table(_rows(stats.get("dominance_list"), plain=True)) if stats.get("dominance_list") else "```\n— not enough data —\n```",
                     inline=False)
     # Lethality dropped from the MONTHLY board: it carries no title or GP here, and as a
@@ -546,8 +546,8 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
 
     embed.set_footer(text=("Kill Share / Warlord / Lethality here are your best 5-game run for THIS "
                            "season (5+ games) -- a season peak that never drops, so keep playing to beat "
-                           "it. The all-time boards show the same over your whole history. Executioner goes "
-                           "to the Lethality leader, Warlord to the Warlord leader; a challenger must beat "
+                           "it. The all-time boards show the same over your whole history. Most Dominant goes "
+                           "to the Dominance leader, Warlord to the Warlord leader; a challenger must beat "
                            "the holder by 1%."))
     return embed
 
@@ -563,7 +563,7 @@ async def update_title_roles(guild, stats, include_weekly=True):
         ('campaign_master', CAMPAIGN_MASTER_ROLE_ID, 'Campaign Master',
          "The campaign maps have been redrawn. {old}, your routes have been rerouted. {new}, you are hereby appointed Campaign Master. The butler expects nothing less than total domination."),
         ('most_lethal_player', MOST_LETHAL_ROLE_ID, 'Dominance',
-         "The two-way tallies have been reviewed. {old}, your grip has slipped. {new}, the Executioner's title is yours. Takedowns and kills both, no min-maxing. The butler is mildly impressed."),
+         "The two-way tallies have been reviewed. {old}, your grip has slipped. {new}, the Most Dominant title is yours. Takedowns and kills both, no min-maxing. The butler is mildly impressed."),
         ('warlord_player', WARLORD_ROLE_ID, 'Warlord',
          "The TD tallies have been reviewed. {old}, your dominance has waned. {new}, the Warlord title is yours. The butler acknowledges your presence on the battlefield."),
     ]
