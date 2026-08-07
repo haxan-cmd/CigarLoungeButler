@@ -699,20 +699,11 @@ async def _build_board_embeds(guild, ordered_boards):
     """Framed board embeds for a thread (entries + weapon thumbnail + related on
     the LAST board), without posting. Returns [(lb_name, [embeds])] in order.
     Shared by _reframe_thread (posts them) and the /refresh_all skip-check."""
-    n = len(ordered_boards)
-    _rel = None
-    try:
-        _recs = await _get_lb_records()
-        _names = {r['Leaderboard Name'] for r in _recs}
-        _tby = {r['Leaderboard Name']: str(r.get('Thread ID') or '') for r in _recs}
-        _primary = next((b for b in ordered_boards if not _is_kills_board(b)),
-                        ordered_boards[0] if ordered_boards else None)
-        if _primary:
-            _rel = _related_boards_field(_primary, _names, _tby)
-    except Exception as _rle:
-        print(f"[BUILD] related-links error: {_rle}")
+    # NOTE: the Related-boards field (Related Maps / Related Weapons) is added inside
+    # _rated_embeds now, per frame-closing board. This path must NOT add it again or it
+    # doubles up on every board (the "related maps twice" bug).
     out = []
-    for idx, lb_name in enumerate(ordered_boards):
+    for lb_name in ordered_boards:
         entries = await get_leaderboard_entries(lb_name)
         entries = await _sort_board_entries(lb_name, entries)
         show_weapon = lb_name in ("100 Kills", "200 Takedowns")
@@ -724,8 +715,6 @@ async def _build_board_embeds(guild, ordered_boards):
                 embeds[-1].set_image(url=None)
             except Exception:
                 pass
-        if idx == n - 1 and _rel and embeds:
-            embeds[-1].add_field(name=_rel[0], value=_rel[1][:1024], inline=False)
         if not is_map and lb_name not in _FEAT_BOARD_NAMES and embeds:
             _weap = lb_name[:-6].strip() if _is_kills_board(lb_name) else lb_name
             _turl = await _weapon_thumb_url(guild, _weap)
