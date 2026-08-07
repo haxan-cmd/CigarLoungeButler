@@ -3300,8 +3300,9 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** reframed successfully.")
 
-    @app_commands.command(name="refresh_all", description="Refresh every leaderboard at once (mod only)")
-    async def refresh_all_leaderboards(self, interaction: discord.Interaction):
+    @app_commands.command(name="refresh_all", description="Reframe drifted leaderboard threads; force:True reframes ALL (mod only).")
+    @app_commands.describe(force="Reframe EVERY thread, not just drifted ones — fixes floating decorations / nav.")
+    async def refresh_all_leaderboards(self, interaction: discord.Interaction, force: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -3343,7 +3344,7 @@ class LeaderboardsCog(commands.Cog):
                 for r in recs:
                     if r['Leaderboard Name'] not in order:
                         order.append(r['Leaderboard Name'])
-                if await _thread_needs_reframe(guild, thread, recs, order):
+                if force or await _thread_needs_reframe(guild, thread, recs, order):
                     await _reframe_thread(guild, thread, order)
                     done.extend(order)
                     await asyncio.sleep(1.5)   # heavy op -> let buckets recover
