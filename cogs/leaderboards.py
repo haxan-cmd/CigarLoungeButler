@@ -872,7 +872,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         updates.append(("Knife", takedowns, True, True, False))
     if selected_weapon == "Healing Horn" and kills >= 100:
         updates.append(("Healing Horn", kills, False, True, False))
-    if second_place_td is not None and kills is not None:
+    # TUFF is a kill-margin (your kills minus your best teammate's takedowns); a VIP run's
+    # inflated kills would skew it, so it's excluded like the weapon boards. Gated here in
+    # the shared update path, so finalise AND the edit path both honour it.
+    if not vip and second_place_td is not None and kills is not None:
         tuff_gap = kills - second_place_td
         if tuff_gap > 0:
             updates.append(("TUFF", tuff_gap, False, False, True))
@@ -1799,7 +1802,9 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     total kills) for a weapon or map board. Rating never drops \u2014 it is the best 5-game
     window a player has ever posted with that weapon/map. Minimum 5 games for
     weapons; for maps the minimum scales with the map's popularity vs the busiest
-    map (rare maps need fewer). Weapon boards exclude VIP; map boards allow it.
+    map (rare maps need fewer). VIP runs are excluded from ALL ratings (weapon AND map) —
+    their inflated kills would skew every conversion metric — even though VIP still counts
+    on the map takedown board itself.
     Returns (lethality_rows, warlord_rows, min_games) with rows = sorted [(player, score)]."""
     subs = all_subs if all_subs is not None else await _db.get_all_submissions()
 
@@ -1868,6 +1873,14 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
     for row in subs:
         if len(row) < 9:
             continue
+        # Ratings measure CONVERSION (lethality = kills/TD, kill share = kills/team kills,
+        # warlord = TD/team kills). A VIP run's inflated kills skew every one of them, so
+        # VIP is excluded from ALL ratings — weapon AND map — even though VIP still counts
+        # on the map TAKEDOWN board itself. (Weapon-only exclusion left the map Kill Share
+        # and Warlord ratings skewed.)
+        _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
+        if _vip:
+            continue
         if is_map:
             m = row[5].strip() if len(row) > 5 else ''
             fac = row[6].strip() if len(row) > 6 else ''
@@ -1875,9 +1888,6 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
                 continue
         else:
             if (row[3].strip() if len(row) > 3 else '') != lb_name:
-                continue
-            _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
-            if _vip:
                 continue
         player = row[1].strip()
         did = row[2].strip() if len(row) > 2 and row[2] else ''

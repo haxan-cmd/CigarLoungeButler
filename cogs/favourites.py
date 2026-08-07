@@ -120,6 +120,12 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
         players_set.add(player)
         td_scores_sub[player] = max(td_scores_sub.get(player, 0), td)
         kills_scores_sub[player] = max(kills_scores_sub.get(player, 0), kills)
+        # VIP runs count as activity above, but are excluded from every CONVERSION rating
+        # below (Lethality, Kill Share, Warlord, kill efficiency, team shares): a VIP run's
+        # inflated kills would skew the season rate-titles, matching the board ratings.
+        _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
+        if _vip:
+            continue
         # Lethality: kill rate (kills/td)
         if kills > 0 and td > 0:
             lethal_ratios.setdefault(player, []).append(kills / td)
