@@ -4631,7 +4631,7 @@ class LeaderboardsCog(commands.Cog):
             content=f"✅ Removed **{removed}** VIP-backed entr{'y' if removed == 1 else 'ies'} "
                     f"from **{board}** and repainted the board.")
 
-    @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, Pacifist (mod only).")
+    @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, TUFF, Pacifist (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("Not for you.", ephemeral=True)
@@ -4699,6 +4699,21 @@ class LeaderboardsCog(commands.Cog):
                     await _db.add_leaderboard_entry("Flawless", player, discord_id, takedowns, link, weapon)
                     existing.add(("Flawless", link))
                     added += 1
+
+                # TUFF: kill-margin (kills minus best teammate's takedowns), unlimited,
+                # ranked by margin. Same rules as the live add: VIP excluded (inflated kills
+                # skew it), resubmits skipped (they'd double-count the same run). The best
+                # teammate TD is stored on the submission as second_place_td (col 22).
+                if ((row[10] or '').strip().lower() != 'yes' and 'Resubmit' not in feats_str
+                        and kills > 0 and ("TUFF", link) not in existing):
+                    try:
+                        _sptd = int(row[22]) if len(row) > 22 and row[22] else None
+                    except (ValueError, TypeError):
+                        _sptd = None
+                    if _sptd is not None and kills - _sptd > 0:
+                        await _db.add_leaderboard_entry("TUFF", player, discord_id, kills - _sptd, link, weapon)
+                        existing.add(("TUFF", link))
+                        added += 1
 
             # Score: one row per player \u2014 their single highest-scoring match.
             # (Additive: keep the higher of stored vs computed, so legacy rows with
