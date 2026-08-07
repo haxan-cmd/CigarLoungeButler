@@ -4541,6 +4541,61 @@ class LeaderboardsCog(commands.Cog):
                 await interaction.edit_original_response(
                     content=f"\u26a0\ufe0f No entry found for **{player}** on **{board}** \u2014 check the exact name shown on the board.")
 
+    @app_commands.command(name="purge_vip_scores", description="Remove VIP-backed entries from a board, e.g. TUFF (mod only). Preview first.")
+    @app_commands.describe(board="Board to clean (default TUFF).",
+                           confirm="Leave false to PREVIEW; set true to actually remove them.")
+    @app_commands.autocomplete(board=_rank_name_ac)
+    async def purge_vip_scores(self, interaction: discord.Interaction, board: str = "TUFF", confirm: bool = False):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        board = board.strip()
+        try:
+            rows = await _db.get_leaderboard_by_board(board)
+            subs = await _db.get_all_submissions()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Read failed: {e}", ephemeral=True)
+            return
+        # message_link -> is this run VIP? Only runs we can positively confirm as VIP are
+        # removed; legacy/unmatched entries (no backing submission) are left untouched.
+        _link_vip = {}
+        for s in subs:
+            if len(s) > 12 and s[12]:
+                _link_vip[(s[12] or '').strip()] = (s[10] or '').strip().lower() == 'yes'
+        _vip_rows = []
+        for r in rows:
+            _link = (r[4] if len(r) > 4 else '').strip()
+            if _link and _link_vip.get(_link):
+                _vip_rows.append(((r[1] if len(r) > 1 else '').strip(),
+                                  (r[3] if len(r) > 3 else ''), _link))
+        if not _vip_rows:
+            await interaction.followup.send(
+                f"✅ No VIP-backed entries found on **{board}**. Nothing to purge.", ephemeral=True)
+            return
+        if not confirm:
+            _lines = [f"• `{_nm}` — {_sc}" for _nm, _sc, _ in _vip_rows[:25]]
+            _more = f"\n…and {len(_vip_rows) - 25} more." if len(_vip_rows) > 25 else ""
+            await interaction.followup.send(
+                f"**VIP entries on {board} — PREVIEW** ({len(_vip_rows)} to remove):\n"
+                + "\n".join(_lines) + _more
+                + f"\n\nRun `/purge_vip_scores board:{board} confirm:true` to remove them.", ephemeral=True)
+            return
+        removed = 0
+        async with _board_lock():
+            for _nm, _sc, _link in _vip_rows:
+                try:
+                    await _db.delete_leaderboard_entry_by_link(board, _link)
+                    removed += 1
+                except Exception as e:
+                    print(f"[PURGE_VIP] {board} link delete error: {e}")
+            rec = next((r for r in await _get_lb_records() if r['Leaderboard Name'] == board), None)
+            if rec:
+                await _render_board(interaction.guild, rec, board)
+        await interaction.edit_original_response(
+            content=f"✅ Removed **{removed}** VIP-backed entr{'y' if removed == 1 else 'ies'} "
+                    f"from **{board}** and repainted the board.")
+
     @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, Pacifist (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
