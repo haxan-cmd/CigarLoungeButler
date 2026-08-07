@@ -234,7 +234,7 @@ def build_challenge_rules_embeds():
         "<a:200tkd:1363648828414230538> **Frenzied** — best average takedowns\n"
         "<a:mostlethal:1520490418817601658> **Kill Share** — biggest share of your team's kills\n"
         "<:warlord:1520490364039860347> **Warlord** — your takedowns vs your team's total kills\n"
-        "🗡️ **Most Dominant** — best **Dominance**: the harmonic mean of your Kill Share and Warlord, "
+        "<a:dominance:1535424879711752233> **Most Dominant** — best **Dominance**: the harmonic mean of your Kill Share and Warlord, "
         "so you must be high in BOTH. Can't be won by maxing one and tanking the other."
     ), inline=False)
     e.add_field(name="A note on Lethality", value=(
