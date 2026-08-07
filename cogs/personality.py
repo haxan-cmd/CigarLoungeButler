@@ -1718,8 +1718,11 @@ class PersonalityCog(commands.Cog):
             return (td * t / k) if (td and k and t) else None
 
         def _lobbyk(s):
-            tot = (_i(s, 25) or 0) + (_i(s, 26) or 0)
-            return tot if tot else _i(s, 18)
+            # Sum of the two faction banner totals ONLY. Do NOT fall back to col 18
+            # (total_lobby_kills) — it's a separate, unreliable field that plotted a bogus
+            # 2000+ outlier when the banners weren't read. Drop the run if either is missing.
+            a, b = _i(s, 25), _i(s, 26)
+            return (a + b) if (a is not None and b is not None) else None
 
         def _gap(s):
             a, b = _i(s, 25), _i(s, 26)
