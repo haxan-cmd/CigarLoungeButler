@@ -286,7 +286,61 @@ def _looks_like_data_question(text):
     _k, _td = extract_stats_from_message(text)
     if _k or _td:
         return True
+    if _asks_own_performance(t):
+        return True
     return any(w in t for w in _DATA_QUESTION_WORDS)
+
+
+# Archetype/playstyle questions want the descriptor even when they aren't a
+# numbers question, so they get their own cheap check (shared by the ctx gate
+# and the archetype-anchor injection so the two can't drift).
+_ARCH_KEYWORDS = (
+    'archetype', 'playstyle', 'play style', 'what am i', 'what class',
+    'which class', 'my class', 'my main', 'damage type', 'what type',
+)
+
+
+def _is_archetype_question(text):
+    t = (text or '').lower()
+    return any(k in t for k in _ARCH_KEYWORDS)
+
+
+# A brag is not a data QUESTION, but the Butler is meant to answer one with
+# receipts, so it also unlocks the stats context. Kept deliberately TIGHT —
+# these are explicit self-superlatives / call-outs, not everyday chat, so the
+# gate isn't quietly re-opened for ordinary banter.
+_BRAG_MARKERS = (
+    "i'm the best", 'im the best', 'best in the lounge', 'best in the server',
+    'better than you', 'better than everyone', 'better than all of you',
+    'no one can beat', 'nobody can beat', "can't beat me", 'cant beat me',
+    'undefeated', "i'm cracked", 'im cracked', "i'm goated", 'im goated',
+    'im the goat', "i'm the goat", 'i carried', 'i carry every', 'i carry you',
+    'get diffed', 'you got diffed', 'washed you', 'clapped you', 'i clapped',
+    'i destroyed', 'i smoked', 'bow to me', 'kneel', 'peasants',
+)
+
+
+def _looks_like_brag(text):
+    t = (text or '').lower()
+    return any(m in t for m in _BRAG_MARKERS)
+
+
+# Self-directed performance questions ("how am I doing", "am I any good", "how
+# do I rank") want the player's own numbers but dodge the keyword list above,
+# so they get their own check — folded into the data-question classifier AND
+# the context gate so they pull stats and get the data-sized budget.
+_SELF_PERF_MARKERS = (
+    'how am i', "how'm i", 'how are my', "how're my", 'hows my', "how's my",
+    'how good am i', 'am i good', 'am i any good', 'am i bad', 'do i suck',
+    'am i washed', 'how do i rank', 'where do i rank', 'how do i stack',
+    'how am i doing', 'how am i looking', 'my performance', 'my numbers',
+    'carry my weight', 'how i doing',
+)
+
+
+def _asks_own_performance(text):
+    t = (text or '').lower()
+    return any(m in t for m in _SELF_PERF_MARKERS)
 
 
 # Proactive information-centre pointer: only fires on a genuine question ('?') about a
@@ -2303,6 +2357,15 @@ class PersonalityCog(commands.Cog):
         gating) lives here. Returns the assembled context string.
         """
         player_stats_ctx = ''
+        # Cheap gate: pure banter ("you like jazz, butler?") needs none of the
+        # per-player work below — no get_all_players, no submission scan, no
+        # leaderboard scan. Only a data/stats question, an archetype ask, or an
+        # explicit brag unlocks the receipts. This is the single biggest cut to
+        # the per-message cost: banter used to pull a full stats context anyway.
+        if not (_is_data_q or _is_archetype_question(content_lower)
+                or _looks_like_brag(content_lower)
+                or _asks_own_performance(content_lower)):
+            return ''
         try:
             p_rows = await _db.get_all_players()
             # Current player stats
@@ -3254,9 +3317,7 @@ class PersonalityCog(commands.Cog):
         # marks concentrate (e.g. Knight Main, Generalist, Messer Specialist). Injected
         # on data questions AND whenever archetype/playstyle is asked about directly, so
         # "what's my archetype" always gets the real label instead of an invented one.
-        _arch_asked = any(k in content_lower for k in (
-            'archetype', 'playstyle', 'play style', 'what am i', 'what class',
-            'which class', 'my class', 'my main', 'damage type', 'what type'))
+        _arch_asked = _is_archetype_question(content_lower)
         if _is_data_q or _arch_asked:
             try:
                 from cogs.registry import get_player_descriptors
