@@ -1229,8 +1229,10 @@ async def _sort_board_entries(lb_name, entries):
         # names + run links each line is long, so rendering the FULL list overflows
         # Discord's 6000-char-per-message embed cap (a 50035 that silently killed every
         # edit once a board grew). Cap the DISPLAY to a safe top-N; the full history stays
-        # in the DB and still counts for marks/records.
-        return _sorted[:20]
+        # in the DB and still counts for marks/records. 15 fits comfortably in ONE embed
+        # (a masked-link line is ~200 chars; ~19 fill the 4096 description limit and spill
+        # the rest into an ugly single-entry "(cont.)" box), so we keep it to a clean top-15.
+        return _sorted[:15]
     subs = await _db.get_all_submissions()
     tdl = {}
     for s in subs:
@@ -1348,6 +1350,15 @@ async def render_peasant_board(guild):
         print(f"[PEASANT] board render failed: {e}")
 
 
+def _thread_board_order(records, thread_id_str):
+    """Board names that share a thread, ordered for a reframe: a base board before its
+    Kills companion, otherwise stable by name. Single-board (feat) threads return one."""
+    tid = str(thread_id_str or '').strip()
+    names = [r['Leaderboard Name'] for r in records
+             if str(r.get('Thread ID') or '').strip() == tid and r.get('Leaderboard Name')]
+    return sorted(names, key=lambda nm: (1 if _is_kills_board(nm) else 0, nm))
+
+
 async def _render_board(guild, lb_row, lb_name):
     """Re-render a single board's Discord messages from its current DB rows."""
     # Peasant has its own table + two-section renderer; route generic refreshes
@@ -1393,6 +1404,21 @@ async def _render_board(guild, lb_row, lb_name):
         return
     try:
         thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
+        # If the tracked message is gone, a plain re-send lands the board at the thread
+        # END, after the top/bottom decorations — orphaning the frame. Reframe the whole
+        # thread (top deco, board(s), bottom deco + nav, in order) instead. Called under
+        # _BOARD_LOCK already, so use the no-lock inner reframe.
+        _alive = True
+        try:
+            await thread.fetch_message(message_ids[0])
+        except discord.NotFound:
+            _alive = False
+        except Exception:
+            _alive = True   # transient fetch error -> assume alive, let the edit retry
+        if not _alive:
+            _order = _thread_board_order(await _get_lb_records(), thread_raw)
+            await _reframe_thread_inner(guild, thread, _order or [lb_name])
+            return
         new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
         if new_ids != message_ids:
             await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
@@ -3229,7 +3255,13 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.response.send_message(f"Refreshing **{', '.join(names_to_refresh)}**...", ephemeral=True)
 
+        # /refresh REFRAMES the whole thread (wipe + re-post top deco, board(s), bottom
+        # deco + nav, in order) rather than editing the board in place. An in-place edit
+        # can't fix a board that ended up out of position (e.g. re-posted after the
+        # decorations when its message was deleted) — a reframe always yields a correct
+        # frame. Grouped by thread so a multi-board thread is reframed once.
         async with _board_lock():
+            _done_threads = set()
             for lb_name in names_to_refresh:
                 if lb_name in _SPECIAL_BOARD_NAMES:
                     # Own renderer (HH completers / All-Time Titles) — not the generic board
@@ -3238,31 +3270,20 @@ class LeaderboardsCog(commands.Cog):
                 lb_row = next((r for r in all_lb_rows if r['Leaderboard Name'] == lb_name), None)
                 if not lb_row:
                     continue
-
-                entries = await get_leaderboard_entries(lb_name)
-                entries = await _sort_board_entries(lb_name, entries)
-
-                show_weapon = lb_name in ("100 Kills", "200 Takedowns")
-                score_prefix = "+" if lb_name == "TUFF" else ""
-                is_map = (lb_row.get('Type', '').strip().lower() == 'map') or (' - ' in lb_name and lb_name.split(' - ')[0] in config.MAP_ATTACK_DEFENSE)
-                embeds = await _rated_embeds(lb_name, entries, is_map, None, 0, show_weapon, score_prefix, True)
-                header_content = _map_header(lb_name) if is_map else _board_header(lb_name)
-
-                thread_id = int(lb_row['Thread ID'])
-                message_ids = [int(m) for m in _re.findall(r'\d{17,20}', str(lb_row['Message ID']))]
-
+                _tid = str(lb_row.get('Thread ID') or '').strip()
+                if not _tid or _tid in _done_threads:
+                    continue
+                _done_threads.add(_tid)
                 try:
                     guild = interaction.guild
-                    thread = guild.get_channel(thread_id) or await guild.fetch_channel(thread_id)
-                    new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
-                    if new_ids != message_ids:
-                        await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
-
+                    thread = guild.get_channel(int(_tid)) or await guild.fetch_channel(int(_tid))
+                    _order = _thread_board_order(all_lb_rows, _tid)
+                    await _reframe_thread_inner(guild, thread, _order or [lb_name])
                 except Exception as e:
                     await interaction.edit_original_response(content=f"❌ Error refreshing {lb_name}: {e}")
                     return
 
-        await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** refreshed successfully.")
+        await interaction.edit_original_response(content=f"✅ **{', '.join(names_to_refresh)}** reframed successfully.")
 
     @app_commands.command(name="refresh_all", description="Refresh every leaderboard at once (mod only)")
     async def refresh_all_leaderboards(self, interaction: discord.Interaction):
