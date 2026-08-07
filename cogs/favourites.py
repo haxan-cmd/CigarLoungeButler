@@ -198,7 +198,11 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     # playing. Mirrors the all-time board ratings (leaderboards.py _peak), scoped to the
     # season here. The 5-game window + 5-game minimum stop one lucky game topping a board.
     _WINDOW = 5     # games in a "run"
-    _MIN = 5        # 5+ games to qualify (matches the all-time boards' minimum)
+    # Minimum games to qualify for a SEASON rate board / title (Kill Share, Warlord,
+    # Dominance). Higher than the all-time boards' 5 on purpose: a season is ~a month, and a
+    # 7-game sample topping a title (and colliding with the incumbency logic) is exactly the
+    # low-sample noise we don't want. Tunable via config.SEASON_RATE_MIN_GAMES.
+    _MIN = max(5, int(getattr(config, 'SEASON_RATE_MIN_GAMES', 10)))
 
     def _peak_rank(data):
         ranked = []

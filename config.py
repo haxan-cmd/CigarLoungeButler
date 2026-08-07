@@ -267,6 +267,11 @@ BUTLER_MAX_LINKS = 25
 # raise cautiously if rebuilds still feel slow, lower to 1 to get the old serial behaviour.
 REBUILD_RENDER_CONCURRENCY = 8
 
+# Minimum games in a season to qualify for a rate board / title (Kill Share, Warlord,
+# Dominance / Executioner). A season is ~a month, so a low sample shouldn't top a title —
+# raise this if 10-game samples still feel too light, lower it toward 5 if the field is thin.
+SEASON_RATE_MIN_GAMES = 10
+
 # Minimum runs before a bar appears on an /explore RATE chart (lethality, kill
 # share, warlord, avg TD/kills). At 3, three-run outliers topped the boards --
 # a junk "Other" subclass led avg lethality on 3 runs. Volume metrics (run
