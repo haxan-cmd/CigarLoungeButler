@@ -462,6 +462,30 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
 
     _season = await _db.get_current_season()
     if _season:
+        # Season end indicator. No hard end date is stored (a mod closes the season with
+        # /bounty_end), so estimate it from the monthly cadence — ~1 month after the start —
+        # and mark it approximate. Prominent at the top of the season block.
+        try:
+            from datetime import datetime as _dt
+            import calendar as _cal
+            _st = _season.get('started_at')
+            if _st:
+                _stn = _st.replace(tzinfo=None) if getattr(_st, 'tzinfo', None) else _st
+                _em, _ey = ((1, _stn.year + 1) if _stn.month == 12 else (_stn.month + 1, _stn.year))
+                _last = _cal.monthrange(_ey, _em)[1]
+                _end = _stn.replace(year=_ey, month=_em, day=min(_stn.day, _last))
+                _days = (_end - _dt.utcnow()).days
+                _tl = f"Started {_stn:%b %d}"
+                if _days > 1:
+                    _tl += f" · **{_days} days left** · ends ~{_end:%b %d}"
+                elif _days >= 0:
+                    _tl += f" · **ends within a day** (~{_end:%b %d})"
+                else:
+                    _tl += " · **past its month** — ends whenever a mod closes it"
+                embed.add_field(name="🗓️ Season timeline  *(end date approximate)*",
+                                value=_tl, inline=False)
+        except Exception as _tle:
+            print(f"[REPORT] season timeline error: {_tle}")
         _standings, _core, _featured = await season_total(_season)
         if _standings:
             crows = [(f"{i:>2} {_short(nm, 16)}", f"{pts} pts") for i, (nm, pts) in enumerate(_standings[:10], 1)]
