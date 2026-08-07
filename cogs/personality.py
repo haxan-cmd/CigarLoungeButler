@@ -1339,68 +1339,6 @@ class PersonalityCog(commands.Cog):
             lines.append(f"{_em} {_nm}: {round(100 * cc.get(_nm, 0) / _N, 1)}% ({cc.get(_nm, 0)}){_mkstr}")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="tier", description="The Butler's tier verdict on you (or another player): S to F.")
-    @app_commands.describe(player="Whose tier to judge (blank = you).")
-    async def tier(self, interaction: discord.Interaction, player: str = None):
-        await interaction.response.defer()
-        from utils.tierlist import gather_tier_inputs, assign_tiers
-        try:
-            subs = await _db.get_all_submissions()
-            ld = await _db.get_all_leaderboard_data()
-            players = await _db.get_all_players()
-        except Exception:
-            subs = ld = players = []
-        raw = gather_tier_inputs(subs, ld, players)
-        res = assign_tiers(raw)
-        if player:
-            _pl = player.strip().lower()
-            key = next((k for k, v in raw.items() if (v.get('name') or '').lower() == _pl), None)
-            if key is None:
-                await interaction.followup.send(f"No player called **{player}** with any runs on record, sir.")
-                return
-        else:
-            _uid = str(interaction.user.id)
-            key = _uid if _uid in raw else next(
-                (k for k, v in raw.items()
-                 if (v.get('name') or '').lower() == interaction.user.display_name.lower()), None)
-        pname = (raw.get(key, {}).get('name') if key else None) or (player or interaction.user.display_name)
-        r = res.get(key) if key else None
-        if not r or r.get('tier') is None:
-            await interaction.followup.send(
-                f"**{pname}** is **Unranked** — under 10 logged runs, sir. I do not tier a rumour.")
-            return
-        tier, pct, score = r['tier'], r['pct'], r['score']
-        _TCOL = {'S': '#e0a84c', 'A': '#4fb3a1', 'B': '#5b8dd9',
-                 'C': '#7a89c2', 'D': '#d85a30', 'F': '#8b8f9a'}
-        _LBL = {'lethality': 'Lethality', 'warlord': 'Warlord', 'valor': 'Valor',
-                'boards': 'Boards', 'feats': 'Feats', 'mastery': 'Mastery'}
-
-        def _bar(p):
-            fill = max(0, min(10, round(p * 10)))
-            return '▰' * fill + '▱' * (10 - fill)
-        _lines = [f"`{_LBL[c]:<9}` {_bar(pct.get(c, 0))} {pct.get(c, 0) * 100:.0f}%"
-                  for c in ('lethality', 'warlord', 'valor', 'boards', 'feats', 'mastery')]
-        _strong = max(pct, key=pct.get) if pct else 'lethality'
-        _weak = min(pct, key=pct.get) if pct else 'mastery'
-        _cap = None
-        try:
-            _cap = await _butler_complete(
-                BUTLER_SYSTEM_PROMPT,
-                f"You are delivering YOUR OWN tier verdict on {pname}: Tier {tier} (S best, F worst). "
-                f"Their strongest area is {_LBL[_strong]}, weakest is {_LBL[_weak]}. In TWO dry, playful "
-                f"sentences, deliver the verdict and own it as your judgement so they blame YOU, not other "
-                f"players. Teasing, never cruel. No em dashes.", 150)
-        except Exception:
-            pass
-        if not _cap:
-            _cap = (f"I have reviewed the evidence and placed {pname} in Tier {tier}. The {_LBL[_strong]} "
-                    f"carries the composition; the {_LBL[_weak]} is doing absolutely nothing.")
-        emb = discord.Embed(title=f"{pname} — Tier {tier}",
-                            description=_cap + "\n\n" + "\n".join(_lines),
-                            colour=discord.Colour.from_str(_TCOL.get(tier, '#8b8f9a')))
-        emb.set_footer(text=f"Butler Score {score * 100:.0f}/100 · percentile within the active lounge")
-        await interaction.followup.send(embed=emb)
-
     @app_commands.command(name="statscape", description="An abstract-art PNG of your combat stats (or a player's, or 'server'). For vibes.")
     @app_commands.describe(player="A player's name, or 'server' for the whole lounge. Blank = you.")
     async def statscape(self, interaction: discord.Interaction, player: str = None):

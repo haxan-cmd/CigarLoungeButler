@@ -11,6 +11,19 @@ No discord/db imports so it's unit-tested; the cog feeds it raw per-player aggre
 
 TIERS = ['S', 'A', 'B', 'C', 'D', 'F']
 
+# Display names — cigar-lounge flavour, best -> worst. The engine keeps the S..F ordering
+# internally; this is purely how the Butler announces the verdict.
+TIER_LABELS = {
+    'S': 'Humidor Reserve',
+    'A': 'Top Shelf',
+    'B': 'House Blend',
+    'C': 'Daily Smoke',
+    'D': 'Stale Stogie',
+    'F': 'Ashtray',
+}
+# Best-to-worst, for prompts / headers.
+TIER_LADDER = [TIER_LABELS[t] for t in TIERS]
+
 # Weighted blend of components. Each is turned into a 0..1 percentile across tiered
 # players first, so the weights mix *ranks*, not raw units. All-around by design: skill
 # (lethality/warlord), difficulty (valor), and breadth (boards/feats/mastery).
