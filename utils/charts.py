@@ -580,13 +580,14 @@ def render_trend(*, title, subtitle, labels, values, value_label, footer,
 
 
 def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subtitle,
-                     signature="Cigar Lounge Butler, mixed media on despair, 2026", seed=0) -> bytes:
-    """A gleefully-silly COLLAGE of a player's (or the server's) real weapon icons: the
-    most-used weapon sits big in the middle, the rest scatter around it, each rotated and
-    sized by how much it's used with a soft damage-type glow behind it. Faction blobs tint
-    the backdrop. Seeded by the stats so it's stable per-state but drifts as data changes.
-    Falls back to coloured polygons for any weapon with no vendored icon. BLOCKING: via
-    render_async."""
+                     signature="Cigar Lounge Butler, mixed media on despair, 2026",
+                     feat_icons=None, watermark=None, mood=0.0, nemesis_icon=None,
+                     nemesis_name=None, cursed=False, seed=0) -> bytes:
+    """A gleefully-silly COLLAGE of a player's (or the server's) real weapon icons plus:
+    earned-feat sticker confetti, a faint title/rank watermark, a valor mood-tint (warm
+    for uphill grinders, cold for farmers), a struck-out nemesis cameo, a gold museum
+    frame, the Butler's signature stamp, and a rare 'cursed' neon variant. Seeded so it is
+    stable per-state but drifts as the data does. BLOCKING: call via render_async."""
     import io as _io
     import random as _rnd
     import math as _math
@@ -601,10 +602,26 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
     ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(0, 100); ax.axis('off')
     ax.set_facecolor(BG)
     rng = _rnd.Random(seed)
-    DMG = {'Cut': BLUE, 'Chop': CORAL, 'Blunt': GOLD, 'Ranged': TEAL}
-    FAC = {'Mason': GOLD, 'Agatha': BLUE, 'Tenosia': CORAL}
 
-    # Faction blobs — soft, low-alpha ellipses tinting the backdrop.
+    if cursed:
+        DMG = {'Cut': '#ff2d95', 'Chop': '#39ff14', 'Blunt': '#ff6a00', 'Ranged': '#00e5ff'}
+        FAC = {'Mason': '#ff2d95', 'Agatha': '#39ff14', 'Tenosia': '#00e5ff'}
+        frame_c, wm_c, title_c = '#ff2d95', '#39ff14', '#ff2d95'
+    else:
+        DMG = {'Cut': BLUE, 'Chop': CORAL, 'Blunt': GOLD, 'Ranged': TEAL}
+        FAC = {'Mason': GOLD, 'Agatha': BLUE, 'Tenosia': CORAL}
+        frame_c, wm_c, title_c = GOLD, FG, GOLD
+
+    # Valor mood-tint — a full-canvas wash, warm for uphill grinders, cold for farmers.
+    if mood:
+        ax.add_patch(plt.Rectangle((0, 0), 100, 100, color=(CORAL if mood > 0 else BLUE),
+                     alpha=min(0.16, abs(mood) * 0.22), zorder=-2))
+    # Title / rank watermark, huge and faint behind everything.
+    if watermark:
+        ax.text(50, 52, str(watermark).upper(), fontsize=62, color=wm_c, alpha=0.06,
+                ha='center', va='center', rotation=16, weight='bold', zorder=-1)
+
+    # Faction blobs.
     _fac = sorted((faction_weights or {}).items(), key=lambda kv: -kv[1])[:4]
     _fmax = max([v for _, v in _fac] + [1])
     for fac, cnt in _fac:
@@ -623,19 +640,17 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
         if idx == 0:
             cx, cy = 50 + rng.uniform(-5, 5), 55 + rng.uniform(-5, 5)
         else:
-            ang = rng.uniform(0, 2 * _math.pi)
-            rad = rng.uniform(20, 42)
+            ang = rng.uniform(0, 2 * _math.pi); rad = rng.uniform(20, 42)
             cx, cy = 50 + rad * _math.cos(ang), 52 + rad * _math.sin(ang)
         ax.add_patch(_Circle((cx, cy), 6 + 10 * frac, color=c,
                              alpha=0.16 + 0.12 * frac, zorder=1))
-        ip = _icon_path(wpn)
-        placed = False
+        ip = _icon_path(wpn); placed = False
         if _Img and ip:
             try:
                 img = _Img.open(ip).convert('RGBA').rotate(
                     rng.uniform(-28, 28), expand=True, resample=_Img.BICUBIC)
-                zoom = 0.5 + 1.7 * _math.sqrt(frac)
-                oi = _OI(_np.asarray(img), zoom=zoom, alpha=0.92 if idx == 0 else 0.82)
+                oi = _OI(_np.asarray(img), zoom=0.5 + 1.7 * _math.sqrt(frac),
+                         alpha=0.92 if idx == 0 else 0.82)
                 ax.add_artist(_AB(oi, (cx, cy), frameon=False, xycoords='data', zorder=3))
                 placed = True
             except Exception:
@@ -646,11 +661,52 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
                               orientation=rng.uniform(0, 6.28), color=c, alpha=0.8,
                               zorder=3, ec=FG, lw=0.6))
 
+    # Feat confetti — the player's earned-feat stickers.
+    if feat_icons and _Img:
+        for _fp, _wt in feat_icons:
+            for _ in range(min(3, max(1, int(_wt)))):
+                try:
+                    _fi = _Img.open(_fp).convert('RGBA').rotate(
+                        rng.uniform(-22, 22), expand=True, resample=_Img.BICUBIC)
+                    ax.add_artist(_AB(_OI(_np.asarray(_fi), zoom=0.34, alpha=0.95),
+                                  (rng.uniform(6, 94), rng.uniform(22, 96)),
+                                  frameon=False, xycoords='data', zorder=4))
+                except Exception:
+                    continue
+
+    # Nemesis cameo — their most-faced opponent's signature weapon, struck out.
+    if nemesis_icon and _Img:
+        try:
+            ax.add_artist(_AB(_OI(_np.asarray(_Img.open(nemesis_icon).convert('RGBA')),
+                          zoom=0.26, alpha=0.85), (84, 90), frameon=False,
+                          xycoords='data', zorder=8))
+            ax.plot([77, 91], [96, 84], color='#e02b2b', lw=3, alpha=0.9, zorder=9)
+            if nemesis_name:
+                ax.text(84, 79.5, f'NEMESIS: {nemesis_name}', fontsize=8, color='#e02b2b',
+                        ha='center', va='center', weight='bold', zorder=9)
+        except Exception:
+            pass
+
     # Museum placard, bottom-left.
     ax.add_patch(plt.Rectangle((3, 3), 66, 15, color=BG, alpha=0.74, zorder=6))
-    ax.text(5, 14.2, title, fontsize=17, color=GOLD, weight='bold', zorder=7, va='center')
+    ax.text(5, 14.2, title, fontsize=17, color=title_c, weight='bold', zorder=7, va='center')
     ax.text(5, 9.6, subtitle, fontsize=10.5, color=FG, zorder=7, va='center')
     ax.text(5, 6.0, signature, fontsize=8.5, color=MUT, style='italic', zorder=7, va='center')
+
+    # Butler signature stamp, bottom-right.
+    _stamp = os.path.join(_ASSETS, 'butler.png')
+    if _Img and os.path.exists(_stamp):
+        try:
+            ax.add_artist(_AB(_OI(_np.asarray(_Img.open(_stamp).convert('RGBA')),
+                          zoom=0.11, alpha=0.9), (92, 10), frameon=False,
+                          xycoords='data', zorder=8))
+        except Exception:
+            pass
+
+    # Ornate double frame (gold, or cursed-neon).
+    for _off, _lw in ((1.4, 2.6), (3.0, 1.0)):
+        ax.add_patch(plt.Rectangle((_off, _off), 100 - 2 * _off, 100 - 2 * _off,
+                     fill=False, edgecolor=frame_c, linewidth=_lw, alpha=0.85, zorder=10))
 
     buf = _io.BytesIO()
     fig.savefig(buf, format='png', dpi=120, facecolor=BG, bbox_inches='tight', pad_inches=0.15)

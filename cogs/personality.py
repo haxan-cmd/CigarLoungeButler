@@ -1339,13 +1339,16 @@ class PersonalityCog(commands.Cog):
             lines.append(f"{_em} {_nm}: {round(100 * cc.get(_nm, 0) / _N, 1)}% ({cc.get(_nm, 0)}){_mkstr}")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="statscape", description="An abstract-art PNG of your combat stats (or another player's). For vibes.")
-    @app_commands.describe(player="Whose stats to paint (leave blank for your own).")
+    @app_commands.command(name="statscape", description="An abstract-art PNG of your combat stats (or a player's, or 'server'). For vibes.")
+    @app_commands.describe(player="A player's name, or 'server' for the whole lounge. Blank = you.")
     async def statscape(self, interaction: discord.Interaction, player: str = None):
         await interaction.response.defer()
         import io as _io
         all_players = await _db.get_all_players()
-        if player:
+        _server = bool(player) and player.strip().lower() in ('server', 'lounge', 'everyone')
+        if _server:
+            did, pname = '', 'The Cigar Lounge'
+        elif player:
             target = next((row for row in all_players
                            if len(row) > 1 and row[1].strip().lower() == player.strip().lower()), None)
             if not target:
@@ -1361,8 +1364,11 @@ class PersonalityCog(commands.Cog):
             subs = await _db.get_all_submissions()
         except Exception:
             subs = []
-        _mine = [r for r in subs if len(r) >= 7
-                 and ((r[2] or '').strip() == did or (r[1] or '').strip().lower() == pname.lower())]
+        if _server:
+            _mine = [r for r in subs if len(r) >= 7]
+        else:
+            _mine = [r for r in subs if len(r) >= 7
+                     and ((r[2] or '').strip() == did or (r[1] or '').strip().lower() == pname.lower())]
         weapon_weights, faction_weights = {}, {}
         for r in _mine:
             w = (r[3] or '').strip()
@@ -1376,21 +1382,113 @@ class PersonalityCog(commands.Cog):
             return
         n_runs = len(_mine)
         top_weapon = max(weapon_weights, key=weapon_weights.get)
+
+        # Archetype (per-player only).
         arch = ''
-        try:
-            from cogs.registry import get_player_descriptors
-            _a, _d = await get_player_descriptors(did)
-            arch = _a or ''
-        except Exception:
-            pass
+        if not _server:
+            try:
+                from cogs.registry import get_player_descriptors
+                _a, _d = await get_player_descriptors(did)
+                arch = _a or ''
+            except Exception:
+                pass
+
+        # Valor mood — warm for uphill grinders, cold for farmers.
+        _hard = sum(1 for r in _mine if len(r) > 11
+                    and any(t in (r[11] or '') for t in ('Uphill', 'Outmatched', 'Brutal')))
+        mood = max(-0.5, min(0.6, (2.2 * _hard / max(1, n_runs)) - 0.15))
+
+        # Title / rank watermark.
+        watermark = 'THE LOUNGE'
+        if not _server:
+            try:
+                from cogs.registry import get_bounty_completions_for_player
+                from utils.ranks import get_player_title
+                _bc = await get_bounty_completions_for_player(did)
+                watermark = get_player_title(len(_bc)) or (arch or 'COMBATANT')
+            except Exception:
+                watermark = arch or 'COMBATANT'
+
+        # Nemesis cameo (per-player only) — most-faced opponent's signature weapon, struck out.
+        nemesis_icon = nemesis_name = None
+        if not _server:
+            try:
+                from utils.rivalries import compute_rivalries, ident as _rivident
+                _riv = await asyncio.to_thread(compute_rivalries, did, subs)
+                _nem = _riv.get('nemesis') if _riv else None
+                if _nem and _nem.get('name'):
+                    nemesis_name = str(_nem['name'])[:14]
+                    _nk = _nem.get('key')
+                    _nw = {}
+                    for r in subs:
+                        try:
+                            if _rivident(r)[0] == _nk:
+                                _wn = (r[3] or '').strip()
+                                if _wn:
+                                    _nw[_wn] = _nw.get(_wn, 0) + 1
+                        except Exception:
+                            continue
+                    if _nw:
+                        import utils.charts as _ch3
+                        nemesis_icon = _ch3._icon_path(max(_nw, key=_nw.get))
+            except Exception as _nme:
+                print(f"[STATSCAPE] nemesis: {_nme}")
+
+        # Cursed roll — 1-in-20 neon variant, decided fresh each call for surprise.
+        _cursed = random.random() < 0.05
         seed = n_runs * 100003 + sum(ord(c) for c in top_weapon) + sum(ord(c) for c in pname[:8])
         _rt = random.Random(seed)
-        title = _rt.choice([
-            f"The {pname} Retrospective", f"{pname}: A Life in Blades",
-            f"Portrait of {pname} in Motion", f"{pname}, Studies in Violence",
-            f"The Collected {pname}", f"{pname} (After the Fall)",
-        ])
+        if _server:
+            title = _rt.choice(["The Cigar Lounge, Collected", "Group Portrait, No Survivors",
+                                "The Lounge in Aggregate", "Everyone, All At Once"])
+        else:
+            title = _rt.choice([
+                f"The {pname} Retrospective", f"{pname}: A Life in Blades",
+                f"Portrait of {pname} in Motion", f"{pname}, Studies in Violence",
+                f"The Collected {pname}", f"{pname} (After the Fall)",
+            ])
+        if _cursed:
+            title = random.choice([
+                "Untitled (Derogatory)", f"{pname}: NPC Behaviour", "Study in Mediocrity",
+                f"The {pname} Fraudulency", "Composition in Cope",
+            ])
+            watermark = "FRAUD"
         subtitle = f"{n_runs} runs · signature: {top_weapon}" + (f" · {arch}" if arch else "")
+
+        # Earned-feat sticker confetti (fetched from Discord CDN once, cached).
+        _feat_src = {**getattr(config, 'FEAT_EMOJIS', {}), **getattr(config, 'SPECIAL_OPS_EMOJIS', {})}
+        _feat_counts = {}
+        for r in _mine:
+            _tags = [t.strip() for t in (r[11] or '').split(',')] if len(r) > 11 else []
+            for _feat in _feat_src:
+                if _feat in _tags:
+                    _feat_counts[_feat] = _feat_counts.get(_feat, 0) + 1
+        _feat_icons = []
+        if _feat_counts:
+            try:
+                import aiohttp as _aioh, os as _os, re as _re2, utils.charts as _ch
+                _cache = _os.path.join(_ch._ASSETS, 'feat_cache')
+                _os.makedirs(_cache, exist_ok=True)
+                async with _aioh.ClientSession() as _sess:
+                    for _feat, _cnt in sorted(_feat_counts.items(), key=lambda kv: -kv[1])[:6]:
+                        _m = _re2.search(r':(\d+)>', _feat_src.get(_feat, ''))
+                        if not _m:
+                            continue
+                        _eid = _m.group(1)
+                        _fp = _os.path.join(_cache, f"{_eid}.png")
+                        if not _os.path.exists(_fp):
+                            try:
+                                async with _sess.get(f"https://cdn.discordapp.com/emojis/{_eid}.png?size=96") as _resp:
+                                    if _resp.status == 200:
+                                        with open(_fp, 'wb') as _wf:
+                                            _wf.write(await _resp.read())
+                            except Exception:
+                                pass
+                        if _os.path.exists(_fp):
+                            _feat_icons.append((_fp, _cnt))
+            except Exception as _ffe:
+                print(f"[STATSCAPE] feat fetch: {_ffe}")
+
         try:
             import utils.charts as _charts
             png = await _charts.render_async(
@@ -1398,20 +1496,25 @@ class PersonalityCog(commands.Cog):
                 weapon_weights=weapon_weights,
                 damage_map=getattr(config, 'WEAPON_DAMAGE_TYPES', {}),
                 faction_weights=faction_weights, title=title, subtitle=subtitle,
-                signature=f"{pname}, mixed media on despair, 2026", seed=seed)
+                signature=f"{pname}, mixed media on despair, 2026",
+                feat_icons=_feat_icons, watermark=watermark, mood=mood,
+                nemesis_icon=nemesis_icon, nemesis_name=nemesis_name,
+                cursed=_cursed, seed=seed)
         except Exception as _se:
             print(f"[STATSCAPE] render error: {_se}")
             await interaction.followup.send("The muse has abandoned me. (render failed)")
             return
         _cap = None
+        _roast = "Be scathing and absurd" if _cursed else "Roast gently"
         try:
             _cap = await _butler_complete(
                 BUTLER_SYSTEM_PROMPT,
                 f"You are unveiling '{title}', an abstract art piece YOU generated from {pname}'s combat "
-                f"record. Present it in TWO dry, pretentious art-critic sentences. Their signature weapon "
-                f"is {top_weapon}, {n_runs} logged runs"
+                f"record. Present it in TWO dry, pretentious art-critic sentences. Signature weapon "
+                f"{top_weapon}, {n_runs} logged runs"
                 + (f", playstyle {arch}" if arch else "")
-                + ". Roast gently. No em dashes.", 150)
+                + (f", their nemesis is {nemesis_name}" if nemesis_name else "")
+                + f". {_roast}. No em dashes.", 150)
         except Exception:
             pass
         if not _cap:
