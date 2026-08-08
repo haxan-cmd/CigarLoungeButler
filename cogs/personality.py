@@ -2616,7 +2616,7 @@ class PersonalityCog(commands.Cog):
         emb.set_footer(text=_foot)
         await interaction.followup.send(embed=emb, ephemeral=True)
 
-    @app_commands.command(name="counting_backfill", description="Replay the counting channel's full history to rebuild counting stats (mod only).")
+    # (slash command 'counting_backfill' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def counting_backfill(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)

@@ -2341,7 +2341,7 @@ class RegistryCog(commands.Cog):
             await update_leaderboard_index(interaction.guild, channel_id, label, blurb)
         await interaction.followup.send("Index rebuilt.", ephemeral=True)
 
-    @app_commands.command(name="purge_blank_cards", description="Delete registry cards for players with no marks data (admin only).")
+    # (slash command 'purge_blank_cards' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.checks.has_permissions(administrator=True)
     async def purge_blank_cards(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -2440,7 +2440,7 @@ class RegistryCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"Rebuild error: {e}", ephemeral=True)
 
-    @app_commands.command(name="import_single", description="Import one player's legacy registry data by name (admin only).")
+    # (slash command 'import_single' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(thread_name="Exact thread name in the-registry (e.g. 'Massive Eggplant')")
     async def import_single(self, interaction: discord.Interaction, thread_name: str):
@@ -2495,7 +2495,7 @@ class RegistryCog(commands.Cog):
             traceback.print_exc()
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="import_registry", description="Import old registry cards from the-registry into butlers-archive (admin only).")
+    # (slash command 'import_registry' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.checks.has_permissions(administrator=True)
     async def import_registry(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -2618,7 +2618,7 @@ class RegistryCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-    @app_commands.command(name="populate_butlers_archive", description="Pre-populate ButlersArchive sheet for all players (admin only).")
+    # (slash command 'populate_butlers_archive' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.checks.has_permissions(administrator=True)
     async def populate_butlers_archive(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

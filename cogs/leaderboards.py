@@ -3623,7 +3623,7 @@ class LeaderboardsCog(commands.Cog):
             summary += f"\n⚠️ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
         await interaction.edit_original_response(content=summary)
 
-    @app_commands.command(name="scan_leaderboard_duplicates", description="Find (and optionally delete) stale duplicate leaderboard messages (mod only).")
+    # (slash command 'scan_leaderboard_duplicates' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.describe(confirm="Set True to DELETE the stray messages. Leave blank for a read-only audit.")
     async def scan_leaderboard_duplicates(self, interaction: discord.Interaction, confirm: bool = False):
         """Read-only audit: each leaderboard board tracks its current Discord message
@@ -3790,7 +3790,7 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.edit_original_response(content=f"✅ **{name}** re-framed with fresh decoration.")
 
-    @app_commands.command(name="fix_map_duplicates", description="Delete stray duplicate header messages on map boards (mod only).")
+    # (slash command 'fix_map_duplicates' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def fix_map_duplicates(self, interaction: discord.Interaction):
         """One-off cleanup for orphaned header-only messages left behind by an
         older posting scheme that tracked more message IDs per map board than
@@ -4765,7 +4765,7 @@ class LeaderboardsCog(commands.Cog):
             await _prune_pacifist_board()
         await interaction.edit_original_response(content=f"\u2705 Added **{added}** missing feat board entries. Run `/refresh` on each board to update Discord.")
 
-    @app_commands.command(name="backfill_legacy_ids", description="Attach registered discord_ids to blank-id legacy board rows (mod only). Preview first.")
+    # (slash command 'backfill_legacy_ids' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.describe(confirm="Leave false to PREVIEW. Set true to actually stamp the ids.")
     async def backfill_legacy_ids(self, interaction: discord.Interaction, confirm: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
@@ -5021,7 +5021,7 @@ class LeaderboardsCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"\u274c Refresh failed: {e}", ephemeral=True)
 
-    @app_commands.command(name="backfill_hundred_handed", description="Seed Hundred Handed from submissions + legacy list (mod only).")
+    # (slash command 'backfill_hundred_handed' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def backfill_hundred_handed(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -5104,7 +5104,7 @@ class LeaderboardsCog(commands.Cog):
             role_msg += f"\n\U0001f396\ufe0f Role granted: {', '.join(hh_role_assigned)}"
         await interaction.edit_original_response(content=f"\u2705 Seeded **{added}** Hundred Handed entries (12 legacy + submissions scan). Board updated.{role_msg}")
 
-    @app_commands.command(name="consolidate_hundred_handed", description="Merge duplicate Hundred Handed identities into one per player (mod only).")
+    # (slash command 'consolidate_hundred_handed' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.describe(confirm="Apply the merge. Leave off for a dry-run preview.")
     async def consolidate_hundred_handed(self, interaction: discord.Interaction, confirm: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
