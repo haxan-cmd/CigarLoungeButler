@@ -121,13 +121,34 @@ async def run_healthcheck():
         if _lab_data_cache["body"] is not None and (now - _lab_data_cache["ts"]) < 30:
             return web.Response(text=_lab_data_cache["body"], content_type="application/json")
         try:
-            from utils.db import get_all_submissions
+            from utils.db import get_all_submissions, get_all_players, get_name_to_id_map
             rows = await get_all_submissions()
         except RuntimeError:
             return web.Response(status=503, text="database unavailable")
+        # Condense IGN variants: resolve every run to the player's canonical registry
+        # name (by discord_id, or by IGN for legacy blank-id runs), so name changes
+        # and "Name, Title" variants collapse into one entry across the whole Lab.
+        _did2canon, _name2did = {}, {}
+        try:
+            for _pr in await get_all_players():
+                if _pr and len(_pr) > 1:
+                    _d, _n = (_pr[0] or '').strip(), (_pr[1] or '').strip()
+                    if _d and _n:
+                        _did2canon[_d] = _n
+            _name2did = await get_name_to_id_map()
+        except Exception as _ce:
+            print(f"[LAB] canonical-name map failed: {_ce}")
         import utils.stats_engine as _SE
         fields = _SE.RECORD_FIELDS
-        data = [[rec.get(f) for f in fields] for rec in _SE.records(rows)]
+        recs = _SE.records(rows)
+        for _rec in recs:
+            _d = _rec.get('did') or _name2did.get((_rec.get('name') or '').strip().lower())
+            _canon = _did2canon.get(_d)
+            if _canon:
+                _rec['name'] = _canon
+                if _d:
+                    _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
+        data = [[_rec.get(f) for f in fields] for _rec in recs]
         body = json.dumps({"fields": fields, "rows": data}, default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
