@@ -714,7 +714,8 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
     return buf.getvalue()
 
 
-def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, trend=None) -> bytes:
+def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, trend=None,
+                   groups=None, group_label=None) -> bytes:
     """Scatter of per-run (x, y) points with a least-squares trend line and the Pearson r
     annotated (with a plain-language strength/direction). Powers /explore's 'does X track
     with Y' correlation view. BLOCKING: call via render_async."""
@@ -732,7 +733,33 @@ def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, tren
     _style_axis(ax, grid_axis='both')
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
-    ax.scatter(xs, ys, s=44, color=GOLD, edgecolor=BG, linewidth=0.7, alpha=0.85, zorder=3)
+    if groups:
+        # Colour dots by category. Keep the legend legible: the 8 most common
+        # groups get their own colour, everything else folds into a grey "Other".
+        _palette = [GOLD, BLUE, CORAL, TEAL, PURPLE, '#e0729b', '#8bd3dd', '#b5e48c', '#f4a259']
+        _freq = {}
+        for g in groups:
+            _freq[g] = _freq.get(g, 0) + 1
+        _keep = [g for g, _ in sorted(_freq.items(), key=lambda kv: (-kv[1], str(kv[0])))[:8]]
+        _norm = [g if g in _keep else 'Other' for g in groups]
+        _order = _keep + (['Other'] if 'Other' in _norm else [])
+        _cmap = {g: (_palette[i] if i < len(_palette) else '#8a8f98') for i, g in enumerate(_keep)}
+        _cmap['Other'] = '#8a8f98'
+        for g in _order:
+            _gx = [xs[i] for i in range(len(xs)) if _norm[i] == g]
+            _gy = [ys[i] for i in range(len(ys)) if _norm[i] == g]
+            if _gx:
+                ax.scatter(_gx, _gy, s=42, color=_cmap[g], edgecolor=BG, linewidth=0.6,
+                           alpha=0.85, zorder=3, label=str(g))
+        _leg = ax.legend(title=group_label, loc='upper left', fontsize=8.5,
+                         framealpha=0.0, handletextpad=0.35, borderpad=0.4, labelspacing=0.3)
+        if _leg:
+            for _tx in _leg.get_texts():
+                _tx.set_color(FG)
+            if _leg.get_title():
+                _leg.get_title().set_color(MUT)
+    else:
+        ax.scatter(xs, ys, s=44, color=GOLD, edgecolor=BG, linewidth=0.7, alpha=0.85, zorder=3)
     if trend is not None and len(points) >= 2:
         m, b = trend
         x0, x1 = min(xs), max(xs)

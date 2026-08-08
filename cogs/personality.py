@@ -1690,7 +1690,12 @@ class PersonalityCog(commands.Cog):
         stat_a="First stat (x axis)", stat_b="Second stat (y axis)",
         player="Scope to one player (optional)",
         weapon="Scope to one weapon, e.g. Messer (optional)",
+        char_class="Scope to one class (optional)",
+        map_name="Scope to one map, e.g. Falmire (optional)",
+        side="Only attacking or only defending runs (optional)",
+        colour_by="Tint the dots by a category and add a legend (optional)",
         window="All time or just this season (optional)")
+    @app_commands.rename(char_class="class", map_name="map")
     @app_commands.choices(
         stat_a=[
             app_commands.Choice(name="Kill share", value="kill_share"),
@@ -1699,6 +1704,9 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Takedowns", value="td"),
             app_commands.Choice(name="Kills", value="kills"),
             app_commands.Choice(name="Deaths", value="deaths"),
+            app_commands.Choice(name="K/D ratio", value="kd"),
+            app_commands.Choice(name="Aggression (K+D)", value="aggression"),
+            app_commands.Choice(name="Team TD share", value="team_td_share"),
             app_commands.Choice(name="Score", value="score"),
             app_commands.Choice(name="Total lobby kills", value="lobby_kills"),
             app_commands.Choice(name="Lobby kill gap", value="tilt"),
@@ -1710,9 +1718,28 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Takedowns", value="td"),
             app_commands.Choice(name="Kills", value="kills"),
             app_commands.Choice(name="Deaths", value="deaths"),
+            app_commands.Choice(name="K/D ratio", value="kd"),
+            app_commands.Choice(name="Aggression (K+D)", value="aggression"),
+            app_commands.Choice(name="Team TD share", value="team_td_share"),
             app_commands.Choice(name="Score", value="score"),
             app_commands.Choice(name="Total lobby kills", value="lobby_kills"),
             app_commands.Choice(name="Lobby kill gap", value="tilt"),
+        ],
+        char_class=[
+            app_commands.Choice(name="Knight", value="Knight"),
+            app_commands.Choice(name="Vanguard", value="Vanguard"),
+            app_commands.Choice(name="Footman", value="Footman"),
+            app_commands.Choice(name="Archer", value="Archer"),
+        ],
+        side=[
+            app_commands.Choice(name="Attacking", value="Attack"),
+            app_commands.Choice(name="Defending", value="Defense"),
+        ],
+        colour_by=[
+            app_commands.Choice(name="Weapon", value="weapon"),
+            app_commands.Choice(name="Class", value="class"),
+            app_commands.Choice(name="Subclass", value="subclass"),
+            app_commands.Choice(name="Faction", value="faction"),
         ],
         window=[
             app_commands.Choice(name="All time", value="all"),
@@ -1722,6 +1749,9 @@ class PersonalityCog(commands.Cog):
     async def correlate(self, interaction: discord.Interaction,
                         stat_a: app_commands.Choice[str], stat_b: app_commands.Choice[str],
                         player: discord.Member = None, weapon: str = None,
+                        char_class: app_commands.Choice[str] = None, map_name: str = None,
+                        side: app_commands.Choice[str] = None,
+                        colour_by: app_commands.Choice[str] = None,
                         window: app_commands.Choice[str] = None):
         await interaction.response.defer()
         # Player scope (gather names/IGNs so legacy blank-id rows count too).
@@ -1793,18 +1823,42 @@ class PersonalityCog(commands.Cog):
             a, b = _i(s, 25), _i(s, 26)
             return (a - b) if (a is not None and b is not None) else None
 
+        def _kd(s):
+            k, d = _i(s, 8), _i(s, 9)
+            if k is None:
+                return None
+            return float(k) if not d else k / d          # 0 deaths -> K/D = kills
+
+        def _agg(s):
+            k, d = _i(s, 8), _i(s, 9)
+            return (k + d) if (k is not None and d is not None) else None
+
+        def _tdshare(s):
+            v = _fl(s, 21)
+            return v if (v is not None and 0 < v <= 100) else None
+
+        _SUB2CLASS = {sub: cls for cls, subs in getattr(config, 'REGISTRY_CLASS_MAP', {}).items()
+                      for sub in subs}
+
+        def _run_class(s):
+            return _SUB2CLASS.get((s[4] or '').strip() if len(s) > 4 else '')
+
         _PR = {
             'kill_share': (_kshare, 'Kill share %'), 'lethality': (_leth, 'Lethality (K/TD)'),
             'warlord': (_warl, 'Warlord %'), 'td': (lambda s: _i(s, 7), 'Takedowns'),
             'kills': (lambda s: _i(s, 8), 'Kills'), 'deaths': (lambda s: _i(s, 9), 'Deaths'),
+            'kd': (_kd, 'K/D ratio'), 'aggression': (_agg, 'Aggression (K+D)'),
+            'team_td_share': (_tdshare, 'Team TD share %'),
             'score': (_score, 'Score'), 'lobby_kills': (_lobbyk, 'Total lobby kills'),
             'tilt': (_gap, 'Lobby kill gap'),
         }
+        _colour_key = colour_by.value if colour_by else None
+        from utils.tilt import orientation as _orient
         _xf, _xlab = _PR[stat_a.value]
         _yf, _ylab = _PR[stat_b.value]
         _all_subs = await _db.get_all_submissions()
         _pl_lower = {n.lower() for n in (_pnames or [])}
-        _pts = []
+        _pts, _groups = [], []
         for s in _all_subs:
             if len(s) < 21 or 'Unlisted' in (s[11] or ''):
                 continue
@@ -1812,6 +1866,12 @@ class PersonalityCog(commands.Cog):
                 if not (((s[2] or '').strip() == _pid) or ((s[1] or '').strip().lower() in _pl_lower)):
                     continue
             if weapon and (s[3] or '').strip().lower() != weapon.strip().lower():
+                continue
+            if char_class and _run_class(s) != char_class.value:
+                continue
+            if map_name and map_name.strip().lower() not in (s[5] or '').strip().lower():
+                continue
+            if side and _orient((s[5] or '').strip(), (s[6] or '').strip()) != side.value:
                 continue
             if _season_start:
                 try:
@@ -1823,6 +1883,16 @@ class PersonalityCog(commands.Cog):
             _x, _y = _xf(s), _yf(s)
             if _x is not None and _y is not None:
                 _pts.append((float(_x), float(_y)))
+                if _colour_key:
+                    if _colour_key == 'weapon':
+                        _g = (s[3] or '').strip() or '—'
+                    elif _colour_key == 'class':
+                        _g = _run_class(s) or '—'
+                    elif _colour_key == 'subclass':
+                        _g = (s[4] or '').strip() or '—'
+                    else:
+                        _g = (s[6] or '').strip() or '—'
+                    _groups.append(_g)
         if len(_pts) < 5:
             await interaction.followup.send(
                 f"Not enough runs to correlate ({len(_pts)}). Widen the scope or drop the weapon filter.")
@@ -1836,13 +1906,23 @@ class PersonalityCog(commands.Cog):
         _r = (_sxy / ((_sxx * _syy) ** 0.5)) if (_sxx > 0 and _syy > 0) else None
         _trend = ((_sxy / _sxx, _my - (_sxy / _sxx) * _mx) if _sxx > 0 else None)
         _title = (f"{_pscope} · {_xlab} vs {_ylab}" if _pscope else f"{_xlab} vs {_ylab}")
-        _bits = ([weapon.strip()] if weapon else []) + [_win_label]
+        _bits = ([weapon.strip()] if weapon else [])
+        if char_class:
+            _bits.append(char_class.value)
+        if map_name:
+            _bits.append(map_name.strip())
+        if side:
+            _bits.append("Attack" if side.value == "Attack" else "Defence")
+        _bits.append(_win_label)
+        _group_label = {'weapon': 'Weapon', 'class': 'Class',
+                        'subclass': 'Subclass', 'faction': 'Faction'}.get(_colour_key)
         try:
             import utils.charts as _charts
             _png = await _charts.render_async(
                 _charts.render_scatter, title=_title, subtitle=" · ".join(_bits),
                 points=_pts, x_label=_xlab, y_label=_ylab, r=_r, trend=_trend,
-                footer=f"{_n} runs · {_win_label}")
+                footer=f"{_n} runs · {_win_label}",
+                groups=(_groups if _colour_key else None), group_label=_group_label)
             await interaction.followup.send(file=discord.File(io.BytesIO(_png), filename="correlate.png"))
         except Exception as _ce:
             print(f"[CORRELATE] render failed: {_ce}")
