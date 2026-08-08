@@ -78,6 +78,16 @@ def _warl(s):
     return (td * t / k) if (td and k and t) else None
 
 
+def _dom(s):
+    # Dominance = harmonic mean of Kill Share and Warlord (both %). Rewards being
+    # high in BOTH; collapses toward the weaker axis so it can't be gamed by
+    # specialising. Same definition as the Most Dominant title.
+    ks, wl = _kshare(s), _warl(s)
+    if not ks or not wl or ks <= 0 or wl <= 0:
+        return None
+    return 2 * ks * wl / (ks + wl)
+
+
 def _kd(s):
     k, d = _i(s, 8), _i(s, 9)
     if k is None:
@@ -110,6 +120,7 @@ STAT_EXTRACTORS = {
     'kill_share':     (_kshare,  'Kill share %'),
     'team_td_share':  (_tdshare, 'Team TD share %'),
     'warlord':        (_warl,    'Warlord %'),
+    'dominance':      (_dom,     'Dominance'),
     'lethality':      (_leth,    'Lethality (K/TD)'),
     'score':          (_score,   'Score'),
     'lobby_kills':    (_lobbyk,  'Total lobby kills'),

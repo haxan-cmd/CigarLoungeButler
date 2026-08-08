@@ -44,6 +44,14 @@ def test_run_class_from_subclass():
     assert run_class(row(subclass="Poleman")) == "Footman"
 
 
+def test_dominance_is_harmonic_mean_of_killshare_and_warlord():
+    dom = STAT_EXTRACTORS['dominance'][0]
+    # kills=50, td=100, kill_share=45% -> warlord=100*45/50=90 -> HM(45,90)=60
+    assert abs(dom(row(td=100, k=50, tkshare=45.0)) - 60.0) < 1e-6
+    # missing an axis (no takedowns -> no warlord) yields None, not a bogus value
+    assert dom(row(td=0, k=50, tkshare=45.0)) is None
+
+
 # ── matrix ─────────────────────────────────────────────────────────────────
 def test_matrix_is_symmetric_with_unit_diagonal():
     # kills tracks takedowns; deaths anti-tracks K/D.
