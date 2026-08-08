@@ -1395,14 +1395,23 @@ class PersonalityCog(commands.Cog):
         await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="statscape", description="An abstract-art PNG of your combat stats (or a player's, or 'server'). For vibes.")
-    @app_commands.describe(player="A player's name, or 'server' for the whole lounge. Blank = you.")
-    async def statscape(self, interaction: discord.Interaction, player: str = None):
+    @app_commands.describe(member="Pick a player with @ — easiest.",
+                           player="…or type a name, or 'server' for the whole lounge. Blank = you.")
+    async def statscape(self, interaction: discord.Interaction,
+                        member: discord.Member = None, player: str = None):
         await interaction.response.defer()
         import io as _io
         all_players = await _db.get_all_players()
         _server = bool(player) and player.strip().lower() in ('server', 'lounge', 'everyone')
         if _server:
             did, pname = '', 'The Cigar Lounge'
+        elif member:
+            # @-picker path: map their Discord id to the canonical registry name
+            # so submissions logged under a legacy name still resolve.
+            did = str(member.id)
+            pname = next((r[1].strip() for r in all_players
+                          if r and (r[0] or '').strip() == did and len(r) > 1),
+                         member.display_name)
         elif player:
             target = next((row for row in all_players
                            if len(row) > 1 and row[1].strip().lower() == player.strip().lower()), None)

@@ -2673,9 +2673,11 @@ class RegistryCog(commands.Cog):
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     @app_commands.command(name="playerstats", description="Your all-time profile: title, weapon ranks and marks.")
-    @app_commands.describe(player="Player name (leave blank for your own)")
+    @app_commands.describe(member="Pick a player with @ — easiest.",
+                           player="…or type a name (leave both blank for your own)")
     @app_commands.autocomplete(player=_player_name_ac)
-    async def progress_command(self, interaction: discord.Interaction, player: str = None):
+    async def progress_command(self, interaction: discord.Interaction,
+                               member: discord.Member = None, player: str = None):
         await interaction.response.defer()
 
         # ── Resolve player ────────────────────────────────────────────────────────
@@ -2683,7 +2685,13 @@ class RegistryCog(commands.Cog):
         discord_id_str = None
         resolved_name = None
 
-        if player is None:
+        if member is not None:
+            # @-picker path: canonical registry name if we have one, else display name.
+            discord_id_str = str(member.id)
+            resolved_name = next((row[1].strip() for row in all_players
+                                  if row and row[0].strip() == discord_id_str and len(row) > 1),
+                                 member.display_name)
+        elif player is None:
             discord_id_str = str(interaction.user.id)
             for row in all_players:
                 if row and row[0].strip() == discord_id_str:
