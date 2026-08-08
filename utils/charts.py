@@ -30,6 +30,8 @@ CORAL = '#d85a30'
 BLUE = '#5b8dd9'
 PURPLE = '#7a89c2'
 TEAL = '#4fb3a1'
+# Canonical faction colours (Chiv 2): Agatha blue, Mason red, Tenosia gold.
+_FACTION_COLOUR = {'Agatha': BLUE, 'Mason': '#d84343', 'Tenosia': GOLD}
 
 ACCENTS = [GOLD, CORAL, BLUE, TEAL, PURPLE]
 
@@ -743,7 +745,13 @@ def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, tren
         _keep = [g for g, _ in sorted(_freq.items(), key=lambda kv: (-kv[1], str(kv[0])))[:8]]
         _norm = [g if g in _keep else 'Other' for g in groups]
         _order = _keep + (['Other'] if 'Other' in _norm else [])
-        _cmap = {g: (_palette[i] if i < len(_palette) else '#8a8f98') for i, g in enumerate(_keep)}
+        _fac = _FACTION_COLOUR if group_label == 'Faction' else {}
+        _cmap = {}
+        for i, g in enumerate(_keep):
+            if g == '—':
+                _cmap[g] = '#8a8f98'          # unknown/blank stays grey
+            else:
+                _cmap[g] = _fac.get(g, _palette[i] if i < len(_palette) else '#8a8f98')
         _cmap['Other'] = '#8a8f98'
         for g in _order:
             _gx = [xs[i] for i in range(len(xs)) if _norm[i] == g]
