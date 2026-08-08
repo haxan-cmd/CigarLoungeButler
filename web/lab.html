@@ -22,6 +22,12 @@ a{color:var(--gold)}
 .f label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;padding-left:2px}
 select,input{background:var(--panel);color:var(--ink);border:1px solid var(--grid);border-radius:8px;padding:6px 9px;font-size:12.5px;font-family:inherit;min-width:96px}
 select:focus,input:focus{outline:1px solid var(--gold)}
+.cbox{position:relative}
+.cbox input{width:100%}
+.cblist{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--panel2);border:1px solid var(--grid);border-radius:8px;margin-top:3px;max-height:260px;overflow-y:auto;box-shadow:0 10px 26px #000a}
+.cbitem{padding:6px 10px;font-size:12.5px;cursor:pointer;color:var(--ink);white-space:nowrap}
+.cbitem:hover{background:var(--panel)}
+.cbitem.sel{color:var(--gold)}
 .btn{background:var(--panel);border:1px solid var(--grid);border-radius:8px;color:var(--mut);padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:inherit}
 .btn:hover{color:var(--ink)}
 .tabs{display:inline-flex;border:1px solid var(--grid);border-radius:10px;overflow:hidden;margin-bottom:14px}
@@ -132,25 +138,42 @@ function filtered(){
 }
 function activeBits(){
   const f=state.filters, out=[];
-  for(const [k,lab] of [['player','Player'],['weapon','Weapon'],['cls','Class'],['grip','Grip'],['faction','Faction'],['map','Map'],['side','Side']])
+  for(const [k,lab] of [['player','Player'],['weapon','Weapon'],['cls','Class'],['grip','Weapon Type'],['faction','Faction'],['map','Map'],['side','Side']])
     if(f[k]) out.push(f[k]);
   return out;
 }
 
 // ---- filters UI ----
+function searchSelect(label,options,current,cb,width){
+  const wrap=document.createElement('div'); wrap.className='f';
+  const l=document.createElement('label'); l.textContent=label; wrap.appendChild(l);
+  const box=document.createElement('div'); box.className='cbox';
+  const input=document.createElement('input'); input.type='text'; input.placeholder='all';
+  input.autocomplete='off'; input.value=current||''; if(width) input.style.minWidth=width+'px';
+  const list=document.createElement('div'); list.className='cblist hide';
+  let cur=current||''; const all=['',...options];
+  function draw(f){
+    list.innerHTML=''; const q=(f||'').toLowerCase();
+    all.filter(o=>o===''||o.toLowerCase().includes(q)).slice(0,300).forEach(o=>{
+      const it=document.createElement('div'); it.className='cbitem'+(o===cur?' sel':'');
+      it.textContent=o===''?'all':o;
+      it.addEventListener('mousedown',e=>{e.preventDefault();cur=o;input.value=o;list.classList.add('hide');input.blur();cb(o);});
+      list.appendChild(it);
+    });
+  }
+  input.addEventListener('focus',()=>{input.value='';draw('');list.classList.remove('hide');});
+  input.addEventListener('input',()=>draw(input.value));
+  input.addEventListener('blur',()=>setTimeout(()=>{list.classList.add('hide');input.value=cur;},120));
+  box.appendChild(input); box.appendChild(list); wrap.appendChild(box);
+  return wrap;
+}
 function buildFilters(){
   const bar=document.getElementById('filters'); bar.innerHTML='';
-  const defs=[['player','Player','name'],['weapon','Weapon','weapon'],['cls','Class','cls'],
-    ['grip','Grip','grip'],['faction','Faction','faction'],['map','Map','map'],['side','Side','side']];
-  for(const [fk,lab,uk] of defs){
-    const wrap=document.createElement('div'); wrap.className='f';
-    const l=document.createElement('label'); l.textContent=lab; wrap.appendChild(l);
-    const sel=document.createElement('select');
-    const optAll=document.createElement('option'); optAll.value=''; optAll.textContent='all'; sel.appendChild(optAll);
-    for(const u of uniques(uk)){const o=document.createElement('option');o.value=u;o.textContent=u;sel.appendChild(o);}
-    sel.value=state.filters[fk]||'';
-    sel.addEventListener('change',()=>{state.filters[fk]=sel.value;render();});
-    wrap.appendChild(sel); bar.appendChild(wrap);
+  const defs=[['player','Player','name',190],['weapon','Weapon','weapon',150],['cls','Class','cls',110],
+    ['grip','Weapon Type','grip',130],['faction','Faction','faction',120],['map','Map','map',140],['side','Side','side',110]];
+  for(const [fk,lab,uk,w] of defs){
+    bar.appendChild(searchSelect(lab, uniques(uk), state.filters[fk]||'',
+      v=>{state.filters[fk]=v;render();}, w));
   }
   const reset=document.createElement('button'); reset.className='btn'; reset.textContent='Reset';
   reset.style.alignSelf='flex-end';
@@ -308,7 +331,7 @@ function renderCompare(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
-  ctrl.appendChild(pickSelect('Group by',[['grip','Grip (1H/2H)'],['class','Class'],['faction','Faction'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
+  ctrl.appendChild(pickSelect('Group by',[['grip','Weapon Type (1H/2H)'],['class','Class'],['faction','Faction'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
   view.appendChild(ctrl);
   const keys=['kills','td','deaths','kd','kill_share','warlord'];
   const gk={grip:'grip',class:'cls',faction:'faction',weapon:'weapon',subclass:'subclass'}[state.group];
