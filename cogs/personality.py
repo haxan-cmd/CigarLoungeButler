@@ -914,6 +914,57 @@ def _server_aggregates(subs):
     return "\n".join(L)
 
 
+def build_lab_url(view='matrix', extra=None):
+    """Build a signed, 24h Stats Lab deep link, or None if the Lab isn't
+    configured. Tolerant of a LAB_BASE_URL set without a scheme (prepends
+    https://) so a missing 'https://' can never crash a command again."""
+    import os as _os
+    base = _os.environ.get('LAB_BASE_URL', '').strip().rstrip('/')
+    secret = _os.environ.get('LAB_SECRET') or _os.environ.get('EXPORT_TOKEN', '')
+    if not (base and secret):
+        return None
+    if not (base.startswith('http://') or base.startswith('https://')):
+        base = 'https://' + base
+    try:
+        from utils.lab_auth import make_token
+        from urllib.parse import urlencode
+        params = {'t': make_token(secret, ttl_seconds=86400), 'view': view}
+        if extra:
+            params.update({k: v for k, v in extra.items() if v})
+        url = f"{base}/lab?{urlencode(params)}"
+        return url if url.startswith('http') else None
+    except Exception as _e:
+        print(f"[LAB] url build failed: {_e}")
+        return None
+
+
+def _lab_link_view(url, label='Open Stats Lab'):
+    v = discord.ui.View(timeout=300)
+    v.add_item(discord.ui.Button(label=label, emoji='🔬',
+                                 style=discord.ButtonStyle.link, url=url))
+    return v
+
+
+class StatsLabEntry(discord.ui.View):
+    """Persistent, pinnable panel. The button survives restarts (custom_id) and
+    mints a fresh short-lived link per click, so a pinned message never goes
+    stale the way a baked-in link would."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label='Open Stats Lab', emoji='🔬',
+                       style=discord.ButtonStyle.primary, custom_id='statslab:open')
+    async def _open(self, interaction: discord.Interaction, button):
+        url = build_lab_url('matrix')
+        if not url:
+            await interaction.response.send_message(
+                "The Stats Lab isn't set up yet — a mod needs to configure it.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Your Stats Lab link (good for 24 hours):", view=_lab_link_view(url), ephemeral=True)
+
+
 class CorrelateView(discord.ui.View):
     """Interactive panel for /correlate: flip between the scatter, the full
     correlation matrix, and 1H-vs-2H / class comparisons without re-running the
@@ -929,40 +980,21 @@ class CorrelateView(discord.ui.View):
         self._add_lab_link()
 
     def _add_lab_link(self):
-        # 'Open in Stats Lab' deep link — only when the web Lab is configured.
-        # Carries the current stats + filters + a short-lived signed token so the
-        # page opens on the same view, fully interactive. Static URL (link buttons
-        # can't update), so it lands on the scatter; switch views live on the page.
-        import os as _os
-        base = _os.environ.get('LAB_BASE_URL', '').rstrip('/')
-        secret = _os.environ.get('LAB_SECRET') or _os.environ.get('EXPORT_TOKEN', '')
-        if not (base and secret):
-            return
-        try:
-            from utils.lab_auth import make_token
-            from urllib.parse import urlencode
-            F = self.F
-            params = {'t': make_token(secret, ttl_seconds=86400),
-                      'view': 'scatter', 'x': F['stat_a'], 'y': F['stat_b']}
-            if F.get('colour_key'):
-                params['colour'] = F['colour_key']
-            if F.get('char_class'):
-                params['class'] = F['char_class']
-            if F.get('grip'):
-                params['grip'] = F['grip']
-            if F.get('side'):
-                params['side'] = F['side']
-            if F.get('weapon_disp'):
-                params['weapon'] = F['weapon_disp']
-            if F.get('map_disp'):
-                params['map'] = F['map_disp']
-            if F.get('pid'):
-                params['player'] = F['pid']
-            self.add_item(discord.ui.Button(
-                label='Open in Stats Lab', emoji='🔗', row=1,
-                style=discord.ButtonStyle.link, url=f"{base}/lab?{urlencode(params)}"))
-        except Exception as _le:
-            print(f"[CORRELATE] lab link build failed: {_le}")
+        # 'Open in Stats Lab' deep link — carries the current stats + filters so the
+        # page opens on the same view. Static URL (link buttons can't update), so it
+        # lands on the scatter; switch views live on the page. Fail-safe: a bad/absent
+        # URL simply omits the button and never breaks the command.
+        F = self.F
+        extra = {'x': F['stat_a'], 'y': F['stat_b']}
+        for _fk, _pk in (('colour_key', 'colour'), ('char_class', 'class'), ('grip', 'grip'),
+                         ('side', 'side'), ('weapon_disp', 'weapon'), ('map_disp', 'map'),
+                         ('pid', 'player')):
+            if F.get(_fk):
+                extra[_pk] = F[_fk]
+        url = build_lab_url('scatter', extra)
+        if url:
+            self.add_item(discord.ui.Button(label='Open in Stats Lab', emoji='🔗', row=1,
+                                            style=discord.ButtonStyle.link, url=url))
 
     async def _rows(self):
         from utils.tilt import orientation as _orient
@@ -1147,6 +1179,12 @@ class PersonalityCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'[PERSONALITY] on_ready fired, starting tasks')
+        if not getattr(self, '_lab_view_added', False):
+            try:
+                self.bot.add_view(StatsLabEntry())
+                self._lab_view_added = True
+            except Exception as _lve:
+                print(f"[LAB] persistent view register failed: {_lve}")
         if not self.dry_weather_check.is_running():
             self.dry_weather_check.start()
         if not self.butler_organic_post.is_running():
@@ -2057,6 +2095,28 @@ class PersonalityCog(commands.Cog):
         _png, _fn = _res
         await interaction.followup.send(
             file=discord.File(io.BytesIO(_png), filename=_fn), view=_view)
+
+    @app_commands.command(name="statslab", description="Open the interactive web Stats Lab (correlations, matrix, 1H vs 2H, and more).")
+    async def statslab(self, interaction: discord.Interaction):
+        url = build_lab_url('matrix')
+        if not url:
+            await interaction.response.send_message(
+                "The Stats Lab isn't set up yet — a mod needs to configure it.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Your Stats Lab link (good for 24 hours):", view=_lab_link_view(url), ephemeral=True)
+
+    @app_commands.command(name="statslab_panel", description="Post a pinnable Stats Lab button here (mod only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def statslab_panel(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🔬 Cigar Lounge — Stats Lab",
+            description=("Explore every logged run: the full correlation matrix, any scatter, "
+                         "1H vs 2H, class by class, and more — all interactive. Click below for "
+                         "your own link (fresh each time, good for 24h)."),
+            color=0xC9A24B)
+        await interaction.channel.send(embed=embed, view=StatsLabEntry())
+        await interaction.response.send_message("Posted — pin it wherever you like.", ephemeral=True)
 
     @app_commands.command(name="explore", description="Chart any stat, grouped any way. e.g. metric: Run count, by: Weapon. Filters optional.")
     @app_commands.describe(
