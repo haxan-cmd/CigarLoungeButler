@@ -265,3 +265,39 @@ def find_insights(rows, stat_keys=None, min_n=8):
         if best:
             out.append({'kind': 'grip_gap', **best})
     return out
+
+
+# Fields the web Stats Lab receives per run: categoricals for filtering + every
+# numeric stat (from STAT_EXTRACTORS). Ordered so it can be sent as compact arrays.
+RECORD_CATEGORICALS = ['name', 'did', 'weapon', 'subclass', 'cls', 'grip',
+                       'faction', 'map', 'side', 'ts']
+RECORD_STATS = list(STAT_EXTRACTORS.keys())
+RECORD_FIELDS = RECORD_CATEGORICALS + RECORD_STATS
+
+
+def run_record(row):
+    """One run as a flat dict of categoricals + all numeric stats, for the web
+    Lab. Numeric stats are None where the run lacks the inputs."""
+    from utils.tilt import orientation as _orientation
+    _mp = (row[5] or '').strip() if len(row) > 5 else ''
+    _fac = (row[6] or '').strip() if len(row) > 6 else ''
+    rec = {
+        'name': (row[1] or '').strip() if len(row) > 1 else '',
+        'did': (row[2] or '').strip() if len(row) > 2 else '',
+        'weapon': run_weapon(row) or '',
+        'subclass': (row[4] or '').strip() if len(row) > 4 else '',
+        'cls': run_class(row) or '',
+        'grip': weapon_grip(row) or '',
+        'faction': _fac,
+        'map': _mp,
+        'side': _orientation(_mp, _fac) or '',
+        'ts': str(row[0]) if len(row) > 0 and row[0] else '',
+    }
+    for k, (fn, _lab) in STAT_EXTRACTORS.items():
+        rec[k] = fn(row)
+    return rec
+
+
+def records(rows):
+    """[run_record, ...] for all non-excluded rows."""
+    return [run_record(r) for r in rows if not is_excluded(r)]

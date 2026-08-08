@@ -75,10 +75,59 @@ async def run_healthcheck():
             {"rows": rows, "nextCursor": next_cursor},
             dumps=lambda d: json.dumps(d, default=str, ensure_ascii=False))
 
+    def _lab_secret():
+        # Reuse EXPORT_TOKEN as the signing secret if no dedicated one is set,
+        # so the Lab can be enabled with a single env var.
+        return os.environ.get("LAB_SECRET") or os.environ.get("EXPORT_TOKEN", "")
+
+    async def lab_page(request):
+        # The interactive web Stats Lab. Token-gated (short-lived signed link
+        # minted by the /correlate panel). Off unless LAB_SECRET/EXPORT_TOKEN set.
+        secret = _lab_secret()
+        if not secret:
+            return web.Response(status=503, text="lab disabled")
+        from utils.lab_auth import verify_token
+        if verify_token(request.query.get("t", ""), secret) is None:
+            return web.Response(
+                status=403, content_type="text/html",
+                text="<body style='background:#22242a;color:#f2f3f5;font-family:sans-serif;"
+                     "text-align:center;padding-top:16vh'><h2>This Stats Lab link has expired.</h2>"
+                     "<p style='color:#8b8f9a'>Run <b>/correlate</b> in Discord for a fresh link.</p></body>")
+        try:
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "lab.html")
+            with open(_p, encoding="utf-8") as f:
+                html = f.read()
+        except Exception:
+            return web.Response(status=500, text="lab page missing")
+        return web.Response(text=html, content_type="text/html")
+
+    async def lab_data(request):
+        # Per-run numeric+categorical records for the Lab to filter and correlate
+        # client-side. Same token gate as the page.
+        secret = _lab_secret()
+        if not secret:
+            return web.Response(status=503, text="lab disabled")
+        from utils.lab_auth import verify_token
+        if verify_token(request.query.get("t", ""), secret) is None:
+            return web.Response(status=403, text="link expired or invalid")
+        try:
+            from utils.db import get_all_submissions
+            rows = await get_all_submissions()
+        except RuntimeError:
+            return web.Response(status=503, text="database unavailable")
+        import utils.stats_engine as _SE
+        fields = _SE.RECORD_FIELDS
+        data = [[rec.get(f) for f in fields] for rec in _SE.records(rows)]
+        return web.json_response(
+            {"fields": fields, "rows": data},
+            dumps=lambda d: json.dumps(d, default=str, ensure_ascii=False))
+
     app = _web_app
     app.router.add_get("/", handle)
     app.router.add_post("/kofi", kofi_webhook)
     app.router.add_get("/export/submissions", export_submissions)
+    app.router.add_get("/lab", lab_page)
+    app.router.add_get("/lab/data", lab_data)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))

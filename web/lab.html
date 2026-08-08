@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cigar Lounge — Stats Lab</title>
+<style>
+:root{
+  --bg:#22242a;--panel:#2b2d34;--panel2:#31343c;--ink:#f2f3f5;--mut:#8b8f9a;
+  --gold:#e0a84c;--blue:#5b8dd9;--coral:#d85a30;--teal:#4fb3a1;--purple:#7a89c2;--grid:#34373f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Poppins',system-ui,-apple-system,sans-serif;font-size:14px}
+a{color:var(--gold)}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 20px 60px}
+.head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:2px}
+.head h1{font-size:22px;margin:0;font-weight:700}
+.head .sub{color:var(--mut);font-size:12.5px}
+.rule{height:1px;background:linear-gradient(90deg,var(--gold),transparent);margin:10px 0 14px;opacity:.6}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.f{display:flex;flex-direction:column;gap:3px}
+.f label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;padding-left:2px}
+select,input{background:var(--panel);color:var(--ink);border:1px solid var(--grid);border-radius:8px;padding:6px 9px;font-size:12.5px;font-family:inherit;min-width:96px}
+select:focus,input:focus{outline:1px solid var(--gold)}
+.btn{background:var(--panel);border:1px solid var(--grid);border-radius:8px;color:var(--mut);padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:inherit}
+.btn:hover{color:var(--ink)}
+.tabs{display:inline-flex;border:1px solid var(--grid);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.tab{padding:8px 16px;font-size:13px;cursor:pointer;color:var(--mut);background:var(--panel);border:none;font-family:inherit}
+.tab.on{background:var(--gold);color:#241c08;font-weight:700}
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{background:var(--panel);border:1px solid var(--grid);border-radius:999px;padding:5px 11px;font-size:11.5px;color:var(--mut);cursor:pointer;user-select:none}
+.chip.on{background:var(--panel2);color:var(--ink);border-color:var(--gold)}
+/* matrix */
+.mtx{display:grid;gap:3px;overflow-x:auto}
+.mcell{aspect-ratio:1;min-width:44px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#12141a;cursor:pointer}
+.mcell.lab{background:none!important;color:var(--mut);font-size:10px;font-weight:600;cursor:default;justify-content:flex-end;padding-right:4px;text-align:right}
+.mcell.labtop{writing-mode:vertical-rl;transform:rotate(180deg);justify-content:flex-start;align-items:flex-start}
+.mcell.diag{background:var(--gold)!important;color:#241c08}
+.mcell:hover{outline:2px solid var(--ink)}
+.legend{display:flex;gap:14px;align-items:center;font-size:11px;color:var(--mut);margin-top:10px;flex-wrap:wrap}
+.sw{width:11px;height:11px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+/* scatter */
+#scWrap{position:relative}
+canvas{display:block;width:100%;border-radius:8px}
+.rbox{position:absolute;top:10px;right:12px;background:#12141a;border:1px solid var(--grid);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:700}
+.slegend{position:absolute;top:10px;left:12px;font-size:11px;color:var(--mut);background:#12141acc;border-radius:8px;padding:6px 8px}
+.slegend div{margin:2px 0}
+.tip{position:fixed;pointer-events:none;background:#12141a;border:1px solid var(--grid);border-radius:7px;padding:6px 9px;font-size:11.5px;opacity:0;transition:.06s;z-index:60;white-space:nowrap}
+/* compare */
+.cmp .row{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;margin-bottom:14px}
+.cmp .k{font-size:12.5px;color:var(--ink);text-align:right}
+.cmp .bars{display:flex;flex-direction:column;gap:4px}
+.cmp .brow{display:flex;align-items:center;gap:8px;font-size:11px}
+.cmp .bx{height:11px;border-radius:3px;min-width:2px}
+.foot{color:var(--mut);font-size:11px;text-align:right;margin-top:8px}
+.loading{color:var(--mut);padding:40px;text-align:center}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>🎲 Cigar Lounge — Stats Lab</h1>
+    <span class="sub" id="sub">loading…</span>
+  </div>
+  <div class="rule"></div>
+
+  <div class="bar" id="filters"></div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab" data-v="matrix">🔲 Matrix</button>
+    <button class="tab" data-v="scatter">📊 Scatter</button>
+    <button class="tab" data-v="compare">⚔️ Compare</button>
+  </div>
+
+  <div id="view"><div class="loading">Fetching the vault…</div></div>
+  <div class="foot" id="foot"></div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const PALETTE=['#e0a84c','#5b8dd9','#d85a30','#4fb3a1','#7a89c2','#e0729b','#8bd3dd','#b5e48c','#f4a259'];
+const FACTION_COL={Agatha:'#5b8dd9',Mason:'#d84343',Tenosia:'#e0a84c'};
+const GRIP_COL={'1H':'#5b8dd9','2H':'#e0a84c'};
+const LABELS={kills:'Kills',td:'Takedowns',deaths:'Deaths',kd:'K/D ratio',
+  aggression:'Aggression (K+D)',kill_share:'Kill share %',team_td_share:'Team TD share %',
+  warlord:'Warlord %',lethality:'Lethality (K/TD)',score:'Score',
+  lobby_kills:'Total lobby kills',tilt:'Lobby kill gap'};
+const ALL_STATS=Object.keys(LABELS);
+const DEFAULT_MATRIX=['kills','td','deaths','kd','kill_share','warlord','tilt'];
+
+const qp=new URLSearchParams(location.search);
+const TOKEN=qp.get('t')||'';
+let FIELDS=[], IDX={}, DATA=[];
+let matrixStats=DEFAULT_MATRIX.slice();
+const state={
+  view:qp.get('view')||'matrix',
+  x:qp.get('x')||'td', y:qp.get('y')||'kills', colour:qp.get('colour')||'',
+  group:'grip',
+  filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
+           grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||''}
+};
+
+function val(rec,key){return rec[IDX[key]];}
+function pearson(pairs){
+  const n=pairs.length; if(n<3) return null;
+  let mx=0,my=0; for(const p of pairs){mx+=p[0];my+=p[1];} mx/=n;my/=n;
+  let sxx=0,syy=0,sxy=0;
+  for(const p of pairs){const dx=p[0]-mx,dy=p[1]-my;sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy;}
+  if(sxx<=0||syy<=0) return null;
+  return {r:sxy/Math.sqrt(sxx*syy),m:sxy/sxx,b:my-(sxy/sxx)*mx};
+}
+function uniques(key){
+  const s=new Set();
+  for(const r of DATA){const v=r[IDX[key]]; if(v) s.add(v);}
+  return [...s].sort();
+}
+function filtered(){
+  const f=state.filters;
+  return DATA.filter(r=>{
+    if(f.player && (r[IDX.name]||'')!==f.player && (r[IDX.did]||'')!==f.player) return false;
+    if(f.weapon && (r[IDX.weapon]||'')!==f.weapon) return false;
+    if(f.cls && (r[IDX.cls]||'')!==f.cls) return false;
+    if(f.grip && (r[IDX.grip]||'')!==f.grip) return false;
+    if(f.faction && (r[IDX.faction]||'')!==f.faction) return false;
+    if(f.map && (r[IDX.map]||'')!==f.map) return false;
+    if(f.side && (r[IDX.side]||'')!==f.side) return false;
+    return true;
+  });
+}
+function activeBits(){
+  const f=state.filters, out=[];
+  for(const [k,lab] of [['player','Player'],['weapon','Weapon'],['cls','Class'],['grip','Grip'],['faction','Faction'],['map','Map'],['side','Side']])
+    if(f[k]) out.push(f[k]);
+  return out;
+}
+
+// ---- filters UI ----
+function buildFilters(){
+  const bar=document.getElementById('filters'); bar.innerHTML='';
+  const defs=[['player','Player','name'],['weapon','Weapon','weapon'],['cls','Class','cls'],
+    ['grip','Grip','grip'],['faction','Faction','faction'],['map','Map','map'],['side','Side','side']];
+  for(const [fk,lab,uk] of defs){
+    const wrap=document.createElement('div'); wrap.className='f';
+    const l=document.createElement('label'); l.textContent=lab; wrap.appendChild(l);
+    const sel=document.createElement('select');
+    const optAll=document.createElement('option'); optAll.value=''; optAll.textContent='all'; sel.appendChild(optAll);
+    for(const u of uniques(uk)){const o=document.createElement('option');o.value=u;o.textContent=u;sel.appendChild(o);}
+    sel.value=state.filters[fk]||'';
+    sel.addEventListener('change',()=>{state.filters[fk]=sel.value;render();});
+    wrap.appendChild(sel); bar.appendChild(wrap);
+  }
+  const reset=document.createElement('button'); reset.className='btn'; reset.textContent='Reset';
+  reset.style.alignSelf='flex-end';
+  reset.addEventListener('click',()=>{for(const k in state.filters)state.filters[k]='';buildFilters();render();});
+  bar.appendChild(reset);
+}
+
+// ---- matrix ----
+function divColor(r){
+  const a=Math.min(1,Math.abs(r));
+  const c=r>=0?[79,179,161]:[216,90,48], bg=[43,45,52];
+  return 'rgb('+c.map((x,i)=>Math.round(bg[i]+(x-bg[i])*(0.15+0.85*a))).join(',')+')';
+}
+function renderMatrix(){
+  const rows=filtered();
+  const keys=matrixStats, n=keys.length;
+  const vals={}; for(const k of keys) vals[k]=rows.map(r=>val(r,k));
+  const view=document.getElementById('view');
+  view.innerHTML='';
+  // stat chips
+  const chipCard=document.createElement('div'); chipCard.className='card';
+  chipCard.innerHTML='<h3>Stats in the matrix — click to toggle</h3>';
+  const chips=document.createElement('div'); chips.className='chips';
+  for(const k of ALL_STATS){
+    const c=document.createElement('span'); c.className='chip'+(keys.includes(k)?' on':'');
+    c.textContent=LABELS[k];
+    c.addEventListener('click',()=>{
+      const i=matrixStats.indexOf(k);
+      if(i>=0){ if(matrixStats.length>2) matrixStats.splice(i,1); }
+      else matrixStats.push(k);
+      renderMatrix();
+    });
+    chips.appendChild(c);
+  }
+  chipCard.appendChild(chips); view.appendChild(chipCard);
+
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML='<h3>Correlation matrix — click a cell to drill into that scatter</h3>';
+  const mtx=document.createElement('div'); mtx.className='mtx';
+  mtx.style.gridTemplateColumns='minmax(70px,auto) repeat('+n+',minmax(44px,1fr))';
+  const tip=document.getElementById('tip');
+  const corner=document.createElement('div'); corner.className='mcell lab'; mtx.appendChild(corner);
+  for(const k of keys){const d=document.createElement('div');d.className='mcell lab labtop';d.textContent=LABELS[k];mtx.appendChild(d);}
+  for(let i=0;i<n;i++){
+    const rl=document.createElement('div'); rl.className='mcell lab'; rl.textContent=LABELS[keys[i]]; mtx.appendChild(rl);
+    for(let j=0;j<n;j++){
+      const c=document.createElement('div');
+      if(i===j){c.className='mcell diag';c.textContent='1';mtx.appendChild(c);continue;}
+      const pairs=[]; for(let t=0;t<rows.length;t++){const a=vals[keys[i]][t],b=vals[keys[j]][t]; if(a!=null&&b!=null)pairs.push([a,b]);}
+      const res=pairs.length>=5?pearson(pairs):null;
+      c.className='mcell';
+      if(!res){c.style.background='#3a3d45';c.style.color='#8b8f9a';c.textContent='·';}
+      else{c.style.background=divColor(res.r);c.style.color='#f2f3f5';c.textContent=(res.r>=0?'+':'')+res.r.toFixed(2).replace(/^(-?)0/,'$1');}
+      const A=keys[i],B=keys[j],R=res;
+      c.addEventListener('mousemove',e=>{tip.textContent=LABELS[A]+' × '+LABELS[B]+(R?('  r='+(R.r>=0?'+':'')+R.r.toFixed(2)+' · '+pairs.length+' runs'):'  (too few runs)');tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';});
+      c.addEventListener('mouseleave',()=>tip.style.opacity=0);
+      c.addEventListener('click',()=>{state.x=B;state.y=A;setView('scatter');});
+      mtx.appendChild(c);
+    }
+  }
+  card.appendChild(mtx);
+  const leg=document.createElement('div'); leg.className='legend';
+  leg.innerHTML='<span><span class="sw" style="background:var(--teal)"></span>move together</span><span><span class="sw" style="background:var(--coral)"></span>pull apart</span><span><span class="sw" style="background:var(--gold)"></span>self</span><span>· = too few runs</span>';
+  card.appendChild(leg); view.appendChild(card);
+}
+
+// ---- scatter ----
+function catOf(r){
+  const ck=state.colour;
+  if(!ck) return null;
+  if(ck==='weapon')return r[IDX.weapon]||'—';
+  if(ck==='class')return r[IDX.cls]||'—';
+  if(ck==='subclass')return r[IDX.subclass]||'—';
+  if(ck==='grip')return r[IDX.grip]||'—';
+  return r[IDX.faction]||'—';
+}
+function renderScatter(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(statSelect('X axis',state.x,v=>{state.x=v;renderScatter();}));
+  ctrl.appendChild(statSelect('Y axis',state.y,v=>{state.y=v;renderScatter();}));
+  ctrl.appendChild(pickSelect('Colour by',[['','none'],['weapon','Weapon'],['class','Class'],['subclass','Subclass'],['grip','Grip'],['faction','Faction']],state.colour,v=>{state.colour=v;renderScatter();}));
+  view.appendChild(ctrl);
+
+  const pts=[];
+  for(const r of rows){const x=val(r,state.x),y=val(r,state.y); if(x!=null&&y!=null)pts.push({x,y,cat:catOf(r),name:r[IDX.name],w:r[IDX.weapon]});}
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML='<h3>'+LABELS[state.x]+' vs '+LABELS[state.y]+' · '+pts.length+' runs</h3>';
+  if(pts.length<5){card.innerHTML+='<div class="loading">Not enough runs — widen the filters.</div>';view.appendChild(card);return;}
+  const wrap=document.createElement('div'); wrap.id='scWrap';
+  const cv=document.createElement('canvas'); wrap.appendChild(cv); card.appendChild(wrap); view.appendChild(card);
+  drawScatter(cv,wrap,pts);
+}
+function drawScatter(cv,wrap,pts){
+  const W=cv.clientWidth||900, H=Math.round(W*0.52);
+  const dpr=window.devicePixelRatio||1; cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
+  const g=cv.getContext('2d'); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
+  const pad={l:52,r:16,t:16,b:36};
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  const xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  const sx=v=>pad.l+(v-xmin)/((xmax-xmin)||1)*(W-pad.l-pad.r);
+  const sy=v=>H-pad.b-(v-ymin)/((ymax-ymin)||1)*(H-pad.t-pad.b);
+  // axes
+  g.strokeStyle='#34373f'; g.lineWidth=1; g.fillStyle='#8b8f9a'; g.font='11px Poppins,sans-serif';
+  for(let i=0;i<=4;i++){const t=i/4;
+    const yv=ymin+(ymax-ymin)*t, xv=xmin+(xmax-xmin)*t;
+    const yy=sy(yv), xx=sx(xv);
+    g.globalAlpha=.5;g.beginPath();g.moveTo(pad.l,yy);g.lineTo(W-pad.r,yy);g.stroke();g.globalAlpha=1;
+    g.fillText(fmt(yv),6,yy+4); g.fillText(fmt(xv),xx-8,H-pad.b+16);
+  }
+  // colour groups
+  let colFn=()=>'#e0a84c', legend=null;
+  if(state.colour){
+    const cats=[...new Set(pts.map(p=>p.cat))];
+    const freq={}; pts.forEach(p=>freq[p.cat]=(freq[p.cat]||0)+1);
+    const keep=cats.sort((a,b)=>freq[b]-freq[a]).slice(0,8);
+    const cmap={}; keep.forEach((c,i)=>cmap[c]=PALETTE[i%PALETTE.length]);
+    if(state.colour==='faction')keep.forEach(c=>{if(FACTION_COL[c])cmap[c]=FACTION_COL[c];});
+    if(state.colour==='grip')keep.forEach(c=>{if(GRIP_COL[c])cmap[c]=GRIP_COL[c];});
+    colFn=p=>cmap[p.cat]||'#8a8f98'; legend=keep.map(c=>[c,cmap[c]]);
+  }
+  // trend + r
+  const res=pearson(pts.map(p=>[p.x,p.y]));
+  // points
+  const screen=[];
+  for(const p of pts){const px=sx(p.x),py=sy(p.y);screen.push({px,py,p});
+    g.beginPath();g.arc(px,py,3.4,0,7);g.fillStyle=colFn(p);g.globalAlpha=.85;g.fill();g.globalAlpha=1;}
+  if(res){g.strokeStyle='#d85a30';g.lineWidth=2.2;g.globalAlpha=.9;g.beginPath();
+    g.moveTo(sx(xmin),sy(res.m*xmin+res.b));g.lineTo(sx(xmax),sy(res.m*xmax+res.b));g.stroke();g.globalAlpha=1;}
+  // r box
+  const rb=document.createElement('div'); rb.className='rbox';
+  if(res){const mag=Math.abs(res.r);const strength=mag<.15?'no':mag<.4?'weak':mag<.7?'moderate':'strong';
+    const dir=mag<.15?'':(res.r>0?' positive':' negative');
+    rb.style.color=res.r>=0?'#4fb3a1':'#d85a30'; rb.textContent='r = '+(res.r>=0?'+':'')+res.r.toFixed(2)+'  ('+strength+dir+')';}
+  else rb.textContent='r = n/a';
+  wrap.appendChild(rb);
+  if(legend){const lg=document.createElement('div');lg.className='slegend';
+    lg.innerHTML=legend.map(([c,col])=>'<div><span class="sw" style="background:'+col+'"></span>'+c+'</div>').join('');
+    wrap.appendChild(lg);}
+  // hover
+  const tip=document.getElementById('tip');
+  cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let best=null,bd=1e9;
+    for(const s of screen){const d=(s.px-mx)**2+(s.py-my)**2; if(d<bd){bd=d;best=s;}}
+    if(best&&bd<160){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';
+      tip.textContent=(best.p.name||'?')+' · '+(best.p.w||'?')+' · '+LABELS[state.x]+' '+fmt(best.p.x)+' / '+LABELS[state.y]+' '+fmt(best.p.y);}
+    else tip.style.opacity=0;};
+  cv.onmouseleave=()=>tip.style.opacity=0;
+}
+function fmt(v){return Math.abs(v)>=100?Math.round(v):(Math.round(v*100)/100);}
+
+// ---- compare ----
+function renderCompare(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(pickSelect('Group by',[['grip','Grip (1H/2H)'],['class','Class'],['faction','Faction'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
+  view.appendChild(ctrl);
+  const keys=['kills','td','deaths','kd','kill_share','warlord'];
+  const gk={grip:'grip',class:'cls',faction:'faction',weapon:'weapon',subclass:'subclass'}[state.group];
+  const acc={};
+  for(const r of rows){const gv=r[IDX[gk]]; if(!gv)continue;
+    const a=acc[gv]||(acc[gv]={n:0}); a.n++;
+    for(const k of keys){const v=val(r,k); if(v!=null){a[k]=(a[k]||0)+v; a[k+'_n']=(a[k+'_n']||0)+1;}}}
+  let groups=Object.keys(acc).filter(g=>acc[g].n>=5);
+  const order={grip:['1H','2H'],class:['Knight','Vanguard','Footman','Archer'],faction:['Agatha','Mason','Tenosia']}[state.group]||[];
+  groups.sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||acc[b].n-acc[a].n;});
+  if(state.group==='weapon'||state.group==='subclass') groups=groups.sort((a,b)=>acc[b].n-acc[a].n).slice(0,8);
+  const cmap={}; groups.forEach((g,i)=>{cmap[g]=PALETTE[i%PALETTE.length];
+    if(state.group==='faction'&&FACTION_COL[g])cmap[g]=FACTION_COL[g];
+    if(state.group==='grip'&&GRIP_COL[g])cmap[g]=GRIP_COL[g];});
+  const card=document.createElement('div'); card.className='card cmp';
+  card.innerHTML='<h3>'+({grip:'One hand vs two',class:'Class by class',faction:'Faction by faction',weapon:'Weapon by weapon',subclass:'Subclass by subclass'}[state.group])+' · '+rows.length+' runs</h3>';
+  if(groups.length<2){card.innerHTML+='<div class="loading">Not enough runs across groups.</div>';view.appendChild(card);return;}
+  const leg=document.createElement('div'); leg.className='chips';
+  leg.innerHTML=groups.map(g=>'<span class="chip on"><span class="sw" style="background:'+cmap[g]+'"></span>'+g+' (n='+acc[g].n+')</span>').join('');
+  card.appendChild(leg);
+  for(const k of keys){
+    const avgs=groups.map(g=>acc[g][k+'_n']?acc[g][k]/acc[g][k+'_n']:null);
+    const max=Math.max(...avgs.filter(v=>v!=null).map(Math.abs),1);
+    const row=document.createElement('div'); row.className='row';
+    const kk=document.createElement('div'); kk.className='k'; kk.textContent=LABELS[k]; row.appendChild(kk);
+    const bars=document.createElement('div'); bars.className='bars';
+    groups.forEach((g,i)=>{const v=avgs[i]; if(v==null)return;
+      const br=document.createElement('div'); br.className='brow';
+      const bx=document.createElement('span'); bx.className='bx'; bx.style.width=Math.max(2,Math.abs(v)/max*100)+'%'; bx.style.background=cmap[g];
+      br.appendChild(bx); const t=document.createElement('span'); t.textContent=(Math.round(v*100)/100); t.style.color='#f2f3f5'; br.appendChild(t);
+      bars.appendChild(br);});
+    row.appendChild(bars); card.appendChild(row);
+  }
+  view.appendChild(card);
+}
+
+// ---- shared selects ----
+function statSelect(label,cur,cb){return pickSelect(label,ALL_STATS.map(k=>[k,LABELS[k]]),cur,cb);}
+function pickSelect(label,opts,cur,cb){
+  const wrap=document.createElement('div'); wrap.className='f';
+  const l=document.createElement('label'); l.textContent=label; wrap.appendChild(l);
+  const sel=document.createElement('select');
+  for(const [v,t] of opts){const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o);}
+  sel.value=cur; sel.addEventListener('change',()=>cb(sel.value)); wrap.appendChild(sel); return wrap;
+}
+
+// ---- view switching ----
+function setView(v){state.view=v;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
+  render();}
+function render(){
+  const bits=activeBits(); const rows=filtered();
+  document.getElementById('sub').textContent=DATA.length+' runs total · '+rows.length+' in view'+(bits.length?(' · '+bits.join(' · ')):'');
+  document.getElementById('foot').textContent='Cigar Lounge Stats Lab · live from the bot';
+  if(state.view==='matrix')renderMatrix();
+  else if(state.view==='scatter')renderScatter();
+  else renderCompare();
+}
+
+// ---- boot ----
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setView(t.dataset.v)));
+fetch('/lab/data?t='+encodeURIComponent(TOKEN))
+  .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
+  .then(d=>{
+    FIELDS=d.fields; FIELDS.forEach((f,i)=>IDX[f]=i);
+    DATA=d.rows;
+    buildFilters();
+    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
+    render();
+  })
+  .catch(e=>{document.getElementById('view').innerHTML='<div class="loading">Could not load data ('+e.message+'). The link may have expired — run <b>/correlate</b> again.</div>';});
+</script>
+</body>
+</html>

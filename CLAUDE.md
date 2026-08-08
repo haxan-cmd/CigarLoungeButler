@@ -175,7 +175,12 @@ quips fall back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback
 `KOFI_TOKEN` (webhook verification; optional) · `EXPORT_TOKEN` (bearer token for
 the read-only `GET /export/submissions` cursor export; endpoint off when unset) ·
 `LETHALITY_STASH_CHANNEL_ID` (channel that hosts the blurb lethality thumbnails;
-falls back to a hardcoded default) · `PORT` (healthcheck, default 8080).
+falls back to a hardcoded default) · `PORT` (healthcheck, default 8080) ·
+`LAB_BASE_URL` (public base URL of the bot's web server, e.g. the Railway domain;
+the `/correlate` panel's "Open in Stats Lab" deep-link button only appears when
+this is set) · `LAB_SECRET` (HMAC secret that signs the Lab's short-lived link
+tokens; falls back to `EXPORT_TOKEN` when unset, so the Lab turns on with just
+`LAB_BASE_URL` if an export token already exists).
 
 ## Deploy & ops
 

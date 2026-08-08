@@ -926,6 +926,43 @@ class CorrelateView(discord.ui.View):
         super().__init__(timeout=600)
         self.F = F
         self.mode = 'scatter'
+        self._add_lab_link()
+
+    def _add_lab_link(self):
+        # 'Open in Stats Lab' deep link — only when the web Lab is configured.
+        # Carries the current stats + filters + a short-lived signed token so the
+        # page opens on the same view, fully interactive. Static URL (link buttons
+        # can't update), so it lands on the scatter; switch views live on the page.
+        import os as _os
+        base = _os.environ.get('LAB_BASE_URL', '').rstrip('/')
+        secret = _os.environ.get('LAB_SECRET') or _os.environ.get('EXPORT_TOKEN', '')
+        if not (base and secret):
+            return
+        try:
+            from utils.lab_auth import make_token
+            from urllib.parse import urlencode
+            F = self.F
+            params = {'t': make_token(secret, ttl_seconds=86400),
+                      'view': 'scatter', 'x': F['stat_a'], 'y': F['stat_b']}
+            if F.get('colour_key'):
+                params['colour'] = F['colour_key']
+            if F.get('char_class'):
+                params['class'] = F['char_class']
+            if F.get('grip'):
+                params['grip'] = F['grip']
+            if F.get('side'):
+                params['side'] = F['side']
+            if F.get('weapon_disp'):
+                params['weapon'] = F['weapon_disp']
+            if F.get('map_disp'):
+                params['map'] = F['map_disp']
+            if F.get('pid'):
+                params['player'] = F['pid']
+            self.add_item(discord.ui.Button(
+                label='Open in Stats Lab', emoji='🔗', row=1,
+                style=discord.ButtonStyle.link, url=f"{base}/lab?{urlencode(params)}"))
+        except Exception as _le:
+            print(f"[CORRELATE] lab link build failed: {_le}")
 
     async def _rows(self):
         from utils.tilt import orientation as _orient
@@ -1996,6 +2033,8 @@ class PersonalityCog(commands.Cog):
             'pid': _pid, 'pnames': {n.lower() for n in (_pnames or [])},
             'pscope': _pscope,
             'weapon': (weapon.strip().lower() if weapon else None),
+            'weapon_disp': (weapon.strip() if weapon else None),
+            'map_disp': (map_name.strip() if map_name else None),
             'char_class': (char_class.value if char_class else None),
             'grip': (grip.value if grip else None),
             'map': (map_name.strip().lower() if map_name else None),
