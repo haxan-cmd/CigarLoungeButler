@@ -883,7 +883,8 @@ def render_group_compare(*, title, subtitle, groups, group_order, stat_keys, sta
     fig.add_artist(plt.Line2D([0.055, 0.955], [1.0 - 0.82 / _H, 1.0 - 0.82 / _H],
                               color=GOLD, linewidth=1.4, alpha=0.55))
 
-    ax = fig.add_axes([0.24, 0.09, 0.72, 1.0 - (1.30 / _H) - 0.09])
+    ax = fig.add_axes([0.24, 0.09, 0.72, 1.0 - (1.55 / _H) - 0.09])
+    ax.set_facecolor('none')
     _step = G + 0.9
     _centres = []
     _has_neg = False
@@ -922,8 +923,9 @@ def render_group_compare(*, title, subtitle, groups, group_order, stat_keys, sta
     # Legend (group -> colour), top-left of the plot area.
     from matplotlib.patches import Patch as _Patch
     _handles = [_Patch(color=_cmap[g], label=f'{g}  (n={groups[g].get("_n", "?")})') for g in order]
-    _leg = ax.legend(handles=_handles, loc='upper right', fontsize=9, framealpha=0.0,
-                     handlelength=1.1, borderpad=0.4)
+    _leg = ax.legend(handles=_handles, loc='lower right', bbox_to_anchor=(1.0, 1.004),
+                     ncol=len(order), fontsize=8.8, framealpha=0.0, handlelength=1.1,
+                     columnspacing=1.2, handletextpad=0.4, borderpad=0.2)
     for _tx in _leg.get_texts():
         _tx.set_color(FG)
 
