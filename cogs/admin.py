@@ -248,28 +248,54 @@ def build_challenge_rules_embeds():
     embeds.append(e)
 
     # ── SEASON CHAMPIONSHIP ───────────────────────────────────────────────────
-    e = discord.Embed(
-        title="🏁  Season Categories",
-        description=(
-            "Every bounty cycle is a season. There's no single overall winner — each "
-            "category crowns its own champion, so chase the ones you're best at. Every "
-            "category champion earns a permanent Hall of Fame entry when the season closes."
-        ),
-        colour=C("#D4AF37"),
-    )
-    e.add_field(name="The categories", value=(
-        "Top the board in any of these to take its crown:\n"
-        "<a:mostlethal:1520490418817601658> **Kill Share**: your share of your team's kills\n"
-        "<:warlord:1520490364039860347> **Warlord**: your takedowns against your team's kills\n"
-        "<a:200tkd:1363648828414230538> **Total Tally**: every takedown you log this season, added up\n"
-        "<a:topkill:1360314538364240024> **Most Kills**: your single best run\n"
-        "<a:toptkd:1360312666475728958> **Highest Takedowns**: your single best run\n"
-        "Check `/standings` for the live leaders and `/season` for where you place."
-    ), inline=False)
-    e.add_field(name="⭐ Special Features", value=(
-        "Four focuses are rolled at random each season: a 1H weapon, a 2H weapon and two maps. "
-        "On each one, the highest takedowns in a single run takes the feature."
-    ), inline=False)
+    if getattr(config, 'SEASON_GP_CHAMPION', True):
+        e = discord.Embed(
+            title="🏆  Season Championship",
+            description=(
+                "Every bounty cycle is a season. Grand Prix points (GP) come from three places. "
+                "Highest total takes the crown and a permanent Hall of Fame entry."
+            ),
+            colour=C("#D4AF37"),
+        )
+        e.add_field(name="1. Category points", value=(
+            "Top 5 in each category score **5 / 4 / 3 / 2 / 1** GP:\n"
+            "<a:mostlethal:1520490418817601658> **Kill Share**: your share of your team's kills\n"
+            "<:warlord:1520490364039860347> **Warlord**: your takedowns against your team's kills\n"
+            "<a:200tkd:1363648828414230538> **Total Tally**: every takedown you log this season, added up\n"
+            "<a:topkill:1360314538364240024> **Most Kills**: your single best run\n"
+            "<a:toptkd:1360312666475728958> **Highest Takedowns**: your single best run"
+        ), inline=False)
+        e.add_field(name="2. Special Features", value=(
+            "Four focuses are rolled at random each season: a 1H weapon, a 2H weapon and two maps. "
+            "On each one, the highest takedowns in a single run scores **3** GP and the runner-up **1**."
+        ), inline=False)
+        e.add_field(name="3. Bounty race", value=(
+            "Completing the monthly bounty pays by finishing position: "
+            "**5** for first, **4** for second, **3** for third, **2** for everyone after."
+        ), inline=False)
+    else:
+        e = discord.Embed(
+            title="🏁  Season Categories",
+            description=(
+                "Every bounty cycle is a season. There's no single overall winner — each "
+                "category crowns its own champion, so chase the ones you're best at. Every "
+                "category champion earns a permanent Hall of Fame entry when the season closes."
+            ),
+            colour=C("#D4AF37"),
+        )
+        e.add_field(name="The categories", value=(
+            "Top the board in any of these to take its crown:\n"
+            "<a:mostlethal:1520490418817601658> **Kill Share**: your share of your team's kills\n"
+            "<:warlord:1520490364039860347> **Warlord**: your takedowns against your team's kills\n"
+            "<a:200tkd:1363648828414230538> **Total Tally**: every takedown you log this season, added up\n"
+            "<a:topkill:1360314538364240024> **Most Kills**: your single best run\n"
+            "<a:toptkd:1360312666475728958> **Highest Takedowns**: your single best run\n"
+            "Check `/standings` for the live leaders and `/season` for where you place."
+        ), inline=False)
+        e.add_field(name="⭐ Special Features", value=(
+            "Four focuses are rolled at random each season: a 1H weapon, a 2H weapon and two maps. "
+            "On each one, the highest takedowns in a single run takes the feature."
+        ), inline=False)
     e.add_field(name="🎯 The bonus challenge (paid on completion)", value=(
         "The bounty's bonus challenge tallies **while the bounty is live**: every "
         "qualifying run counts toward it as you go. You don't have to save it for last "
@@ -333,7 +359,7 @@ async def save_challenge_rules_message_ids(msg_ids):
     # label rather than dropping, so a future section can't desync the save.
     labels = ['Intro', 'Earning Marks', 'Lobby Difficulty', 'Weapon Ranks',
               'Subclass & Class', 'Feats of Legend', 'Leaderboards', 'Titles',
-              'Season Categories', 'Player Titles', 'Monthly Cycle']
+              'Season', 'Player Titles', 'Monthly Cycle']
     labels += [f'Section {i}' for i in range(len(labels), len(msg_ids))]
     labels = labels[:len(msg_ids)]
     try:

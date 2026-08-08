@@ -2991,16 +2991,26 @@ class PersonalityCog(commands.Cog):
             if summary_lines and _is_data_q:
                 player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
 
-            # Season board — category leaders. This is what the Butler should
-            # lean on when talking performance. No overall points champion any
-            # more: each category is its own race.
+            # Season board — championship standings (when SEASON_GP_CHAMPION is on)
+            # plus category leaders. What the Butler leans on for performance talk.
             try:
                 from cogs.favourites import season_total
                 # Season standings are comparison context — data questions only.
                 _season = await _db.get_current_season() if _is_data_q else None
                 if _season:
-                    _, _sstats, _ = await season_total(_season)
+                    _standings, _sstats, _ = await season_total(_season)
                     _lbl = _season.get('label') or f"Season {_season['id']}"
+                    _gp_on = getattr(config, 'SEASON_GP_CHAMPION', True)
+                    if _gp_on:
+                        _top8 = ", ".join(f"{i}. {nm} {pts} GP"
+                                          for i, (nm, pts) in enumerate(_standings[:8], 1))
+                        player_stats_ctx += f"\n\nSeason championship ({_lbl}): {_top8}"
+                        if player_name not in [nm for nm, _ in _standings[:8]]:
+                            _mine = next((f"{player_name} is {i}. with {pts} GP"
+                                          for i, (nm, pts) in enumerate(_standings, 1)
+                                          if nm == player_name), None)
+                            if _mine:
+                                player_stats_ctx += f" … {_mine}"
 
                     def _lead(key):
                         v = _sstats.get(key) or []
@@ -3011,19 +3021,22 @@ class PersonalityCog(commands.Cog):
                             return it.split(" -- ")[0].strip()
                         return f"{it[0]} ({it[1]})"
                     player_stats_ctx += (
-                        f"\n\nSeason categories ({_lbl}) — each is its own race, no overall "
-                        "points champion. Current leaders: "
+                        f"\nSeason category leaders ({_lbl}): "
                         f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
                         f"Dominance {_lead('dominance_list')}; "
                         f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
                         f"Highest TD {_lead('top_td_list')}")
+                    _champ_note = (
+                        "The overall season champion is the Grand-Prix points leader: top 5 in each "
+                        "category scores 5/4/3/2/1, plus featured picks and the bounty race."
+                        if _gp_on else
+                        "There is NO overall season points champion — every category crowns its own winner.")
                     player_stats_ctx += (
                         "\n[Titles: the Most Dominant role goes to the DOMINANCE leader (harmonic "
                         "mean of Kill Share and Warlord, i.e. two-way impact); the Warlord role to "
                         "the Warlord leader (takedowns/team kills). Kill Share (kills/team kills) is "
-                        "a season category with its own champion but no role. There is NO overall "
-                        "season points champion — every category crowns its own winner. Raw Lethality "
-                        "(kills/takedowns) is context only, no title.]")
+                        "a season category with its own champion but no role. " + _champ_note +
+                        " Raw Lethality (kills/takedowns) is context only, no title.]")
             except Exception as _sce:
                 print(f"[BUTLER] season ctx error: {_sce}")
 

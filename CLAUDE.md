@@ -30,7 +30,7 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `cogs/leaderboards.py` | Board rendering/updating, ledger entrance, forum indexes, monthly/all-time boards, ratings, the Peasant board, the **Score** board (highest match points, one row/player, top-50, `/setup_score_board`), `/top`, `/refresh*`, `/rebuild_boards`, `/remove_board_score`. Imports `_FEAT_BOARD_NAMES` from `utils/boards`. |
 | `cogs/registry.py` | Registry cards (per-player forum threads), mark calculation (incl. difficulty valor + High Score + Score marks), `/playerstats`, `/refreshcard`, `/versus` (head-to-head), `/next` (goal nudge), legacy imports. |
 | `cogs/bounty.py` | Monthly bounty: progress tracking, forum cards, completion, `/bounty_*` commands. |
-| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles (Most Dominant / Warlord), per-category seasons + Hall of Fame (category champions, no overall points champion), the combined All-Time Titles board (`/setup_titles_board`, `refresh_all_time_titles_board`), `/report`, `/standings`, `/season`, `/titles`. |
+| `cogs/favourites.py` | Season board (`calculate_butler_stats`), title roles (Most Dominant / Warlord), seasons + Hall of Fame (GP champion or per-category winners, per `config.SEASON_GP_CHAMPION`), the combined All-Time Titles board (`/setup_titles_board`, `refresh_all_time_titles_board`), `/report`, `/standings`, `/season`, `/titles`. |
 | `cogs/personality.py` | Butler AI chat (on_message, with lore injection), task loops (polls, digest, dry-spell, daily cycle), `/explore`, `/tilt_stats`, `/serverstats`, `/help`, bounty channel placeholders. |
 | `cogs/admin.py` | Mod tooling: `/remove_submission`, `/unlist_submission`, backups, rules posts, `/award_marks`, `/set_feat_count`. |
 | `cogs/kofi.py` | Ko-fi donations: webhook handler (route lives in bot.py), dashboard embed. |
@@ -97,17 +97,19 @@ Sheets era). Cogs index into them positionally. Key maps:
 - The **Score** board (`Score`) ranks the highest scoreboard POINTS in a single match,
   one row per player, capped at top-50, +1 mark on board movement (like High Score).
   It is a feat board; its value is POINTS, never takedowns.
-- Seasons are decided PER CATEGORY — there is NO aggregate points champion. Each of the
-  five season categories (Kill Share, Warlord, Total Tally, Most Kills, Highest Takedowns)
-  crowns its own winner; the Hall of Fame thread records those category champions, and
-  `/standings` (category leaders) / `/season` (your per-category placements) surface them.
-  The **Most Dominant** and **Warlord** ROLES are the separate season titles (Dominance =
-  harmonic mean of Kill Share + Warlord; Warlord = TD ÷ team kills). The old Grand-Prix
-  machinery — `favourites.season_total` / `compute_season_standings` / `_GP_POINTS`, plus
-  the bounty-race `award_season_bonus` — still computes but is LEGACY and unused for
-  display. Do NOT reintroduce a combined points standings or a single season champion; if
-  you touch season display, read from the per-category stats (`_SEASON_CATEGORIES` +
-  `_cat_pairs`), not the GP totals.
+- Season display is switched by `config.SEASON_GP_CHAMPION` (default True), read everywhere
+  via `getattr(config, 'SEASON_GP_CHAMPION', True)`. ON = the aggregate Grand-Prix points
+  champion + standings show across `/standings`, `/season` (with the rendered card), the
+  monthly report, the Hall of Fame season embed + index, the registry card season line, and
+  the Butler's season context; GP = top-5 per category (5/4/3/2/1) + featured picks (3/1) +
+  bounty race, summed in `favourites.season_total` / `compute_season_standings`. OFF = no
+  overall champion; each of the five categories (Kill Share, Warlord, Total Tally, Most
+  Kills, Highest Takedowns) stands alone and the Hall of Fame records the category champions
+  (`/standings` = category leaders, `/season` = your per-category placements). Every season
+  display site carries BOTH branches — keep them both working when you touch season display,
+  and never delete the GP engine, it feeds the ON path. The **Most Dominant** / **Warlord**
+  ROLES are separate season titles (Dominance = harmonic mean of Kill Share + Warlord;
+  Warlord = TD ÷ team kills) and exist in either mode.
 - Board names: weapon boards are the weapon name; map boards are
   `"{Map} - {Faction}"`; feat boards are `100 Kills`, `200 Takedowns`, `Triple`,
   `TUFF`, `Flawless`, `Mallet`, `Knife`, `Healing Horn`, `Healing Banner`, `Pacifist`,
