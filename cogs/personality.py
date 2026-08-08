@@ -965,6 +965,20 @@ class StatsLabEntry(discord.ui.View):
             "Your Stats Lab link (good for 24 hours):", view=_lab_link_view(url), ephemeral=True)
 
 
+def stats_lab_panel_embed():
+    import discord as _d
+    return _d.Embed(
+        title="🔬 Cigar Lounge — Stats Lab",
+        description=(
+            "Every logged run, every angle. Open the interactive lab for the full "
+            "correlation matrix, any scatter you like, 1H vs 2H, class by class, "
+            "faction by faction — all live, all filterable.\n\n"
+            "Click below for your own link (fresh each time, good for 24 hours). "
+            "You can also use **/statslab** anywhere, or **/correlate** for a quick "
+            "chart right here in Discord."),
+        color=0xC9A24B)
+
+
 class CorrelateView(discord.ui.View):
     """Interactive panel for /correlate: flip between the scatter, the full
     correlation matrix, and 1H-vs-2H / class comparisons without re-running the
@@ -1176,6 +1190,44 @@ class PersonalityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _ensure_stats_lab_panel(self):
+        """Self-heal a bot-owned, pinned Stats Lab panel in the Lounge Stats
+        channel: edit it in place if it exists, else post+pin+remember it. The
+        button is persistent, so a single pinned message serves everyone and
+        never goes stale. No-op when STATS_LAB_CHANNEL_ID is unset."""
+        ch_id = getattr(config, 'STATS_LAB_CHANNEL_ID', 0)
+        if not ch_id:
+            return
+        channel = self.bot.get_channel(ch_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(ch_id)
+            except Exception:
+                return
+        embed = stats_lab_panel_embed()
+        idx = next((p for p in await _db.get_all_index_posts() if p[0] == 'stats_lab_panel'), None)
+        if idx and len(idx) > 2 and idx[2]:
+            try:
+                msg = await channel.fetch_message(int(idx[2]))
+                await msg.edit(embed=embed, view=StatsLabEntry())
+                if not msg.pinned:
+                    try:
+                        await msg.pin()
+                    except Exception:
+                        pass
+                return
+            except Exception:
+                pass   # stored message gone — fall through and re-post
+        try:
+            msg = await channel.send(embed=embed, view=StatsLabEntry())
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+            await _db.upsert_index_post('stats_lab_panel', str(channel.id), str(msg.id))
+        except Exception as _e:
+            print(f"[LAB] could not post stats-lab panel: {_e}")
+
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'[PERSONALITY] on_ready fired, starting tasks')
@@ -1185,6 +1237,10 @@ class PersonalityCog(commands.Cog):
                 self._lab_view_added = True
             except Exception as _lve:
                 print(f"[LAB] persistent view register failed: {_lve}")
+        try:
+            await self._ensure_stats_lab_panel()
+        except Exception as _spe:
+            print(f"[LAB] stats-lab panel ensure failed: {_spe}")
         if not self.dry_weather_check.is_running():
             self.dry_weather_check.start()
         if not self.butler_organic_post.is_running():
@@ -2109,13 +2165,7 @@ class PersonalityCog(commands.Cog):
     @app_commands.command(name="statslab_panel", description="Post a pinnable Stats Lab button here (mod only).")
     @app_commands.checks.has_permissions(administrator=True)
     async def statslab_panel(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="🔬 Cigar Lounge — Stats Lab",
-            description=("Explore every logged run: the full correlation matrix, any scatter, "
-                         "1H vs 2H, class by class, and more — all interactive. Click below for "
-                         "your own link (fresh each time, good for 24h)."),
-            color=0xC9A24B)
-        await interaction.channel.send(embed=embed, view=StatsLabEntry())
+        await interaction.channel.send(embed=stats_lab_panel_embed(), view=StatsLabEntry())
         await interaction.response.send_message("Posted — pin it wherever you like.", ephemeral=True)
 
     @app_commands.command(name="explore", description="Chart any stat, grouped any way. e.g. metric: Run count, by: Weapon. Filters optional.")
