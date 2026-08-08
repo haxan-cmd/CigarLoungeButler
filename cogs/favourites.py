@@ -1361,7 +1361,8 @@ def _render_wrapped_embed(name, label, w, *, archetype=None, damage=None,
     if nemesis:
         rl.append(f"\U0001f5e1️ **Nemesis:** {nemesis['name']} — faced {nemesis['clashes']}×")
     if ally:
-        rl.append(f"\U0001f91d **Closest ally:** {ally['name']} — {ally['matches']} battles together")
+        rl.append(f"\U0001f91d **Closest ally:** {ally['name']} — {ally['matches']} "
+                  f"battle{'' if ally['matches'] == 1 else 's'} together")
     if rl:
         e.add_field(name="Rivalries", value="\n".join(rl), inline=False)
     _tl = []
@@ -1462,7 +1463,11 @@ class FavouritesCog(commands.Cog):
         try:
             from utils.rivalries import compute_rivalries
             _riv = compute_rivalries(did, subs)
-            nemesis, ally = _riv.get('nemesis'), _riv.get('ally')
+            _nem, _al = _riv.get('nemesis'), _riv.get('ally')
+            # A one-game "rivalry" reads as noise (and grammar like "1 battles"),
+            # so only surface a nemesis/ally with at least two shared games.
+            nemesis = _nem if (_nem and _nem.get('clashes', 0) >= 2) else None
+            ally = _al if (_al and _al.get('matches', 0) >= 2) else None
         except Exception as _re:
             print(f"[WRAPPED] rivalry error: {_re}")
 

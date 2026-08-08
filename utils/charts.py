@@ -642,14 +642,14 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
         else:
             ang = rng.uniform(0, 2 * _math.pi); rad = rng.uniform(20, 42)
             cx, cy = 50 + rad * _math.cos(ang), 52 + rad * _math.sin(ang)
-        ax.add_patch(_Circle((cx, cy), 6 + 10 * frac, color=c,
+        ax.add_patch(_Circle((cx, cy), 5 + 7 * frac, color=c,
                              alpha=0.16 + 0.12 * frac, zorder=1))
         ip = _icon_path(wpn); placed = False
         if _Img and ip:
             try:
                 img = _Img.open(ip).convert('RGBA').rotate(
                     rng.uniform(-28, 28), expand=True, resample=_Img.BICUBIC)
-                oi = _OI(_np.asarray(img), zoom=0.5 + 1.7 * _math.sqrt(frac),
+                oi = _OI(_np.asarray(img), zoom=0.30 + 0.85 * _math.sqrt(frac),
                          alpha=0.92 if idx == 0 else 0.82)
                 ax.add_artist(_AB(oi, (cx, cy), frameon=False, xycoords='data', zorder=3))
                 placed = True
@@ -657,7 +657,7 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
                 placed = False
         if not placed:
             sides = [3, 4, 5, 6][sum(ord(ch) for ch in wpn) % 4]
-            ax.add_patch(_Reg((cx, cy), sides, radius=4 + 7 * frac,
+            ax.add_patch(_Reg((cx, cy), sides, radius=3 + 5 * frac,
                               orientation=rng.uniform(0, 6.28), color=c, alpha=0.8,
                               zorder=3, ec=FG, lw=0.6))
 
