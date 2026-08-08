@@ -73,6 +73,32 @@ def test_excludes_resubmit_and_unlisted():
     assert w['runs'] == 1 and w['kills'] == 40
 
 
+def test_faction_split_and_top_faction():
+    subs = [row(faction="Agatha"), row(faction="Agatha"), row(faction="Mason")]
+    w = build_wrapped(subs)
+    assert w['faction_split'] == {"Agatha": 2, "Mason": 1}
+    assert w['top_faction'] == "Agatha"
+
+
+def test_tilt_hardest_lobby_from_banner_totals():
+    # cols 25/26 = team_total_kills / enemy_total_kills. Negative gap = uphill.
+    a = row(); a[25] = "100"; a[26] = "160"   # your team outkilled by 60% — hard
+    b = row(); b[25] = "200"; b[26] = "150"   # comfortable stomp
+    w = build_wrapped([a, b])
+    assert w['tilt_bands']                       # bands recorded
+    assert w['hardest_lobby'] is not None
+    assert w['hardest_lobby']['gap'] == -60      # the most-negative run is captured
+    # a run with no banner totals contributes nothing to tilt
+    assert build_wrapped([row()])['hardest_lobby'] is None
+
+
+def test_peak_hour():
+    subs = [row(ts="2026-07-01 22:00:00"), row(ts="2026-07-01 22:30:00"),
+            row(ts="2026-07-02 09:00:00")]
+    w = build_wrapped(subs)
+    assert w['peak_hour'] == 22 and w['peak_hour_runs'] == 2
+
+
 # ── compute_superlatives ─────────────────────────────────────────────────────
 
 def test_superlatives_pick_expected_winners():

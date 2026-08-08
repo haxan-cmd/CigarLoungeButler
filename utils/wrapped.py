@@ -14,6 +14,8 @@ Row indices (see CLAUDE.md submissions map):
 """
 from datetime import datetime
 
+from utils.tilt import raw_tilt as _raw_tilt, band as _tilt_band
+
 # Valor tags written on the feats column by the tilt grader.
 VALOR_TAGS = ("Brutal", "Outmatched", "Uphill")
 # The maps the Butler considers kill-farms (his standing opinion); used by the
@@ -66,12 +68,16 @@ def build_wrapped(subs):
         'best_game': None, 'flawless_streak': 0,
         'carries': 0, 'triples': 0, 'hundred_kills': 0,
         'two_hundred_td': 0, 'flawless_runs': 0, 'night_runs': 0,
+        'faction_split': {}, 'top_faction': None,
+        'tilt_bands': {}, 'hardest_lobby': None,
+        'peak_hour': None, 'peak_hour_runs': 0,
     }
     n = len(subs)
     out['runs'] = n
     if n == 0:
         return out
-    wcount, mcount = {}, {}
+    wcount, mcount, fcount, hours, band_count = {}, {}, {}, {}, {}
+    hardest = None  # (raw_gap, band_dict) — most negative = biggest uphill fought
     best = None  # (score, row)
     for r in subs:
         k, td, d = _i(r[8]), _i(r[7]), _i(r[9])
@@ -96,8 +102,21 @@ def build_wrapped(subs):
         if d == 0 and td > 0 and not (k == 0 and td <= 10):
             out['flawless_runs'] += 1
         h = _hour(r[0])
-        if h is not None and 0 <= h < 6:
-            out['night_runs'] += 1
+        if h is not None:
+            hours[h] = hours.get(h, 0) + 1
+            if 0 <= h < 6:
+                out['night_runs'] += 1
+        fac = (r[6] or '').strip() if len(r) > 6 else ''
+        if fac:
+            fcount[fac] = fcount.get(fac, 0) + 1
+        _tt = _i(r[25]) if len(r) > 25 else 0
+        _et = _i(r[26]) if len(r) > 26 else 0
+        _raw = _raw_tilt(_tt, _et) if (_tt and _et) else None
+        if _raw is not None:
+            _bd = _tilt_band(_raw)
+            band_count[_bd['name']] = band_count.get(_bd['name'], 0) + 1
+            if hardest is None or _raw < hardest[0]:
+                hardest = (_raw, _bd)
         sc = _i(r[24]) if len(r) > 24 else 0
         if best is None or sc > best[0]:
             best = (sc, r)
@@ -127,6 +146,15 @@ def build_wrapped(subs):
         else:
             cur = 0
     out['flawless_streak'] = mx
+    out['faction_split'] = fcount
+    out['top_faction'] = max(fcount, key=fcount.get) if fcount else None
+    out['tilt_bands'] = band_count
+    if hardest is not None:
+        _hraw, _hbd = hardest
+        out['hardest_lobby'] = {'band': _hbd['name'], 'emoji': _hbd['emoji'], 'gap': _hraw}
+    if hours:
+        _ph = max(hours, key=hours.get)
+        out['peak_hour'], out['peak_hour_runs'] = _ph, hours[_ph]
     return out
 
 

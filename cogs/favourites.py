@@ -1304,11 +1304,27 @@ async def _windowed_subs():
     return all_subs, 'all time'
 
 
-def _render_wrapped_embed(name, label, w):
+def _faction_line(split):
+    """'⚔️ Agatha 60% · Mason 30%' from a {faction: runs} dict, most-flown first."""
+    if not split:
+        return ""
+    fe = getattr(config, 'FACTION_EMOJIS', {}) or {}
+    tot = sum(split.values()) or 1
+    parts = []
+    for fac, n in sorted(split.items(), key=lambda kv: -kv[1]):
+        parts.append(f"{fe.get(fac, '')} {fac} {round(n / tot * 100)}%".strip())
+    return " · ".join(parts)
+
+
+def _render_wrapped_embed(name, label, w, *, archetype=None, damage=None,
+                          nemesis=None, ally=None, ranks=None, butler_line=None):
     e = discord.Embed(title=f"\U0001f381 {name} — {label} Wrapped", colour=_WRAP_GOLD)
-    e.description = (f"**{w['runs']}** runs · **{w['kills']:,}** kills · "
-                    f"**{w['takedowns']:,}** takedowns · **{w['deaths']:,}** deaths "
-                    f"(K/D **{w['kd']}**)")
+    desc = (f"**{w['runs']}** runs · **{w['kills']:,}** kills · "
+            f"**{w['takedowns']:,}** takedowns · **{w['deaths']:,}** deaths "
+            f"(K/D **{w['kd']}**)")
+    if butler_line:
+        desc += f"\n\n*\u201c{butler_line}\u201d*"
+    e.description = desc
     if w['signature_weapon']:
         e.add_field(name="\U0001f5e1️ Signature weapon",
                     value=f"**{w['signature_weapon']}** — {w['signature_weapon_runs']} runs", inline=True)
@@ -1316,7 +1332,16 @@ def _render_wrapped_embed(name, label, w):
         e.add_field(name="\U0001f5fa️ Home turf",
                     value=f"**{w['signature_map']}** — {w['signature_map_runs']} runs", inline=True)
     e.add_field(name="\U0001f3a8 Range",
-                value=f"{w['weapons_used']} weapons · {w['maps_played']} maps", inline=True)
+                value=(f"{w['weapons_used']} weapon{'' if w['weapons_used'] == 1 else 's'} · "
+                       f"{w['maps_played']} map{'' if w['maps_played'] == 1 else 's'}"), inline=True)
+    if archetype or damage:
+        e.add_field(name="\U0001f9ed Playstyle",
+                    value=" · ".join(x for x in (archetype, damage) if x), inline=True)
+    if ranks:
+        e.add_field(name="\U0001f4c8 Standing", value=ranks, inline=True)
+    _fac = _faction_line(w.get('faction_split') or {})
+    if _fac:
+        e.add_field(name="\U0001f6a9 Allegiance", value=_fac, inline=True)
     bg = w['best_game']
     if bg:
         line = f"{bg['takedowns']} TD / {bg['kills']} K / {bg['deaths']} D on {bg['weapon']}"
@@ -1332,10 +1357,29 @@ def _render_wrapped_embed(name, label, w):
     if w['flawless_runs']:  feat_bits.append(f"{w['flawless_runs']}× Flawless")
     if feat_bits:
         e.add_field(name="⭐ Feats", value=" · ".join(feat_bits), inline=False)
+    rl = []
+    if nemesis:
+        rl.append(f"\U0001f5e1️ **Nemesis:** {nemesis['name']} — faced {nemesis['clashes']}×")
+    if ally:
+        rl.append(f"\U0001f91d **Closest ally:** {ally['name']} — {ally['matches']} battles together")
+    if rl:
+        e.add_field(name="Rivalries", value="\n".join(rl), inline=False)
+    _tl = []
+    hl = w.get('hardest_lobby')
+    if hl and hl.get('gap', 0) < 0:
+        _tl.append(f"{hl['emoji']} Toughest lobby: **{hl['band']}** ({hl['gap']:+d} kill gap)")
+    if w['carries']:
+        _tl.append(f"\U0001f396️ {w['carries']} uphill valor run{'s' if w['carries'] != 1 else ''}")
+    if _tl:
+        e.add_field(name="Lobbies braved", value="\n".join(_tl), inline=False)
     extra = []
-    if w['flawless_streak'] >= 2: extra.append(f"\U0001f9ca {w['flawless_streak']}-game flawless streak")
-    if w['carries']:             extra.append(f"\U0001f396️ {w['carries']} valor runs (fought uphill)")
-    if w['night_runs']:          extra.append(f"\U0001f989 {w['night_runs']} after-midnight runs")
+    if w['flawless_streak'] >= 2:
+        extra.append(f"\U0001f9ca {w['flawless_streak']}-game flawless streak")
+    if w.get('peak_hour') is not None and w.get('peak_hour_runs', 0) >= 3:
+        _h = w['peak_hour']
+        extra.append(f"\U0001f989 Prime time: {_h:02d}:00–{(_h + 1) % 24:02d}:00 ({w['peak_hour_runs']} runs)")
+    elif w['night_runs']:
+        extra.append(f"\U0001f989 {w['night_runs']} after-midnight runs")
     if extra:
         e.add_field(name="​", value="\n".join(extra), inline=False)
     e.set_footer(text=f"{label} · Cigar Lounge Wrapped")
@@ -1372,7 +1416,7 @@ class FavouritesCog(commands.Cog):
     async def cog_load(self):
         await _db.season_init()
 
-    @app_commands.command(name="wrapped", description="Your season recap — signature weapon, best game, streaks and more.")
+    @app_commands.command(name="wrapped", description="Your season recap — signature weapon, best game, rivals, standing and more.")
     @app_commands.describe(player="Whose recap to show (defaults to you).")
     async def wrapped_cmd(self, interaction: discord.Interaction, player: discord.Member = None):
         await interaction.response.defer()
@@ -1380,13 +1424,99 @@ class FavouritesCog(commands.Cog):
         target = player or interaction.user
         subs, label = await _windowed_subs()
         did = str(target.id)
-        mine = [r for r in subs if len(r) > 2 and (r[2] or '').strip() == did]
+
+        # Merge identity — id OR canonical name OR any stored IGN — so legacy runs
+        # logged under an old name still count toward the recap (id-only missed them).
+        names = {(target.display_name or '').strip().lower()}
+        canonical = target.display_name
+        try:
+            prow = await _db.get_player(did)
+            if prow and len(prow) > 1 and (prow[1] or '').strip():
+                canonical = prow[1].strip()
+                names.add(canonical.lower())
+            for ign in (await _db.get_player_igns(did)) or []:
+                if ign and ign.strip():
+                    names.add(ign.strip().lower())
+        except Exception:
+            pass
+        names.discard('')
+        mine = [r for r in subs if len(r) > 2
+                and ((r[2] or '').strip() == did
+                     or (len(r) > 1 and (r[1] or '').strip().lower() in names))]
         w = build_wrapped(mine)
         if w['runs'] == 0:
             await interaction.followup.send(
-                f"No runs for **{target.display_name}** in {label} yet — submit a scorecard first.")
+                f"No runs for **{canonical}** in {label} yet — submit a scorecard first.")
             return
-        await interaction.followup.send(embed=_render_wrapped_embed(target.display_name, label, w))
+
+        # Playstyle descriptors (archetype + damage lean).
+        archetype = damage = None
+        try:
+            from cogs.registry import get_player_descriptors
+            archetype, damage = await get_player_descriptors(did)
+        except Exception as _de:
+            print(f"[WRAPPED] descriptors error: {_de}")
+
+        # Nemesis & closest ally over the window.
+        nemesis = ally = None
+        try:
+            from utils.rivalries import compute_rivalries
+            _riv = compute_rivalries(did, subs)
+            nemesis, ally = _riv.get('nemesis'), _riv.get('ally')
+        except Exception as _re:
+            print(f"[WRAPPED] rivalry error: {_re}")
+
+        # Server standing: rank + percentile by total kills and takedowns this window.
+        ranks = None
+        try:
+            def _n(v):
+                try:
+                    return int(str(v).strip())
+                except Exception:
+                    return 0
+            agg = {}
+            for r in subs:
+                if len(r) < 9:
+                    continue
+                _f = (r[11] or '') if len(r) > 11 else ''
+                if 'Resubmit' in _f or 'Unlisted' in _f:
+                    continue
+                key = (r[2] or '').strip() or ('name:' + (r[1] or '').strip().lower())
+                a = agg.setdefault(key, [0, 0])
+                a[0] += _n(r[8])
+                a[1] += _n(r[7])
+            tkeys = {did} | {'name:' + nm for nm in names}
+            ok = [a[0] for k, a in agg.items() if k not in tkeys]
+            otd = [a[1] for k, a in agg.items() if k not in tkeys]
+            field = len(ok) + 1
+            if field >= 3:
+                kr = 1 + sum(1 for v in ok if v > w['kills'])
+                tr = 1 + sum(1 for v in otd if v > w['takedowns'])
+                ranks = (f"Kills **#{kr}**/{field} *(top {max(1, round(kr / field * 100))}%)*\n"
+                         f"Takedowns **#{tr}**/{field} *(top {max(1, round(tr / field * 100))}%)*")
+        except Exception as _se:
+            print(f"[WRAPPED] standing error: {_se}")
+
+        # One dry Butler line to cap it — best-effort, silently skipped if the model is down.
+        butler_line = None
+        try:
+            from utils.helpers import butler_complete
+            from cogs.personality import BUTLER_SYSTEM_PROMPT
+            _bp = (f"Write ONE dry, in-character sentence to cap {canonical}'s {label} recap. "
+                   "No preamble, no lists, no stat-dump — a single sardonic line under 30 words. "
+                   f"Their season: {w['runs']} runs, {w['kills']} kills, {w['takedowns']} takedowns, "
+                   f"K/D {w['kd']}, signature weapon {w['signature_weapon']}, "
+                   f"archetype {archetype or 'unknown'}, {w['carries']} uphill valor runs, "
+                   f"{w['night_runs']} after-midnight runs.")
+            _line = await butler_complete(BUTLER_SYSTEM_PROMPT, _bp, 70)
+            if _line and _line.strip() and _line.strip() != 'SKIP':
+                butler_line = _line.strip().strip('"').strip("\u201c\u201d").strip()
+        except Exception as _be:
+            print(f"[WRAPPED] butler line error: {_be}")
+
+        await interaction.followup.send(embed=_render_wrapped_embed(
+            canonical, label, w, archetype=archetype, damage=damage,
+            nemesis=nemesis, ally=ally, ranks=ranks, butler_line=butler_line))
 
     @app_commands.command(name="superlatives", description="The season's tongue-in-cheek awards, handed out by the Butler.")
     async def superlatives_cmd(self, interaction: discord.Interaction):
