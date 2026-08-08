@@ -3084,13 +3084,23 @@ class RegistryCog(commands.Cog):
         try:
             _season = await _db.get_current_season()
             if _season:
-                from cogs.favourites import season_total
-                _standings, _, _ = await season_total(_season)
+                # No overall points rank any more — report where they sit across
+                # the season's individual categories (top-5 = on the board).
+                from cogs.favourites import season_total, _SEASON_CATEGORIES, _cat_pairs
+                _, _sstats, _ = await season_total(_season)
                 _slabel = _season.get('label') or 'the season'
-                for _i, (_nm, _pts) in enumerate(_standings, 1):
-                    if _nm == resolved_name:
-                        season_line = f"#{_i} in the {_slabel} season — {_pts} GP"
-                        break
+                _places = []  # (category, position) for every top-5 they hold
+                for _cat, _key, _plain in _SEASON_CATEGORIES:
+                    _pairs = _cat_pairs(_sstats.get(_key), _plain)
+                    _pos = next((i for i, (nm, _v) in enumerate(_pairs, 1)
+                                 if nm == resolved_name), None)
+                    if _pos:
+                        _places.append((_cat, _pos))
+                if _places:
+                    _best_cat, _best_pos = min(_places, key=lambda cp: cp[1])
+                    _ord = {1: '1st', 2: '2nd', 3: '3rd'}.get(_best_pos, f'{_best_pos}th')
+                    season_line = (f"top 5 in {len(_places)} of {len(_SEASON_CATEGORIES)} "
+                                   f"{_slabel} categories (best: {_best_cat} {_ord})")
         except Exception as _se:
             print(f"[STATS] season line error: {_se}")
         counting_line = None

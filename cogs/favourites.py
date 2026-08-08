@@ -504,10 +504,7 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
                                 value=_tl, inline=False)
         except Exception as _tle:
             print(f"[REPORT] season timeline error: {_tle}")
-        _standings, _core, _featured = await season_total(_season)
-        if _standings:
-            crows = [(f"{i:>2} {_short(nm, 16)}", f"{pts} pts") for i, (nm, pts) in enumerate(_standings[:10], 1)]
-            embed.add_field(name="🏁 Championship", value=_table(crows), inline=False)
+        _, _core, _featured = await season_total(_season)
         embed.add_field(name=_RULE, value="​", inline=False)
         if _featured:
             frows = [((f"{lbl}: {focus}"), (f"{top[0][0]} ({top[0][1]})" if top else "—"))
@@ -650,6 +647,15 @@ _SEASON_CATEGORIES = [
 # Top-5 pay 5/4/3/2/1 (was top-3 at 3/2/1): a category win matches the best
 # bounty-race payout, and mid-table players hold real points worth defending.
 _GP_POINTS = [5, 4, 3, 2, 1]
+
+# Per-category icons, matching the season board, for /standings and /season.
+_CATEGORY_EMOJI = {
+    "Kill Share":        "<a:mostlethal:1520490418817601658>",
+    "Warlord":           "<:warlord:1520490364039860347>",
+    "Total Tally":       "<a:200tkd:1363648828414230538>",
+    "Most Kills":        "<a:topkill:1360314538364240024>",
+    "Highest Takedowns": "<a:toptkd:1360312666475728958>",
+}
 
 
 def _cat_names(items, plain=False):
@@ -862,19 +868,13 @@ async def build_season_embed(season):
     a_stats = await calculate_butler_stats()  # all-time
     label = season.get("label") or f"Season {season['id']}"
     lines = []
-    if standings:
-        champ = standings[0]
-        lines += [f"🏆 **Champion — {champ[0]}**  ({champ[1]} pts)", "", "**Standings**"]
-        for i, (nm, pts) in enumerate(standings[:8], 1):
-            lines.append(f"`{i:>2}.` {nm} — {pts} pts")
-        lines.append("")
     if featured:
         lines.append("**Special Features**  *(random each season)*")
         for flabel, focus, top in featured:
             winner = f"`{top[0][0]}` ({top[0][1]})" if top else "—"
             lines.append(f"│ **{flabel} — {focus}**: {winner}")
         lines.append("")
-    lines.append("**Category Winners**  *(this season · all-time)*")
+    lines.append("🏆 **Category Champions**  *(this season · all-time)*")
     for cat, key, plain in _SEASON_CATEGORIES:
         s_nm, s_val = _cat_top(s_stats.get(key), plain)
         a_nm, a_val = _cat_top(a_stats.get(key), plain)
@@ -889,17 +889,15 @@ async def _hof_index_refresh(guild):
     forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
     if not forum:
         return
-    lines = ["**\U0001f3c1 Hall of Fame — Index**", "", "*Champions of each season.*", ""]
+    lines = ["**\U0001f3c1 Hall of Fame — Index**", "", "*Each season's category champions inside.*", ""]
     for s in await _db.get_all_seasons():
         tid = s.get("thread_id")
         if not tid:
             continue
         label = s.get("label") or f"Season {s['id']}"
-        standings, _, _ = await season_total(s)
-        champ = standings[0][0] if standings else "—"
         status = "" if s.get("ended_at") else "  *(in progress)*"
         link = f"  https://discord.com/channels/{guild.id}/{tid}"
-        lines.append(f"**{label}** — \U0001f3c6 {champ}{status}{link}")
+        lines.append(f"**{label}**{status}{link}")
     body = "\n".join(lines)
     idx = next((p for p in await _db.get_all_index_posts() if p[0] == "hall_of_fame"), None)
     if idx and idx[1]:
@@ -935,14 +933,8 @@ async def finalize_season(guild, season):
     try:
         # Framing intro so the whole thread reads as ONE closing recap (crown ->
         # standings -> superlatives -> rivalries -> what now), not loose embeds.
-        _intro = f"**{label} — Hall of Fame**"
-        try:
-            _st, _, _ = await season_total(season)
-            _champ = _st[0][0] if _st else None
-            if _champ:
-                _intro += f"\n🏆 **{_champ}** takes the season. Standings, superlatives, and the season's rivalries below."
-        except Exception:
-            pass
+        _intro = (f"**{label} — Hall of Fame**"
+                  "\nThe season's category champions, superlatives, and rivalries below.")
         created = await forum.create_thread(name=label, content=_intro, embed=embed)
         await _db.set_season_thread(season["id"], str(created.thread.id))
         # Auto-post the season's Superlatives + rivalries once, when the HoF thread
@@ -1443,24 +1435,40 @@ class FavouritesCog(commands.Cog):
         await interaction.followup.send(
             f"Season **{label}** now starts **{date}** — the report and standings include everything from then.", ephemeral=True)
 
-    @app_commands.command(name="standings", description="Live standings for the current season (this bounty cycle).")
+    @app_commands.command(name="standings", description="Live category leaders for the current season (this bounty cycle).")
     async def season_standings(self, interaction: discord.Interaction):
         await interaction.response.defer()
         season = await _db.get_current_season()
         if not season:
             await interaction.followup.send("No season is running — a season opens when a bounty starts.")
             return
-        standings, _s, _feat = await season_total(season)
-        if not standings:
+        # No overall points champion: each category is its own race. Show the
+        # top 5 of each (the leaderboards people actually chase) plus the
+        # random Special Features winners.
+        _, s_stats, featured = await season_total(season)
+        label = season.get("label") or f"Season {season['id']}"
+        lines = [f"**\U0001f3c1 {label} — Category Leaders**", ""]
+        _any = False
+        for cat, key, plain in _SEASON_CATEGORIES:
+            pairs = _cat_pairs(s_stats.get(key), plain)
+            if not pairs:
+                continue
+            _any = True
+            lines.append(f"{_CATEGORY_EMOJI.get(cat, '')} **{cat}**")
+            for i, (nm, val) in enumerate(pairs[:5], 1):
+                lines.append(f"`{i}.` {nm}" + (f" — {val}" if val else ""))
+            lines.append("")
+        if featured:
+            lines.append("⭐ **Special Features**  *(random this season)*")
+            for _flabel, focus, top in featured:
+                winner = f"{top[0][0]} ({top[0][1]})" if top else "—"
+                lines.append(f"│ **{focus}**: {winner}")
+        if not _any:
             await interaction.followup.send("No stats recorded yet this season.")
             return
-        label = season.get("label") or f"Season {season['id']}"
-        lines = [f"**\U0001f3c1 {label} — Live Standings**", ""]
-        for i, (nm, pts) in enumerate(standings[:15], 1):
-            lines.append(f"`{i:>2}.` **{nm}** — {pts} pts")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="season", description="Your season GP: where the points came from and what's closest to gaining more.")
+    @app_commands.command(name="season", description="Your season: where you place in each category and what's closest to breaking into the top 5.")
     @app_commands.describe(player="Whose season to show (defaults to you)")
     async def my_season(self, interaction: discord.Interaction, player: discord.Member = None):
         await interaction.response.defer()
@@ -1471,7 +1479,7 @@ class FavouritesCog(commands.Cog):
 
         member = player or interaction.user
         # Match on the canonical name the boards use, not the Discord display name:
-        # they diverge constantly and a mismatch would report a real player as 0 GP.
+        # they diverge constantly and a mismatch would miss a real player's placements.
         name = member.display_name
         try:
             _prow = await _db.get_player(str(member.id))
@@ -1480,79 +1488,35 @@ class FavouritesCog(commands.Cog):
         except Exception as _pe:
             print(f"[MY_SEASON] canonical name lookup failed: {_pe}")
 
-        standings, stats, featured = await season_total(season)
+        # No overall points total any more: each category is its own chase, so we
+        # report where the player sits in each (top-5 = on the board) and, if not,
+        # the score that would break in.
+        _, stats, featured = await season_total(season)
         label = season.get("label") or f"Season {season['id']}"
-
-        _rank = next((i for i, (nm, _) in enumerate(standings, 1) if nm == name), None)
-        _gp = next((p for nm, p in standings if nm == name), 0)
-
-        lines = [f"**\U0001f3c1 {label} — {name}**", ""]
-        if _rank:
-            lines.append(f"**{_gp} GP** · {_ordinal_gp(_rank)} of {len(standings)}")
-        else:
-            lines.append("**0 GP** · not on the board yet")
-        lines.append("")
-        lines.append("**Where the points came from**")
+        lines = [f"**\U0001f3c1 {label} — {name}**", "", "**Your category placements**"]
 
         _any = False
-        _card_rows = []      # (category, position|None, gp, note) for the image
         for _lbl, _key, _plain in _SEASON_CATEGORIES:
             _pairs = _cat_pairs(stats.get(_key), _plain)
             _pos = next((i for i, (nm, _v) in enumerate(_pairs, 1) if nm == name), None)
+            _em = _CATEGORY_EMOJI.get(_lbl, "")
             if _pos:
                 _any = True
-                lines.append(f"`{_lbl:<18}` {_ordinal_gp(_pos)} — **+{_GP_POINTS[_pos - 1]} GP**")
-                _card_rows.append((_lbl, _pos, _GP_POINTS[_pos - 1], None))
+                lines.append(f"{_em} `{_lbl:<18}` **{_ordinal_gp(_pos)}** in the top 5")
             elif len(_pairs) >= len(_GP_POINTS):
-                # Full board: the last scoring place is the bar to beat.
                 _cut = _pairs[-1][1]
-                lines.append(f"`{_lbl:<18}` — *(needs {_cut} to score)*")
-                _card_rows.append((_lbl, None, 0, f"needs {_cut} to score"))
+                lines.append(f"{_em} `{_lbl:<18}` — *(needs {_cut} to break the top 5)*")
             else:
-                lines.append(f"`{_lbl:<18}` — *(open, top 5 all score)*")
-                _card_rows.append((_lbl, None, 0, "open — top 5 all score"))
+                lines.append(f"{_em} `{_lbl:<18}` — *(open — the top 5 is still forming)*")
 
         for _flabel, _fval, _ftop in (featured or []):
             _fpos = next((i for i, (nm, _td) in enumerate(_ftop, 1) if nm == name), None)
-            if _fpos and _fpos <= len(_FEATURED_POINTS):
+            if _fpos:
                 _any = True
-                lines.append(f"`{'Featured: ' + str(_fval):<18}` {_ordinal_gp(_fpos)} — "
-                             f"**+{_FEATURED_POINTS[_fpos - 1]} GP**")
-                _card_rows.append((f"Featured: {_fval}", _fpos,
-                                   _FEATURED_POINTS[_fpos - 1], None))
-
-        try:
-            _bon = await _db.get_season_bonuses(season["id"])
-            if _bon.get(name):
-                _any = True
-                lines.append(f"`{'Bounty race':<18}` — **+{_bon[name]} GP**")
-                _card_rows.append(("Bounty race", None, _bon[name],
-                                   f"+{_bon[name]} GP"))
-        except Exception as _be:
-            print(f"[MY_SEASON] bonus lookup failed: {_be}")
+                lines.append(f"⭐ `{('Featured: ' + str(_fval)):<18}` **{_ordinal_gp(_fpos)}**")
 
         if not _any:
-            lines.append("*Nothing scoring yet. Top 5 in any category pays 5/4/3/2/1.*")
-
-        _behind = None
-        if _rank and _rank > 1:
-            _above = standings[_rank - 2]
-            lines += ["", f"**{_above[1] - _gp} GP** behind {_above[0]} in {_ordinal_gp(_rank - 1)}."]
-            _behind = (_above[1] - _gp, _above[0], _rank - 1)
-
-        try:
-            import io as _io2
-            import utils.charts as _charts
-            _png = await _charts.render_async(
-                _charts.render_season_card,
-                player=name, season_label=label, gp=_gp, rank=_rank,
-                field_size=len(standings), rows=_card_rows, behind=_behind,
-                footer="Cigar Lounge")
-            await interaction.followup.send(
-                file=discord.File(_io2.BytesIO(_png), filename="season.png"))
-            return
-        except Exception as _ce:
-            print(f"[SEASON] card render failed, text fallback: {_ce}")
+            lines.append("*Not in the top 5 of any category yet. Keep submitting.*")
 
         await interaction.followup.send("\n".join(lines))
 

@@ -73,7 +73,7 @@ Your server knowledge:
 - Leaderboards live in the 1H and 2H weapon forums — use /top [weapon] for a quick look
 - /rules shows the challenge rules
 - /progress shows title standings and weapon rank progress
-- /refreshcard updates a registry card, /playerstats shows an all-time profile, /season shows season GP
+- /refreshcard updates a registry card, /playerstats shows an all-time profile, /season shows where you place in each season category
 - /bounty status shows the active bounty card and your personal progress\n- /help lists a person's available commands; /serverstats shows a submission-activity dashboard;\n  /explore breaks any stat down across weapons/players/maps as a chart; /tilt_stats shows the lobby-difficulty ladder across all games; /standings and /titles show the season race
 - The Manager handles all administrative matters and will follow up on feedback
 - The lounge has a counting channel. You track its stats: current run, the record, lifetime counts, who counts most, and who breaks it (the Idiot role goes to breakers). When counting stats appear in your context, use the real numbers — the record of shame is prime roasting material.
@@ -2991,24 +2991,16 @@ class PersonalityCog(commands.Cog):
             if summary_lines and _is_data_q:
                 player_stats_ctx += f"\n\nMost active players (by logged runs):\n" + "\n".join(summary_lines)
 
-            # Season board — championship standings + category form. This is
-            # what the Butler should lean on when talking performance.
+            # Season board — category leaders. This is what the Butler should
+            # lean on when talking performance. No overall points champion any
+            # more: each category is its own race.
             try:
                 from cogs.favourites import season_total
                 # Season standings are comparison context — data questions only.
                 _season = await _db.get_current_season() if _is_data_q else None
                 if _season:
-                    _standings, _sstats, _ = await season_total(_season)
+                    _, _sstats, _ = await season_total(_season)
                     _lbl = _season.get('label') or f"Season {_season['id']}"
-                    _top8 = ", ".join(f"{i}. {nm} {pts} GP"
-                                      for i, (nm, pts) in enumerate(_standings[:8], 1))
-                    player_stats_ctx += f"\n\nSeason championship ({_lbl}): {_top8}"
-                    if player_name not in [nm for nm, _ in _standings[:8]]:
-                        _mine = next((f"{player_name} is {i}. with {pts} GP"
-                                      for i, (nm, pts) in enumerate(_standings, 1)
-                                      if nm == player_name), None)
-                        if _mine:
-                            player_stats_ctx += f" … {_mine}"
 
                     def _lead(key):
                         v = _sstats.get(key) or []
@@ -3019,7 +3011,8 @@ class PersonalityCog(commands.Cog):
                             return it.split(" -- ")[0].strip()
                         return f"{it[0]} ({it[1]})"
                     player_stats_ctx += (
-                        "\nSeason category leaders: "
+                        f"\n\nSeason categories ({_lbl}) — each is its own race, no overall "
+                        "points champion. Current leaders: "
                         f"Kill Share {_lead('high_lethality')}; Warlord {_lead('most_dominant')}; "
                         f"Dominance {_lead('dominance_list')}; "
                         f"Total Tally {_lead('top_total_tally')}; Most Kills {_lead('top_kills_list')}; "
@@ -3028,8 +3021,9 @@ class PersonalityCog(commands.Cog):
                         "\n[Titles: the Most Dominant role goes to the DOMINANCE leader (harmonic "
                         "mean of Kill Share and Warlord, i.e. two-way impact); the Warlord role to "
                         "the Warlord leader (takedowns/team kills). Kill Share (kills/team kills) is "
-                        "a scored season category but carries no role. Raw Lethality (kills/takedowns) "
-                        "is context only, no title.]")
+                        "a season category with its own champion but no role. There is NO overall "
+                        "season points champion — every category crowns its own winner. Raw Lethality "
+                        "(kills/takedowns) is context only, no title.]")
             except Exception as _sce:
                 print(f"[BUTLER] season ctx error: {_sce}")
 

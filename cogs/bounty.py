@@ -553,7 +553,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
             try:
                 await bounty_channel.send(
                     f"{bounty_role.mention} 🏆 **{player_name}** has completed the "
-                    f"**{bounty['title']}**! ({_ord} to finish — +{race_points} GP)"
+                    f"**{bounty['title']}**! ({_ord} to finish)"
                 )
             except Exception as e:
                 print(f"Bounty completion ping error: {e}")

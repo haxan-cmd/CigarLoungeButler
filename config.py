@@ -38,7 +38,7 @@ ALLTIME_RECORDS_FORUM_ID    = 0   # retired (Monthly Report removed; season stat
 LEDGER_BANNER_URL = ""
 # Banner atop the archive-entrance (The Ledger) header embed.
 LEDGER_ENTRANCE_BANNER_URL = ""
-BOUNTY_COMPLETION_BONUS     = 5   # season GP for FIRST bounty completion (race: 5/4/3, then 2 for later finishers)
+BOUNTY_COMPLETION_BONUS     = 5   # legacy season-race bonus; retained for the DB record but no longer shown (seasons have no overall points champion)
 BOUNTY_FORUM_CHANNEL_ID     = 1456640264004435978   # Ledger forum for bounty cards
 BULLETIN_BOARD_CATEGORY_ID  = 1359537379039252550
 LEDGER_CATEGORY_ID          = 1456640264004435978
@@ -625,12 +625,12 @@ PLAYER_COMMANDS = [
     ("/help",         "Every command you can run, grouped by what it does."),
     ("/rules",        "Show the Cigar Lounge challenge rules."),
     ("/playerstats",  "Your all-time profile: title, weapon ranks and marks. /playerstats [name] for anyone."),
-    ("/season",       "Your season GP: rank, where each point came from, and how far off the next place."),
+    ("/season",       "Where you place in each season category and what's closest to the top 5."),
     ("/refreshcard",  "Refresh your registry card in butlers-archive."),
     ("/top",          "Top 10 for any weapon or class board e.g. /top Messer."),
-    ("/standings",    "Live standings for the current season."),
+    ("/standings",    "Live category leaders for the current season."),
     ("/titles",       "Who leads each all-time title, with the tiebreak shown."),
-    ("/report",       "Current-standings snapshot: season champions, records, all-time titles."),
+    ("/report",       "Current-standings snapshot: category champions, records, all-time titles."),
     ("/serverstats",  "Server activity dashboard over 24h / 7d / 30d."),
     ("/explore",      "Any metric grouped any way, filtered by feat or season, as a chart."),
     ("/aliases",      "Who has the most in-game names."),
