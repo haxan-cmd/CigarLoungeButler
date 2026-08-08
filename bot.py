@@ -99,17 +99,27 @@ async def run_healthcheck():
                 html = f.read()
         except Exception:
             return web.Response(status=500, text="lab page missing")
-        return web.Response(text=html, content_type="text/html")
+        # no-cache so a deploy's page changes reach everyone without a hard refresh
+        return web.Response(text=html, content_type="text/html",
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    _lab_data_cache = {"body": None, "ts": 0.0}
 
     async def lab_data(request):
         # Per-run numeric+categorical records for the Lab to filter and correlate
-        # client-side. Same token gate as the page.
+        # client-side. Same token gate as the page. The serialized payload is
+        # cached ~30s so a token holder can't hammer the DB/CPU by reloading, and
+        # every visitor's first paint is cheap.
         secret = _lab_secret()
         if not secret:
             return web.Response(status=503, text="lab disabled")
         from utils.lab_auth import verify_token
         if verify_token(request.query.get("t", ""), secret) is None:
             return web.Response(status=403, text="link expired or invalid")
+        import time as _t
+        now = _t.time()
+        if _lab_data_cache["body"] is not None and (now - _lab_data_cache["ts"]) < 30:
+            return web.Response(text=_lab_data_cache["body"], content_type="application/json")
         try:
             from utils.db import get_all_submissions
             rows = await get_all_submissions()
@@ -118,9 +128,9 @@ async def run_healthcheck():
         import utils.stats_engine as _SE
         fields = _SE.RECORD_FIELDS
         data = [[rec.get(f) for f in fields] for rec in _SE.records(rows)]
-        return web.json_response(
-            {"fields": fields, "rows": data},
-            dumps=lambda d: json.dumps(d, default=str, ensure_ascii=False))
+        body = json.dumps({"fields": fields, "rows": data}, default=str, ensure_ascii=False)
+        _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
+        return web.Response(text=body, content_type="application/json")
 
     app = _web_app
     app.router.add_get("/", handle)
