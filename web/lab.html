@@ -120,11 +120,11 @@ let matrixStats=DEFAULT_MATRIX.slice();
 const state={
   view:qp.get('view')||'matrix',
   x:qp.get('x')||'td', y:qp.get('y')||'kills', colour:qp.get('colour')||'',
-  group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3,
+  group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3, compareScale:'prop',
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
-           grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||''}
+           grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
 
 function val(rec,key){return rec[IDX[key]];}
@@ -152,6 +152,7 @@ function filtered(){
     if(f.faction && (r[IDX.faction]||'')!==f.faction) return false;
     if(f.map && (r[IDX.map]||'')!==f.map) return false;
     if(f.side && (r[IDX.side]||'')!==f.side) return false;
+    if(f.vip && (r[IDX.vip]||'')!==f.vip) return false;
     return true;
   });
 }
@@ -189,7 +190,7 @@ function searchSelect(label,options,current,cb,width){
 function buildFilters(){
   const bar=document.getElementById('filters'); bar.innerHTML='';
   const defs=[['player','Player','name',190],['weapon','Weapon','weapon',150],['cls','Class','cls',110],
-    ['grip','Weapon Type','grip',130],['faction','Faction','faction',120],['map','Map','map',140],['side','Side','side',110]];
+    ['grip','Weapon Type','grip',130],['faction','Faction','faction',120],['map','Map','map',140],['side','Side','side',110],['vip','VIP','vip',100]];
   for(const [fk,lab,uk,w] of defs){
     bar.appendChild(searchSelect(lab, uniques(uk), state.filters[fk]||'',
       v=>{state.filters[fk]=v;render();}, w));
@@ -267,6 +268,7 @@ function catOf(r){
   if(ck==='class')return r[IDX.cls]||'—';
   if(ck==='subclass')return r[IDX.subclass]||'—';
   if(ck==='grip')return r[IDX.grip]||'—';
+  if(ck==='vip')return r[IDX.vip]||'—';
   return r[IDX.faction]||'—';
 }
 function renderScatter(){
@@ -350,8 +352,9 @@ function renderCompare(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
-  ctrl.appendChild(pickSelect('Group by',[['grip','Weapon Type (1H/2H)'],['class','Class'],['faction','Faction'],['side','Side (attack/def)'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
+  ctrl.appendChild(pickSelect('Group by',[['grip','Weapon Type (1H/2H)'],['class','Class'],['faction','Faction'],['side','Side (attack/def)'],['vip','VIP status'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
   ctrl.appendChild(pickSelect('Min runs',[['1','1+'],['3','3+'],['5','5+'],['10','10+']],String(state.compareMin),v=>{state.compareMin=+v;renderCompare();}));
+  ctrl.appendChild(pickSelect('Bar scale',[['prop','Proportional'],['spread','Spread']],state.compareScale,v=>{state.compareScale=v;renderCompare();}));
   view.appendChild(ctrl);
   // stat picker
   const chipCard=document.createElement('div'); chipCard.className='card';
@@ -365,22 +368,22 @@ function renderCompare(){
   chipCard.appendChild(chips); view.appendChild(chipCard);
 
   const keys=state.compareStats;
-  const gk={grip:'grip',class:'cls',faction:'faction',side:'side',weapon:'weapon',subclass:'subclass'}[state.group];
+  const gk={grip:'grip',class:'cls',faction:'faction',side:'side',vip:'vip',weapon:'weapon',subclass:'subclass'}[state.group];
   const acc={};
   for(const r of rows){const gv=r[IDX[gk]]; if(!gv)continue;
     const a=acc[gv]||(acc[gv]={n:0}); a.n++;
     for(const k of keys){const v=val(r,k); if(v!=null){a[k]=(a[k]||0)+v; a[k+'_n']=(a[k+'_n']||0)+1;}}}
   let groups=Object.keys(acc).filter(g=>acc[g].n>=state.compareMin);
-  const order={grip:['1H','2H'],class:['Knight','Vanguard','Footman','Archer'],faction:['Agatha','Mason','Tenosia'],side:['Attack','Defense']}[state.group]||[];
+  const order={grip:['1H','2H'],class:['Knight','Vanguard','Footman','Archer'],faction:['Agatha','Mason','Tenosia'],side:['Attack','Defense'],vip:['VIP','Non-VIP']}[state.group]||[];
   groups.sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||acc[b].n-acc[a].n;});
   if(state.group==='weapon'||state.group==='subclass') groups=groups.sort((a,b)=>acc[b].n-acc[a].n).slice(0,8);
   const cmap={}; groups.forEach((g,i)=>{cmap[g]=PALETTE[i%PALETTE.length];
     if(state.group==='faction'&&FACTION_COL[g])cmap[g]=FACTION_COL[g];
     if(state.group==='grip'&&GRIP_COL[g])cmap[g]=GRIP_COL[g];});
-  const titleMap={grip:'One hand vs two',class:'Class by class',faction:'Faction by faction',side:'Attack vs defence',weapon:'Weapon by weapon',subclass:'Subclass by subclass'};
+  const titleMap={grip:'One hand vs two',class:'Class by class',faction:'Faction by faction',side:'Attack vs defence',vip:'VIP vs non-VIP',weapon:'Weapon by weapon',subclass:'Subclass by subclass'};
   const base=groups[0];
   const card=document.createElement('div'); card.className='card cmp';
-  card.innerHTML='<h3>'+(titleMap[state.group]||'Compare')+' · '+rows.length+' runs'+(base?(' · bars scaled to the spread · % vs '+esc(base)):'')+'</h3>';
+  card.innerHTML='<h3>'+(titleMap[state.group]||'Compare')+' · '+rows.length+' runs'+(base?(' · bars '+(state.compareScale==='spread'?'scaled to the spread':'proportional')+' · % vs '+esc(base)):'')+'</h3>';
   if(groups.length<2){card.innerHTML+='<div class="loading">Only '+groups.length+' group meets the run threshold — lower Min runs, change the grouping, or widen the filters.</div>';view.appendChild(card);return;}
   const leg=document.createElement('div'); leg.className='chips';
   leg.innerHTML=groups.map(g=>'<span class="chip on"><span class="sw" style="background:'+cmap[g]+'"></span>'+esc(g)+' (n='+acc[g].n+')'+(acc[g].n<10?' · low':'')+'</span>').join('');
@@ -390,6 +393,7 @@ function renderCompare(){
     const present=avgs.filter(v=>v!=null);
     if(!present.length) continue;
     const vmin=Math.min(...present), vmax=Math.max(...present), rng=(vmax-vmin)||1;
+    const absmax=Math.max(...present.map(Math.abs),1e-9);
     const baseVal=acc[base][k+'_n']?acc[base][k]/acc[base][k+'_n']:null;
     const row=document.createElement('div'); row.className='row';
     const kk=document.createElement('div'); kk.className='k'; kk.textContent=LABELS[k]; row.appendChild(kk);
@@ -399,7 +403,8 @@ function renderCompare(){
       const bx=document.createElement('span'); bx.className='bx';
       if(v==null){bx.style.width='3px';bx.style.background='#4a4d55';br.appendChild(bx);
         const t=document.createElement('span');t.style.color='#8b8f9a';t.textContent='—  (0 runs)';br.appendChild(t);bars.appendChild(br);return;}
-      bx.style.width=((0.12+0.88*(v-vmin)/rng)*100)+'%'; bx.style.background=cmap[g];
+      const frac=(state.compareScale==='spread')?(0.12+0.88*(v-vmin)/rng):(Math.abs(v)/absmax);
+      bx.style.width=(Math.max(0.6,frac*100))+'%'; bx.style.background=cmap[g];
       br.appendChild(bx);
       const t=document.createElement('span'); t.style.color='#f2f3f5';
       let txt=''+(Math.round(v*100)/100);
@@ -428,7 +433,7 @@ function renderTrends(){
   const ctrl=document.createElement('div'); ctrl.className='bar';
   ctrl.appendChild(statSelect('Stat',state.trend.stat,v=>{state.trend.stat=v;renderTrends();}));
   ctrl.appendChild(pickSelect('Period',[['week','Weekly'],['month','Monthly']],state.trend.period,v=>{state.trend.period=v;renderTrends();}));
-  ctrl.appendChild(pickSelect('Split by',[['','None (server)'],['cls','Class'],['grip','Weapon Type'],['faction','Faction']],state.trend.split,v=>{state.trend.split=v;renderTrends();}));
+  ctrl.appendChild(pickSelect('Split by',[['','None (server)'],['cls','Class'],['grip','Weapon Type'],['faction','Faction'],['vip','VIP status']],state.trend.split,v=>{state.trend.split=v;renderTrends();}));
   view.appendChild(ctrl);
   const stat=state.trend.stat, period=state.trend.period, split=state.trend.split;
   const buckets={}, groupsSet=new Set();
