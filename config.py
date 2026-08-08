@@ -23,7 +23,7 @@ MAIN_CHANNEL_ID             = 1324447691467526338
 SKYNET_CHANNEL_ID           = 1525101978034901002   # skynet — Butler answers text chat here too
 # "Lounge Stats" channel — the bot self-heals a pinned Stats Lab panel here on
 # startup. Set to the channel ID (or via env STATS_LAB_CHANNEL_ID); 0 = disabled.
-STATS_LAB_CHANNEL_ID        = int(os.environ.get("STATS_LAB_CHANNEL_ID", "0") or 0)
+STATS_LAB_CHANNEL_ID        = int(os.environ.get("STATS_LAB_CHANNEL_ID", "1535745522630139904") or 0)
 # Channels where the Butler answers free-text chat (when pinged or named "butler"/"clanker").
 # Main plus any extras (e.g. skynet). Slash commands work everywhere regardless of this.
 BUTLER_CHAT_CHANNEL_IDS     = {MAIN_CHANNEL_ID} | ({SKYNET_CHANNEL_ID} if SKYNET_CHANNEL_ID else set())
