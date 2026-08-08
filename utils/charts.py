@@ -717,7 +717,7 @@ def render_statscape(*, weapon_weights, damage_map, faction_weights, title, subt
 
 
 def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, trend=None,
-                   groups=None, group_label=None) -> bytes:
+                   groups=None, group_label=None, colour_map=None) -> bytes:
     """Scatter of per-run (x, y) points with a least-squares trend line and the Pearson r
     annotated (with a plain-language strength/direction). Powers /explore's 'does X track
     with Y' correlation view. BLOCKING: call via render_async."""
@@ -745,13 +745,15 @@ def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, tren
         _keep = [g for g, _ in sorted(_freq.items(), key=lambda kv: (-kv[1], str(kv[0])))[:8]]
         _norm = [g if g in _keep else 'Other' for g in groups]
         _order = _keep + (['Other'] if 'Other' in _norm else [])
-        _fac = _FACTION_COLOUR if group_label == 'Faction' else {}
+        _override = dict(_FACTION_COLOUR if group_label == 'Faction' else {})
+        if colour_map:
+            _override.update(colour_map)
         _cmap = {}
         for i, g in enumerate(_keep):
             if g == '—':
                 _cmap[g] = '#8a8f98'          # unknown/blank stays grey
             else:
-                _cmap[g] = _fac.get(g, _palette[i] if i < len(_palette) else '#8a8f98')
+                _cmap[g] = _override.get(g, _palette[i] if i < len(_palette) else '#8a8f98')
         _cmap['Other'] = '#8a8f98'
         for g in _order:
             _gx = [xs[i] for i in range(len(xs)) if _norm[i] == g]
@@ -788,6 +790,144 @@ def render_scatter(*, title, subtitle, points, x_label, y_label, r, footer, tren
             bbox=dict(boxstyle='round,pad=0.45', fc=PANEL, ec='none'))
     fig.text(0.955, _y(0.66), footer, color=MUT, fontsize=8.5, ha='right', va='center')
 
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def render_corr_matrix(*, title, subtitle, matrix, footer) -> bytes:
+    """Diverging stats × stats correlation heatmap. `matrix` is the dict from
+    stats_engine.correlation_matrix (stats, labels, r, n). Teal = move together,
+    coral = pull apart, gold diagonal, grey dot where the sample is too small.
+    BLOCKING: call via render_async."""
+    import numpy as _np
+    from matplotlib.colors import LinearSegmentedColormap as _LSC
+    from matplotlib.patches import Rectangle as _Rect
+    keys = matrix['stats']
+    labels = matrix['labels']
+    R = matrix['r']
+    n = len(keys)
+    arr = _np.full((n, n), _np.nan)
+    for i in range(n):
+        for j in range(n):
+            v = R.get((i, j))
+            if v is not None and i != j:
+                arr[i, j] = v
+
+    plt, fig = _new_figure((max(7.4, n * 0.92 + 2.4), max(6.6, n * 0.82 + 2.2)))
+
+    def _yt(inches_from_top, H):
+        return 1.0 - (inches_from_top / H)
+    _H = fig.get_size_inches()[1]
+    fig.text(0.045, _yt(0.36, _H), title, color=FG, fontsize=20, fontweight='bold', ha='left', va='center')
+    fig.text(0.045, _yt(0.64, _H), subtitle, color=MUT, fontsize=12, ha='left', va='center')
+
+    ax = fig.add_axes([0.20, 0.06, 0.75, 0.70])
+    cmap = _LSC.from_list('lounge_div', [CORAL, '#3a3d45', TEAL])
+    ax.imshow(arr, cmap=cmap, vmin=-1, vmax=1, aspect='equal', zorder=1)
+    for i in range(n):
+        for j in range(n):
+            v = R.get((i, j))
+            if i == j:
+                ax.add_patch(_Rect((j - 0.5, i - 0.5), 1, 1, color=GOLD, zorder=2))
+                ax.text(j, i, '1', ha='center', va='center', color='#241c08',
+                        fontsize=9, fontweight='bold', zorder=3)
+            elif v is None:
+                ax.text(j, i, '·', ha='center', va='center', color=MUT, fontsize=11, zorder=3)
+            else:
+                _t = f'{v:+.2f}'.replace('0.', '.')
+                ax.text(j, i, _t, ha='center', va='center', color=FG,
+                        fontsize=8.6, fontweight='bold', zorder=3)
+    ax.set_xticks(range(n))
+    ax.set_xticklabels(labels, rotation=38, ha='left', fontsize=8.8, color=MUT)
+    ax.xaxis.set_ticks_position('top')
+    ax.set_yticks(range(n))
+    ax.set_yticklabels(labels, fontsize=8.8, color=MUT)
+    ax.tick_params(length=0)
+    for _sp in ax.spines.values():
+        _sp.set_visible(False)
+    ax.set_xticks([x - 0.5 for x in range(1, n)], minor=True)
+    ax.set_yticks([y - 0.5 for y in range(1, n)], minor=True)
+    ax.grid(which='minor', color=BG, linewidth=2)
+
+    fig.text(0.045, _yt(_H - 0.30, _H),
+             '■ teal = move together    ■ coral = pull apart    · = too few runs',
+             color=MUT, fontsize=9, ha='left', va='center')
+    fig.text(0.955, _yt(_H - 0.30, _H), footer, color=MUT, fontsize=8.5, ha='right', va='center')
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def render_group_compare(*, title, subtitle, groups, group_order, stat_keys, stat_labels,
+                         footer, colour_map=None) -> bytes:
+    """Grouped comparison bars (e.g. 1H vs 2H across stats). Bars are normalised
+    per stat (each stat scaled to its own max) so wildly different scales stay
+    comparable; the real value is printed at the bar end. `groups` is the dict
+    from stats_engine.group_compare. BLOCKING: call via render_async."""
+    _palette = [GOLD, BLUE, CORAL, TEAL, PURPLE]
+    order = [g for g in group_order if g in groups]
+    _cmap = dict(colour_map or {})
+    for i, g in enumerate(order):
+        _cmap.setdefault(g, _palette[i % len(_palette)])
+
+    S = len(stat_keys)
+    G = len(order)
+    plt, fig = _new_figure((9.6, max(4.2, S * (G * 0.34 + 0.5) + 1.8)))
+    _H = fig.get_size_inches()[1]
+    fig.text(0.055, 1.0 - 0.34 / _H, title, color=FG, fontsize=20, fontweight='bold', ha='left', va='center')
+    fig.text(0.055, 1.0 - 0.62 / _H, subtitle, color=MUT, fontsize=12, ha='left', va='center')
+    fig.add_artist(plt.Line2D([0.055, 0.955], [1.0 - 0.82 / _H, 1.0 - 0.82 / _H],
+                              color=GOLD, linewidth=1.4, alpha=0.55))
+
+    ax = fig.add_axes([0.24, 0.09, 0.72, 1.0 - (1.30 / _H) - 0.09])
+    _step = G + 0.9
+    _centres = []
+    _has_neg = False
+    for si, k in enumerate(stat_keys):
+        vals = [groups[g].get(k) for g in order]
+        present = [abs(v) for v in vals if v is not None]
+        m = max(present) if present else 1.0
+        base = si * _step
+        _centres.append(base + (G - 1) / 2.0)
+        for gi, g in enumerate(order):
+            v = vals[gi]
+            if v is None:
+                continue
+            if v < 0:
+                _has_neg = True
+            y = base + gi
+            nv = v / m if m else 0
+            ax.barh(y, nv, height=0.82, color=_cmap[g], zorder=2)
+            _ha = 'left' if nv >= 0 else 'right'
+            _off = 0.02 if nv >= 0 else -0.02
+            _txt = f'{v:g}'
+            ax.text(nv + _off, y, _txt, va='center', ha=_ha, color=FG, fontsize=9, zorder=3)
+    ax.set_yticks(_centres)
+    ax.set_yticklabels(stat_labels, fontsize=9.5, color=FG)
+    ax.set_ylim(-0.8, (S - 1) * _step + G - 0.2 + 0.6)
+    ax.invert_yaxis()
+    ax.set_xlim(-1.28 if _has_neg else -0.02, 1.28)
+    ax.set_xticks([])
+    if _has_neg:
+        ax.axvline(0, color=MUT, linewidth=0.8, alpha=0.5)
+    for _sp in ax.spines.values():
+        _sp.set_visible(False)
+    ax.tick_params(length=0)
+    ax.xaxis.grid(False)
+
+    # Legend (group -> colour), top-left of the plot area.
+    from matplotlib.patches import Patch as _Patch
+    _handles = [_Patch(color=_cmap[g], label=f'{g}  (n={groups[g].get("_n", "?")})') for g in order]
+    _leg = ax.legend(handles=_handles, loc='upper right', fontsize=9, framealpha=0.0,
+                     handlelength=1.1, borderpad=0.4)
+    for _tx in _leg.get_texts():
+        _tx.set_color(FG)
+
+    fig.text(0.955, 0.028, footer, color=MUT, fontsize=8.5, ha='right', va='center')
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=125, facecolor=BG, bbox_inches='tight')
     plt.close(fig)

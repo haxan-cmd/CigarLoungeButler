@@ -176,6 +176,7 @@ _COUNTING_INSULT_FALLBACKS = [
 
 import os as _os
 from utils.helpers import butler_complete as _butler_complete, _openai_client as _ai_client
+from utils import stats_engine as _SE
 if not _ai_client:
     print("Butler AI unavailable: no OPENAI_API_KEY / openai package")
 
@@ -911,6 +912,195 @@ def _server_aggregates(subs):
             _tpw = max(e[2].items(), key=lambda x: x[1])[0] if e[2] else "n/a"
             L.append(f"  {s}: {e[0]} runs, {e[1]/e[0]:.1f} avg TD, top weapon {_tpw}")
     return "\n".join(L)
+
+
+class CorrelateView(discord.ui.View):
+    """Interactive panel for /correlate: flip between the scatter, the full
+    correlation matrix, and 1H-vs-2H / class comparisons without re-running the
+    command. Every view reads utils.stats_engine, so the numbers always agree.
+    Anyone in the channel can drive it; it stops responding after 10 minutes."""
+
+    _COMPARE_STATS = ['kills', 'td', 'deaths', 'kd', 'kill_share', 'warlord']
+
+    def __init__(self, F):
+        super().__init__(timeout=600)
+        self.F = F
+        self.mode = 'scatter'
+
+    async def _rows(self):
+        from utils.tilt import orientation as _orient
+        import datetime as _dt
+        F = self.F
+        out = []
+        for s in await _db.get_all_submissions():
+            if len(s) < 21 or 'Unlisted' in (s[11] or ''):
+                continue
+            if F['pid'] or F['pnames']:
+                if not (((s[2] or '').strip() == F['pid'])
+                        or ((s[1] or '').strip().lower() in F['pnames'])):
+                    continue
+            if F['weapon'] and (s[3] or '').strip().lower() != F['weapon']:
+                continue
+            if F['char_class'] and _SE.run_class(s) != F['char_class']:
+                continue
+            if F['grip'] and _SE.weapon_grip(s) != F['grip']:
+                continue
+            if F['map'] and F['map'] not in (s[5] or '').strip().lower():
+                continue
+            if F['side'] and _orient((s[5] or '').strip(), (s[6] or '').strip()) != F['side']:
+                continue
+            if F['season_start']:
+                try:
+                    _tsv = s[0] if hasattr(s[0], 'year') else _dt.datetime.fromisoformat(str(s[0]))
+                    if _tsv.replace(tzinfo=None) < F['season_start']:
+                        continue
+                except Exception:
+                    pass
+            out.append(s)
+        return out
+
+    def _grp(self, s):
+        ck = self.F['colour_key']
+        if ck == 'weapon':
+            return (s[3] or '').strip() or '—'
+        if ck == 'class':
+            return _SE.run_class(s) or '—'
+        if ck == 'subclass':
+            return (s[4] or '').strip() or '—'
+        if ck == 'grip':
+            return _SE.weapon_grip(s) or '—'
+        return (s[6] or '').strip() or '—'      # faction
+
+    async def render(self):
+        """Returns ((png_bytes, filename), None) or (None, error_str)."""
+        import utils.charts as _charts
+        F = self.F
+        rows = await self._rows()
+        sub = F['subtitle']
+        if self.mode == 'scatter':
+            xf, xlab = _SE.STAT_EXTRACTORS[F['stat_a']][0], _SE.stat_label(F['stat_a'])
+            yf, ylab = _SE.STAT_EXTRACTORS[F['stat_b']][0], _SE.stat_label(F['stat_b'])
+            ck = F['colour_key']
+            pts, groups = [], []
+            for s in rows:
+                x, y = xf(s), yf(s)
+                if x is not None and y is not None:
+                    pts.append((float(x), float(y)))
+                    if ck:
+                        groups.append(self._grp(s))
+            if len(pts) < 5:
+                return None, f"Not enough runs to correlate ({len(pts)}). Widen the scope."
+            n = len(pts)
+            mx = sum(p[0] for p in pts) / n
+            my = sum(p[1] for p in pts) / n
+            sxx = sum((p[0] - mx) ** 2 for p in pts)
+            syy = sum((p[1] - my) ** 2 for p in pts)
+            sxy = sum((p[0] - mx) * (p[1] - my) for p in pts)
+            r = (sxy / ((sxx * syy) ** 0.5)) if (sxx > 0 and syy > 0) else None
+            trend = ((sxy / sxx, my - (sxy / sxx) * mx) if sxx > 0 else None)
+            title = (f"{F['pscope']} · {xlab} vs {ylab}" if F['pscope'] else f"{xlab} vs {ylab}")
+            glabel = {'weapon': 'Weapon', 'class': 'Class', 'subclass': 'Subclass',
+                      'faction': 'Faction', 'grip': 'Grip'}.get(ck)
+            cmap = {'1H': _charts.BLUE, '2H': _charts.GOLD} if ck == 'grip' else None
+            png = await _charts.render_async(
+                _charts.render_scatter, title=title, subtitle=sub, points=pts,
+                x_label=xlab, y_label=ylab, r=r, trend=trend,
+                footer=f"{n} runs · {F['win_label']}",
+                groups=(groups if ck else None), group_label=glabel, colour_map=cmap)
+            return (png, 'scatter.png'), None
+        if self.mode == 'matrix':
+            m = _SE.correlation_matrix(rows)
+            title = (f"{F['pscope']} · stat correlations" if F['pscope']
+                     else "Stat correlations — everyone")
+            png = await _charts.render_async(
+                _charts.render_corr_matrix, title=title,
+                subtitle=f"{sub} · {len(rows)} runs", matrix=m,
+                footer=f"{len(rows)} runs · {F['win_label']}")
+            return (png, 'matrix.png'), None
+        # 1H-vs-2H / class / faction comparison
+        gfn = {'grip': _SE.weapon_grip, 'class': _SE.run_class,
+               'faction': _SE.run_faction}[self.mode]
+        gc = _SE.group_compare(rows, gfn, self._COMPARE_STATS, min_n=5)
+        if len(gc) < 2:
+            return None, "Not enough runs across groups to compare — widen the scope."
+        order = {'grip': ['1H', '2H'],
+                 'class': ['Knight', 'Vanguard', 'Footman', 'Archer'],
+                 'faction': ['Agatha', 'Mason', 'Tenosia']}[self.mode]
+        order = [g for g in order if g in gc] + [g for g in gc if g not in order]
+        cmap = None
+        if self.mode == 'grip':
+            cmap = {'1H': _charts.BLUE, '2H': _charts.GOLD}
+        elif self.mode == 'faction':
+            cmap = {'Agatha': _charts.BLUE, 'Mason': '#d84343', 'Tenosia': _charts.GOLD}
+        titles = {'grip': 'One hand vs two', 'class': 'Class by class',
+                  'faction': 'Faction by faction'}
+        png = await _charts.render_async(
+            _charts.render_group_compare, title=titles[self.mode],
+            subtitle=f"{sub} · {len(rows)} runs", groups=gc, group_order=order,
+            stat_keys=self._COMPARE_STATS,
+            stat_labels=[_SE.stat_label(k) for k in self._COMPARE_STATS],
+            footer=F['win_label'], colour_map=cmap)
+        return (png, 'compare.png'), None
+
+    async def _switch(self, interaction, mode):
+        self.mode = mode
+        await interaction.response.defer()
+        try:
+            res, err = await self.render()
+        except Exception as e:
+            print(f"[CORRELATE] view render failed: {e}")
+            await interaction.followup.send(f"Couldn't render that view: {e}", ephemeral=True)
+            return
+        if err:
+            await interaction.followup.send(err, ephemeral=True)
+            return
+        png, fn = res
+        await interaction.edit_original_response(
+            attachments=[discord.File(io.BytesIO(png), filename=fn)], view=self)
+
+    @discord.ui.button(label="Scatter", emoji="📊", style=discord.ButtonStyle.secondary, row=0)
+    async def _b_scatter(self, interaction: discord.Interaction, button):
+        await self._switch(interaction, 'scatter')
+
+    @discord.ui.button(label="Matrix", emoji="🔲", style=discord.ButtonStyle.secondary, row=0)
+    async def _b_matrix(self, interaction: discord.Interaction, button):
+        await self._switch(interaction, 'matrix')
+
+    @discord.ui.button(label="1H vs 2H", emoji="⚔️", style=discord.ButtonStyle.secondary, row=0)
+    async def _b_grip(self, interaction: discord.Interaction, button):
+        await self._switch(interaction, 'grip')
+
+    @discord.ui.button(label="By class", emoji="🛡️", style=discord.ButtonStyle.secondary, row=0)
+    async def _b_class(self, interaction: discord.Interaction, button):
+        await self._switch(interaction, 'class')
+
+    @discord.ui.button(label="Insight", emoji="🎲", style=discord.ButtonStyle.primary, row=1)
+    async def _b_insight(self, interaction: discord.Interaction, button):
+        await interaction.response.defer()
+        try:
+            ins = _SE.find_insights(await self._rows())
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't mine insights: {e}", ephemeral=True)
+            return
+        if not ins:
+            await interaction.followup.send("Not enough data to find anything interesting yet.",
+                                            ephemeral=True)
+            return
+        lines = ["**The Butler noticed…**"]
+        for x in ins:
+            if x['kind'] == 'strongest':
+                lines.append(f"🔗 Strongest link: **{x['a_label']}** & **{x['b_label']}** move "
+                             f"together (r {x['r']:+.2f}, {x['n']} runs).")
+            elif x['kind'] == 'strongest_negative':
+                lines.append(f"↔️ Hardest opposite: **{x['a_label']}** & **{x['b_label']}** "
+                             f"(r {x['r']:+.2f}).")
+            elif x['kind'] == 'weakest':
+                lines.append(f"🤷 Barely related: **{x['a_label']}** & **{x['b_label']}** "
+                             f"(r {x['r']:+.2f}).")
+            elif x['kind'] == 'grip_gap':
+                lines.append(f"⚔️ Biggest 1H/2H gap: **{x['label']}** — 1H {x['oneh']:g} vs "
+                             f"2H {x['twoh']:g}.")
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 
 class PersonalityCog(commands.Cog):
@@ -1693,6 +1883,7 @@ class PersonalityCog(commands.Cog):
         char_class="Scope to one class (optional)",
         map_name="Scope to one map, e.g. Falmire (optional)",
         side="Only attacking or only defending runs (optional)",
+        grip="Scope to one- or two-handed weapons (optional)",
         colour_by="Tint the dots by a category and add a legend (optional)",
         window="All time or just this season (optional)")
     @app_commands.rename(char_class="class", map_name="map")
@@ -1735,11 +1926,16 @@ class PersonalityCog(commands.Cog):
             app_commands.Choice(name="Attacking", value="Attack"),
             app_commands.Choice(name="Defending", value="Defense"),
         ],
+        grip=[
+            app_commands.Choice(name="One-handed", value="1H"),
+            app_commands.Choice(name="Two-handed", value="2H"),
+        ],
         colour_by=[
             app_commands.Choice(name="Weapon", value="weapon"),
             app_commands.Choice(name="Class", value="class"),
             app_commands.Choice(name="Subclass", value="subclass"),
             app_commands.Choice(name="Faction", value="faction"),
+            app_commands.Choice(name="Grip (1H/2H)", value="grip"),
         ],
         window=[
             app_commands.Choice(name="All time", value="all"),
@@ -1751,6 +1947,7 @@ class PersonalityCog(commands.Cog):
                         player: discord.Member = None, weapon: str = None,
                         char_class: app_commands.Choice[str] = None, map_name: str = None,
                         side: app_commands.Choice[str] = None,
+                        grip: app_commands.Choice[str] = None,
                         colour_by: app_commands.Choice[str] = None,
                         window: app_commands.Choice[str] = None):
         await interaction.response.defer()
@@ -1782,151 +1979,45 @@ class PersonalityCog(commands.Cog):
             except Exception:
                 pass
 
-        def _i(s, idx):
-            try:
-                return int(s[idx]) if len(s) > idx and s[idx] not in (None, '') else None
-            except (ValueError, TypeError):
-                return None
-
-        def _fl(s, idx):
-            try:
-                return float(s[idx]) if len(s) > idx and s[idx] not in (None, '') else None
-            except (ValueError, TypeError):
-                return None
-
-        def _score(s):
-            try:
-                return int(str(s[24]).replace(',', '').strip()) if len(s) > 24 and s[24] else None
-            except (ValueError, TypeError):
-                return None
-
-        def _kshare(s):
-            v = _fl(s, 20)
-            return v if (v and 0 < v <= 100) else None
-
-        def _leth(s):
-            td, k = _i(s, 7), _i(s, 8)
-            return (k / td) if (td and k) else None
-
-        def _warl(s):
-            td, k, t = _i(s, 7), _i(s, 8), _fl(s, 20)
-            return (td * t / k) if (td and k and t) else None
-
-        def _lobbyk(s):
-            # Sum of the two faction banner totals ONLY. Do NOT fall back to col 18
-            # (total_lobby_kills) — it's a separate, unreliable field that plotted a bogus
-            # 2000+ outlier when the banners weren't read. Drop the run if either is missing.
-            a, b = _i(s, 25), _i(s, 26)
-            return (a + b) if (a is not None and b is not None) else None
-
-        def _gap(s):
-            a, b = _i(s, 25), _i(s, 26)
-            return (a - b) if (a is not None and b is not None) else None
-
-        def _kd(s):
-            k, d = _i(s, 8), _i(s, 9)
-            if k is None:
-                return None
-            return float(k) if not d else k / d          # 0 deaths -> K/D = kills
-
-        def _agg(s):
-            k, d = _i(s, 8), _i(s, 9)
-            return (k + d) if (k is not None and d is not None) else None
-
-        def _tdshare(s):
-            v = _fl(s, 21)
-            return v if (v is not None and 0 < v <= 100) else None
-
-        _SUB2CLASS = {sub: cls for cls, subs in getattr(config, 'REGISTRY_CLASS_MAP', {}).items()
-                      for sub in subs}
-
-        def _run_class(s):
-            return _SUB2CLASS.get((s[4] or '').strip() if len(s) > 4 else '')
-
-        _PR = {
-            'kill_share': (_kshare, 'Kill share %'), 'lethality': (_leth, 'Lethality (K/TD)'),
-            'warlord': (_warl, 'Warlord %'), 'td': (lambda s: _i(s, 7), 'Takedowns'),
-            'kills': (lambda s: _i(s, 8), 'Kills'), 'deaths': (lambda s: _i(s, 9), 'Deaths'),
-            'kd': (_kd, 'K/D ratio'), 'aggression': (_agg, 'Aggression (K+D)'),
-            'team_td_share': (_tdshare, 'Team TD share %'),
-            'score': (_score, 'Score'), 'lobby_kills': (_lobbyk, 'Total lobby kills'),
-            'tilt': (_gap, 'Lobby kill gap'),
-        }
-        _colour_key = colour_by.value if colour_by else None
-        from utils.tilt import orientation as _orient
-        _xf, _xlab = _PR[stat_a.value]
-        _yf, _ylab = _PR[stat_b.value]
-        _all_subs = await _db.get_all_submissions()
-        _pl_lower = {n.lower() for n in (_pnames or [])}
-        _pts, _groups = [], []
-        for s in _all_subs:
-            if len(s) < 21 or 'Unlisted' in (s[11] or ''):
-                continue
-            if _pid or _pl_lower:
-                if not (((s[2] or '').strip() == _pid) or ((s[1] or '').strip().lower() in _pl_lower)):
-                    continue
-            if weapon and (s[3] or '').strip().lower() != weapon.strip().lower():
-                continue
-            if char_class and _run_class(s) != char_class.value:
-                continue
-            if map_name and map_name.strip().lower() not in (s[5] or '').strip().lower():
-                continue
-            if side and _orient((s[5] or '').strip(), (s[6] or '').strip()) != side.value:
-                continue
-            if _season_start:
-                try:
-                    _tsv = s[0] if hasattr(s[0], 'year') else __import__('datetime').datetime.fromisoformat(str(s[0]))
-                    if _tsv.replace(tzinfo=None) < _season_start:
-                        continue
-                except Exception:
-                    pass
-            _x, _y = _xf(s), _yf(s)
-            if _x is not None and _y is not None:
-                _pts.append((float(_x), float(_y)))
-                if _colour_key:
-                    if _colour_key == 'weapon':
-                        _g = (s[3] or '').strip() or '—'
-                    elif _colour_key == 'class':
-                        _g = _run_class(s) or '—'
-                    elif _colour_key == 'subclass':
-                        _g = (s[4] or '').strip() or '—'
-                    else:
-                        _g = (s[6] or '').strip() or '—'
-                    _groups.append(_g)
-        if len(_pts) < 5:
-            await interaction.followup.send(
-                f"Not enough runs to correlate ({len(_pts)}). Widen the scope or drop the weapon filter.")
-            return
-        _n = len(_pts)
-        _mx = sum(p[0] for p in _pts) / _n
-        _my = sum(p[1] for p in _pts) / _n
-        _sxx = sum((p[0] - _mx) ** 2 for p in _pts)
-        _syy = sum((p[1] - _my) ** 2 for p in _pts)
-        _sxy = sum((p[0] - _mx) * (p[1] - _my) for p in _pts)
-        _r = (_sxy / ((_sxx * _syy) ** 0.5)) if (_sxx > 0 and _syy > 0) else None
-        _trend = ((_sxy / _sxx, _my - (_sxy / _sxx) * _mx) if _sxx > 0 else None)
-        _title = (f"{_pscope} · {_xlab} vs {_ylab}" if _pscope else f"{_xlab} vs {_ylab}")
+        # Bundle the scope into a filter spec and hand it to the interactive panel.
+        # The panel renders the scatter now and the matrix / 1H-vs-2H / class views
+        # on button clicks, all off the SAME stats_engine so the numbers agree.
         _bits = ([weapon.strip()] if weapon else [])
         if char_class:
             _bits.append(char_class.value)
+        if grip:
+            _bits.append(grip.value)
         if map_name:
             _bits.append(map_name.strip())
         if side:
             _bits.append("Attack" if side.value == "Attack" else "Defence")
         _bits.append(_win_label)
-        _group_label = {'weapon': 'Weapon', 'class': 'Class',
-                        'subclass': 'Subclass', 'faction': 'Faction'}.get(_colour_key)
+        _F = {
+            'pid': _pid, 'pnames': {n.lower() for n in (_pnames or [])},
+            'pscope': _pscope,
+            'weapon': (weapon.strip().lower() if weapon else None),
+            'char_class': (char_class.value if char_class else None),
+            'grip': (grip.value if grip else None),
+            'map': (map_name.strip().lower() if map_name else None),
+            'side': (side.value if side else None),
+            'season_start': _season_start, 'win_label': _win_label,
+            'stat_a': stat_a.value, 'stat_b': stat_b.value,
+            'colour_key': (colour_by.value if colour_by else None),
+            'subtitle': " · ".join(_bits),
+        }
+        _view = CorrelateView(_F)
         try:
-            import utils.charts as _charts
-            _png = await _charts.render_async(
-                _charts.render_scatter, title=_title, subtitle=" · ".join(_bits),
-                points=_pts, x_label=_xlab, y_label=_ylab, r=_r, trend=_trend,
-                footer=f"{_n} runs · {_win_label}",
-                groups=(_groups if _colour_key else None), group_label=_group_label)
-            await interaction.followup.send(file=discord.File(io.BytesIO(_png), filename="correlate.png"))
+            _res, _err = await _view.render()
         except Exception as _ce:
-            print(f"[CORRELATE] render failed: {_ce}")
+            print(f"[CORRELATE] initial render failed: {_ce}")
             await interaction.followup.send(f"Couldn't render the correlation: {_ce}")
+            return
+        if _err:
+            await interaction.followup.send(_err)
+            return
+        _png, _fn = _res
+        await interaction.followup.send(
+            file=discord.File(io.BytesIO(_png), filename=_fn), view=_view)
 
     @app_commands.command(name="explore", description="Chart any stat, grouped any way. e.g. metric: Run count, by: Weapon. Filters optional.")
     @app_commands.describe(
