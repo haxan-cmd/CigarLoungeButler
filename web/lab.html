@@ -79,6 +79,8 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="matrix">🔲 Matrix</button>
     <button class="tab" data-v="scatter">📊 Scatter</button>
     <button class="tab" data-v="compare">⚔️ Compare</button>
+    <button class="tab" data-v="trends">📈 Trends</button>
+    <button class="tab" data-v="galaxy">🌌 Galaxy</button>
   </div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
@@ -105,6 +107,8 @@ const state={
   view:qp.get('view')||'matrix',
   x:qp.get('x')||'td', y:qp.get('y')||'kills', colour:qp.get('colour')||'',
   group:'grip',
+  trend:{stat:'kill_share',period:'week',split:''},
+  galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||''}
 };
@@ -368,6 +372,154 @@ function renderCompare(){
   view.appendChild(card);
 }
 
+// ---- trends ----
+function periodKey(ts,period){
+  if(!ts) return null;
+  const d=ts.slice(0,10);
+  if(period==='month') return ts.slice(0,7);
+  const dt=new Date(d+'T00:00:00Z'); if(isNaN(dt)) return null;
+  const day=(dt.getUTCDay()+6)%7; dt.setUTCDate(dt.getUTCDate()-day);
+  return dt.toISOString().slice(0,10);
+}
+function renderTrends(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(statSelect('Stat',state.trend.stat,v=>{state.trend.stat=v;renderTrends();}));
+  ctrl.appendChild(pickSelect('Period',[['week','Weekly'],['month','Monthly']],state.trend.period,v=>{state.trend.period=v;renderTrends();}));
+  ctrl.appendChild(pickSelect('Split by',[['','None (server)'],['cls','Class'],['grip','Weapon Type'],['faction','Faction']],state.trend.split,v=>{state.trend.split=v;renderTrends();}));
+  view.appendChild(ctrl);
+  const stat=state.trend.stat, period=state.trend.period, split=state.trend.split;
+  const buckets={}, groupsSet=new Set();
+  for(const r of rows){
+    const v=val(r,stat); if(v==null) continue;
+    const pk=periodKey(r[IDX.ts],period); if(!pk) continue;
+    const g=split?(r[IDX[split]]||'—'):'all'; groupsSet.add(g);
+    const b=buckets[pk]||(buckets[pk]={}); const e=b[g]||(b[g]=[0,0]); e[0]+=v; e[1]++;
+  }
+  const periods=Object.keys(buckets).sort();
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML='<h3>'+LABELS[stat]+' over time · '+(period==='week'?'weekly':'monthly')+' · '+rows.length+' runs</h3>';
+  if(periods.length<2){card.innerHTML+='<div class="loading">Not enough time range yet — widen the filters.</div>';view.appendChild(card);return;}
+  let groups=[...groupsSet];
+  if(split){
+    const cnt={}; for(const pk of periods) for(const g in buckets[pk]) cnt[g]=(cnt[g]||0)+buckets[pk][g][1];
+    groups=groups.filter(g=>g!=='—').sort((a,b)=>cnt[b]-cnt[a]).slice(0,6);
+  }
+  const cmap={}; groups.forEach((g,i)=>{cmap[g]=PALETTE[i%PALETTE.length];
+    if(split==='faction'&&FACTION_COL[g])cmap[g]=FACTION_COL[g];
+    if(split==='grip'&&GRIP_COL[g])cmap[g]=GRIP_COL[g];});
+  const wrap=document.createElement('div'); wrap.id='scWrap'; const cv=document.createElement('canvas'); wrap.appendChild(cv); card.appendChild(wrap); view.appendChild(card);
+  drawTrends(cv,wrap,periods,groups,cmap,buckets,split);
+}
+function drawTrends(cv,wrap,periods,groups,cmap,buckets,split){
+  const W=cv.clientWidth||900,H=Math.round((W||900)*0.5);
+  const dpr=window.devicePixelRatio||1; cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const g=cv.getContext('2d'); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
+  const pad={l:54,r:16,t:16,b:46};
+  const series={}; let ymin=Infinity,ymax=-Infinity;
+  groups.forEach(gr=>{series[gr]=periods.map(pk=>{const e=buckets[pk][gr]; if(e&&e[1]>=3){const v=e[0]/e[1]; if(v<ymin)ymin=v; if(v>ymax)ymax=v; return v;} return null;});});
+  if(!isFinite(ymin)){ymin=0;ymax=1;} if(ymin===ymax){ymax=ymin+1;}
+  const n=periods.length;
+  const sx=i=>pad.l+(n<=1?0:i/(n-1))*(W-pad.l-pad.r);
+  const sy=v=>H-pad.b-(v-ymin)/((ymax-ymin)||1)*(H-pad.t-pad.b);
+  g.strokeStyle='#34373f'; g.fillStyle='#8b8f9a'; g.font='11px Poppins,sans-serif';
+  for(let i=0;i<=4;i++){const yv=ymin+(ymax-ymin)*i/4, yy=sy(yv);
+    g.globalAlpha=.5;g.beginPath();g.moveTo(pad.l,yy);g.lineTo(W-pad.r,yy);g.stroke();g.globalAlpha=1;g.fillText(fmt(yv),6,yy+4);}
+  const step=Math.max(1,Math.ceil(n/8));
+  for(let i=0;i<n;i++){ if(i%step&&i!==n-1) continue; g.save();g.translate(sx(i),H-pad.b+14);g.rotate(-0.5);g.fillText(periods[i].slice(2),0,0);g.restore(); }
+  const screen=[];
+  groups.forEach(gr=>{
+    g.strokeStyle=cmap[gr]; g.lineWidth=2.2; g.beginPath(); let started=false;
+    series[gr].forEach((v,i)=>{ if(v==null){started=false;return;} const px=sx(i),py=sy(v);
+      if(!started){g.moveTo(px,py);started=true;} else g.lineTo(px,py); screen.push({px,py,gr,v,pk:periods[i]});});
+    g.stroke();
+    g.fillStyle=cmap[gr]; series[gr].forEach((v,i)=>{if(v==null)return;g.beginPath();g.arc(sx(i),sy(v),3,0,7);g.fill();});
+  });
+  if(split){const lg=document.createElement('div');lg.className='slegend';
+    lg.innerHTML=groups.map(gr=>'<div><span class="sw" style="background:'+cmap[gr]+'"></span>'+gr+'</div>').join('');wrap.appendChild(lg);}
+  const tip=document.getElementById('tip');
+  cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let best=null,bd=1e9; for(const s of screen){const d=(s.px-mx)**2+(s.py-my)**2; if(d<bd){bd=d;best=s;}}
+    if(best&&bd<200){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';
+      tip.textContent=best.pk+(split?(' · '+best.gr):'')+' · '+LABELS[state.trend.stat]+' '+fmt(best.v);}
+    else tip.style.opacity=0;};
+  cv.onmouseleave=()=>tip.style.opacity=0;
+}
+
+// ---- galaxy (players as points in a playstyle space) ----
+function renderGalaxy(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(statSelect('X axis',state.galaxy.x,v=>{state.galaxy.x=v;renderGalaxy();}));
+  ctrl.appendChild(statSelect('Y axis',state.galaxy.y,v=>{state.galaxy.y=v;renderGalaxy();}));
+  ctrl.appendChild(pickSelect('Colour by',[['cls','Class'],['grip','Weapon Type'],['faction','Faction']],state.galaxy.colour,v=>{state.galaxy.colour=v;renderGalaxy();}));
+  ctrl.appendChild(pickSelect('Min runs',[['5','5+'],['10','10+'],['20','20+'],['40','40+']],String(state.galaxy.min),v=>{state.galaxy.min=+v;renderGalaxy();}));
+  view.appendChild(ctrl);
+  const agg={};
+  for(const r of rows){
+    const name=r[IDX.name]||''; if(!name) continue;
+    const key=(r[IDX.did]||'')||('name:'+name.toLowerCase());
+    const a=agg[key]||(agg[key]={name:name,n:0,x:[0,0],y:[0,0],cats:{}});
+    a.name=name; a.n++;
+    const xv=val(r,state.galaxy.x), yv=val(r,state.galaxy.y);
+    if(xv!=null){a.x[0]+=xv;a.x[1]++;} if(yv!=null){a.y[0]+=yv;a.y[1]++;}
+    const c=r[IDX[state.galaxy.colour]]||'—'; a.cats[c]=(a.cats[c]||0)+1;
+  }
+  const pts=[];
+  for(const k in agg){const a=agg[k]; if(a.n<state.galaxy.min||!a.x[1]||!a.y[1])continue;
+    const cat=Object.keys(a.cats).sort((x,y)=>a.cats[y]-a.cats[x])[0];
+    pts.push({name:a.name,n:a.n,x:a.x[0]/a.x[1],y:a.y[0]/a.y[1],cat});}
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML='<h3>The playstyle galaxy · '+LABELS[state.galaxy.x]+' vs '+LABELS[state.galaxy.y]+' · '+pts.length+' players (each dot = a player)</h3>';
+  if(pts.length<3){card.innerHTML+='<div class="loading">Not enough players at this run threshold — lower Min runs or widen filters.</div>';view.appendChild(card);return;}
+  const wrap=document.createElement('div'); wrap.id='scWrap'; const cv=document.createElement('canvas'); wrap.appendChild(cv); card.appendChild(wrap); view.appendChild(card);
+  drawGalaxy(cv,wrap,pts);
+}
+function drawGalaxy(cv,wrap,pts){
+  const W=cv.clientWidth||900,H=Math.round((W||900)*0.62);
+  const dpr=window.devicePixelRatio||1; cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const g=cv.getContext('2d'); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
+  const pad={l:54,r:16,t:16,b:38};
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  const xr=(xmax-xmin)*0.06||1,yr=(ymax-ymin)*0.06||1; xmin-=xr;xmax+=xr;ymin-=yr;ymax+=yr;
+  const sx=v=>pad.l+(v-xmin)/((xmax-xmin)||1)*(W-pad.l-pad.r);
+  const sy=v=>H-pad.b-(v-ymin)/((ymax-ymin)||1)*(H-pad.t-pad.b);
+  const med=arr=>{const s=[...arr].sort((a,b)=>a-b);return s[Math.floor(s.length/2)];};
+  const cx=med(xs),cy=med(ys);
+  g.strokeStyle='#34373f';g.setLineDash([4,4]);g.globalAlpha=.7;
+  g.beginPath();g.moveTo(sx(cx),pad.t);g.lineTo(sx(cx),H-pad.b);g.stroke();
+  g.beginPath();g.moveTo(pad.l,sy(cy));g.lineTo(W-pad.r,sy(cy));g.stroke();
+  g.setLineDash([]);g.globalAlpha=1;
+  g.fillStyle='#8b8f9a';g.font='11px Poppins,sans-serif';
+  for(let i=0;i<=4;i++){const t=i/4;g.fillText(fmt(ymin+(ymax-ymin)*t),6,sy(ymin+(ymax-ymin)*t)+4);g.fillText(fmt(xmin+(xmax-xmin)*t),sx(xmin+(xmax-xmin)*t)-8,H-pad.b+16);}
+  const cats=[...new Set(pts.map(p=>p.cat))];
+  const freq={};pts.forEach(p=>freq[p.cat]=(freq[p.cat]||0)+1);
+  const keep=cats.sort((a,b)=>freq[b]-freq[a]).slice(0,8);
+  const cmap={};keep.forEach((c,i)=>cmap[c]=PALETTE[i%PALETTE.length]);
+  if(state.galaxy.colour==='faction')keep.forEach(c=>{if(FACTION_COL[c])cmap[c]=FACTION_COL[c];});
+  if(state.galaxy.colour==='grip')keep.forEach(c=>{if(GRIP_COL[c])cmap[c]=GRIP_COL[c];});
+  const col=p=>cmap[p.cat]||'#8a8f98';
+  const maxn=Math.max(...pts.map(p=>p.n));
+  const screen=[];
+  for(const p of pts){const px=sx(p.x),py=sy(p.y),rad=4+6*Math.sqrt(p.n/maxn);
+    g.beginPath();g.arc(px,py,rad,0,7);g.fillStyle=col(p);g.globalAlpha=.82;g.fill();g.globalAlpha=1;screen.push({px,py,rad,p});}
+  const labelled=[...pts].sort((a,b)=>b.n-a.n).slice(0,8);
+  g.fillStyle='#f2f3f5';g.font='11px Poppins,sans-serif';
+  for(const p of labelled){g.fillText(p.name,sx(p.x)+7,sy(p.y)+3);}
+  const lg=document.createElement('div');lg.className='slegend';
+  lg.innerHTML=keep.map(c=>'<div><span class="sw" style="background:'+cmap[c]+'"></span>'+c+'</div>').join('');wrap.appendChild(lg);
+  const tip=document.getElementById('tip');
+  cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mxp=e.clientX-rect.left,myp=e.clientY-rect.top;
+    let best=null,bd=1e9;for(const s of screen){const d=(s.px-mxp)**2+(s.py-myp)**2;if(d<bd){bd=d;best=s;}}
+    if(best&&bd<300){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';
+      tip.textContent=best.p.name+' · '+LABELS[state.galaxy.x]+' '+fmt(best.p.x)+' / '+LABELS[state.galaxy.y]+' '+fmt(best.p.y)+' · '+best.p.n+' runs';}
+    else tip.style.opacity=0;};
+  cv.onmouseleave=()=>tip.style.opacity=0;
+}
+
 // ---- shared selects ----
 function statSelect(label,cur,cb){return pickSelect(label,ALL_STATS.map(k=>[k,LABELS[k]]),cur,cb);}
 function pickSelect(label,opts,cur,cb){
@@ -388,7 +540,9 @@ function render(){
   document.getElementById('foot').textContent='Cigar Lounge Stats Lab · live from the bot';
   if(state.view==='matrix')renderMatrix();
   else if(state.view==='scatter')renderScatter();
-  else renderCompare();
+  else if(state.view==='compare')renderCompare();
+  else if(state.view==='trends')renderTrends();
+  else renderGalaxy();
 }
 
 // ---- boot ----
