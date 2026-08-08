@@ -273,6 +273,7 @@ _DATA_QUESTION_WORDS = (
     'lobby', 'same game', 'same match', 'teammate', 'who was i', 'who else',
     'nemesis', 'rival', ' ally', 'allies', 'closest', 'best teammate',
     'play with', 'play against', 'played with', 'played against',
+    'missing', 'about maps', 'what maps', 'which maps', 'map board',
 )
 
 
@@ -2619,18 +2620,48 @@ class PersonalityCog(commands.Cog):
                         # Exact complement for "what boards am I NOT on" — computed by
                         # discord_id, WEAPON boards only (feat/kills boards excluded).
                         try:
-                            from utils.boards import is_feat_board as _isfeat, is_kills_board as _iskb
+                            from utils.boards import is_feat_board as _isfeat, is_kills_board as _iskb, is_archer_weapon as _isarch
                             _weapon_boards = {w for w in boards if not _isfeat(w) and not _iskb(w)}
                             _absent = sorted(_weapon_boards - _on_weapons)
                             if _absent:
-                                player_stats_ctx += (
+                                _ranged_absent = [w for w in _absent if _isarch(w)]
+                                _wnote = (
                                     f"\nWeapon boards this player has NO entry on ({len(_absent)}): "
                                     + ", ".join(_absent)
-                                    + ". [This is the authoritative list for 'which boards am I not on' — use it exactly, do not guess.]")
+                                    + ". [This is the authoritative list for 'which boards am I not on' — use it exactly, do not guess.")
+                                if _ranged_absent:
+                                    _wnote += (" NOTE: " + ", ".join(_ranged_absent)
+                                               + " are Archer/ranged boards that do NOT count toward the Weapons Master "
+                                                 "/ Grand Marshal titles — say so if you list them toward title progress.")
+                                player_stats_ctx += _wnote + "]"
                             elif _weapon_boards:
                                 player_stats_ctx += "\nThis player has an entry on EVERY weapon board."
                         except Exception as _abe:
                             print(f"[BUTLER] ctx absent-boards error: {_abe}")
+                        # Map boards NOT on — built here (not only under title questions) so a
+                        # bare "what about maps" gets the real map names instead of a placeholder.
+                        try:
+                            _map_on, _map_all = set(), set()
+                            for _mr in ld_for_pb:
+                                _mb = _mr[0].strip() if _mr else ''
+                                if ' - ' not in _mb or _mb.split(' - ')[0] not in getattr(config, 'MAP_ATTACK_DEFENSE', {}):
+                                    continue
+                                _map_all.add(_mb)
+                                _mrd = (_mr[2] or '').strip() if len(_mr) > 2 else ''
+                                _mrn = _mr[1].strip() if len(_mr) > 1 else ''
+                                if (_mrd and _mrd == discord_id_str) or (_mrn and _mrn == player_name_for_ld):
+                                    _map_on.add(_mb)
+                            _map_absent = sorted(_map_all - _map_on)
+                            if _map_absent:
+                                player_stats_ctx += (
+                                    f"\nMap boards this player has NO entry on ({len(_map_absent)}): "
+                                    + ", ".join(_map_absent)
+                                    + ". [Authoritative for 'which maps am I missing' AND Campaign Master gaps — list "
+                                      "these exact 'Map - Faction' names, NEVER a generic placeholder like 'Map boards'.]")
+                            elif _map_all:
+                                player_stats_ctx += "\nThis player has an entry on EVERY map board."
+                        except Exception as _mae:
+                            print(f"[BUTLER] ctx map-absent error: {_mae}")
                     except Exception as _e:
                         print(f"[BUTLER] ctx standings error: {_e}")
 
@@ -2683,22 +2714,8 @@ class PersonalityCog(commands.Cog):
                                       "Throwing Axe) do NOT count toward the melee titles — never name them as a title gap.]")
                             except Exception as _twg:
                                 print(f"[BUTLER] ctx title weapon-gap error: {_twg}")
-                            # Map-board gaps (Campaign Master), matched by discord_id.
-                            _map_on, _map_all = set(), set()
-                            for _r in ld_for_pb:
-                                _b = _r[0].strip() if _r else ''
-                                if ' - ' not in _b or _b.split(' - ')[0] not in getattr(config, 'MAP_ATTACK_DEFENSE', {}):
-                                    continue
-                                _map_all.add(_b)
-                                _rd = (_r[2] or '').strip() if len(_r) > 2 else ''
-                                _rn = _r[1].strip() if len(_r) > 1 else ''
-                                if (_rd and _rd == discord_id_str) or (_rn and _rn == _ldn):
-                                    _map_on.add(_b)
-                            _map_absent = sorted(_map_all - _map_on)
-                            if _map_absent:
-                                player_stats_ctx += (f"\nMap boards this player has NO entry on ({len(_map_absent)}): "
-                                                     + ", ".join(_map_absent)
-                                                     + ". [Authoritative for Campaign Master gaps.]")
+                            # (Map-board gaps now injected unconditionally above, so they're
+                            # present for Campaign Master AND a bare "what about maps".)
                         except Exception as _tse:
                             print(f"[BUTLER] ctx title-strategy error: {_tse}")
 
