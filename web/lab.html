@@ -63,6 +63,20 @@ canvas{display:block;width:100%;border-radius:8px}
 .foot{color:var(--mut);font-size:11px;text-align:right;margin-top:8px}
 .loading{color:var(--mut);padding:40px;text-align:center}
 .hide{display:none}
+@media(max-width:640px){
+  .wrap{padding:10px 10px 46px}
+  .head h1{font-size:17px}
+  .head{gap:6px}
+  .bar{gap:6px}
+  .f{flex:1 1 44%}
+  .cbox input,select{min-width:0;width:100%}
+  .tab{padding:7px 9px;font-size:12px}
+  .tabs{flex-wrap:wrap}
+  .cblist{max-height:200px}
+  .cmp .row{grid-template-columns:70px 1fr;gap:6px}
+  .cmp .k{font-size:11px}
+  .card{padding:12px 12px}
+}
 </style>
 </head>
 <body>
@@ -106,7 +120,7 @@ let matrixStats=DEFAULT_MATRIX.slice();
 const state={
   view:qp.get('view')||'matrix',
   x:qp.get('x')||'td', y:qp.get('y')||'kills', colour:qp.get('colour')||'',
-  group:'grip',
+  group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3,
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
@@ -114,6 +128,7 @@ const state={
 };
 
 function val(rec,key){return rec[IDX[key]];}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function pearson(pairs){
   const n=pairs.length; if(n<3) return null;
   let mx=0,my=0; for(const p of pairs){mx+=p[0];my+=p[1];} mx/=n;my/=n;
@@ -316,7 +331,7 @@ function drawScatter(cv,wrap,pts){
   else rb.textContent='r = n/a';
   wrap.appendChild(rb);
   if(legend){const lg=document.createElement('div');lg.className='slegend';
-    lg.innerHTML=legend.map(([c,col])=>'<div><span class="sw" style="background:'+col+'"></span>'+c+'</div>').join('');
+    lg.innerHTML=legend.map(([c,col])=>'<div><span class="sw" style="background:'+col+'"></span>'+esc(c)+'</div>').join('');
     wrap.appendChild(lg);}
   // hover
   const tip=document.getElementById('tip');
@@ -335,37 +350,63 @@ function renderCompare(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
-  ctrl.appendChild(pickSelect('Group by',[['grip','Weapon Type (1H/2H)'],['class','Class'],['faction','Faction'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
+  ctrl.appendChild(pickSelect('Group by',[['grip','Weapon Type (1H/2H)'],['class','Class'],['faction','Faction'],['side','Side (attack/def)'],['weapon','Weapon'],['subclass','Subclass']],state.group,v=>{state.group=v;renderCompare();}));
+  ctrl.appendChild(pickSelect('Min runs',[['1','1+'],['3','3+'],['5','5+'],['10','10+']],String(state.compareMin),v=>{state.compareMin=+v;renderCompare();}));
   view.appendChild(ctrl);
-  const keys=['kills','td','deaths','kd','kill_share','warlord'];
-  const gk={grip:'grip',class:'cls',faction:'faction',weapon:'weapon',subclass:'subclass'}[state.group];
+  // stat picker
+  const chipCard=document.createElement('div'); chipCard.className='card';
+  chipCard.innerHTML='<h3>Stats to compare — click to toggle</h3>';
+  const chips=document.createElement('div'); chips.className='chips';
+  for(const k of ALL_STATS){
+    const c=document.createElement('span'); c.className='chip'+(state.compareStats.includes(k)?' on':''); c.textContent=LABELS[k];
+    c.addEventListener('click',()=>{const i=state.compareStats.indexOf(k); if(i>=0){if(state.compareStats.length>1)state.compareStats.splice(i,1);} else state.compareStats.push(k); renderCompare();});
+    chips.appendChild(c);
+  }
+  chipCard.appendChild(chips); view.appendChild(chipCard);
+
+  const keys=state.compareStats;
+  const gk={grip:'grip',class:'cls',faction:'faction',side:'side',weapon:'weapon',subclass:'subclass'}[state.group];
   const acc={};
   for(const r of rows){const gv=r[IDX[gk]]; if(!gv)continue;
     const a=acc[gv]||(acc[gv]={n:0}); a.n++;
     for(const k of keys){const v=val(r,k); if(v!=null){a[k]=(a[k]||0)+v; a[k+'_n']=(a[k+'_n']||0)+1;}}}
-  let groups=Object.keys(acc).filter(g=>acc[g].n>=5);
-  const order={grip:['1H','2H'],class:['Knight','Vanguard','Footman','Archer'],faction:['Agatha','Mason','Tenosia']}[state.group]||[];
+  let groups=Object.keys(acc).filter(g=>acc[g].n>=state.compareMin);
+  const order={grip:['1H','2H'],class:['Knight','Vanguard','Footman','Archer'],faction:['Agatha','Mason','Tenosia'],side:['Attack','Defense']}[state.group]||[];
   groups.sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||acc[b].n-acc[a].n;});
   if(state.group==='weapon'||state.group==='subclass') groups=groups.sort((a,b)=>acc[b].n-acc[a].n).slice(0,8);
   const cmap={}; groups.forEach((g,i)=>{cmap[g]=PALETTE[i%PALETTE.length];
     if(state.group==='faction'&&FACTION_COL[g])cmap[g]=FACTION_COL[g];
     if(state.group==='grip'&&GRIP_COL[g])cmap[g]=GRIP_COL[g];});
+  const titleMap={grip:'One hand vs two',class:'Class by class',faction:'Faction by faction',side:'Attack vs defence',weapon:'Weapon by weapon',subclass:'Subclass by subclass'};
+  const base=groups[0];
   const card=document.createElement('div'); card.className='card cmp';
-  card.innerHTML='<h3>'+({grip:'One hand vs two',class:'Class by class',faction:'Faction by faction',weapon:'Weapon by weapon',subclass:'Subclass by subclass'}[state.group])+' · '+rows.length+' runs</h3>';
-  if(groups.length<2){card.innerHTML+='<div class="loading">Not enough runs across groups.</div>';view.appendChild(card);return;}
+  card.innerHTML='<h3>'+(titleMap[state.group]||'Compare')+' · '+rows.length+' runs'+(base?(' · bars scaled to the spread · % vs '+esc(base)):'')+'</h3>';
+  if(groups.length<2){card.innerHTML+='<div class="loading">Only '+groups.length+' group meets the run threshold — lower Min runs, change the grouping, or widen the filters.</div>';view.appendChild(card);return;}
   const leg=document.createElement('div'); leg.className='chips';
-  leg.innerHTML=groups.map(g=>'<span class="chip on"><span class="sw" style="background:'+cmap[g]+'"></span>'+g+' (n='+acc[g].n+')</span>').join('');
+  leg.innerHTML=groups.map(g=>'<span class="chip on"><span class="sw" style="background:'+cmap[g]+'"></span>'+esc(g)+' (n='+acc[g].n+')'+(acc[g].n<10?' · low':'')+'</span>').join('');
   card.appendChild(leg);
   for(const k of keys){
     const avgs=groups.map(g=>acc[g][k+'_n']?acc[g][k]/acc[g][k+'_n']:null);
-    const max=Math.max(...avgs.filter(v=>v!=null).map(Math.abs),1);
+    const present=avgs.filter(v=>v!=null);
+    if(!present.length) continue;
+    const vmin=Math.min(...present), vmax=Math.max(...present), rng=(vmax-vmin)||1;
+    const baseVal=acc[base][k+'_n']?acc[base][k]/acc[base][k+'_n']:null;
     const row=document.createElement('div'); row.className='row';
     const kk=document.createElement('div'); kk.className='k'; kk.textContent=LABELS[k]; row.appendChild(kk);
     const bars=document.createElement('div'); bars.className='bars';
-    groups.forEach((g,i)=>{const v=avgs[i]; if(v==null)return;
+    groups.forEach((g,i)=>{const v=avgs[i]; const nContrib=acc[g][k+'_n']||0;
       const br=document.createElement('div'); br.className='brow';
-      const bx=document.createElement('span'); bx.className='bx'; bx.style.width=Math.max(2,Math.abs(v)/max*100)+'%'; bx.style.background=cmap[g];
-      br.appendChild(bx); const t=document.createElement('span'); t.textContent=(Math.round(v*100)/100); t.style.color='#f2f3f5'; br.appendChild(t);
+      const bx=document.createElement('span'); bx.className='bx';
+      if(v==null){bx.style.width='3px';bx.style.background='#4a4d55';br.appendChild(bx);
+        const t=document.createElement('span');t.style.color='#8b8f9a';t.textContent='—  (0 runs)';br.appendChild(t);bars.appendChild(br);return;}
+      bx.style.width=((0.12+0.88*(v-vmin)/rng)*100)+'%'; bx.style.background=cmap[g];
+      br.appendChild(bx);
+      const t=document.createElement('span'); t.style.color='#f2f3f5';
+      let txt=''+(Math.round(v*100)/100);
+      if(baseVal!=null && g!==base && baseVal!==0){const d=Math.round((v-baseVal)/Math.abs(baseVal)*100); txt+='  '+(d>=0?'+':'')+d+'%';}
+      const low=document.createElement('span'); low.style.color='#8b8f9a'; low.style.fontSize='10px';
+      low.textContent = (nContrib<state.compareMin||nContrib<10) ? ('  ·'+nContrib+'n'+(nContrib<state.compareMin?' low':'')) : '';
+      t.textContent=txt; br.appendChild(t); if(low.textContent) br.appendChild(low);
       bars.appendChild(br);});
     row.appendChild(bars); card.appendChild(row);
   }
@@ -437,7 +478,7 @@ function drawTrends(cv,wrap,periods,groups,cmap,buckets,split){
     g.fillStyle=cmap[gr]; series[gr].forEach((v,i)=>{if(v==null)return;g.beginPath();g.arc(sx(i),sy(v),3,0,7);g.fill();});
   });
   if(split){const lg=document.createElement('div');lg.className='slegend';
-    lg.innerHTML=groups.map(gr=>'<div><span class="sw" style="background:'+cmap[gr]+'"></span>'+gr+'</div>').join('');wrap.appendChild(lg);}
+    lg.innerHTML=groups.map(gr=>'<div><span class="sw" style="background:'+cmap[gr]+'"></span>'+esc(gr)+'</div>').join('');wrap.appendChild(lg);}
   const tip=document.getElementById('tip');
   cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
     let best=null,bd=1e9; for(const s of screen){const d=(s.px-mx)**2+(s.py-my)**2; if(d<bd){bd=d;best=s;}}
@@ -510,7 +551,7 @@ function drawGalaxy(cv,wrap,pts){
   g.fillStyle='#f2f3f5';g.font='11px Poppins,sans-serif';
   for(const p of labelled){g.fillText(p.name,sx(p.x)+7,sy(p.y)+3);}
   const lg=document.createElement('div');lg.className='slegend';
-  lg.innerHTML=keep.map(c=>'<div><span class="sw" style="background:'+cmap[c]+'"></span>'+c+'</div>').join('');wrap.appendChild(lg);
+  lg.innerHTML=keep.map(c=>'<div><span class="sw" style="background:'+cmap[c]+'"></span>'+esc(c)+'</div>').join('');wrap.appendChild(lg);
   const tip=document.getElementById('tip');
   cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mxp=e.clientX-rect.left,myp=e.clientY-rect.top;
     let best=null,bd=1e9;for(const s of screen){const d=(s.px-mxp)**2+(s.py-myp)**2;if(d<bd){bd=d;best=s;}}
