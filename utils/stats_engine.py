@@ -270,7 +270,7 @@ def find_insights(rows, stat_keys=None, min_n=8):
 # Fields the web Stats Lab receives per run: categoricals for filtering + every
 # numeric stat (from STAT_EXTRACTORS). Ordered so it can be sent as compact arrays.
 RECORD_CATEGORICALS = ['name', 'did', 'weapon', 'subclass', 'cls', 'grip',
-                       'faction', 'map', 'side', 'ts']
+                       'faction', 'map', 'side', 'vip', 'ts']
 RECORD_STATS = list(STAT_EXTRACTORS.keys())
 RECORD_FIELDS = RECORD_CATEGORICALS + RECORD_STATS
 
@@ -291,6 +291,8 @@ def run_record(row):
         'faction': _fac,
         'map': _mp,
         'side': _orientation(_mp, _fac) or '',
+        'vip': ('VIP' if ((row[10] or '').strip().lower() in ('yes', 'true', '1', 'y')
+                          if len(row) > 10 else False) else 'Non-VIP'),
         'ts': str(row[0]) if len(row) > 0 and row[0] else '',
     }
     for k, (fn, _lab) in STAT_EXTRACTORS.items():
