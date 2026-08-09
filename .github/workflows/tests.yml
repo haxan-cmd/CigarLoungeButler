@@ -1,18 +1,28 @@
 name: tests
 
+# Runs the pure-logic test suite on every push and pull request to main.
+# The integration tests importorskip discord + asyncpg, so with only
+# pytest + python-dotenv installed they skip and the pure suite runs green
+# without a database (see CLAUDE.md > tests/).
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
-  test:
+  pytest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      # Tests only touch config + utils/parsing (pure), so we don't need the
-      # full bot dependency stack — just dotenv (config imports it) and pytest.
-      - run: pip install pytest python-dotenv
-      - run: python -m pytest tests/ -q
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest python-dotenv
+
+      - name: Run pure-logic test suite
+        run: pytest -q
