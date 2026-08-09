@@ -1194,6 +1194,17 @@ async def _sort_board_entries(lb_name, entries):
     takedowns are pulled from each entry's linked submission and stashed on 'td' for
     the '{td} TD · {score}' display. Every other board ranks by score descending.
     Shared by _render_board and the /refresh commands so ordering can't drift."""
+    # Tie-break equal scores by the OLDEST submission — whoever REACHED the score
+    # first holds the rank, so a later identical score can't leapfrog them.
+    # leaderboard_data stores no timestamp, so map each row to its submission's
+    # time via message_link (submissions col12 -> col0). Unknown time sorts last.
+    _subs_all = await _db.get_all_submissions()
+    _link2ts = {}
+    for _s in _subs_all:
+        if len(_s) > 12 and _s[12] and _s[12].strip():
+            _link2ts.setdefault(_s[12].strip(), (_s[0] or '').strip() or '9999')
+    def _tie(en):
+        return _link2ts.get((en.get('link') or '').strip()) or '9999'
     if lb_name == "Hybrid":
         # One row per player, best takedowns; ties by score.
         best = {}
@@ -1205,7 +1216,7 @@ async def _sort_board_entries(lb_name, entries):
                 _sc = 0
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
-        return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))
+        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0), _tie(e)))
     if lb_name == "Score":
         # One row per player (their best-scoring match), capped to the top 50 by
         # score. The board stores one row per player, but a big community makes the
@@ -1219,9 +1230,9 @@ async def _sort_board_entries(lb_name, entries):
                 _sc = 0
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
-        return sorted(best.values(), key=lambda e: -int(e.get('score') or 0))[:50]
+        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0), _tie(e)))[:50]
     if lb_name != "Pacifist":
-        _sorted = sorted(entries, key=lambda x: x['score'], reverse=True)
+        _sorted = sorted(entries, key=lambda x: (-int(x.get('score') or 0), _tie(x)))
         # Weapon / map / kills boards are top-10. Guard the DISPLAY so a bloated
         # board (legacy or backfill rows that skipped the insert-time eviction)
         # can never render more than 10. Feat boards are unlimited and pass through.
@@ -1233,7 +1244,7 @@ async def _sort_board_entries(lb_name, entries):
         # cap. Keep a generous top-50 so a busy board stays to a few messages rather than
         # dozens; the full history still lives in the DB and counts for marks/records.
         return _sorted[:50]
-    subs = await _db.get_all_submissions()
+    subs = _subs_all
     tdl = {}
     for s in subs:
         if len(s) > 12 and s[12].strip():
