@@ -76,6 +76,7 @@ _INDEXES = [
     # Same-lobby lookup filters on map + submission time (then fuzzy-matches the
     # lobby kill total in Python), so index those two columns.
     ("idx_submissions_map_time",   "submissions",      "(map, submitted_at)"),
+    ("idx_sub_rosters_sid",        "submission_rosters", "(submission_id)"),
 ]
 
 
@@ -141,6 +142,13 @@ _SCHEMA_STATEMENTS = [
     # Master rankings), pinned at a single mod-chosen message in the feats forum.
     "CREATE TABLE IF NOT EXISTS titles_board ("
     "id INT PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
+    # Parsed lobby roster per submission: the NAMES the vision parser reads off
+    # the scoreboard (it already OCRs every row for the team/enemy stat arrays;
+    # we now keep the names too). Ground-truth lobby membership -> accurate
+    # nemesis/ally without the time-window guess. One row per other player.
+    "CREATE TABLE IF NOT EXISTS submission_rosters ("
+    "submission_id INTEGER NOT NULL, name TEXT NOT NULL, side TEXT, "
+    "takedowns INTEGER, kills INTEGER)",
 ]
 
 
@@ -482,6 +490,59 @@ async def add_submission(
             team_total_kills, enemy_total_kills
         )
     return row_id
+
+
+async def save_submission_roster(submission_id, roster):
+    """Persist the parsed lobby roster for a submission. roster: iterable of
+    {'name','side','td','k'} ('side' is 'team'=ally / 'enemy'=opponent of the
+    submitter). Replaces any existing rows for this submission, so an edit or
+    re-parse is idempotent. Best-effort: a failure here never blocks a submission."""
+    if not submission_id or not roster:
+        return
+    try:
+        pool = _pool_check()
+    except Exception:
+        return
+    rows = []
+    for e in roster:
+        nm = (e.get('name') or '').strip()
+        if not nm:
+            continue
+        side = e.get('side') if e.get('side') in ('team', 'enemy') else None
+        td = _as_int(e.get('td'), None) if e.get('td') is not None else None
+        k = _as_int(e.get('k'), None) if e.get('k') is not None else None
+        rows.append((int(submission_id), nm[:64], side, td, k))
+    _cache_invalidate('rosters')
+    if not rows:
+        # still clear stale rows on an edit that produced no roster
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM submission_rosters WHERE submission_id=$1", int(submission_id))
+        return
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM submission_rosters WHERE submission_id=$1", int(submission_id))
+            await conn.executemany(
+                "INSERT INTO submission_rosters (submission_id, name, side, takedowns, kills) "
+                "VALUES ($1,$2,$3,$4,$5)", rows)
+
+
+async def get_all_rosters() -> dict:
+    """{submission_id_str: [{'name','side','td','k'}, ...]} for the roster-based
+    rivalry engine (utils/roster.py). Cached like the other bulk reads (5s TTL)."""
+    cached = _cache_get('rosters')
+    if cached is not None:
+        return cached
+    pool = _pool_check()
+    out: dict = {}
+    async with pool.acquire() as conn:
+        recs = await conn.fetch(
+            "SELECT submission_id, name, side, takedowns, kills FROM submission_rosters")
+    for r in recs:
+        out.setdefault(str(r['submission_id']), []).append(
+            {'name': r['name'] or '', 'side': r['side'] or '',
+             'td': r['takedowns'], 'k': r['kills']})
+    _cache_set('rosters', out)
+    return out
 
 
 async def get_submission_by_link(message_link: str):

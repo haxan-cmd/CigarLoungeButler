@@ -158,6 +158,9 @@ The scoreboard shows TWO teams side by side. For ALL other rows (excluding the h
 - team_kills: K column integers for players on the SAME team as the highlighted player
 - enemy_takedowns: T column integers for players on the ENEMY team
 - enemy_kills: K column integers for players on the ENEMY team
+- team_names: the NAME column text for players on the SAME team, in the SAME ROW ORDER as team_takedowns/team_kills
+- enemy_names: the NAME column text for players on the ENEMY team, in the SAME ROW ORDER as enemy_takedowns/enemy_kills
+Read each name EXACTLY as printed (keep clan tags and symbols); do not translate or invent. These identify who was in the lobby.
 
 CRITICAL — these four arrays take T and K ONLY, never SCORE. T values are small
 (typically 0-200). SCORE values are thousands (e.g. 9,260). If any number you are
@@ -186,7 +189,7 @@ Your response must be ONLY the JSON object below - no explanation, no preamble, 
 
 Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"enemy_takedowns":[],"enemy_kills":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"team_names":[],"enemy_takedowns":[],"enemy_kills":[],"enemy_names":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
 _HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
@@ -239,6 +242,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         'weapon': None, 'subclass': None, 'map': None, 'faction': None, 'name': None,
         'takedowns': None, 'kills': None, 'deaths': None, 'score': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
+        'team_names': [], 'enemy_names': [],
         'team_total_kills': None, 'enemy_total_kills': None, 'match_result': None,
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
@@ -340,7 +344,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         # ~1k tokens, and the 512-token thinking budget also draws from
                         # this pool — 2048 risked truncating the roster on big lobbies,
                         # so 4096 gives real headroom without inviting a runaway.
-                        max_output_tokens=4096,
+                        max_output_tokens=6144,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
@@ -474,7 +478,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                     contents=[prompt + _roster_req, image_part],
                     config=_gtypes.GenerateContentConfig(
                         temperature=0, response_mime_type='application/json',
-                        max_output_tokens=4096,
+                        max_output_tokens=6144,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512)))
                 _rraw = (_rr.text or '').strip()
                 if _rraw.startswith('```'):
@@ -491,7 +495,8 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                               f"(was {_roster_len(data)}"
                               f"{', wrong column' if _wrong_col else ''})")
                         # Keep the original player fields; adopt the fuller roster.
-                        for _rk in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
+                        for _rk in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills',
+                                    'team_names', 'enemy_names'):
                             if _rdata.get(_rk):
                                 data[_rk] = _rdata[_rk]
                     else:
@@ -565,6 +570,10 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         for list_field in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
             if not isinstance(data.get(list_field), list):
                 data[list_field] = []
+        for _nf in ('team_names', 'enemy_names'):
+            _v = data.get(_nf)
+            data[_nf] = ([str(x).strip() for x in _v if str(x).strip()]
+                         if isinstance(_v, list) else [])
         return {**empty, **data}
     except Exception as e:
         err = str(e)

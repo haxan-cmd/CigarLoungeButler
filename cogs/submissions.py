@@ -242,6 +242,29 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
     )
     return row_id, None
 
+
+def _roster_from_vision(vd):
+    """Roster entries [{'name','side','td','k'}] from a parsed vision dict. The
+    names align with the per-side stat arrays the parser already returns; side is
+    'team' (ally of the submitter) or 'enemy' (opponent)."""
+    out = []
+    if not isinstance(vd, dict):
+        return out
+    for _side, _nk, _tk, _kk in (('team', 'team_names', 'team_scores', 'team_kills'),
+                                 ('enemy', 'enemy_names', 'enemy_scores', 'enemy_kills')):
+        _names = vd.get(_nk) or []
+        _tds = vd.get(_tk) or []
+        _ks = vd.get(_kk) or []
+        for _i, _nm in enumerate(_names):
+            _nm = str(_nm).strip() if _nm is not None else ''
+            if not _nm:
+                continue
+            _td = _tds[_i] if _i < len(_tds) and isinstance(_tds[_i], int) else None
+            _k = _ks[_i] if _i < len(_ks) and isinstance(_ks[_i], int) else None
+            out.append({'name': _nm, 'side': _side, 'td': _td, 'k': _k})
+    return out
+
+
 class HealingScoreModal(discord.ui.Modal, title="Healing Submission"):
     """Manual score entry for a Healing Horn / Healing Banner run — the in-game
     popup screenshot can't go through scorecard vision, so the player types
@@ -2975,6 +2998,15 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # it wrote to, or None if this was a dedup-skipped repeat — in which case
         # dup_weapon is the weapon already recorded on the matching original.
         submission_row, dup_weapon = log_result
+        # Persist the parsed lobby roster (names read off the scoreboard) for the
+        # roster-based nemesis/ally engine. Best-effort — never blocks a submission.
+        if submission_row:
+            try:
+                _rost = _roster_from_vision(vd)
+                if _rost:
+                    await _db.save_submission_roster(submission_row, _rost)
+            except Exception as _rerr:
+                print(f"[ROSTER] save skipped: {_rerr}")
         is_new_player = False  # determined later from submission_count == 1
 
         # Auto-increment manual feat counts if already set for this player
@@ -3624,9 +3656,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 # ally (over all shared-lobby history). The scan runs off the event loop.
                 _nem_key = _ally_key = None
                 try:
-                    from utils.rivalries import compute_rivalries
+                    from utils import rivalry_service as _rivsvc
                     _all_subs = await _db.get_all_submissions()
-                    _rv = await asyncio.to_thread(compute_rivalries, str(interaction.user.id), _all_subs)
+                    _rv = await _rivsvc.rivalries_for(str(interaction.user.id), _all_subs)
                     _nem_key = (_rv.get('nemesis') or {}).get('key')
                     _ally_key = (_rv.get('ally') or {}).get('key')
                 except Exception as _rve:

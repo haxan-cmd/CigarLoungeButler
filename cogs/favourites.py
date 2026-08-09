@@ -965,12 +965,12 @@ async def finalize_season(guild, season):
         # idempotent), then one unified closing that points forward.
         try:
             from utils.wrapped import compute_superlatives
-            from utils.rivalries import compute_pair_awards
+            from utils import rivalry_service as _rivsvc
             _start = season["started_at"].timestamp()
             _end = season["ended_at"].timestamp() if season.get("ended_at") else None
             _subs = [r for r in await _db.get_all_submissions() if _sub_in_window(r, _start, _end)]
             _awards = compute_superlatives(_subs)
-            _pairs = await asyncio.to_thread(compute_pair_awards, _subs)
+            _pairs = await _rivsvc.pair_awards(_subs)
             if _awards or _pairs.get('bitter_rivals') or _pairs.get('inseparable'):
                 await created.thread.send(embed=_render_superlatives_embed(label, _awards, _pairs))
             await created.thread.send(
@@ -1461,8 +1461,8 @@ class FavouritesCog(commands.Cog):
         # Nemesis & closest ally over the window.
         nemesis = ally = None
         try:
-            from utils.rivalries import compute_rivalries
-            _riv = compute_rivalries(did, subs)
+            from utils import rivalry_service as _rivsvc
+            _riv = await _rivsvc.rivalries_for(did, subs)
             _nem, _al = _riv.get('nemesis'), _riv.get('ally')
             # A one-game "rivalry" reads as noise (and grammar like "1 battles"),
             # so only surface a nemesis/ally with at least two shared games.
@@ -1527,10 +1527,10 @@ class FavouritesCog(commands.Cog):
     async def superlatives_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer()
         from utils.wrapped import compute_superlatives
-        from utils.rivalries import compute_pair_awards
+        from utils import rivalry_service as _rivsvc
         subs, label = await _windowed_subs()
         awards = compute_superlatives(subs)
-        pairs = await asyncio.to_thread(compute_pair_awards, subs)
+        pairs = await _rivsvc.pair_awards(subs)
         if not awards and not (pairs.get('bitter_rivals') or pairs.get('inseparable')):
             await interaction.followup.send(f"Not enough runs in {label} to hand out awards yet.")
             return

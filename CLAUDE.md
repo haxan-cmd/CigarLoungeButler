@@ -22,7 +22,9 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `utils/boards.py` | Pure board classification — THE single source of truth for which boards are feat/weapon/map/kills, which count toward the board titles (`non_weapon_feat_boards()`), and each board's score unit (`board_unit()`). Route new board-name checks through here, not hand-typed sets. Unit-tested. |
 | `utils/goals.py` | Pure "what's next" goal picker across next weapon rank / mastery / Hundred-Handed. Feeds `/next` and the Butler's in-passing goal nudge. Unit-tested. |
 | `utils/archetype.py` | Pure descriptive-playstyle labels from a player's marks distribution: `derive_archetype` (class/weapon → "Knight Main", "Generalist", "Messer Specialist") and `derive_damage_style` (damage type via `config.WEAPON_DAMAGE_TYPES` → "Blunt specialist", "Chop-leaning", "Mixed damage"). Neutral tone. Shown on the registry card (`registry.archetype_label` / `damage_style_label`) and injected into the Butler on data questions (`registry.get_player_descriptors`). Unit-tested. |
-| `utils/rivalries.py` | Pure shared-lobby aggregation: nemesis/ally, `head_to_head` (powers `/versus`), Bitter-Rivals/Inseparable pair awards. Deliberately NO per-game win/loss (a scoreboard is a snapshot). Unit-tested. |
+| `utils/rivalries.py` | Pure shared-lobby aggregation via a time-window FINGERPRINT (same map + tight time + matching banner totals). NOW THE FALLBACK for legacy rows with no stored roster; the roster engine below is preferred. nemesis/ally, `head_to_head`, pair awards. NO per-game win/loss. Unit-tested. |
+| `utils/roster.py` | Pure ROSTER-based rivalry engine — the accurate successor. Every scoreboard lists everyone in the lobby; the vision parser now keeps those NAMES per side. Matches them to registered players (`normalize_name` + OCR-confusable-fold + fuzzy, unregistered = anonymous), then derives nemesis (enemy side) / ally (team side) / `head_to_head` / pair awards from ground-truth membership — one screenshot, no time window, and a rival shows up even if they never submit. Unit-tested. |
+| `utils/rivalry_service.py` | Async orchestration: prefers `utils.roster` when ANY submission has a stored roster (`has_roster_coverage`), else falls back to `utils.rivalries`. Fetches submissions + rosters + name→id map, runs the pure engines off the event loop. All rivalry callers (wrapped, statscape, `/versus`, Butler, superlatives) go through here — do NOT call the pure engines directly. |
 | `utils/wrapped.py` | Pure season-recap + superlatives aggregation (`/wrapped`, `/superlatives`). Unit-tested. |
 | `utils/validation.py` | Pure impossible-submission guard — rejects contradictory data (e.g. Agatha on Askandir) while passing incomplete data. Unit-tested. |
 | `utils/charts.py` | Themed matplotlib charts, rendered off the event loop via `render_async`: tilt ladder, weapon-lethality charge, `/explore` breakdown and trend lines, macro season graphs. |
@@ -145,6 +147,15 @@ Sheets era). Cogs index into them positionally. Key maps:
   a tag (`Uphill`/`Outmatched`/`Brutal`) on the feats column so the mark math and
   edits see it. `adjusted()` is a 0-baseline pass-through kept for option value.
   `/tilt_stats` and `/explore` surface the distribution.
+- Rivalries (nemesis/ally/`/versus`/pair awards) are ROSTER-based: the vision parser
+  reads every scoreboard row and now returns `team_names`/`enemy_names` alongside the
+  stat arrays it already extracted; the finalise path stores them in `submission_rosters`
+  (side='team'=ally / 'enemy'=opponent). `utils.roster` matches names to registered
+  players and derives exact rivalries; `utils.rivalry_service` picks it over the legacy
+  time-window `utils.rivalries` whenever a roster exists. Route new rivalry reads through
+  `rivalry_service`, never the pure engine, so the fallback stays automatic. Names are the
+  ONE field where OCR noise matters, so the matcher folds look-alikes (1/l, 0/O, 5/S) and
+  fuzzy-matches; an unregistered name stays anonymous and is skipped (never a false rival).
 - Peasant board: an isolated highscore board for the Coxwell / Bridgetown Agatha
   peasant stage. It has its OWN tables (`peasant_runs` + the `peasant_board`
   pointer) and its own submit flow, and is deliberately NOT a `leaderboard_data`

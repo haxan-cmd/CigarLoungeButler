@@ -1799,8 +1799,9 @@ class PersonalityCog(commands.Cog):
         nemesis_icon = nemesis_name = None
         if not _server:
             try:
-                from utils.rivalries import compute_rivalries, ident as _rivident
-                _riv = await asyncio.to_thread(compute_rivalries, did, subs)
+                from utils.rivalries import ident as _rivident
+                from utils import rivalry_service as _rivsvc
+                _riv = await _rivsvc.rivalries_for(did, subs)
                 _nem = _riv.get('nemesis') if _riv else None
                 if _nem and _nem.get('name'):
                     nemesis_name = str(_nem['name'])[:14]
@@ -3230,8 +3231,9 @@ class PersonalityCog(commands.Cog):
                                                     'best teammate', 'head to head', 'head-to-head',
                                                     'who beats me', 'who do i beat', 'who do i lose',
                                                     'play with', 'played with', 'play against', 'played against')):
-                            from utils.rivalries import compute_rivalries, rivalry_context
-                            _rv = compute_rivalries(discord_id_str, await _db.get_all_submissions())
+                            from utils.rivalries import rivalry_context
+                            from utils import rivalry_service as _rivsvc
+                            _rv = await _rivsvc.rivalries_for(discord_id_str)
                             _rvctx = rivalry_context(player_name, _rv)
                             if _rvctx:
                                 player_stats_ctx += "\n" + _rvctx

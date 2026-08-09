@@ -2180,10 +2180,10 @@ class RegistryCog(commands.Cog):
             await interaction.followup.send("Pick someone other than yourself.", ephemeral=True)
             return
         try:
-            from utils.rivalries import head_to_head
+            from utils import rivalry_service as _rivsvc
             subs = await _db.get_all_submissions()
             me_id, foe_id = str(interaction.user.id), str(player.id)
-            h = await asyncio.to_thread(head_to_head, me_id, foe_id, subs)
+            h = await _rivsvc.head_to_head_for(me_id, foe_id, subs)
             _me = interaction.user.display_name
             _foe = player.display_name
             if not h:
