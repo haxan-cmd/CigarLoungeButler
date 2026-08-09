@@ -3250,6 +3250,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="refresh", description="Refresh the leaderboard in this thread, or specify a name (mod only)")
     @app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
+    @app_commands.autocomplete(name=_rank_name_ac)
     async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -3741,6 +3742,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="fix_board_decoration", description="Re-frame a single (non-map) board with fresh top/bottom decoration (mod only).")
     @app_commands.describe(name="Exact leaderboard name, e.g. 'Messer' or 'Glaive'")
+    @app_commands.autocomplete(name=_rank_name_ac)
     async def fix_board_decoration(self, interaction: discord.Interaction, name: str):
         """Decoration spacer images are only ever posted once, by /setup_leaderboard,
         and Discord has no way to insert a message "before" an existing one — so a
@@ -3914,6 +3916,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="rebuild_boards", description="THE rebuild: recompute a board (or all) from submissions and repaint it correctly (mod only).")
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.",
                            full="Repaint EVERY board even if unchanged (slower). Use after a render-logic change.")
+    @app_commands.autocomplete(name=_rank_name_ac)
     async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None, full: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4503,6 +4506,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="delete_board", description="Delete a stray leaderboard board + its thread (mod only). Preview first.")
     @app_commands.describe(board="Exact board name to delete (e.g. 'Titles board')",
                            confirm="Leave false to PREVIEW. Set true to actually delete the board + thread.")
+    @app_commands.autocomplete(board=_rank_name_ac)
     async def delete_board_cmd(self, interaction: discord.Interaction, board: str, confirm: bool = False):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
