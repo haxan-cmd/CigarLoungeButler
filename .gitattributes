@@ -1,0 +1,15 @@
+# Normalize line endings so a Windows editor can't flip whole files to CRLF
+# and produce a giant no-op diff. Text files are stored with LF in the repo;
+# git checks them out with LF everywhere.
+* text=auto eol=lf
+
+# Treat these as binary — never touch their bytes or try to diff them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.gz   binary
+*.zip  binary
+*.db   binary
