@@ -1199,12 +1199,20 @@ async def _sort_board_entries(lb_name, entries):
     # leaderboard_data stores no timestamp, so map each row to its submission's
     # time via message_link (submissions col12 -> col0). Unknown time sorts last.
     _subs_all = await _db.get_all_submissions()
-    _link2ts = {}
+    _link2ts, _link2k = {}, {}
     for _s in _subs_all:
         if len(_s) > 12 and _s[12] and _s[12].strip():
-            _link2ts.setdefault(_s[12].strip(), (_s[0] or '').strip() or '9999')
+            _lk = _s[12].strip()
+            _link2ts.setdefault(_lk, (_s[0] or '').strip() or '9999')
+            try:
+                _link2k.setdefault(_lk, int(_s[8]))
+            except (ValueError, TypeError, IndexError):
+                pass
     def _tie(en):
-        return _link2ts.get((en.get('link') or '').strip()) or '9999'
+        # Equal score -> more KILLS ranks higher; if kills also tie, the OLDEST
+        # submission holds the rank. Missing kills sorts after real ones.
+        _lk = (en.get('link') or '').strip()
+        return (-_link2k.get(_lk, -1), _link2ts.get(_lk) or '9999')
     if lb_name == "Hybrid":
         # One row per player, best takedowns; ties by score.
         best = {}
@@ -1216,7 +1224,7 @@ async def _sort_board_entries(lb_name, entries):
                 _sc = 0
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
-        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0), _tie(e)))
+        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0),) + _tie(e))
     if lb_name == "Score":
         # One row per player (their best-scoring match), capped to the top 50 by
         # score. The board stores one row per player, but a big community makes the
@@ -1230,9 +1238,9 @@ async def _sort_board_entries(lb_name, entries):
                 _sc = 0
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
-        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0), _tie(e)))[:50]
+        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0),) + _tie(e))[:50]
     if lb_name != "Pacifist":
-        _sorted = sorted(entries, key=lambda x: (-int(x.get('score') or 0), _tie(x)))
+        _sorted = sorted(entries, key=lambda x: (-int(x.get('score') or 0),) + _tie(x))
         # Weapon / map / kills boards are top-10. Guard the DISPLAY so a bloated
         # board (legacy or backfill rows that skipped the insert-time eviction)
         # can never render more than 10. Feat boards are unlimited and pass through.
@@ -2201,8 +2209,10 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
     colour = _embed_colour(lb_name)
     _nlx = name_links or {}
     if is_map:
-        # Map boards render as TWO section embeds in one message: Takedowns (+ Warlord)
-        # and Kills (+ Kill Share). Warlord rides with Takedowns, Kill Share with Kills.
+        # Map board = ONE embed so Kills sits DIRECTLY under Takedowns, not a
+        # separate section embed that drifts to the bottom (the layout DC flagged).
+        # Order: Takedowns list, Kills list, then the two never-drop 5-game ratings
+        # (Kill Share, Warlord). Matches CLAUDE.md > map kills.
         _te = getattr(config, 'TITLE_EMOJIS', {})
         _wl_e = _te.get('Warlord', '\U0001f6e1\ufe0f')
         _ks_e = _te.get('Lethality', '\U0001f9ea')
@@ -2221,27 +2231,20 @@ def format_leaderboard_embeds(lb_name, entries, overflow=0, show_weapon=False, s
             return "\n".join(_out) if _out else "*Not enough games yet.*"
         _td_lines = [_mrow(_i, _e['player'], _e.get('did', ''), f"{score_prefix}{_e['score']}", _e.get('link'))
                      for _i, _e in enumerate(entries, 1)]
-        e_td = discord.Embed(title="Takedowns",
-                             description=("\n".join(_td_lines) or "*No entries yet.*")[:4096], colour=colour)
-        if warlord_rows:
-            e_td.add_field(name=f"{_wl_e} Warlord",
-                           value=_mrating(warlord_rows), inline=False)
-        # Both section embeds carry a footer + timestamp; without one, Discord renders
-        # the footer-less embed narrower than its sibling (the "shrinking" the user saw).
-        e_td.set_footer(text="Best 5-game average, a separate ranking that never drops \u00b7 Last updated")
-        e_td.timestamp = datetime.now(timezone.utc)
         _k_lines = [_mrow(_i, _kr[0], (_kr[3] if len(_kr) > 3 else ''), _kr[1], (_kr[2] if len(_kr) > 2 else ''))
                     for _i, _kr in enumerate((kills_rows or [])[:10], 1)]
-        e_k = discord.Embed(title="Kills",
-                            description=("\n".join(_k_lines) or "*No kills yet.*")[:4096], colour=colour)
-        if lethality_rows:   # for map boards lethality_rows carries Kill Share
-            e_k.add_field(name=f"{_ks_e} Kill Share",
-                          value=_mrating(lethality_rows), inline=False)
-        if related_field:    # links to the other map threads (one entry per map)
-            e_k.add_field(name=related_field[0], value=related_field[1][:1024], inline=False)
-        e_k.set_footer(text="Best 5-game average, a separate ranking that never drops \u00b7 Last updated")
-        e_k.timestamp = datetime.now(timezone.utc)
-        return [e_td, e_k]
+        _desc = "**Takedowns**\n" + ("\n".join(_td_lines) or "*No entries yet.*")
+        _desc += "\n\n**Kills**\n" + ("\n".join(_k_lines) or "*No kills yet.*")
+        e_map = discord.Embed(description=_desc[:4096], colour=colour)
+        if lethality_rows:   # map boards: lethality_rows carries Kill Share
+            e_map.add_field(name=f"{_ks_e} Kill Share", value=_mrating(lethality_rows), inline=False)
+        if warlord_rows:
+            e_map.add_field(name=f"{_wl_e} Warlord", value=_mrating(warlord_rows), inline=False)
+        if related_field:
+            e_map.add_field(name=related_field[0], value=related_field[1][:1024], inline=False)
+        e_map.set_footer(text="Kill Share & Warlord: best 5-game average, never drops \u00b7 Last updated")
+        e_map.timestamp = datetime.now(timezone.utc)
+        return [e_map]
     if not entries:
         e = discord.Embed(title=_lb_title(lb_name, show_title), description="*No entries yet.*", colour=colour)
         e.set_footer(text="Last updated")
