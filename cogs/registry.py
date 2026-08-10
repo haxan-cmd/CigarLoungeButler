@@ -129,10 +129,18 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
     # (avoids double-counting shared weapons like Greatsword across Knight/Vanguard)
     try:
         ld_rows = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
+        from utils.boards import non_weapon_feat_boards as _nwfb
+        _NON_WEAPON = _nwfb()
         for row in ld_rows:
             if len(row) < 6:
                 continue
             if row[2].strip() != discord_id_str:
+                continue
+            # Non-weapon feat boards (Pacifist, Score, TUFF, Triple, Flawless, Hybrid,
+            # Healing) also store the weapon used, but a placement there is NOT weapon
+            # skill and must not credit a weapon mark. A pacifist run on Pickaxe was
+            # wrongly adding a Pickaxe mark (Meowssiah, 2026-08-10).
+            if (row[0] or '').strip() in _NON_WEAPON:
                 continue
             weapon = config.canonical_weapon(row[5].strip()) if len(row) > 5 else ''
             if not weapon or weapon in ('Other', 'Multiple Weapons', 'Hybrid'):
