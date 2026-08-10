@@ -137,13 +137,23 @@ async def run_healthcheck():
         # Condense IGN variants: resolve every run to the player's canonical registry
         # name (by discord_id, or by IGN for legacy blank-id runs), so name changes
         # and "Name, Title" variants collapse into one entry across the whole Lab.
-        _did2canon, _name2did = {}, {}
+        _did2canon, _name2did, _pmarks = {}, {}, []
         try:
             for _pr in await get_all_players():
-                if _pr and len(_pr) > 1:
-                    _d, _n = (_pr[0] or '').strip(), (_pr[1] or '').strip()
-                    if _d and _n:
-                        _did2canon[_d] = _n
+                if not _pr or len(_pr) < 2:
+                    continue
+                _d, _n = (_pr[0] or '').strip(), (_pr[1] or '').strip()
+                if _d and _n:
+                    _did2canon[_d] = _n
+                # players.total_marks (index 3) — the stored all-time career marks tally,
+                # for the Lab's Career-marks ranking. Keyed by id + name so the client
+                # can match either a did-backed run or a name-keyed legacy one.
+                try:
+                    _mk = int(_pr[3]) if len(_pr) > 3 and _pr[3] not in (None, '') else 0
+                except (ValueError, TypeError):
+                    _mk = 0
+                if _mk > 0 and (_d or _n):
+                    _pmarks.append([_d, _n, _mk])
             _name2did = await get_name_to_id_map()
         except Exception as _ce:
             print(f"[LAB] canonical-name map failed: {_ce}")
@@ -158,7 +168,8 @@ async def run_healthcheck():
                 if _d:
                     _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
         data = [[_rec.get(f) for f in fields] for _rec in recs]
-        body = json.dumps({"fields": fields, "rows": data}, default=str, ensure_ascii=False)
+        body = json.dumps({"fields": fields, "rows": data, "player_marks": _pmarks},
+                          default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
 
