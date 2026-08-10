@@ -2810,6 +2810,21 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _all_td = _team_td + _enemy_td
     _all_k  = _team_k  + _enemy_k
 
+    # Assign the team/enemy banner totals from the CONFIRMED faction, not the model's
+    # own-vs-other guess: vision confuses left/right with own-team when the submitter
+    # is on the right, which swapped the totals and flipped a dominant lobby into
+    # 'Outmatched' (and skewed Kill Share). faction_kills maps each banner label to its
+    # total; the submitter's faction picks which is theirs. Only when it cleanly holds
+    # the two match factions; else keep the model's team_total_kills/enemy_total_kills.
+    _fk = vd.get('faction_kills') or {}
+    if isinstance(_fk, dict) and faction:
+        _fkn = {str(_k).strip().lower(): _v for _k, _v in _fk.items()
+                if isinstance(_v, int) and _v > 0}
+        _mine = _fkn.get(str(faction).strip().lower())
+        _others = [_v for _k, _v in _fkn.items() if _k != str(faction).strip().lower()]
+        if _mine is not None and len(_others) == 1:
+            vd['team_total_kills'] = _mine
+            vd['enemy_total_kills'] = _others[0]
     # Team total kills = denominator for Warlord/Kill Share. Prefer the faction's
     # TOTAL kill count read off the top of the scoreboard (robust, and it includes
     # players who left mid-match); fall back to summing the visible teammate rows.

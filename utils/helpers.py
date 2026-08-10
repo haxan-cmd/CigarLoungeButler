@@ -146,7 +146,7 @@ Extract ONLY from that highlighted row:
 - weapon (exact weapon name if shown - may appear as an icon tooltip or text; null if not visible)
 - subclass (class name e.g. Ambusher, Officer, Devastator, Poleman, Man-at-Arms, Longbowman; null if not visible)
 - map (full map name shown at the TOP of the screen above the scoreboard, e.g. "The Siege of Rudhelm", "The Battle of Darkforest" — NOT from the leaderboard rows)
-NOTE: The two large numbers at the TOP of the screen, one on each side (one per faction, e.g. "AGATHA 531" on the left and "MASON 678" on the right), are each team's TOTAL KILL count for the whole match. Read them into team_total_kills (the submitting player's OWN faction) and enemy_total_kills (the OTHER faction). These are team totals, NOT individual stats — never use them for the highlighted player's kills or takedowns.
+NOTE: The two large numbers at the TOP of the screen, one on each side (one per faction, e.g. "AGATHA 531" on the left and "MASON 678" on the right), are each team's TOTAL KILL count for the whole match. Read them into team_total_kills (the submitting player's OWN faction) and enemy_total_kills (the OTHER faction). These are team totals, NOT individual stats — never use them for the highlighted player's kills or takedowns. ALSO read faction_kills: an object mapping EACH faction's banner LABEL to its total kill number exactly as printed, e.g. {"Agatha": 531, "Mason": 678}. Read BOTH banner labels and BOTH numbers; the bot uses the highlighted player's faction to decide team vs enemy, so left/right can't be gotten wrong.
 - faction: the highlighted player's team. Determine it from the large faction banner at the TOP of the screen (the same "AGATHA .../ MASON ..." labels noted above — one faction name on the LEFT side, the other on the RIGHT side). The scoreboard is split into two side-by-side halves; work out which half (left or right) the highlighted row sits in, then read the faction from the banner label directly ABOVE that half. That banner name is the source of truth — do NOT guess the faction from row colours or icons. (Agatha, Mason, or Tenosia.)
 - takedowns (integer from T column of highlighted row)
 - kills (integer from K column of highlighted row)
@@ -189,7 +189,7 @@ Your response must be ONLY the JSON object below - no explanation, no preamble, 
 
 Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"team_names":[],"enemy_takedowns":[],"enemy_kills":[],"enemy_names":[],"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"team_names":[],"enemy_takedowns":[],"enemy_kills":[],"enemy_names":[],"faction_kills":{},"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
 _HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
@@ -243,7 +243,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         'takedowns': None, 'kills': None, 'deaths': None, 'score': None,
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
         'team_names': [], 'enemy_names': [],
-        'team_total_kills': None, 'enemy_total_kills': None, 'match_result': None,
+        'faction_kills': {}, 'team_total_kills': None, 'enemy_total_kills': None, 'match_result': None,
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _gemini_client:
@@ -574,6 +574,17 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             _v = data.get(_nf)
             data[_nf] = ([str(x).strip() for x in _v if str(x).strip()]
                          if isinstance(_v, list) else [])
+        _fk = data.get('faction_kills')
+        if isinstance(_fk, dict):
+            _fkc = {}
+            for _fkk, _fkv in _fk.items():
+                try:
+                    _fkc[str(_fkk).strip()] = int(_fkv)
+                except (ValueError, TypeError):
+                    pass
+            data['faction_kills'] = _fkc
+        else:
+            data['faction_kills'] = {}
         return {**empty, **data}
     except Exception as e:
         err = str(e)
