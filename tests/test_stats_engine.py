@@ -64,6 +64,15 @@ def test_warlord_rejects_impossible_kill_share():
     assert warl(row(td=100, k=50, tkshare=45.0)) is not None
 
 
+def test_td_lead_over_teammate():
+    lead = STAT_EXTRACTORS['td_lead'][0]
+    r = row(td=140); r[22] = '110'          # best teammate had 110 TD
+    assert lead(r) == 30                     # you led by 30
+    r2 = row(td=90); r2[22] = '120'
+    assert lead(r2) == -30                   # a teammate out-took-down you
+    assert lead(row(td=100)) is None         # no second-place TD stored -> None
+
+
 # ── matrix ─────────────────────────────────────────────────────────────────
 def test_matrix_is_symmetric_with_unit_diagonal():
     # kills tracks takedowns; deaths anti-tracks K/D.

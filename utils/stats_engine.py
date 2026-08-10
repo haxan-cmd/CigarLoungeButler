@@ -113,6 +113,14 @@ def _gap(s):
     return (a - b) if (a is not None and b is not None) else None
 
 
+def _lead2(s):
+    # Takedowns minus the best TEAMMATE's takedowns (col 22 = second_place_td, the
+    # value TUFF uses). Positive = you topped your side's scoreboard; the margin by
+    # which you out-took-down the next-best player on your team. Can be negative.
+    td, tp = _i(s, 7), _i(s, 22)
+    return (td - tp) if (td is not None and tp is not None) else None
+
+
 # key -> (extractor, human label). Shared by scatter, matrix, and compare.
 STAT_EXTRACTORS = {
     'kills':          (_kills,   'Kills'),
@@ -128,6 +136,7 @@ STAT_EXTRACTORS = {
     'score':          (_score,   'Score'),
     'lobby_kills':    (_lobbyk,  'Total lobby kills'),
     'tilt':           (_gap,     'Lobby kill gap'),
+    'td_lead':        (_lead2,   'TD lead over teammate'),
 }
 
 # A compact, readable default set for the matrix (7×7 stays legible).
