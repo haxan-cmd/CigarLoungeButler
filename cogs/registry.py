@@ -788,6 +788,15 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None, 
     # Build board -> all scores, and find player's score on each board
     board_scores = {}   # board_name -> sorted list of scores (desc)
     player_scores = {}  # board_name -> player's score
+    # A board row is credited to this player by discord_id OR — for legacy/renamed
+    # rows that stored a BLANK id under a name — by one of their known names. Without
+    # this, a #1 logged before they registered (or under an old IGN) never shows on
+    # the card (the '#1 rapier kills missing from my profile' bug).
+    try:
+        _nmap = (cached_data or {}).get('name_to_id') or await _db.get_name_to_id_map()
+    except Exception:
+        _nmap = {}
+    _my_names = {nm for nm, d in _nmap.items() if str(d) == discord_id_str}
 
     for row in all_rows:
         if len(row) < 4 or not row[3]:
@@ -802,8 +811,11 @@ async def get_best_placements_for_player(discord_id, top_n=5, cached_data=None, 
             score = int(row[3])
         except ValueError:
             continue
-        board_scores.setdefault(lb_name, []).append((score, row[2].strip()))
-        if row[2].strip() == discord_id_str:
+        _rid = row[2].strip()
+        _rname = row[1].strip().lower() if len(row) > 1 and row[1] else ''
+        board_scores.setdefault(lb_name, []).append((score, _rid))
+        _mine = (_rid == discord_id_str) or (_rid == '' and _rname in _my_names)
+        if _mine:
             if lb_name not in player_scores or score > player_scores[lb_name]:
                 player_scores[lb_name] = score
 
