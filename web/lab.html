@@ -96,6 +96,7 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="trends">📈 Trends</button>
     <button class="tab" data-v="galaxy">🌌 Galaxy</button>
   <button class="tab" data-v="activity">🕒 Activity</button>
+  <button class="tab" data-v="ranking">🏅 Rankings</button>
   </div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
@@ -125,6 +126,7 @@ const state={
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   activity:{tz:0},
+  ranking:{stat:'tilt',min:5,order:'desc'},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -653,6 +655,61 @@ function renderActivity(){
   while(holder.firstChild) view.appendChild(holder.firstChild);
 }
 
+// ---- rankings (per-player average of any stat; who has the easiest/hardest lobbies etc.) ----
+function renderRanking(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(statSelect('Stat',state.ranking.stat,v=>{state.ranking.stat=v;renderRanking();}));
+  ctrl.appendChild(pickSelect('Min runs',[['3','3+'],['5','5+'],['10','10+'],['20','20+']],String(state.ranking.min),v=>{state.ranking.min=+v;renderRanking();}));
+  ctrl.appendChild(pickSelect('Order',[['desc','Highest first'],['asc','Lowest first']],state.ranking.order,v=>{state.ranking.order=v;renderRanking();}));
+  view.appendChild(ctrl);
+  const stat=state.ranking.stat, isTilt=stat==='tilt';
+  const agg={};
+  for(const r of rows){
+    const nm=r[IDX.name]||''; if(!nm) continue;
+    const v=val(r,stat); if(v==null) continue;
+    const key=(r[IDX.did]||'')||('name:'+nm.toLowerCase());
+    const a=agg[key]||(agg[key]={name:nm,sum:0,n:0}); a.name=nm; a.sum+=v; a.n++;
+  }
+  let players=Object.values(agg).filter(a=>a.n>=state.ranking.min).map(a=>({name:a.name,avg:a.sum/a.n,n:a.n}));
+  const card=document.createElement('div'); card.className='card';
+  let sub=LABELS[stat]+' \u00b7 per-player average \u00b7 '+players.length+' players (min '+state.ranking.min+' runs)';
+  if(isTilt) sub+=' \u00b7 higher = easier lobbies (your team outkilled), lower/negative = harder (outmatched)';
+  card.innerHTML='<h3>Player ranking \u00b7 '+esc(LABELS[stat])+'</h3><div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">'+esc(sub)+'</div>';
+  if(players.length<1){card.innerHTML+='<div class="loading">No players at this run threshold \u2014 lower Min runs or widen filters.</div>';view.appendChild(card);return;}
+  players.sort((x,y)=> state.ranking.order==='asc' ? x.avg-y.avg : y.avg-x.avg);
+  players=players.slice(0,50);
+  const vals=players.map(p=>p.avg);
+  const lo=Math.min(...vals,0), hi=Math.max(...vals,0);
+  const span=Math.max(Math.abs(lo),Math.abs(hi))||1;
+  const diverging=lo<0;
+  players.forEach((p,i)=>{
+    const pos=p.avg>=0;
+    const col=isTilt ? (pos?'#4fb3a1':'#d85a30') : '#e0a84c';
+    let bar;
+    if(diverging){
+      const pct=Math.round(Math.abs(p.avg)/span*100);
+      bar='<span style="flex:1;display:flex;align-items:center;height:14px">'
+        +'<span style="width:50%;display:flex;justify-content:flex-end;overflow:hidden">'+(pos?'':'<span style="height:100%;width:'+pct+'%;background:'+col+';border-radius:4px 0 0 4px"></span>')+'</span>'
+        +'<span style="width:1px;height:14px;background:#555;flex:none"></span>'
+        +'<span style="width:50%;overflow:hidden">'+(pos?'<span style="display:block;height:100%;width:'+pct+'%;background:'+col+';border-radius:0 4px 4px 0"></span>':'')+'</span>'
+        +'</span>';
+    } else {
+      const w=Math.round(p.avg/span*100);
+      bar='<span style="flex:1;background:#2a2c33;border-radius:5px;overflow:hidden;height:14px"><span style="display:block;height:100%;width:'+w+'%;background:'+col+'"></span></span>';
+    }
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
+    row.innerHTML='<span style="width:22px;text-align:right;color:#8b8f9a;font-size:12px;flex:none">'+(i+1)+'.</span>'
+      +'<span style="width:120px;color:#c9ccd3;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'
+      + bar
+      +'<span style="width:56px;text-align:right;color:'+col+';font-size:12px;flex:none">'+fmt(p.avg)+'</span>';
+    card.appendChild(row);
+  });
+  view.appendChild(card);
+}
+
 // ---- view switching ----
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
@@ -666,6 +723,7 @@ function render(){
   else if(state.view==='compare')renderCompare();
   else if(state.view==='trends')renderTrends();
   else if(state.view==='activity')renderActivity();
+  else if(state.view==='ranking')renderRanking();
   else renderGalaxy();
 }
 
