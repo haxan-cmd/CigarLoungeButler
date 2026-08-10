@@ -124,7 +124,7 @@ const state={
   group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3, compareScale:'auto',
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
-  activity:{tz:0},
+  activity:{tz:0,gap:60},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -620,6 +620,7 @@ function renderActivity(){
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
   ctrl.appendChild(pickSelect('Time zone',[['0','UTC'],['-4','UTC-4 (ET)'],['-5','UTC-5 (ET)'],['-6','UTC-6 (CT)'],['-7','UTC-7 (MT)'],['-8','UTC-8 (PT)'],['1','UTC+1 (CET)'],['10','UTC+10 (AEST)']],String(state.activity.tz),v=>{state.activity.tz=+v;renderActivity();}));
+  ctrl.appendChild(pickSelect('Session gap',[['30','30 min'],['45','45 min'],['60','60 min'],['90','90 min'],['120','120 min']],String(state.activity.gap),v=>{state.activity.gap=+v;renderActivity();}));
   view.appendChild(ctrl);
   if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
   const tz=state.activity.tz;
@@ -649,6 +650,33 @@ function renderActivity(){
   html+=_barBlock('Runs per player · one-and-done vs grinders',
         players+' players · '+totalRuns+' runs · '+odPct+'% one-and-done · median '+median+' runs/player',
         bItems,'#4fb3a1');
+  // ---- sessions: sittings inferred from gaps between a player's submission times ----
+  const gapMs=state.activity.gap*60000;
+  const byP={};
+  for(const r of rows){
+    const nm=r[IDX.name]||''; const ts=r[IDX.ts]; if(!nm||!ts) continue;
+    const d=new Date(String(ts).replace(' ','T')+'Z'); if(isNaN(d)) continue;
+    const k=(r[IDX.did]||'')||('name:'+nm.toLowerCase());
+    (byP[k]||(byP[k]=[])).push(d.getTime());
+  }
+  const sizes=[], lens=[];
+  for(const k in byP){
+    const t=byP[k].sort((a,b)=>a-b); let start=0;
+    for(let i=1;i<=t.length;i++){
+      if(i===t.length || t[i]-t[i-1]>gapMs){ sizes.push(i-start); lens.push((t[i-1]-t[start])/60000); start=i; }
+    }
+  }
+  const nSess=sizes.length;
+  const logoff=sizes.filter(x=>x===1).length;
+  const loPct=nSess?Math.round(logoff/nSess*100):0;
+  const avgGames=nSess?(sizes.reduce((a,b)=>a+b,0)/nSess):0;
+  const sitLens=lens.filter((l,i)=>sizes[i]>=2).sort((a,b)=>a-b);
+  const medLen=sitLens.length?Math.round(sitLens[Math.floor(sitLens.length/2)]):0;
+  const sBk=[['1',x=>x===1],['2',x=>x===2],['3–4',x=>x>=3&&x<=4],['5–7',x=>x>=5&&x<=7],['8+',x=>x>=8]];
+  const sItems=sBk.map(b=>({label:b[0],n:sizes.filter(b[1]).length}));
+  html+=_barBlock('Games per session · '+state.activity.gap+'-min gap starts a new sitting',
+        nSess+' sessions · '+loPct+'% one-and-logoff · avg '+avgGames.toFixed(1)+' submissions/session · median sitting '+medLen+' min · counts SUBMISSIONS, not games',
+        sItems,'#7a89c2');
   const holder=document.createElement('div'); holder.innerHTML=html;
   while(holder.firstChild) view.appendChild(holder.firstChild);
 }
