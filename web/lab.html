@@ -117,9 +117,6 @@ const DEFAULT_MATRIX=['kills','td','deaths','kd','kill_share','warlord','tilt'];
 const qp=new URLSearchParams(location.search);
 const TOKEN=qp.get('t')||'';
 let FIELDS=[], IDX={}, DATA=[];
-let ROTATION=[], ROTIDX={};
-function _rnorm(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
-function rotIdx(map){const k=_rnorm(map); return (k in ROTIDX)?ROTIDX[k]:null;}
 let matrixStats=DEFAULT_MATRIX.slice();
 const state={
   view:qp.get('view')||'matrix',
@@ -127,7 +124,7 @@ const state={
   group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3, compareScale:'auto',
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
-  activity:{tz:0,gap:60,minspace:8},
+  activity:{tz:0},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -623,8 +620,6 @@ function renderActivity(){
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
   ctrl.appendChild(pickSelect('Time zone',[['0','UTC'],['-4','UTC-4 (ET)'],['-5','UTC-5 (ET)'],['-6','UTC-6 (CT)'],['-7','UTC-7 (MT)'],['-8','UTC-8 (PT)'],['1','UTC+1 (CET)'],['10','UTC+10 (AEST)']],String(state.activity.tz),v=>{state.activity.tz=+v;renderActivity();}));
-  ctrl.appendChild(pickSelect('Session gap',[['30','30 min'],['45','45 min'],['60','60 min'],['90','90 min'],['120','120 min']],String(state.activity.gap),v=>{state.activity.gap=+v;renderActivity();}));
-  ctrl.appendChild(pickSelect('Min game spacing',[['0','off'],['5','5 min'],['8','8 min'],['12','12 min'],['15','15 min']],String(state.activity.minspace),v=>{state.activity.minspace=+v;renderActivity();}));
   view.appendChild(ctrl);
   if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
   const tz=state.activity.tz;
@@ -654,48 +649,6 @@ function renderActivity(){
   html+=_barBlock('Runs per player · one-and-done vs grinders',
         players+' players · '+totalRuns+' runs · '+odPct+'% one-and-done · median '+median+' runs/player',
         bItems,'#4fb3a1');
-  // ---- sessions: sittings inferred from gaps between a player's submission times ----
-  const gapMs=state.activity.gap*60000;
-  const N=ROTATION.length||13;
-  const maxPerPair=Math.max(1,Math.round(state.activity.gap/15)); // plausible games between two in-session uploads
-  const minSpaceMs=state.activity.minspace*60000;
-  const byP={};
-  for(const r of rows){
-    const nm=r[IDX.name]||''; const ts=r[IDX.ts]; if(!nm||!ts) continue;
-    const d=new Date(String(ts).replace(' ','T')+'Z'); if(isNaN(d)) continue;
-    const k=(r[IDX.did]||'')||('name:'+nm.toLowerCase());
-    (byP[k]||(byP[k]=[])).push({t:d.getTime(),mi:rotIdx(r[IDX.map]||'')});
-  }
-  const sizes=[], lens=[]; let rawN=0, keptN=0;   // sizes = rotation-estimated GAMES played per sitting
-  for(const k in byP){
-    let ev=byP[k].sort((a,b)=>a.t-b.t); rawN+=ev.length;
-    if(minSpaceMs>0){ const kp=[]; let last=-1e15; for(const e of ev){ if(e.t-last>=minSpaceMs){ kp.push(e); last=e.t; } } ev=kp; }
-    keptN+=ev.length; let start=0;
-    for(let i=1;i<=ev.length;i++){
-      if(i===ev.length || ev[i].t-ev[i-1].t>gapMs){
-        let games=1;
-        for(let j=start+1;j<i;j++){
-          const a=ev[j-1].mi, b=ev[j].mi;
-          if(a==null||b==null){ games+=1; continue; }        // unknown map -> at least 1 game
-          const dist=((b-a)%N+N)%N;                           // forward steps through the rotation
-          if(dist===0) continue;                              // same map again (dup/edit) -> +0
-          games += (dist<=maxPerPair ? dist : 1);             // implausibly far for the elapsed time -> count 1
-        }
-        sizes.push(games); lens.push((ev[i-1].t-ev[start].t)/60000); start=i;
-      }
-    }
-  }
-  const nSess=sizes.length;
-  const logoff=sizes.filter(x=>x===1).length;
-  const loPct=nSess?Math.round(logoff/nSess*100):0;
-  const avgGames=nSess?(sizes.reduce((a,b)=>a+b,0)/nSess):0;
-  const sitLens=lens.filter((l,i)=>sizes[i]>=2).sort((a,b)=>a-b);
-  const medLen=sitLens.length?Math.round(sitLens[Math.floor(sitLens.length/2)]):0;
-  const sBk=[['1',x=>x===1],['2',x=>x===2],['3–4',x=>x>=3&&x<=4],['5–7',x=>x>=5&&x<=7],['8+',x=>x>=8]];
-  const sItems=sBk.map(b=>({label:b[0],n:sizes.filter(b[1]).length}));
-  html+=_barBlock('Games in a row per sitting · rotation-estimated',
-        nSess+' sittings · '+loPct+'% play one game and log off · avg '+avgGames.toFixed(1)+' games/sitting · median sitting '+medLen+' min · '+state.activity.gap+'-min gap = new sitting'+(minSpaceMs>0?(' · '+(rawN-keptN)+' batch uploads ignored'):''),
-        sItems,'#7a89c2');
   const holder=document.createElement('div'); holder.innerHTML=html;
   while(holder.firstChild) view.appendChild(holder.firstChild);
 }
@@ -723,7 +676,6 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
   .then(d=>{
     FIELDS=d.fields; FIELDS.forEach((f,i)=>IDX[f]=i);
     DATA=d.rows;
-    ROTATION=d.rotation||[]; ROTIDX={}; ROTATION.forEach((m,i)=>ROTIDX[_rnorm(m)]=i);
     buildFilters();
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
     render();

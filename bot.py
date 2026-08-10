@@ -149,9 +149,7 @@ async def run_healthcheck():
                 if _d:
                     _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
         data = [[_rec.get(f) for f in fields] for _rec in recs]
-        body = json.dumps({"fields": fields, "rows": data,
-                           "rotation": list(getattr(config, "MAP_ROTATION", []))},
-                          default=str, ensure_ascii=False)
+        body = json.dumps({"fields": fields, "rows": data}, default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
 
