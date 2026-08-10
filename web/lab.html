@@ -95,6 +95,7 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="compare">⚔️ Compare</button>
     <button class="tab" data-v="trends">📈 Trends</button>
     <button class="tab" data-v="galaxy">🌌 Galaxy</button>
+  <button class="tab" data-v="activity">🕒 Activity</button>
   </div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
@@ -123,6 +124,7 @@ const state={
   group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3, compareScale:'auto',
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
+  activity:{tz:0},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -599,6 +601,58 @@ function pickSelect(label,opts,cur,cb){
   sel.value=cur; sel.addEventListener('change',()=>cb(sel.value)); wrap.appendChild(sel); return wrap;
 }
 
+// ---- activity (submission timing + cadence) ----
+function _barBlock(title,sub,items,color){
+  const max=Math.max(1,...items.map(i=>i.n));
+  let h='<div class="card"><h3>'+esc(title)+'</h3>';
+  if(sub)h+='<div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">'+esc(sub)+'</div>';
+  for(const it of items){
+    const pct=Math.round(it.n/max*100);
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:3px 0">'
+      +'<span style="width:60px;text-align:right;color:#c9ccd3;font-size:12px;flex:none">'+esc(it.label)+'</span>'
+      +'<span style="flex:1;background:#2a2c33;border-radius:5px;overflow:hidden;height:16px"><span style="display:block;height:100%;width:'+pct+'%;background:'+color+'"></span></span>'
+      +'<span style="width:46px;color:#8b8f9a;font-size:12px;flex:none">'+it.n+'</span></div>';
+  }
+  return h+'</div>';
+}
+function renderActivity(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(pickSelect('Time zone',[['0','UTC'],['-4','UTC-4 (ET)'],['-5','UTC-5 (ET)'],['-6','UTC-6 (CT)'],['-7','UTC-7 (MT)'],['-8','UTC-8 (PT)'],['1','UTC+1 (CET)'],['10','UTC+10 (AEST)']],String(state.activity.tz),v=>{state.activity.tz=+v;renderActivity();}));
+  view.appendChild(ctrl);
+  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
+  const tz=state.activity.tz;
+  const hours=new Array(24).fill(0), wdays=new Array(7).fill(0);
+  const perPlayer={}; let dated=0;
+  for(const r of rows){
+    const name=r[IDX.name]||''; if(name){const key=(r[IDX.did]||'')||('name:'+name.toLowerCase()); perPlayer[key]=(perPlayer[key]||0)+1;}
+    const ts=r[IDX.ts]; if(!ts) continue;
+    const d=new Date(String(ts).replace(' ','T')+'Z'); if(isNaN(d)) continue;
+    d.setUTCHours(d.getUTCHours()+tz); dated++;
+    hours[d.getUTCHours()]++; wdays[(d.getUTCDay()+6)%7]++;
+  }
+  const hourItems=hours.map((n,h)=>({label:(h<10?'0'+h:h)+':00',n}));
+  const WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const wdItems=wdays.map((n,i)=>({label:WD[i],n}));
+  const counts=Object.values(perPlayer);
+  const players=counts.length, totalRuns=counts.reduce((a,b)=>a+b,0);
+  const oneDone=counts.filter(c=>c===1).length;
+  const sorted=[...counts].sort((a,b)=>a-b); const median=players?sorted[Math.floor(players/2)]:0;
+  const odPct=players?Math.round(oneDone/players*100):0;
+  const buckets=[['1',c=>c===1],['2',c=>c===2],['3–5',c=>c>=3&&c<=5],['6–10',c=>c>=6&&c<=10],['11–20',c=>c>=11&&c<=20],['21+',c=>c>=21]];
+  const bItems=buckets.map(b=>({label:b[0],n:counts.filter(b[1]).length}));
+  const tzlab=tz===0?'UTC':('UTC'+(tz>0?'+':'')+tz);
+  let html='';
+  html+=_barBlock('When runs are submitted · by hour','Hour of day ('+tzlab+') · '+dated+' dated runs',hourItems,'#e0a84c');
+  html+=_barBlock('By day of week','',wdItems,'#5b8dd9');
+  html+=_barBlock('Runs per player · one-and-done vs grinders',
+        players+' players · '+totalRuns+' runs · '+odPct+'% one-and-done · median '+median+' runs/player',
+        bItems,'#4fb3a1');
+  const holder=document.createElement('div'); holder.innerHTML=html;
+  while(holder.firstChild) view.appendChild(holder.firstChild);
+}
+
 // ---- view switching ----
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
@@ -611,6 +665,7 @@ function render(){
   else if(state.view==='scatter')renderScatter();
   else if(state.view==='compare')renderCompare();
   else if(state.view==='trends')renderTrends();
+  else if(state.view==='activity')renderActivity();
   else renderGalaxy();
 }
 
