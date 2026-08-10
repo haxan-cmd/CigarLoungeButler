@@ -52,6 +52,18 @@ def test_dominance_is_harmonic_mean_of_killshare_and_warlord():
     assert dom(row(td=0, k=50, tkshare=45.0)) is None
 
 
+def test_warlord_rejects_impossible_kill_share():
+    # A cropped scorecard makes vision misread the team total tiny, so the stored
+    # kill share exceeds 100% and warlord would explode (a real 368% outlier squished
+    # the Lab graph). Warlord (and dominance, which needs it) must reject those.
+    warl = STAT_EXTRACTORS['warlord'][0]
+    dom = STAT_EXTRACTORS['dominance'][0]
+    assert warl(row(td=103, k=48, tkshare=171.5)) is None
+    assert dom(row(td=103, k=48, tkshare=171.5)) is None
+    # a valid share (<=100%) still computes
+    assert warl(row(td=100, k=50, tkshare=45.0)) is not None
+
+
 # ── matrix ─────────────────────────────────────────────────────────────────
 def test_matrix_is_symmetric_with_unit_diagonal():
     # kills tracks takedowns; deaths anti-tracks K/D.

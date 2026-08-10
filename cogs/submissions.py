@@ -2948,7 +2948,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _team_td_share = round(takedowns / total_team_td * 100, 1)
     if _all_k:
         _total_lobby_kills = (kills or 0) + sum(_all_k)
-    if total_team_kills and kills:
+    # Your kills are PART of the team total, so team_total >= your kills always holds.
+    # A smaller team total means vision misread it (cropped card) -> the share would be
+    # >100% and warlord would explode; leave it None rather than store garbage.
+    if total_team_kills and kills and total_team_kills >= kills:
         _team_kill_share = round(kills / total_team_kills * 100, 1)
 
     # TUFF: gap between player kills and best teammate's takedowns (kills - best_teammate_TD).

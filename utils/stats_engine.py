@@ -74,7 +74,10 @@ def _leth(s):
 
 
 def _warl(s):
-    td, k, t = _i(s, 7), _i(s, 8), _fl(s, 20)
+    # Use the VALIDATED kill share (0<..<=100). A cropped card makes vision misread
+    # the team total tiny, so the stored share can exceed 100% and warlord explodes
+    # (a real 368% outlier squished the Lab graph). Reject those instead of plotting.
+    td, k, t = _i(s, 7), _i(s, 8), _kshare(s)
     return (td * t / k) if (td and k and t) else None
 
 
