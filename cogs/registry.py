@@ -640,6 +640,12 @@ async def get_feats_for_player(discord_id, cached_data=None):
             link_to_best[link] = (emojis, link)
     feats = list(link_to_best.values()) + no_link_feats
 
+    try:
+        _pex = await _db.get_peasant_extraction_count(discord_id_str)
+        if _pex:
+            board_counts['Peasant Extractions'] = _pex
+    except Exception:
+        pass
     return named_feats, feats, board_counts, flawless_pb_link
 
 # NOTE: _SUBCLASS_PRIMARIES is defined once, at module top (line ~27), as an alias
@@ -1007,7 +1013,8 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
     first one found in submission order."""
     import re
     lines = []
-    if not (named_feats or feat_submissions or (board_counts or {}).get('TUFF')):
+    if not (named_feats or feat_submissions or (board_counts or {}).get('TUFF')
+            or (board_counts or {}).get('Peasant Extractions')):
         return lines
     if 'hhanded' in named_feats:
         lines.append(f"• <:hhanded:1430199468246044772> The Hundred-Handed")
@@ -1093,6 +1100,7 @@ def _feats_of_legend_lines(named_feats, feat_submissions, board_counts, flawless
         ('100 Kills',     FEAT_EMOJIS['100 Kills']),
         ('Triple',        FEAT_EMOJIS['Triple']),
         ('TUFF',          "<a:TUFF2:1520779243879927898>"),
+        ('Peasant Extractions', getattr(config, 'PEASANT_EMOJI', '👨')),
     ]
     for _fb_label, _fb_emoji in _fallback_feats:
         if _fb_label in _rendered_labels:

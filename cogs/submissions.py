@@ -1121,10 +1121,12 @@ class ClassSelect(discord.ui.Select):
                                   "Hybrid", "Hybrid", vd)
             return
         if selected_class == "Peasant Run":
-            # Own isolated path: restricted map, no weapon, no marks. See _finalise_peasant.
-            view = PeasantMapSelectView(self.original_message, self.prompt_msg)
+            # Own isolated path: pick the KIND first (survived-to-end Extraction vs
+            # died-in-one-life Performance), then map, then stats. See _finalise_peasant.
+            view = PeasantKindSelectView(self.original_message, self.prompt_msg)
             await interaction.response.edit_message(
-                content="Peasant Run (Agatha peasant highscore). Which map?", view=view)
+                content="Peasant Run. Did you survive to the end (Extraction), or are you logging your best single life (Performance)?",
+                view=view)
             return
         if self.pre_detected_weapon:
             # Vision already had the weapon (it just missed the class), so route
@@ -1144,19 +1146,51 @@ class ClassSelect(discord.ui.Select):
                     content=f"Class: `{selected_class}`. Which weapon?", view=view)
 
 
+class PeasantKindSelectView(discord.ui.View):
+    """Pick the kind of peasant submission before the map: a Successful Extraction
+    (survived to the end of the match, win or loss) or a Peasant Performance (you
+    died — logging your best single peasant life)."""
+    def __init__(self, original_message, prompt_msg):
+        super().__init__(timeout=300)
+        self.add_item(PeasantKindSelect(original_message, prompt_msg))
+
+
+class PeasantKindSelect(discord.ui.Select):
+    def __init__(self, original_message, prompt_msg):
+        self.original_message = original_message
+        self.prompt_msg = prompt_msg
+        opts = [
+            discord.SelectOption(label="Successful Extraction", value="extraction",
+                                 description="Survived to the end as a peasant (win or loss)."),
+            discord.SelectOption(label="Peasant Performance", value="performance",
+                                 description="You died — best single peasant life."),
+        ]
+        super().__init__(placeholder="Extraction or Performance?", options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        _kind = self.values[0]
+        _lbl = "Successful Extraction" if _kind == "extraction" else "Peasant Performance"
+        view = PeasantMapSelectView(self.original_message, self.prompt_msg, _kind)
+        await interaction.response.edit_message(content=f"{_lbl}. Which map?", view=view)
+
+
 class PeasantMapSelectView(discord.ui.View):
     """Restricted map picker for a Peasant Run: only the two Agatha maps that have
     a playable peasant first stage. Faction is always Agatha, so there is no
     faction step — the map choice leads straight to the stats modal."""
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, kind="performance"):
         super().__init__(timeout=300)
-        self.add_item(PeasantMapSelect(original_message, prompt_msg))
+        self.add_item(PeasantMapSelect(original_message, prompt_msg, kind))
 
 
 class PeasantMapSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, kind="performance"):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
+        self.kind = kind
         opts = [discord.SelectOption(label=m) for m in getattr(config, 'PEASANT_MAPS', [])]
         super().__init__(placeholder="Which peasant map?", options=opts or [discord.SelectOption(label="Coxwell")])
 
@@ -1165,15 +1199,16 @@ class PeasantMapSelect(discord.ui.Select):
             await interaction.response.send_message("Not your submission.", ephemeral=True)
             return
         await interaction.response.send_modal(
-            PeasantStatsModal(self.original_message, self.prompt_msg, self.values[0]))
+            PeasantStatsModal(self.original_message, self.prompt_msg, self.values[0], self.kind))
 
 
 class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stats"):
-    def __init__(self, original_message, prompt_msg, selected_map):
+    def __init__(self, original_message, prompt_msg, selected_map, kind="performance"):
         super().__init__()
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.selected_map = selected_map
+        self.kind = kind
         self.score = discord.ui.TextInput(label="Score", placeholder="e.g. 12500", required=True)
         self.takedowns = discord.ui.TextInput(label="Takedowns", placeholder="e.g. 45", required=True)
         self.kills = discord.ui.TextInput(label="Kills", placeholder="e.g. 20", required=True)
@@ -1195,14 +1230,20 @@ class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stat
             await interaction.response.send_message(
                 "Those numbers aren't possible (kills can't exceed takedowns). Try again.", ephemeral=True)
             return
+        if self.kind == "extraction" and d != 0:
+            await interaction.response.send_message(
+                "An Extraction means you SURVIVED to the end — deaths must be 0. "
+                "If your peasant died, submit it as a Peasant Performance instead.", ephemeral=True)
+            return
         await _finalise_peasant(interaction, self.original_message, self.prompt_msg,
-                                self.selected_map, score, td, k, d)
+                                self.selected_map, score, td, k, d, self.kind)
 
 
-async def _finalise_peasant(interaction, original_message, prompt_msg, selected_map, score, td, k, d):
-    """Isolated Peasant Run finalise. Logs to the peasant_runs table, posts a 👨
+async def _finalise_peasant(interaction, original_message, prompt_msg, selected_map, score, td, k, d, kind="performance"):
+    """Isolated Peasant Run finalise. Logs to the peasant_runs table, posts a
     blurb, and refreshes the Peasant board. Deliberately touches nothing else — no
-    marks, weapon/map boards, mastery, bounty, or registry card."""
+    marks, weapon/map boards, mastery, bounty, or registry card. kind is
+    'extraction' (survived to the end) or 'performance' (best single life)."""
     try:
         await interaction.response.edit_message(content="Logged. 👨", view=None)
     except Exception:
@@ -1213,7 +1254,7 @@ async def _finalise_peasant(interaction, original_message, prompt_msg, selected_
     _user = interaction.user
     _link = original_message.jump_url
     try:
-        await _db.add_peasant_run(str(_user.id), _user.display_name, selected_map, score, td, k, d, _link)
+        await _db.add_peasant_run(str(_user.id), _user.display_name, selected_map, score, td, k, d, _link, kind)
     except Exception as _e:
         print(f"[PEASANT] log failed: {_e}")
         try:
@@ -1222,12 +1263,20 @@ async def _finalise_peasant(interaction, original_message, prompt_msg, selected_
             pass
         return
     _emoji = getattr(config, 'PEASANT_EMOJI', '👨')
-    _emb = discord.Embed(
-        title="Peasant Run",
-        colour=_BLURB_GOLD,
-        description=(f"{_emoji} **`{_user.display_name}`** survived as a peasant on **{selected_map}**.\n"
-                     f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
-                     f"*No marks — for the Peasant board alone.*"))
+    if kind == "extraction":
+        _emb = discord.Embed(
+            title="Successful Peasant Extraction",
+            colour=_BLURB_GOLD,
+            description=(f"{_emoji} **`{_user.display_name}`** survived to the end as a peasant on **{selected_map}**.\n"
+                         f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
+                         f"*Extraction logged — it stacks on the Extractions board and your Feats of Legend.*"))
+    else:
+        _emb = discord.Embed(
+            title="Peasant Performance",
+            colour=_BLURB_GOLD,
+            description=(f"{_emoji} **`{_user.display_name}`** — best peasant life on **{selected_map}**.\n"
+                         f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
+                         f"*No marks — for the Peasant board alone.*"))
     try:
         await original_message.reply(embed=_emb, mention_author=False)
     except Exception as _e:

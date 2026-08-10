@@ -1327,32 +1327,45 @@ async def _peasant_embed():
         return f"`{name}`"
 
     emoji = getattr(config, 'PEASANT_EMOJI', '👨')
-    emb = discord.Embed(title=f"{emoji}  Peasant Board", colour=0xC9A24B)
+
+    def _row_line(idx, r, show_map=False):
+        _sc = r.get('score') or 0
+        _link = (r.get('message_link') or '').strip()
+        _scstr = f"[{_sc:,}]({_link})" if _link else f"{_sc:,}"
+        _nm = _namelink(r.get('discord_id'), r.get('player_name'))
+        _mp = f"  ·  _{(r.get('map') or '').strip()}_" if show_map else ""
+        return (f"`{idx}.` {_nm} — **{_scstr}**  ·  "
+                f"{r.get('takedowns') or 0} TD  ·  {r.get('kills') or 0} K  ·  "
+                f"{r.get('deaths') or 0} D{_mp}")
+
+    def _is_extraction(r):
+        return (r.get('kind') or 'performance') == 'extraction'
+
+    # Board 1 — Successful Peasant Extractions: every surviving run STACKS, ranked by
+    # score (like TUFF). Map shown per row; deaths are 0 by definition of survival.
+    ext = discord.Embed(title=f"{emoji}  Successful Peasant Extractions", colour=0xC9A24B)
+    _ext_runs = sorted([r for r in runs if _is_extraction(r)], key=lambda r: -(r.get('score') or 0))[:15]
+    if _ext_runs:
+        ext.description = "\n".join(_row_line(i, r, show_map=True) for i, r in enumerate(_ext_runs, 1))[:4096]
+    else:
+        ext.description = "*Survive to the end of a peasant match to land here.  Score · TD · K · Map*"
+    ext.set_footer(text="Made it to the end as a peasant — win or loss. Every run stacks.")
+
+    # Board 2 — Peasant Performances: best single peasant life per player, per map.
+    perf = discord.Embed(title=f"{emoji}  Peasant Performances", colour=0xC9A24B)
     for mp in getattr(config, 'PEASANT_MAPS', ['Coxwell', 'Bridgetown']):
         best = {}
         for r in runs:
-            if (r.get('map') or '').strip() != mp:
+            if _is_extraction(r) or (r.get('map') or '').strip() != mp:
                 continue
             pid = (r.get('discord_id') or '').strip() or ('name:' + (r.get('player_name') or '').strip().lower())
             if pid not in best or (r.get('score') or 0) > (best[pid].get('score') or 0):
                 best[pid] = r
         rows = sorted(best.values(), key=lambda r: -(r.get('score') or 0))[:15]
-        if rows:
-            lines = []
-            for i, r in enumerate(rows, 1):
-                _sc = r.get('score') or 0
-                _link = (r.get('message_link') or '').strip()
-                _scstr = f"[{_sc:,}]({_link})" if _link else f"{_sc:,}"
-                _nm = _namelink(r.get('discord_id'), r.get('player_name'))
-                lines.append(f"`{i}.` {_nm} — **{_scstr}**  ·  "
-                             f"{r.get('takedowns') or 0} TD  ·  {r.get('kills') or 0} K  ·  "
-                             f"{r.get('deaths') or 0} D")
-            val = "\n".join(lines)
-        else:
-            # Empty state: a clean column legend, no placeholder dashes.
-            val = "*Score · TD · K · D*"
-        emb.add_field(name=f"{mp} · Agatha", value=val[:1024], inline=False)
-    return emb
+        val = "\n".join(_row_line(i, r) for i, r in enumerate(rows, 1)) if rows else "*Score · TD · K · D*"
+        perf.add_field(name=f"{mp} · Agatha", value=val[:1024], inline=False)
+    perf.set_footer(text="Best single peasant life per player, per map.")
+    return [ext, perf]
 
 
 async def render_peasant_board(guild):
@@ -1361,10 +1374,10 @@ async def render_peasant_board(guild):
     if not ptr or not ptr[0] or not ptr[1]:
         return
     try:
-        emb = await _peasant_embed()
+        embs = await _peasant_embed()
         ch = guild.get_channel(int(ptr[0])) or await guild.fetch_channel(int(ptr[0]))
         msg = await ch.fetch_message(int(ptr[1]))
-        await msg.edit(embed=emb)
+        await msg.edit(embeds=embs)
     except Exception as e:
         print(f"[PEASANT] board render failed: {e}")
 

@@ -136,6 +136,7 @@ _SCHEMA_STATEMENTS = [
     # The Peasant board lives at a single message the mod chooses (any channel or
     # thread). Kept OUT of the leaderboards table on purpose, so the generic board
     # machinery never renders it as a weapon board.
+    "ALTER TABLE peasant_runs ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'performance'",
     "CREATE TABLE IF NOT EXISTS peasant_board ("
     "id INT PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
     # The combined All-Time Titles board (Grand Marshal / Weapons Master / Campaign
@@ -399,16 +400,18 @@ async def get_tilt_games() -> list:
     return [(int(r['t']), int(r['e']), r['map'], r['faction']) for r in rows]
 
 
-async def add_peasant_run(discord_id, player_name, map_name, score, takedowns, kills, deaths, message_link):
-    """Log a Peasant Run into its isolated table (no marks / boards / mastery)."""
+async def add_peasant_run(discord_id, player_name, map_name, score, takedowns, kills, deaths, message_link, kind="performance"):
+    """Log a Peasant Run into its isolated table (no marks / boards / mastery).
+    kind: 'extraction' (survived to the end) or 'performance' (best single life)."""
     pool = _pool_check()
+    _kind = kind if kind in ("extraction", "performance") else "performance"
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO peasant_runs "
-            "(discord_id, player_name, map, score, takedowns, kills, deaths, message_link) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "(discord_id, player_name, map, score, takedowns, kills, deaths, message_link, kind) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             str(discord_id), player_name, map_name,
-            int(score), int(takedowns), int(kills), int(deaths), message_link)
+            int(score), int(takedowns), int(kills), int(deaths), message_link, _kind)
 
 
 async def get_peasant_runs():
@@ -418,6 +421,17 @@ async def get_peasant_runs():
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM peasant_runs ORDER BY score DESC NULLS LAST")
     return [dict(r) for r in rows]
+
+
+async def get_peasant_extraction_count(discord_id) -> int:
+    """How many Successful Peasant Extractions a player has logged (kind='extraction').
+    Feeds the TUFF-style count in the registry card's Feats of Legend."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        n = await conn.fetchval(
+            "SELECT COUNT(*) FROM peasant_runs WHERE discord_id=$1 AND kind='extraction'",
+            str(discord_id))
+    return int(n or 0)
 
 
 async def delete_peasant_run_by_link(message_link: str) -> int:
