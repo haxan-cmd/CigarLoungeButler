@@ -3656,8 +3656,14 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             _nem_key = _ally_key = None
             try:
                 _rv = await _rivsvc.rivalries_for(_self_id, await _db.get_all_submissions())
-                _nem_key = (_rv.get('nemesis') or {}).get('key')
-                _ally_key = (_rv.get('ally') or {}).get('key')
+                # Only crown a nemesis / closest ally after a real HISTORY (3+ shared
+                # games on that side); otherwise a single lobby tags a stranger. The
+                # line still shows plain 'Fought against X' below — this gates the TAG.
+                _RIVAL_MIN = 3
+                _nemD = _rv.get('nemesis') or {}
+                _allyD = _rv.get('ally') or {}
+                _nem_key = _nemD.get('key') if _nemD.get('clashes', 0) >= _RIVAL_MIN else None
+                _ally_key = _allyD.get('key') if _allyD.get('matches', 0) >= _RIVAL_MIN else None
             except Exception as _rve:
                 print(f"[LOBBYMATE] rivalry tag error: {_rve}")
             _lines = []
