@@ -117,6 +117,9 @@ const DEFAULT_MATRIX=['kills','td','deaths','kd','kill_share','warlord','tilt'];
 const qp=new URLSearchParams(location.search);
 const TOKEN=qp.get('t')||'';
 let FIELDS=[], IDX={}, DATA=[];
+let ROTATION=[], ROTIDX={};
+function _rnorm(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function rotIdx(map){const k=_rnorm(map); return (k in ROTIDX)?ROTIDX[k]:null;}
 let matrixStats=DEFAULT_MATRIX.slice();
 const state={
   view:qp.get('view')||'matrix',
@@ -652,18 +655,30 @@ function renderActivity(){
         bItems,'#4fb3a1');
   // ---- sessions: sittings inferred from gaps between a player's submission times ----
   const gapMs=state.activity.gap*60000;
+  const N=ROTATION.length||13;
+  const maxPerPair=Math.max(1,Math.round(state.activity.gap/15)); // plausible games between two in-session uploads
   const byP={};
   for(const r of rows){
     const nm=r[IDX.name]||''; const ts=r[IDX.ts]; if(!nm||!ts) continue;
     const d=new Date(String(ts).replace(' ','T')+'Z'); if(isNaN(d)) continue;
     const k=(r[IDX.did]||'')||('name:'+nm.toLowerCase());
-    (byP[k]||(byP[k]=[])).push(d.getTime());
+    (byP[k]||(byP[k]=[])).push({t:d.getTime(),mi:rotIdx(r[IDX.map]||'')});
   }
-  const sizes=[], lens=[];
+  const sizes=[], lens=[];   // sizes = rotation-estimated GAMES played per sitting
   for(const k in byP){
-    const t=byP[k].sort((a,b)=>a-b); let start=0;
-    for(let i=1;i<=t.length;i++){
-      if(i===t.length || t[i]-t[i-1]>gapMs){ sizes.push(i-start); lens.push((t[i-1]-t[start])/60000); start=i; }
+    const ev=byP[k].sort((a,b)=>a.t-b.t); let start=0;
+    for(let i=1;i<=ev.length;i++){
+      if(i===ev.length || ev[i].t-ev[i-1].t>gapMs){
+        let games=1;
+        for(let j=start+1;j<i;j++){
+          const a=ev[j-1].mi, b=ev[j].mi;
+          if(a==null||b==null){ games+=1; continue; }        // unknown map -> at least 1 game
+          const dist=((b-a)%N+N)%N;                           // forward steps through the rotation
+          if(dist===0) continue;                              // same map again (dup/edit) -> +0
+          games += (dist<=maxPerPair ? dist : 1);             // implausibly far for the elapsed time -> count 1
+        }
+        sizes.push(games); lens.push((ev[i-1].t-ev[start].t)/60000); start=i;
+      }
     }
   }
   const nSess=sizes.length;
@@ -674,8 +689,8 @@ function renderActivity(){
   const medLen=sitLens.length?Math.round(sitLens[Math.floor(sitLens.length/2)]):0;
   const sBk=[['1',x=>x===1],['2',x=>x===2],['3–4',x=>x>=3&&x<=4],['5–7',x=>x>=5&&x<=7],['8+',x=>x>=8]];
   const sItems=sBk.map(b=>({label:b[0],n:sizes.filter(b[1]).length}));
-  html+=_barBlock('Games per session · '+state.activity.gap+'-min gap starts a new sitting',
-        nSess+' sessions · '+loPct+'% one-and-logoff · avg '+avgGames.toFixed(1)+' submissions/session · median sitting '+medLen+' min · counts SUBMISSIONS, not games',
+  html+=_barBlock('Games in a row per sitting · rotation-estimated',
+        nSess+' sittings · '+loPct+'% play one game and log off · avg '+avgGames.toFixed(1)+' games/sitting · median sitting '+medLen+' min · '+state.activity.gap+'-min gap starts a new sitting',
         sItems,'#7a89c2');
   const holder=document.createElement('div'); holder.innerHTML=html;
   while(holder.firstChild) view.appendChild(holder.firstChild);
@@ -704,6 +719,7 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
   .then(d=>{
     FIELDS=d.fields; FIELDS.forEach((f,i)=>IDX[f]=i);
     DATA=d.rows;
+    ROTATION=d.rotation||[]; ROTIDX={}; ROTATION.forEach((m,i)=>ROTIDX[_rnorm(m)]=i);
     buildFilters();
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
     render();

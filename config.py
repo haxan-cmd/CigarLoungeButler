@@ -420,6 +420,16 @@ TILT_CARD_BADGES = ("Outmatched", "Brutal")
 PEASANT_BOARD = "Peasant"
 PEASANT_EMOJI = "\U0001F3C3\u200D\u2642\uFE0F\u200D\u27A1\uFE0F"   # man running, facing right
 # Short map names (as stored) + faction where the peasant stage exists.
+# Server map rotation (TO), in play order — one map is one game. Used by the
+# Stats Lab to estimate "games in a row": the forward distance between two
+# submitted maps within a single sitting = the games played between them,
+# including the ones nobody screenshotted. Names match MAP_FACTIONS keys.
+MAP_ROTATION = [
+    "Lionspire", "Galencourt", "Aberfell", "Coxwell", "Darkforest", "Baudwyn",
+    "Rudhelm", "Trayan Citadel", "Montcrux", "Bridgetown", "Thayic Stronghold",
+    "Falmire", "Askandir",
+]
+
 PEASANT_MAP_FACTIONS = [("Coxwell", "Agatha"), ("Bridgetown", "Agatha")]
 PEASANT_MAPS = [m for m, _f in PEASANT_MAP_FACTIONS]
 
