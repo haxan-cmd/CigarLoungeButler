@@ -3650,37 +3650,64 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # haven't uploaded yet — only later submitters get the line. That's fine; the
         # Butler's on-demand context (below) fills it in for anyone who asks afterward.
         try:
-            _mates = await _db.get_lobbymates(str(interaction.user.id), message_link)
-            if _mates:
-                # Flag a lobbymate if they're this player's aggregate nemesis or closest
-                # ally (over all shared-lobby history). The scan runs off the event loop.
-                _nem_key = _ally_key = None
+            from utils import rivalry_service as _rivsvc
+            from utils import roster as _R
+            _self_id = str(interaction.user.id)
+            _nem_key = _ally_key = None
+            try:
+                _rv = await _rivsvc.rivalries_for(_self_id, await _db.get_all_submissions())
+                _nem_key = (_rv.get('nemesis') or {}).get('key')
+                _ally_key = (_rv.get('ally') or {}).get('key')
+            except Exception as _rve:
+                print(f"[LOBBYMATE] rivalry tag error: {_rve}")
+            _lines = []
+            _rost = _roster_from_vision(vd)
+            if _rost:
+                # Ground-truth sides from THIS scoreboard's roster (accurate), not the
+                # time-window fingerprint that mislabeled teammates as opponents (the
+                # "Fought against ... your closest ally" contradiction). Tags are gated to
+                # the side, so the ally tag only rides a teammate and the nemesis a foe.
                 try:
-                    from utils import rivalry_service as _rivsvc
-                    _all_subs = await _db.get_all_submissions()
-                    _rv = await _rivsvc.rivalries_for(str(interaction.user.id), _all_subs)
-                    _nem_key = (_rv.get('nemesis') or {}).get('key')
-                    _ally_key = (_rv.get('ally') or {}).get('key')
-                except Exception as _rve:
-                    print(f"[LOBBYMATE] rivalry tag error: {_rve}")
-                _lines = []
-                for _mm in _mates[:3]:
-                    if _mm['same_team'] is True:
-                        _rel = "alongside"
-                    elif _mm['same_team'] is False:
-                        _rel = "against"
+                    _nmap = await _db.get_name_to_id_map()
+                except Exception:
+                    _nmap = {}
+                _idx = {}
+                for _nm, _d in _nmap.items():
+                    _n = _R.normalize_name(_nm)
+                    if len(_n) >= 2 and _d:
+                        _idx.setdefault(_n, str(_d))
+                _seen, _tagged, _plain = set(), [], []
+                for _e in _rost:
+                    _did = _R.resolve_name(_e.get('name') or '', _idx)
+                    if not _did or _did == _self_id or _did in _seen:
+                        continue
+                    _seen.add(_did)
+                    _side = _e.get('side')
+                    _rel = "alongside" if _side == 'team' else ("against" if _side == 'enemy' else "in a lobby with")
+                    if _did == _nem_key and _side == 'enemy':
+                        _tagged.append(f"🎪 Fought {_rel} `{_e.get('name')}` — ⚔️ your nemesis")
+                    elif _did == _ally_key and _side == 'team':
+                        _tagged.append(f"🎪 Fought {_rel} `{_e.get('name')}` — \U0001f91d your closest ally")
                     else:
-                        _rel = "in a lobby with"
+                        _plain.append(f"🎪 Fought {_rel} `{_e.get('name')}`")
+                _lines = (_tagged + _plain)[:3]
+            else:
+                # No roster on this submission (manual entry / vision missed names) —
+                # fall back to the co-submitter fingerprint, tags gated to the side too.
+                _mates = await _db.get_lobbymates(_self_id, message_link)
+                for _mm in (_mates or [])[:3]:
+                    _rel = ("alongside" if _mm['same_team'] is True
+                            else "against" if _mm['same_team'] is False else "in a lobby with")
                     _mk = (_mm.get('discord_id') or '').strip() or ('name:' + (_mm.get('player_name') or '').lower())
                     _tag = ""
-                    if _mk and _mk == _nem_key:
+                    if _mk and _mk == _nem_key and _mm['same_team'] is False:
                         _tag = " — ⚔️ your nemesis"
-                    elif _mk and _mk == _ally_key:
+                    elif _mk and _mk == _ally_key and _mm['same_team'] is True:
                         _tag = " — \U0001f91d your closest ally"
                     _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`{_tag}")
-                if _lines:
-                    _lm_desc = await blurb_read()
-                    blurb_write(_lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
+            if _lines:
+                _lm_desc = await blurb_read()
+                blurb_write(_lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
         except Exception as _lme:
             print(f"[LOBBYMATE] blurb update error: {_lme}")
         await blurb_commit()
