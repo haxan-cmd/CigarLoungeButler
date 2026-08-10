@@ -1123,7 +1123,7 @@ class ClassSelect(discord.ui.Select):
         if selected_class == "Peasant Run":
             # Own isolated path: pick the KIND first (survived-to-end Extraction vs
             # died-in-one-life Performance), then map, then stats. See _finalise_peasant.
-            view = PeasantKindSelectView(self.original_message, self.prompt_msg)
+            view = PeasantKindSelectView(self.original_message, self.prompt_msg, vd)
             await interaction.response.edit_message(
                 content="Peasant Run. Did you survive to the end (Extraction), or are you logging your best single life (Performance)?",
                 view=view)
@@ -1150,15 +1150,16 @@ class PeasantKindSelectView(discord.ui.View):
     """Pick the kind of peasant submission before the map: a Successful Extraction
     (survived to the end of the match, win or loss) or a Peasant Performance (you
     died — logging your best single peasant life)."""
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, vision_data=None):
         super().__init__(timeout=300)
-        self.add_item(PeasantKindSelect(original_message, prompt_msg))
+        self.add_item(PeasantKindSelect(original_message, prompt_msg, vision_data or {}))
 
 
 class PeasantKindSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg):
+    def __init__(self, original_message, prompt_msg, vision_data):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
+        self.vision_data = vision_data
         opts = [
             discord.SelectOption(label="Successful Extraction", value="extraction",
                                  description="Survived to the end as a peasant (win or loss)."),
@@ -1173,24 +1174,25 @@ class PeasantKindSelect(discord.ui.Select):
             return
         _kind = self.values[0]
         _lbl = "Successful Extraction" if _kind == "extraction" else "Peasant Performance"
-        view = PeasantMapSelectView(self.original_message, self.prompt_msg, _kind)
+        view = PeasantMapSelectView(self.original_message, self.prompt_msg, _kind, self.vision_data)
         await interaction.response.edit_message(content=f"{_lbl}. Which map?", view=view)
 
 
 class PeasantMapSelectView(discord.ui.View):
-    """Restricted map picker for a Peasant Run: only the two Agatha maps that have
-    a playable peasant first stage. Faction is always Agatha, so there is no
-    faction step — the map choice leads straight to the stats modal."""
-    def __init__(self, original_message, prompt_msg, kind="performance"):
+    """Map picker for a Peasant Run: the two Agatha peasant-stage maps. Faction is
+    always Agatha, so there's no faction step. Stats come from the VISION read of
+    the scorecard (no manual typing); the player can Fix them on the blurb after."""
+    def __init__(self, original_message, prompt_msg, kind="performance", vision_data=None):
         super().__init__(timeout=300)
-        self.add_item(PeasantMapSelect(original_message, prompt_msg, kind))
+        self.add_item(PeasantMapSelect(original_message, prompt_msg, kind, vision_data or {}))
 
 
 class PeasantMapSelect(discord.ui.Select):
-    def __init__(self, original_message, prompt_msg, kind="performance"):
+    def __init__(self, original_message, prompt_msg, kind, vision_data):
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.kind = kind
+        self.vision_data = vision_data
         opts = [discord.SelectOption(label=m) for m in getattr(config, 'PEASANT_MAPS', [])]
         super().__init__(placeholder="Which peasant map?", options=opts or [discord.SelectOption(label="Coxwell")])
 
@@ -1198,21 +1200,38 @@ class PeasantMapSelect(discord.ui.Select):
         if interaction.user.id != self.original_message.author.id:
             await interaction.response.send_message("Not your submission.", ephemeral=True)
             return
-        await interaction.response.send_modal(
-            PeasantStatsModal(self.original_message, self.prompt_msg, self.values[0], self.kind))
+        vd = self.vision_data or {}
+        _sc, _td, _k, _d = vd.get('score'), vd.get('takedowns'), vd.get('kills'), vd.get('deaths')
+        # Use the vision read straight away when it's complete — no typing. Only fall
+        # back to a PRE-FILLED form if vision missed a stat on the peasant scorecard.
+        if None not in (_sc, _td, _k, _d):
+            await _finalise_peasant(interaction, self.original_message, self.prompt_msg,
+                                    self.values[0], _sc, _td, _k, _d, self.kind)
+        else:
+            await interaction.response.send_modal(
+                PeasantStatsModal(self.original_message, self.prompt_msg, self.values[0],
+                                  self.kind, defaults=vd))
 
 
-class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stats"):
-    def __init__(self, original_message, prompt_msg, selected_map, kind="performance"):
+class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Stats"):
+    """Manual stat entry, PRE-FILLED from the vision read. Used only when vision
+    missed a stat, or from the 'Fix stats' button to correct a misread. When
+    blurb_msg is set (Fix path) the existing blurb is edited in place."""
+    def __init__(self, original_message, prompt_msg, selected_map, kind="performance",
+                 defaults=None, blurb_msg=None):
         super().__init__()
         self.original_message = original_message
         self.prompt_msg = prompt_msg
         self.selected_map = selected_map
         self.kind = kind
-        self.score = discord.ui.TextInput(label="Score", placeholder="e.g. 12500", required=True)
-        self.takedowns = discord.ui.TextInput(label="Takedowns", placeholder="e.g. 45", required=True)
-        self.kills = discord.ui.TextInput(label="Kills", placeholder="e.g. 20", required=True)
-        self.deaths = discord.ui.TextInput(label="Deaths", placeholder="e.g. 3", required=True)
+        self.blurb_msg = blurb_msg
+        _df = defaults or {}
+        def _sv(v):
+            return "" if v is None else str(v)
+        self.score = discord.ui.TextInput(label="Score", default=_sv(_df.get('score')), required=True)
+        self.takedowns = discord.ui.TextInput(label="Takedowns", default=_sv(_df.get('takedowns')), required=True)
+        self.kills = discord.ui.TextInput(label="Kills", default=_sv(_df.get('kills')), required=True)
+        self.deaths = discord.ui.TextInput(label="Deaths", default=_sv(_df.get('deaths')), required=True)
         for _it in (self.score, self.takedowns, self.kills, self.deaths):
             self.add_item(_it)
 
@@ -1224,7 +1243,7 @@ class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stat
             d = int(self.deaths.value)
         except ValueError:
             await interaction.response.send_message(
-                "Those want to be whole numbers, peasant. Start the Peasant Run again.", ephemeral=True)
+                "Those want to be whole numbers, peasant.", ephemeral=True)
             return
         if min(score, td, k, d) < 0 or k > td:
             await interaction.response.send_message(
@@ -1233,19 +1252,92 @@ class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Enter Your Stat
         if self.kind == "extraction" and d != 0:
             await interaction.response.send_message(
                 "An Extraction means you SURVIVED to the end — deaths must be 0. "
-                "If your peasant died, submit it as a Peasant Performance instead.", ephemeral=True)
+                "If your peasant died, resubmit it as a Peasant Performance.", ephemeral=True)
             return
-        await _finalise_peasant(interaction, self.original_message, self.prompt_msg,
-                                self.selected_map, score, td, k, d, self.kind)
+        if self.blurb_msg is not None:
+            # Fix path: replace the run and edit the existing blurb in place.
+            try:
+                await _log_render_peasant(interaction.guild, interaction.user, self.selected_map,
+                                          score, td, k, d, self.kind, self.original_message.jump_url)
+                await self.blurb_msg.edit(
+                    embed=_peasant_blurb_embed(interaction.user, self.selected_map, score, td, k, d, self.kind),
+                    view=PeasantFixView(self.original_message, self.selected_map, self.kind,
+                                        (score, td, k, d), self.blurb_msg))
+                await interaction.response.send_message("Updated your peasant run. ✅", ephemeral=True)
+            except Exception as _e:
+                print(f"[PEASANT] fix failed: {_e}")
+                try:
+                    await interaction.response.send_message("Couldn't update that run.", ephemeral=True)
+                except Exception:
+                    pass
+        else:
+            await _finalise_peasant(interaction, self.original_message, self.prompt_msg,
+                                    self.selected_map, score, td, k, d, self.kind)
+
+
+class PeasantFixView(discord.ui.View):
+    """A 'Fix stats' button on the peasant blurb — reopens the stat form PRE-FILLED,
+    so a vision misread is corrected just like a normal submission's Edit."""
+    def __init__(self, original_message, selected_map, kind, stats, blurb_msg=None):
+        super().__init__(timeout=900)
+        self.original_message = original_message
+        self.selected_map = selected_map
+        self.kind = kind
+        self.stats = stats  # (score, td, k, d)
+        self.blurb_msg = blurb_msg
+
+    @discord.ui.button(label="Fix stats", style=discord.ButtonStyle.secondary, emoji="✏️")
+    async def fix(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.original_message.author.id:
+            await interaction.response.send_message("Not your submission.", ephemeral=True)
+            return
+        _sc, _td, _k, _d = self.stats
+        await interaction.response.send_modal(
+            PeasantStatsModal(self.original_message, None, self.selected_map, self.kind,
+                              defaults={'score': _sc, 'takedowns': _td, 'kills': _k, 'deaths': _d},
+                              blurb_msg=self.blurb_msg))
+
+
+def _peasant_blurb_embed(user, selected_map, score, td, k, d, kind):
+    _emoji = getattr(config, 'PEASANT_EMOJI', '\U0001F468')
+    if kind == "extraction":
+        _warn = ("\n⚠️ *The card shows deaths — an extraction should be 0. Hit Fix stats, "
+                 "or resubmit as a Performance if you died.*") if d else ""
+        return discord.Embed(
+            title="Successful Peasant Extraction", colour=_BLURB_GOLD,
+            description=(f"{_emoji} **`{user.display_name}`** survived to the end as a peasant on **{selected_map}**.\n"
+                         f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
+                         f"*Extraction logged — it stacks on the Extractions board and your Feats of Legend.*{_warn}"))
+    return discord.Embed(
+        title="Peasant Performance", colour=_BLURB_GOLD,
+        description=(f"{_emoji} **`{user.display_name}`** — best peasant life on **{selected_map}**.\n"
+                     f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
+                     f"*No marks — for the Peasant board alone.*"))
+
+
+async def _log_render_peasant(guild, user, selected_map, score, td, k, d, kind, link):
+    """Replace any prior peasant run from this scorecard (idempotent for edits),
+    log the run, and re-render the Peasant board."""
+    try:
+        await _db.delete_peasant_run_by_link(link)
+    except Exception:
+        pass
+    await _db.add_peasant_run(str(user.id), user.display_name, selected_map,
+                              score, td, k, d, link, kind)
+    try:
+        from cogs.leaderboards import render_peasant_board
+        await render_peasant_board(guild)
+    except Exception as _e:
+        print(f"[PEASANT] board refresh failed: {_e}")
 
 
 async def _finalise_peasant(interaction, original_message, prompt_msg, selected_map, score, td, k, d, kind="performance"):
-    """Isolated Peasant Run finalise. Logs to the peasant_runs table, posts a
-    blurb, and refreshes the Peasant board. Deliberately touches nothing else — no
-    marks, weapon/map boards, mastery, bounty, or registry card. kind is
-    'extraction' (survived to the end) or 'performance' (best single life)."""
+    """Isolated Peasant Run finalise. Uses the vision-read stats, logs to the
+    peasant_runs table, posts a blurb with a 'Fix stats' button, and refreshes the
+    Peasant board. Touches nothing else — no marks, boards, mastery, bounty, card.
+    kind is 'extraction' (survived to the end) or 'performance' (best single life)."""
     try:
-        await interaction.response.edit_message(content="Logged. 👨", view=None)
+        await interaction.response.edit_message(content="Logged. \U0001F468", view=None)
     except Exception:
         try:
             await interaction.response.defer()
@@ -1254,7 +1346,7 @@ async def _finalise_peasant(interaction, original_message, prompt_msg, selected_
     _user = interaction.user
     _link = original_message.jump_url
     try:
-        await _db.add_peasant_run(str(_user.id), _user.display_name, selected_map, score, td, k, d, _link, kind)
+        await _log_render_peasant(interaction.guild, _user, selected_map, score, td, k, d, kind, _link)
     except Exception as _e:
         print(f"[PEASANT] log failed: {_e}")
         try:
@@ -1262,34 +1354,19 @@ async def _finalise_peasant(interaction, original_message, prompt_msg, selected_
         except Exception:
             pass
         return
-    _emoji = getattr(config, 'PEASANT_EMOJI', '👨')
-    if kind == "extraction":
-        _emb = discord.Embed(
-            title="Successful Peasant Extraction",
-            colour=_BLURB_GOLD,
-            description=(f"{_emoji} **`{_user.display_name}`** survived to the end as a peasant on **{selected_map}**.\n"
-                         f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
-                         f"*Extraction logged — it stacks on the Extractions board and your Feats of Legend.*"))
-    else:
-        _emb = discord.Embed(
-            title="Peasant Performance",
-            colour=_BLURB_GOLD,
-            description=(f"{_emoji} **`{_user.display_name}`** — best peasant life on **{selected_map}**.\n"
-                         f"Score **{score:,}**  ·  {td} TD  ·  {k} K  ·  {d} D\n"
-                         f"*No marks — for the Peasant board alone.*"))
+    _emoji = getattr(config, 'PEASANT_EMOJI', '\U0001F468')
+    _view = PeasantFixView(original_message, selected_map, kind, (score, td, k, d))
     try:
-        await original_message.reply(embed=_emb, mention_author=False)
+        _sent = await original_message.reply(
+            embed=_peasant_blurb_embed(_user, selected_map, score, td, k, d, kind),
+            view=_view, mention_author=False)
+        _view.blurb_msg = _sent
     except Exception as _e:
         print(f"[PEASANT] blurb failed: {_e}")
     try:
         await original_message.add_reaction(_emoji)
     except Exception:
         pass
-    try:
-        from cogs.leaderboards import render_peasant_board
-        await render_peasant_board(interaction.guild)
-    except Exception as _e:
-        print(f"[PEASANT] board refresh failed: {_e}")
 
 
 class WeaponSearchModal(discord.ui.Modal, title="Weapon Search"):
