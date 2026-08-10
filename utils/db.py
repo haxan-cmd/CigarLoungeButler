@@ -77,6 +77,7 @@ _INDEXES = [
     # lobby kill total in Python), so index those two columns.
     ("idx_submissions_map_time",   "submissions",      "(map, submitted_at)"),
     ("idx_sub_rosters_sid",        "submission_rosters", "(submission_id)"),
+    ("idx_lab_opens_time",         "lab_opens",          "(opened_at)"),
 ]
 
 
@@ -150,6 +151,10 @@ _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS submission_rosters ("
     "submission_id INTEGER NOT NULL, name TEXT NOT NULL, side TEXT, "
     "takedowns INTEGER, kills INTEGER)",
+    # One row per time someone opens a Stats Lab link (the token carries the
+    # opener's id/name). Lets a mod see if the Lab is actually being used.
+    "CREATE TABLE IF NOT EXISTS lab_opens ("
+    "id SERIAL PRIMARY KEY, discord_id TEXT, name TEXT, opened_at TIMESTAMP DEFAULT NOW())",
 ]
 
 
@@ -556,6 +561,43 @@ async def get_all_rosters() -> dict:
             {'name': r['name'] or '', 'side': r['side'] or '',
              'td': r['takedowns'], 'k': r['kills']})
     _cache_set('rosters', out)
+    return out
+
+
+async def record_lab_open(discord_id, name):
+    """Log one Stats Lab open. Best-effort — never raises into the web handler."""
+    try:
+        pool = _pool_check()
+    except Exception:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO lab_opens (discord_id, name) VALUES ($1, $2)",
+                str(discord_id or ''), (name or '')[:80])
+    except Exception as e:
+        print(f"[LAB] open-log failed: {e}")
+
+
+async def get_lab_usage():
+    """Summary of Stats Lab opens: totals, unique users, top openers, recent."""
+    pool = _pool_check()
+    out = {'total': 0, 'last7': 0, 'last30': 0, 'unique': 0, 'top': [], 'recent': []}
+    async with pool.acquire() as conn:
+        out['total'] = int(await conn.fetchval("SELECT COUNT(*) FROM lab_opens") or 0)
+        out['last7'] = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM lab_opens WHERE opened_at >= NOW() - INTERVAL '7 days'") or 0)
+        out['last30'] = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM lab_opens WHERE opened_at >= NOW() - INTERVAL '30 days'") or 0)
+        out['unique'] = int(await conn.fetchval(
+            "SELECT COUNT(DISTINCT COALESCE(NULLIF(discord_id,''), name)) FROM lab_opens") or 0)
+        _top = await conn.fetch(
+            "SELECT MAX(name) AS name, COUNT(*) AS n FROM lab_opens "
+            "GROUP BY COALESCE(NULLIF(discord_id,''), name) ORDER BY n DESC LIMIT 10")
+        out['top'] = [((r['name'] or 'unknown'), int(r['n'])) for r in _top]
+        _rec = await conn.fetch(
+            "SELECT name, opened_at FROM lab_opens ORDER BY opened_at DESC LIMIT 10")
+        out['recent'] = [((r['name'] or 'unknown'), r['opened_at']) for r in _rec]
     return out
 
 

@@ -87,12 +87,21 @@ async def run_healthcheck():
         if not secret:
             return web.Response(status=503, text="lab disabled")
         from utils.lab_auth import verify_token
-        if verify_token(request.query.get("t", ""), secret) is None:
+        _payload = verify_token(request.query.get("t", ""), secret)
+        if _payload is None:
             return web.Response(
                 status=403, content_type="text/html",
                 text="<body style='background:#22242a;color:#f2f3f5;font-family:sans-serif;"
                      "text-align:center;padding-top:16vh'><h2>This Stats Lab link has expired.</h2>"
                      "<p style='color:#8b8f9a'>Run <b>/correlate</b> in Discord for a fresh link.</p></body>")
+        # Record the open (best-effort). The signed token carries the opener's id/name,
+        # so it's trustworthy and can't be spoofed by editing the URL.
+        try:
+            from utils.db import record_lab_open
+            await record_lab_open(_payload.get("u"), _payload.get("n"))
+            print(f"[LAB] opened by {_payload.get('n') or 'unknown'} ({_payload.get('u') or '?'})")
+        except Exception:
+            pass
         try:
             _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "lab.html")
             with open(_p, encoding="utf-8") as f:

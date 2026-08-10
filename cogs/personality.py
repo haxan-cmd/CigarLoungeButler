@@ -914,7 +914,7 @@ def _server_aggregates(subs):
     return "\n".join(L)
 
 
-def build_lab_url(view='matrix', extra=None):
+def build_lab_url(view='matrix', extra=None, uid=None, uname=None):
     """Build a signed, 24h Stats Lab deep link, or None if the Lab isn't
     configured. Tolerant of a LAB_BASE_URL set without a scheme (prepends
     https://) so a missing 'https://' can never crash a command again."""
@@ -928,7 +928,12 @@ def build_lab_url(view='matrix', extra=None):
     try:
         from utils.lab_auth import make_token
         from urllib.parse import urlencode
-        params = {'t': make_token(secret, ttl_seconds=86400), 'view': view}
+        _tok_extra = {}
+        if uid:
+            _tok_extra['u'] = str(uid)
+        if uname:
+            _tok_extra['n'] = str(uname)[:80]
+        params = {'t': make_token(secret, ttl_seconds=86400, extra=_tok_extra or None), 'view': view}
         if extra:
             params.update({k: v for k, v in extra.items() if v})
         url = f"{base}/lab?{urlencode(params)}"
@@ -956,7 +961,7 @@ class StatsLabEntry(discord.ui.View):
     @discord.ui.button(label='Open Stats Lab', emoji='🔬',
                        style=discord.ButtonStyle.primary, custom_id='statslab:open')
     async def _open(self, interaction: discord.Interaction, button):
-        url = build_lab_url('matrix')
+        url = build_lab_url('matrix', uid=interaction.user.id, uname=interaction.user.display_name)
         if not url:
             await interaction.response.send_message(
                 "The Stats Lab isn't set up yet — a mod needs to configure it.", ephemeral=True)
@@ -2155,7 +2160,7 @@ class PersonalityCog(commands.Cog):
 
     @app_commands.command(name="statslab", description="Open the interactive web Stats Lab (correlations, matrix, 1H vs 2H, and more).")
     async def statslab(self, interaction: discord.Interaction):
-        url = build_lab_url('matrix')
+        url = build_lab_url('matrix', uid=interaction.user.id, uname=interaction.user.display_name)
         if not url:
             await interaction.response.send_message(
                 "The Stats Lab isn't set up yet — a mod needs to configure it.", ephemeral=True)
@@ -2168,6 +2173,41 @@ class PersonalityCog(commands.Cog):
     async def statslab_panel(self, interaction: discord.Interaction):
         await interaction.channel.send(embed=stats_lab_panel_embed(), view=StatsLabEntry())
         await interaction.response.send_message("Posted — pin it wherever you like.", ephemeral=True)
+
+    @app_commands.command(name="statslab_usage", description="See who opens the Stats Lab and how often (mod only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def statslab_usage(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            u = await _db.get_lab_usage()
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't read Lab usage: {e}", ephemeral=True)
+            return
+        if not u.get('total'):
+            await interaction.followup.send(
+                "No Stats Lab opens recorded yet — either nobody's opened it, or it's all "
+                "since this deploy (tracking only starts now).", ephemeral=True)
+            return
+        e = discord.Embed(title="🔬 Stats Lab — usage", colour=0xC9A24B)
+        e.add_field(name="Opens",
+                    value=f"**{u['total']}** all-time  ·  **{u['last7']}** last 7d  ·  **{u['last30']}** last 30d",
+                    inline=False)
+        e.add_field(name="Unique users", value=f"**{u['unique']}**", inline=False)
+        if u.get('top'):
+            e.add_field(name="Top openers",
+                        value="\n".join(f"`{i}.` {nm} — **{n}**" for i, (nm, n) in enumerate(u['top'], 1))[:1024],
+                        inline=False)
+        if u.get('recent'):
+            def _fmt(dt):
+                try:
+                    return dt.strftime('%b %d, %H:%M')
+                except Exception:
+                    return str(dt)
+            e.add_field(name="Most recent",
+                        value="\n".join(f"{nm} · {_fmt(dt)}" for nm, dt in u['recent'])[:1024],
+                        inline=False)
+        e.set_footer(text="Tracking began this deploy · times UTC")
+        await interaction.followup.send(embed=e, ephemeral=True)
 
     @app_commands.command(name="explore", description="Chart any stat, grouped any way. e.g. metric: Run count, by: Weapon. Filters optional.")
     @app_commands.describe(
