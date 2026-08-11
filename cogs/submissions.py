@@ -3734,13 +3734,22 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 # That is the signature of a wrong-row read (e.g. reading a friend's
                 # green-highlighted row) — learning it would poison this player's name
                 # hints and make the misread stick.
+                _vn = _vision_name.strip()
                 _n2id = await _db.get_name_to_id_map()
-                _owner = _n2id.get(_vision_name.strip().lower())
+                _owner = _n2id.get(_vn.lower())
                 if _owner and str(_owner) != str(_user_id):
-                    print(f"[IGN] Skipped '{_vision_name}' for {_user_name} — that name belongs to another player ({_owner}); likely a wrong-row read")
+                    print(f"[IGN] Skipped '{_vn}' for {_user_name} — that name belongs to another player ({_owner}); likely a wrong-row read")
                 else:
-                    await _db.save_player_ign(_user_id, _vision_name.strip())
-                    print(f"[IGN] Saved alias for {_user_name}: '{_vision_name}'")
+                    # Only LEARN a name that RECURS. A one-off wrong-row read (a friend's
+                    # green row) or OCR slip is how a player's IGN list got polluted with
+                    # other people's names (the witness-protection board). A real alt name
+                    # shows up again; a misread almost never does. Promote on 2nd sighting.
+                    _seen = await _db.bump_ign_pending(str(_user_id), _vn)
+                    if _seen >= 2:
+                        await _db.save_player_ign(_user_id, _vn)
+                        print(f"[IGN] Learned alias for {_user_name}: '{_vn}' (seen {_seen}x)")
+                    else:
+                        print(f"[IGN] Holding '{_vn}' for {_user_name} (seen once; learns if it repeats)")
             except Exception as e:
                 print(f"[IGN] Save error: {e}")
 

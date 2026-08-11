@@ -155,6 +155,12 @@ _SCHEMA_STATEMENTS = [
     # opener's id/name). Lets a mod see if the Lab is actually being used.
     "CREATE TABLE IF NOT EXISTS lab_opens ("
     "id SERIAL PRIMARY KEY, discord_id TEXT, name TEXT, opened_at TIMESTAMP DEFAULT NOW())",
+    # Sighting counter for auto-learned IGNs: a vision-read name is only promoted
+    # to players.igns once it RECURS (>=2), so a one-off wrong-row read / OCR slip
+    # never sticks (what polluted the witness-protection board with foreign names).
+    "CREATE TABLE IF NOT EXISTS ign_pending ("
+    "discord_id TEXT NOT NULL, name TEXT NOT NULL, seen INTEGER DEFAULT 1, "
+    "PRIMARY KEY (discord_id, name))",
 ]
 
 
@@ -930,6 +936,26 @@ def _ign_is_duplicate(candidate: str, existing: list[str], threshold: float = 0.
     return False
 
 
+async def bump_ign_pending(discord_id: str, name: str) -> int:
+    """Count sightings of a vision-read name for a player; returns the new count.
+    The auto-learn only promotes a name to igns once it recurs (>=2 sightings), so a
+    one-off misread can't poison the player's identity."""
+    try:
+        pool = _pool_check()
+    except Exception:
+        return 1
+    try:
+        async with pool.acquire() as conn:
+            n = await conn.fetchval(
+                "INSERT INTO ign_pending (discord_id, name, seen) VALUES ($1, $2, 1) "
+                "ON CONFLICT (discord_id, name) DO UPDATE SET seen = ign_pending.seen + 1 "
+                "RETURNING seen", str(discord_id), name)
+        return int(n or 1)
+    except Exception as e:
+        print(f"[IGN] pending bump failed: {e}")
+        return 2   # fail-open: on error, allow the learn rather than block forever
+
+
 async def save_player_ign(discord_id: str, ign: str):
     """Append a new in-game name alias — unless it's really a variant of a name we
     already have. In-game names carry special characters vision reads inconsistently,
@@ -964,40 +990,48 @@ async def dedupe_all_aliases(dry_run: bool = True) -> list[dict]:
     Returns per-player before/after for a report. dry_run leaves the DB untouched."""
     from difflib import SequenceMatcher as _SM
     pool = _pool_check()
+    changes = []
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT discord_id, player_name, igns FROM players "
             "WHERE array_length(igns, 1) >= 1")
-    changes = []
-    for r in rows:
-        igns = [i for i in (r['igns'] or []) if i and i.strip()]
-        if not igns:
-            continue
-        base = r['player_name'] or ''
-        base_n = _normalize_ign(base)
-        kept = []          # representative IGNs we keep
-        for ign in igns:
-            n = _normalize_ign(ign)
-            # Drop if it collapses into the registered name or an already-kept IGN
-            if base_n and (n == base_n or (n and _SM(None, n, base_n).ratio() >= 0.85)):
+        # Registered identities: an ign that IS a DIFFERENT player's registered name is a
+        # squatted misread (kc holding 'canada dry'), and it poisons name->id resolution.
+        _allp = await conn.fetch("SELECT discord_id, player_name FROM players")
+        _reg_owner = {}
+        for _p in _allp:
+            _pn = _normalize_ign(_p['player_name'] or '')
+            if _pn:
+                _reg_owner.setdefault(_pn, str(_p['discord_id'] or ''))
+        for r in rows:
+            _did = str(r['discord_id'] or '')
+            _orig = [i for i in (r['igns'] or []) if i and i.strip()]
+            if not _orig:
                 continue
-            dup_of = next((k for k in kept
-                           if _normalize_ign(k) == n
-                           or _SM(None, n, _normalize_ign(k)).ratio() >= 0.85), None)
-            if dup_of is None:
-                kept.append(ign)
-            else:
-                # Prefer the spelling closest to the registered name
-                if base_n and _SM(None, n, base_n).ratio() > _SM(None, _normalize_ign(dup_of), base_n).ratio():
+            base = r['player_name'] or ''
+            base_n = _normalize_ign(base)
+            # Drop igns that are another registered player's name, then collapse variants.
+            igns = [ig for ig in _orig if _reg_owner.get(_normalize_ign(ig)) in (None, '', _did)]
+            kept = []          # representative IGNs we keep
+            for ign in igns:
+                n = _normalize_ign(ign)
+                if base_n and (n == base_n or (n and _SM(None, n, base_n).ratio() >= 0.85)):
+                    continue
+                dup_of = next((k for k in kept
+                               if _normalize_ign(k) == n
+                               or _SM(None, n, _normalize_ign(k)).ratio() >= 0.85), None)
+                if dup_of is None:
+                    kept.append(ign)
+                elif base_n and _SM(None, n, base_n).ratio() > _SM(None, _normalize_ign(dup_of), base_n).ratio():
                     kept[kept.index(dup_of)] = ign
-        if len(kept) != len(igns):
-            changes.append({'discord_id': r['discord_id'], 'player_name': base,
-                            'before': igns, 'after': kept,
-                            'removed': len(igns) - len(kept)})
-            if not dry_run:
-                await conn.execute(
-                    "UPDATE players SET igns = $1 WHERE discord_id = $2",
-                    kept, r['discord_id'])
+            if kept != _orig:
+                changes.append({'discord_id': r['discord_id'], 'player_name': base,
+                                'before': _orig, 'after': kept,
+                                'removed': len(_orig) - len(kept)})
+                if not dry_run:
+                    await conn.execute(
+                        "UPDATE players SET igns = $1 WHERE discord_id = $2",
+                        kept, r['discord_id'])
     if not dry_run:
         _cache_invalidate('players')
     return changes
