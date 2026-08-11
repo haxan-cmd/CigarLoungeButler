@@ -73,6 +73,16 @@ def test_td_lead_over_teammate():
     assert lead(row(td=100)) is None         # no second-place TD stored -> None
 
 
+def test_marks_earned():
+    marks = STAT_EXTRACTORS['marks'][0]
+    assert marks(row(td=50, k=30, feats='')) == 1                         # base submission
+    assert marks(row(td=205, k=110, feats='200 Takedowns, 100 Kills')) == 3   # 1 + 2 feats
+    assert marks(row(td=50, k=30, feats='Outmatched')) == 3               # 1 + valor +2
+    assert marks(row(td=5, k=0, feats='')) == 0                           # pacifist
+    assert marks(row(weapon='Hybrid', td=50, k=30, feats='')) == 0        # Hybrid = no weapon marks
+    assert marks(row(td=50, k=30, feats='High Score')) == 2               # High Score only, not +Score too
+
+
 # ── matrix ─────────────────────────────────────────────────────────────────
 def test_matrix_is_symmetric_with_unit_diagonal():
     # kills tracks takedowns; deaths anti-tracks K/D.

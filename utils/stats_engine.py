@@ -121,6 +121,37 @@ def _lead2(s):
     return (td - tp) if (td is not None and tp is not None) else None
 
 
+def _marks(s):
+    # Weapon marks this run earned, mirroring the registry rules (SUBMISSIONS only —
+    # excludes legacy/imported marks the Lab can't see): 0 for a pacifist or a
+    # Hybrid/blank-weapon run; else 1 base + feat bonuses (200 Takedowns, 100 Kills,
+    # Triple, High Score, Score) + one difficulty valor tag (Uphill 1 / Outmatched 2 /
+    # Brutal 3). Sum it per player (Rankings 'Total') for a marks count.
+    td, k = _i(s, 7), _i(s, 8)
+    if td is None or k is None:
+        return None
+    if k == 0 and td <= 10:
+        return 0
+    w = (s[3] or '').strip() if len(s) > 3 else ''
+    if not w or w in ('Other', 'Multiple Weapons', 'Hybrid'):
+        return 0
+    _fs = (s[11] or '') if len(s) > 11 else ''
+    feats = [x.strip() for x in _fs.split(',')] if _fs and _fs != 'None' else []
+    m = 1
+    for _feat in ('200 Takedowns', '100 Kills', 'Triple', 'High Score', 'Score'):
+        if _feat in feats:
+            m += 1
+    try:
+        from utils.tilt import tag_marks as _tm
+        for _tag, _mv in sorted(_tm().items(), key=lambda kv: -kv[1]):
+            if _tag in feats:
+                m += _mv
+                break
+    except Exception:
+        pass
+    return m
+
+
 # key -> (extractor, human label). Shared by scatter, matrix, and compare.
 STAT_EXTRACTORS = {
     'kills':          (_kills,   'Kills'),
@@ -137,6 +168,7 @@ STAT_EXTRACTORS = {
     'lobby_kills':    (_lobbyk,  'Total lobby kills'),
     'tilt':           (_gap,     'Lobby kill gap'),
     'td_lead':        (_lead2,   'TD lead over teammate'),
+    'marks':          (_marks,   'Marks earned'),
 }
 
 # A compact, readable default set for the matrix (7×7 stays legible).
