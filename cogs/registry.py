@@ -745,13 +745,22 @@ async def get_personal_bests(discord_id, cached_data=None):
     """Return dict with highest kills, highest TDs, and best lethality from all submissions."""
     subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
     discord_id_str = str(discord_id)
+    try:
+        _nmap = (cached_data or {}).get('name_to_id') or await _db.get_name_to_id_map()
+    except Exception:
+        _nmap = {}
+    _my_names = {nm for nm, d in _nmap.items() if str(d) == discord_id_str}
     best_kills = 0
     best_td = 0
     best_lethality = 0.0
     best_executioner = 0.0   # highest single-game kills / team kills %
     best_warlord = 0.0       # highest single-game takedowns / team kills %
     for row in subs:
-        if len(row) < 9 or row[2].strip() != discord_id_str:
+        if len(row) < 9:
+            continue
+        _rid0 = row[2].strip()
+        _rn0 = row[1].strip().lower() if row[1] else ''
+        if not (_rid0 == discord_id_str or (_rid0 == '' and _rn0 in _my_names)):
             continue
         try:
             td = int(row[7])
@@ -777,6 +786,33 @@ async def get_personal_bests(discord_id, cached_data=None):
                 _wl = td * _tks / kills
                 if _wl > best_warlord:
                     best_warlord = _wl
+    # Recover bests from board entries too: a legacy 200-TD run can sit on the
+    # 200 Takedowns / weapon board with NO matching submission, which showed a 176 PB
+    # next to a x2 200 Takedowns feat. Board score is TDs for weapon/map/feat-TD boards,
+    # kills for the 100 Kills board and the weapon Kills companions.
+    try:
+        from utils.boards import board_unit, is_kills_board
+        _ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
+        for _r in _ld:
+            if len(_r) < 4 or not _r[3]:
+                continue
+            _rid = (_r[2] or '').strip()
+            _rn = (_r[1] or '').strip().lower()
+            if not (_rid == discord_id_str or (_rid == '' and _rn in _my_names)):
+                continue
+            try:
+                _sc = int(_r[3])
+            except (ValueError, TypeError):
+                continue
+            _bn = (_r[0] or '').strip()
+            if is_kills_board(_bn) or _bn == '100 Kills':
+                if _sc > best_kills:
+                    best_kills = _sc
+            elif board_unit(_bn) == 'TDs':
+                if _sc > best_td:
+                    best_td = _sc
+    except Exception as _pbe:
+        print(f"[PB] board-best merge failed: {_pbe}")
     return {
         'kills': best_kills,
         'td': best_td,
