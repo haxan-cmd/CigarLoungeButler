@@ -491,7 +491,6 @@ async def add_submission(
     team_total_kills=None, enemy_total_kills=None
 ) -> int:
     """Insert a submission and return its id (replaces sheet row index)."""
-    _cache_invalidate('submissions')
     pool = _pool_check()
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
     if isinstance(timestamp, str):
@@ -514,6 +513,11 @@ async def add_submission(
             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score,
             team_total_kills, enemy_total_kills
         )
+    # Invalidate AFTER the insert commits: doing it before left a window where a
+    # concurrent read (the finalise pipeline does several) re-cached the pre-insert
+    # rows for the full TTL, so the same finalise's board render drew a stale Kills
+    # section (missing the just-logged run) until a later /refresh.
+    _cache_invalidate('submissions')
     return row_id
 
 
