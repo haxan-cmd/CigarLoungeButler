@@ -432,6 +432,25 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     }
 
 
+def estimate_season_end(started_at, now=None):
+    """Estimated season/bounty end from the monthly cadence: ~1 month after the
+    start (same calendar day, clamped to the month's length). No hard end is stored
+    — a mod closes the season via /bounty_end — so this is APPROXIMATE. Returns
+    (end_datetime, days_left), or (None, None) when there's no start. Single source
+    for the timeline shown in the report AND injected into the Butler's context, so
+    the two can never drift."""
+    from datetime import datetime as _dt
+    import calendar as _cal
+    if not started_at:
+        return None, None
+    st = started_at.replace(tzinfo=None) if getattr(started_at, 'tzinfo', None) else started_at
+    em, ey = ((1, st.year + 1) if st.month == 12 else (st.month + 1, st.year))
+    last = _cal.monthrange(ey, em)[1]
+    end = st.replace(year=ey, month=em, day=min(st.day, last))
+    days_left = (end - (now or _dt.utcnow())).days
+    return end, days_left
+
+
 async def build_favourites_embed(stats, bot_avatar_url=None):
     import discord as _discord
 
@@ -484,15 +503,10 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
         # /bounty_end), so estimate it from the monthly cadence — ~1 month after the start —
         # and mark it approximate. Prominent at the top of the season block.
         try:
-            from datetime import datetime as _dt
-            import calendar as _cal
             _st = _season.get('started_at')
-            if _st:
+            _end, _days = estimate_season_end(_st)
+            if _end:
                 _stn = _st.replace(tzinfo=None) if getattr(_st, 'tzinfo', None) else _st
-                _em, _ey = ((1, _stn.year + 1) if _stn.month == 12 else (_stn.month + 1, _stn.year))
-                _last = _cal.monthrange(_ey, _em)[1]
-                _end = _stn.replace(year=_ey, month=_em, day=min(_stn.day, _last))
-                _days = (_end - _dt.utcnow()).days
                 _tl = f"Started {_stn:%b %d}"
                 if _days > 1:
                     _tl += f" · **{_days} days left** · ends ~{_end:%b %d}"

@@ -118,6 +118,7 @@ Special instructions:
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
+- When a SEASON/BOUNTY TIMELINE block is in your context, use it to answer "when does the bounty/season end", "how long left", or "when did it start". Give the estimated end date and days left from that block, framed as approximate ("around", "roughly ~Aug 20"), since a mod closes the season by hand. Do NOT deflect with a vague "about a month" when the block gives you the actual dates.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
 - Never invent commands or channels that do not exist.
@@ -2738,6 +2739,33 @@ class PersonalityCog(commands.Cog):
                 or _looks_like_brag(content_lower)
                 or _asks_own_performance(content_lower)):
             return ''
+        # Season/bounty timeline — so "when does the bounty end" gets a real answer
+        # instead of a deflection. The bounty and season start together and run ~a
+        # month; the end date is ESTIMATED (a mod closes it), single-sourced with the
+        # report via favourites.estimate_season_end so the two can't drift.
+        try:
+            from cogs.favourites import estimate_season_end as _est_end
+            _seas = await _db.get_current_season()
+            if _seas and _seas.get('started_at'):
+                _sst = _seas.get('started_at')
+                _sstn = _sst.replace(tzinfo=None) if getattr(_sst, 'tzinfo', None) else _sst
+                _send, _sdays = _est_end(_sst)
+                if _send:
+                    if _sdays > 1:
+                        _swhen = f"about {_sdays} days left, ends ~{_send:%b %d}"
+                    elif _sdays >= 0:
+                        _swhen = f"ends within a day (~{_send:%b %d})"
+                    else:
+                        _swhen = "already past its scheduled month; it now ends whenever a mod closes it"
+                    _slabel = (_seas.get('label') or 'current')
+                    player_stats_ctx += (
+                        f"SEASON/BOUNTY TIMELINE: the {_slabel} season and its bounty started "
+                        f"{_sstn:%b %d} and run about a month, so the bounty {_swhen}. This end "
+                        f"date is an ESTIMATE (a mod closes it manually) — answer with 'around' "
+                        f"or 'roughly', and never state it as an exact guaranteed date.\n"
+                    )
+        except Exception as _tl_e:
+            print(f"[BUTLER] season timeline ctx error: {_tl_e}")
         try:
             p_rows = await _db.get_all_players()
             # Current player stats
