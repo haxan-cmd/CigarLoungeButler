@@ -3008,7 +3008,12 @@ class RegistryCog(commands.Cog):
             if rk > pb_kills:
                 pb_kills = rk; best_kills_row = r
 
-        # Legacy LeaderboardData check for best TD
+        # Legacy LeaderboardData check for best TD. Only boards whose stored score
+        # IS takedowns may feed the TD PB — route through utils.boards.board_unit so
+        # Score (points), the weapon Kills companions (kills) and kill-margin boards
+        # can't leak in. (A hand-typed exclusion set used to miss Score, which then
+        # rendered as e.g. "Score — 27799 TD".)
+        from utils.boards import board_unit as _board_unit
         ld_all = ld  # already fetched above
         for ld_r in ld_all:
             if len(ld_r) < 4:
@@ -3016,7 +3021,7 @@ class RegistryCog(commands.Cog):
             if ld_r[1].strip() != resolved_name:
                 continue
             lb = ld_r[0].strip()
-            if ' - ' in lb or lb in {'Flawless', 'Healing Horn', 'Healing Banner', '200 Takedowns', '100 Kills'}:
+            if _board_unit(lb) != 'TDs':
                 continue
             try:
                 ld_td = int(ld_r[3])
