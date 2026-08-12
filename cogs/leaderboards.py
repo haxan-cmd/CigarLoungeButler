@@ -1247,11 +1247,13 @@ async def _sort_board_entries(lb_name, entries):
         if _classify_board(lb_name, '') in ('weapon', 'map', 'weapon_kills'):
             return _sorted[:10]
         # Feat boards (TUFF, 100 Kills, Flawless…) stack unbounded rows and "go off" like a
-        # full ladder. The render now packs the long list across as many messages as it
-        # needs (see _pack_embeds), so it no longer overflows Discord's 6000-char/message
-        # cap. Keep a generous top-50 so a busy board stays to a few messages rather than
-        # dozens; the full history still lives in the DB and counts for marks/records.
-        return _sorted[:50]
+        # full ladder. The render packs the long list across as many messages as it needs
+        # (see _pack_embeds), so it no longer overflows Discord's 6000-char/message cap.
+        # Currently UNCAPPED — every qualifying run is shown so no one ranked outside a
+        # top-N is invisible. Trade-off is a forever-growing per-run board = more messages
+        # re-edited on each refresh; revisit a cap (e.g. top-100) if it gets unwieldy.
+        # (Score stays capped at 50 above; this branch is the feat boards only.)
+        return _sorted
     subs = _subs_all
     tdl = {}
     for s in subs:
