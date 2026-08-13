@@ -574,6 +574,38 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         emb.add_field(name="\U0001F451 Titles Held", value="  ·  ".join(_held), inline=False)
 
     # --- Curio: an obscure, player-unique stat ---
+    # "Haunts": pick the map the player is most OVER-indexed on vs the lounge, so it's
+    # distinctive to them (Falmire is nearly everyone's most-played, so that alone says
+    # nothing). Restricted to maps that are a real chunk of their play (>=12%, >=3 games)
+    # so it stays representative; falls back to plain most-played if none stand out.
+    _haunt = None
+    try:
+        if mc:
+            _pl_tot = sum(mc.values())
+            _comm = {}
+            _comm_tot = 0
+            for _s in await _db.get_all_submissions():
+                if len(_s) < 6 or 'Unlisted' in (_s[11] or '') or 'Resubmit' in (_s[11] or ''):
+                    continue
+                _mm = (_s[5] or '').strip()
+                if _mm:
+                    _comm[_mm] = _comm.get(_mm, 0) + 1
+                    _comm_tot += 1
+            _best_r = 0.0
+            if _comm_tot and _pl_tot:
+                for _mm, _n in mc.items():
+                    _pl_share = _n / _pl_tot
+                    if _n < 3 or _pl_share < 0.12:
+                        continue
+                    _cs = _comm.get(_mm, 0) / _comm_tot
+                    _r = (_pl_share / _cs) if _cs else _pl_share
+                    if _r > _best_r:
+                        _best_r, _haunt = _r, _mm
+            if not _haunt:
+                _haunt = max(mc.items(), key=lambda kv: kv[1])[0]
+    except Exception:
+        _haunt = (max(mc.items(), key=lambda kv: kv[1])[0] if mc else None)
+
     try:
         _bits = []
         if tot_td or tot_k:
@@ -581,8 +613,8 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         if fc:
             _ff = sorted(fc.items(), key=lambda kv: -kv[1]); _ftot = sum(fc.values())
             _bits.append(f"{round(_ff[0][1] * 100 / _ftot)}% {_ff[0][0]}" if _ftot else "")
-        if mc:
-            _bits.append(f"haunts {max(mc.items(), key=lambda kv: kv[1])[0]}")
+        if _haunt:
+            _bits.append(f"haunts {_haunt}")
         if best_score:
             _bits.append(f"peak match score {best_score:,}")
         _bits = [b for b in _bits if b]
