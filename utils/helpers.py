@@ -791,6 +791,7 @@ _nerve_events = {
     'butler_interactions': [],  # (trigger[:60], response[:60])
     'errors':              [],  # (timestamp, error_str)
     'milestones':          [],  # (player, weapon, rank)
+    'fabrications':        [],  # (player, question[:80], [ungrounded numbers])
 }
 
 
@@ -808,6 +809,13 @@ def nerve_log_error(context, error):
 
 def nerve_log_milestone(player, weapon, rank):
     _nerve_events['milestones'].append((player, weapon, rank))
+
+
+def nerve_log_fabrication(player, question, numbers):
+    """Buffer a suspected Butler fabrication (an ungrounded stat in a data answer)
+    for the hourly digest. Cap the buffer so a bad run can't balloon it."""
+    if len(_nerve_events['fabrications']) < 50:
+        _nerve_events['fabrications'].append((player, (question or '')[:80], list(numbers)))
 
 
 _nerve_alert_sent = {}          # signature -> last-sent timestamp
@@ -868,9 +876,16 @@ def nerve_flush():
         for player, weapon, rank in milestones:
             parts.append(f"  **{player}** — {weapon} → {rank}")
 
+    fabrications = _nerve_events['fabrications']
+    if fabrications:
+        parts.append(f"🧮 **Possible fabrications — {len(fabrications)}** (Butler cited a stat not in its context)")
+        for player, question, numbers in fabrications[:15]:
+            parts.append(f"  **{player}** — {numbers} · `{question}`")
+
     _nerve_events['submissions'].clear()
     _nerve_events['butler_interactions'].clear()
     _nerve_events['errors'].clear()
     _nerve_events['milestones'].clear()
+    _nerve_events['fabrications'].clear()
 
     return "\n".join(parts) if parts else ""

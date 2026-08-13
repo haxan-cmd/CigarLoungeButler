@@ -4150,6 +4150,8 @@ class PersonalityCog(commands.Cog):
                             _bad = _ungr(response_text, player_stats_ctx + " " + resolved_message)
                             if _bad:
                                 print(f"[BUTLER][FABRICATION?] ungrounded={_bad} q={resolved_message!r}")
+                                from utils.helpers import nerve_log_fabrication as _nlf
+                                _nlf(player_name, resolved_message, _bad)
                         except Exception:
                             pass
                     if player_stats_ctx:
