@@ -4140,6 +4140,18 @@ class PersonalityCog(commands.Cog):
                                 pass
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
                     print(f"[BUTLER] reply={response_text!r}")
+                    # Anti-fabrication (LOG-ONLY): on a data answer, flag material numbers in
+                    # the reply that aren't grounded in the context he was given. Never alters
+                    # the reply — this is signal for the eval loop, not a gate. Skips the
+                    # dossier (deterministic) and banter (no stats to fabricate).
+                    if _is_data_q and player_stats_ctx and _dossier_embed is None:
+                        try:
+                            from utils.grounding import ungrounded_numbers as _ungr
+                            _bad = _ungr(response_text, player_stats_ctx + " " + resolved_message)
+                            if _bad:
+                                print(f"[BUTLER][FABRICATION?] ungrounded={_bad} q={resolved_message!r}")
+                        except Exception:
+                            pass
                     if player_stats_ctx:
                         print(f"[BUTLER] stats_ctx={player_stats_ctx!r}")
                     # Track for reaction feedback — store FULL text so tuning isn't blind
