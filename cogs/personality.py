@@ -4089,8 +4089,10 @@ class PersonalityCog(commands.Cog):
                         _dossier_embed = await _bsd(discord_id_str, player_name, _role_ids, guild_id=_gid)
                         if _dossier_embed is not None:
                             player_stats_ctx += ("\n\n[DOSSIER MODE: A full formatted stat dossier embed is shown "
-                                                 "WITH your reply. Do NOT repeat any numbers or list any stats. Reply "
-                                                 "with ONLY a single dry closing remark, one sentence.]")
+                                                 "WITH your reply. Do NOT repeat any numbers or list any stats, and do "
+                                                 "NOT address the player by any name (the dossier is already labelled — "
+                                                 "guessing a name gets it wrong). Reply with ONLY a single dry closing "
+                                                 "remark, one sentence.]")
                     except Exception as _de:
                         print(f"[BUTLER] dossier build error: {_de}")
                 # Detect rude messages — force idiot emoji regardless of AI response
