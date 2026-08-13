@@ -363,7 +363,7 @@ async def get_player_bounties_completed(discord_id):
         return 0
 
 
-async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data=None):
+async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data=None, guild_id=None):
     """Deterministic, emoji-rich registry-card dossier as a discord.Embed, for the
     Butler's "give me my stats" reply (custom emoji tokens can't be reproduced by
     the chat model). The Butler adds a one-line closing quip as the message content.
@@ -388,14 +388,19 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
 
     # --- Tally: marks / runs / boards ---
     total_marks = n_runs = 0
+    _thread_id = None
     try:
         for _p in await _db.get_all_players():
             if _p and _p[0].strip() == did:
                 total_marks = int(_p[3]) if len(_p) > 3 and _p[3] else 0
                 n_runs = int(_p[4]) if len(_p) > 4 and _p[4] else 0
+                _thread_id = (_p[2].strip() if len(_p) > 2 and _p[2] else None)
                 break
     except Exception:
         pass
+    # Hyperlink the dossier title to the player's registry card thread.
+    if _thread_id and guild_id:
+        emb.url = f"https://discord.com/channels/{guild_id}/{_thread_id}"
     boards = 0
     try:
         _nm = (name or '').strip().lower()
@@ -485,13 +490,32 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
     except Exception:
         pass
 
-    # --- Feats ---
-    if feat_counts:
+    # --- Feats: authoritative counts from the SAME source as the card's "Feats of
+    # Legend" (feat-board row counts + manual overrides), not a submission-tag scan
+    # which misses legacy/board feats like Flawless and TUFF. ---
+    try:
+        _hh_tok = "<:hhanded:1430199468246044772>"
+        _tuff_tok = "<a:TUFF2:1520779243879927898>"
+        _named, _fsubs, _bcounts, _flink = await get_feats_for_player(did, cached_data)
+        _feat_emoji = {
+            '100 Kills':     _cfg.FEAT_EMOJIS.get('100 Kills', ''),
+            '200 Takedowns': _cfg.FEAT_EMOJIS.get('200 Takedowns', ''),
+            'Triple':        _cfg.FEAT_EMOJIS.get('Triple', ''),
+            'Flawless':      _cfg.FEAT_EMOJIS.get('Flawless', ''),
+            'TUFF':          _tuff_tok,
+            'Pacifist':      _cfg.FEAT_EMOJIS.get('Pacifist', ''),
+        }
+        _order = ['Flawless', '100 Kills', '200 Takedowns', 'Triple', 'TUFF', 'Pacifist']
         _fp = []
-        for _ft, _c in sorted(feat_counts.items(), key=lambda kv: -kv[1])[:8]:
-            _e = _feat_src.get(_ft, '')
-            _fp.append(f"{_e}×{_c}" if _e else f"{_ft}×{_c}")
-        emb.add_field(name="\U0001F3AF Feats", value="  ".join(_fp), inline=False)
+        for _fk in _order:
+            _c = (_bcounts or {}).get(_fk, 0)
+            if _c:
+                _e = _feat_emoji.get(_fk, '')
+                _fp.append(f"{_e}×{_c}" if _e else f"{_fk}×{_c}")
+        if _fp:
+            emb.add_field(name="\U0001F3AF Feats", value="  ".join(_fp), inline=False)
+    except Exception:
+        pass
 
     # --- Playstyle (archetype + damage) ---
     try:
@@ -523,7 +547,7 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
             _hhv = f"COMPLETE {HH_TOTAL}/{HH_TOTAL} \u2705"
         else:
             _hhv = f"{len(_done)}/{HH_TOTAL}"
-        emb.add_field(name="\U0001F4AF Hundred-Handed", value=_hhv, inline=True)
+        emb.add_field(name="<:hhanded:1430199468246044772> Hundred-Handed", value=_hhv, inline=True)
     except Exception:
         pass
 
@@ -534,7 +558,7 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         (getattr(_cfg, 'CAMPAIGN_MASTER_ROLE_ID', 0),_cfg.TITLE_EMOJIS.get('Campaign Master', ''),'Campaign Master'),
         (getattr(_cfg, 'MOST_LETHAL_ROLE_ID', 0),   '\U0001F947', 'Most Dominant'),
         (getattr(_cfg, 'WARLORD_ROLE_ID', 0),       '\u2694\uFE0F', 'Warlord'),
-        (getattr(_cfg, 'HUNDRED_HANDED_ROLE_ID', 0),'\U0001F4AF', 'Hundred-Handed'),
+        (getattr(_cfg, 'HUNDRED_HANDED_ROLE_ID', 0),'<:hhanded:1430199468246044772>', 'Hundred-Handed'),
     ]
     _held = [f"{_e} {_n}".strip() for _rid, _e, _n in _title_roles if _rid and _rid in roles]
     if _held:

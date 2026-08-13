@@ -4018,7 +4018,8 @@ class PersonalityCog(commands.Cog):
                     try:
                         from cogs.registry import build_self_dossier as _bsd
                         _role_ids = [r.id for r in getattr(message.author, 'roles', [])]
-                        _dossier_embed = await _bsd(discord_id_str, player_name, _role_ids)
+                        _gid = message.guild.id if message.guild else None
+                        _dossier_embed = await _bsd(discord_id_str, player_name, _role_ids, guild_id=_gid)
                         if _dossier_embed is not None:
                             player_stats_ctx += ("\n\n[DOSSIER MODE: A full formatted stat dossier embed is shown "
                                                  "WITH your reply. Do NOT repeat any numbers or list any stats. Reply "
