@@ -78,7 +78,6 @@ _INDEXES = [
     ("idx_submissions_map_time",   "submissions",      "(map, submitted_at)"),
     ("idx_sub_rosters_sid",        "submission_rosters", "(submission_id)"),
     ("idx_lab_opens_time",         "lab_opens",          "(opened_at)"),
-    ("idx_butler_mem_player",      "butler_memories",    "(discord_id, salience)"),
 ]
 
 
@@ -162,16 +161,6 @@ _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS ign_pending ("
     "discord_id TEXT NOT NULL, name TEXT NOT NULL, seen INTEGER DEFAULT 1, "
     "PRIMARY KEY (discord_id, name))",
-    # Butler long-term memory: things he remembers about a player (jokes, promises,
-    # milestones) or the community as a whole (scope='community', discord_id NULL).
-    # Injected BOUNDED into his chat context so callbacks feel lived-in. salience
-    # ranks what survives pruning; use_count/last_used_at track what he actually
-    # brings up so stale memories decay out.
-    "CREATE TABLE IF NOT EXISTS butler_memories ("
-    "id SERIAL PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'player', discord_id TEXT, "
-    "player_name TEXT, kind TEXT, text TEXT NOT NULL, salience INTEGER DEFAULT 1, "
-    "source TEXT DEFAULT 'auto', source_link TEXT, created_at TIMESTAMP DEFAULT NOW(), "
-    "last_used_at TIMESTAMP, use_count INTEGER DEFAULT 0)",
 ]
 
 
@@ -969,142 +958,6 @@ async def bump_ign_pending(discord_id: str, name: str) -> int:
     except Exception as e:
         print(f"[IGN] pending bump failed: {e}")
         return 2   # fail-open: on error, allow the learn rather than block forever
-
-
-async def add_butler_memory(text, *, scope='player', discord_id=None, player_name=None,
-                            kind=None, source='auto', source_link=None, salience=1):
-    """Store a Butler memory. Dedups against a near-identical memory in the same
-    scope/player (case-folded 80-char prefix) — bumps its salience instead of storing
-    a twin. Returns the new row id, or None on failure/dedup."""
-    text = ' '.join((text or '').split())
-    if len(text) < 4:
-        return None
-    text = text[:400]
-    try:
-        pool = _pool_check()
-    except Exception:
-        return None
-    _key = text.lower()[:80]
-    try:
-        async with pool.acquire() as conn:
-            dup = await conn.fetchrow(
-                "SELECT id FROM butler_memories WHERE scope = $1 "
-                "AND discord_id IS NOT DISTINCT FROM $2 AND lower(left(text, 80)) = $3 LIMIT 1",
-                scope, (str(discord_id) if discord_id else None), _key)
-            if dup:
-                await conn.execute("UPDATE butler_memories SET salience = salience + 1 WHERE id = $1", dup['id'])
-                return None
-            rid = await conn.fetchval(
-                "INSERT INTO butler_memories (scope, discord_id, player_name, kind, text, "
-                "salience, source, source_link) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-                scope, (str(discord_id) if discord_id else None), player_name, kind, text,
-                int(salience), source, source_link)
-        return int(rid) if rid else None
-    except Exception as e:
-        print(f"[MEM] add failed: {e}")
-        return None
-
-
-async def get_butler_memories(discord_id, player_limit=6, community_limit=3):
-    """Bounded recall for the Butler's chat context: a player's top memories plus a few
-    community ones, ranked by salience then recency. Returns a list of dicts."""
-    try:
-        pool = _pool_check()
-    except Exception:
-        return []
-    out = []
-    try:
-        async with pool.acquire() as conn:
-            if discord_id:
-                rows = await conn.fetch(
-                    "SELECT id, kind, text, source_link FROM butler_memories "
-                    "WHERE scope = 'player' AND discord_id = $1 "
-                    "ORDER BY salience DESC, created_at DESC LIMIT $2",
-                    str(discord_id), int(player_limit))
-                out += [dict(r) for r in rows]
-            crows = await conn.fetch(
-                "SELECT id, kind, text, source_link FROM butler_memories "
-                "WHERE scope = 'community' ORDER BY salience DESC, created_at DESC LIMIT $1",
-                int(community_limit))
-            out += [dict(r) for r in crows]
-    except Exception as e:
-        print(f"[MEM] recall failed: {e}")
-    return out
-
-
-async def touch_butler_memories(ids):
-    """Mark memories as surfaced (use_count + last_used_at) so unused ones age out first."""
-    ids = [int(i) for i in (ids or []) if i]
-    if not ids:
-        return
-    try:
-        pool = _pool_check()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE butler_memories SET use_count = use_count + 1, last_used_at = NOW() "
-                "WHERE id = ANY($1::int[])", ids)
-    except Exception as e:
-        print(f"[MEM] touch failed: {e}")
-
-
-async def list_butler_memories_for_player(discord_id):
-    """All of a player's memories, newest first — for the mod view."""
-    try:
-        pool = _pool_check()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, kind, text, source, salience, use_count, created_at "
-                "FROM butler_memories WHERE scope='player' AND discord_id = $1 "
-                "ORDER BY created_at DESC", str(discord_id))
-        return [dict(r) for r in rows]
-    except Exception as e:
-        print(f"[MEM] list failed: {e}")
-        return []
-
-
-async def delete_butler_memory(memory_id):
-    """Forget one memory by id. Returns True if a row was removed."""
-    try:
-        pool = _pool_check()
-        async with pool.acquire() as conn:
-            res = await conn.execute("DELETE FROM butler_memories WHERE id = $1", int(memory_id))
-        return res.strip().endswith('1')
-    except Exception as e:
-        print(f"[MEM] delete failed: {e}")
-        return False
-
-
-async def forget_butler_memories_for_player(discord_id):
-    """Wipe every memory for a player. Returns the number removed."""
-    try:
-        pool = _pool_check()
-        async with pool.acquire() as conn:
-            res = await conn.execute(
-                "DELETE FROM butler_memories WHERE scope='player' AND discord_id = $1", str(discord_id))
-        try:
-            return int(res.split()[-1])
-        except Exception:
-            return 0
-    except Exception as e:
-        print(f"[MEM] forget failed: {e}")
-        return 0
-
-
-async def prune_butler_memories(max_per_player=40):
-    """Decay: keep only the top-N per player (salience, then recency); delete the rest.
-    Community memories are left alone (curated, low volume)."""
-    try:
-        pool = _pool_check()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM butler_memories WHERE id IN ("
-                "  SELECT id FROM ("
-                "    SELECT id, row_number() OVER ("
-                "      PARTITION BY discord_id ORDER BY salience DESC, created_at DESC) AS rn "
-                "    FROM butler_memories WHERE scope='player'"
-                "  ) t WHERE t.rn > $1)", int(max_per_player))
-    except Exception as e:
-        print(f"[MEM] prune failed: {e}")
 
 
 async def save_player_ign(discord_id: str, ign: str):

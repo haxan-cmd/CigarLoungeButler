@@ -3991,16 +3991,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             msg = build_milestone_message(_user_name, weapon, threshold, rank_name)
                             if msg:
                                 nerve_log_milestone(_user_name, weapon, rank_name)
-                                # Butler long-term memory: a rank milestone is a notable,
-                                # factual thing worth recalling later (salience 2, above chat).
-                                try:
-                                    await _db.add_butler_memory(
-                                        f"Reached {rank_name} on {weapon}.", scope='player',
-                                        discord_id=str(_user_id), player_name=_user_name,
-                                        kind='milestone', source='milestone',
-                                        source_link=message_link, salience=2)
-                                except Exception:
-                                    pass
                                 # board/card links + the run that did it
                                 msg = await _lky3(msg, _guild) + f" [The run.]({message_link})"
                                 await main_ch.send(msg)
