@@ -493,7 +493,7 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
             _label = _wname + (f" ({_sub})" if _sub else "")
             _lines.append(f"{_badge} {_label} · {_m}".strip())
         if _lines:
-            emb.add_field(name="\U0001F3C5 Signature Arms", value="\n".join(_lines), inline=False)
+            emb.add_field(name="\U0001F5E1️ Signature Arms", value="\n".join(_lines), inline=False)
     except Exception:
         pass
 
@@ -520,7 +520,7 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
                 _e = _feat_emoji.get(_fk, '')
                 _fp.append(f"{_e}×{_c}" if _e else f"{_fk}×{_c}")
         if _fp:
-            emb.add_field(name="\U0001F3AF Feats", value="  ".join(_fp), inline=False)
+            emb.add_field(name="\U0001F3DB️ Feats", value="  ".join(_fp), inline=False)
     except Exception:
         pass
 
@@ -528,20 +528,22 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
     try:
         _arch, _dmg = await get_player_descriptors(did, cached_data)
         if _arch:
-            emb.add_field(name="\U0001F9EC Playstyle",
+            emb.add_field(name="\U0001F3AD Archetype",
                           value=_arch + (f"\n{_dmg}" if _dmg else ""), inline=True)
     except Exception:
         pass
 
     # --- Lobby gauntlet ---
     try:
+        _fire = "\U0001F525"
+        _dotmap = {t: e for t, e in _tiltmod.card_badges()}
         _diff = (_ls or {}).get('difficulty') or {}
         if _diff:
             _order = ['Brutal', 'Outmatched', 'Uphill']
-            _dp = [f"{_t} ×{_diff[_t]}" for _t in _order if _diff.get(_t)]
-            _dp += [f"{_t} ×{_c}" for _t, _c in _diff.items() if _t not in _order and _c]
+            _keys = [t for t in _order if _diff.get(t)] + [t for t in _diff if t not in _order and _diff[t]]
+            _dp = [f"{_dotmap.get(t, _fire)} {t} ×{_diff[t]}" for t in _keys]
             if _dp:
-                emb.add_field(name="\U0001F525 Lobby Gauntlet", value="\n".join(_dp), inline=True)
+                emb.add_field(name=f"{_fire} Lobby Ratings", value="\n".join(_dp), inline=True)
     except Exception:
         pass
 
