@@ -4006,6 +4006,25 @@ class PersonalityCog(commands.Cog):
                 # _build_player_stats_ctx so the ~8k-char balloon guardrails are testable).
                 player_stats_ctx = await self._build_player_stats_ctx(
                     message, discord_id_str, player_name, resolved_message, content_lower, _is_data_q)
+                # HYBRID self-dossier: "give me my stats" gets a deterministic, emoji-rich
+                # stat block built in code (mirrors the registry card header — custom emoji
+                # tokens the chat model can't reproduce), with the Butler adding a single
+                # closing quip. Built here; prepended to the reply below.
+                _dossier_block = None
+                _msg_l = resolved_message.lower()
+                if any(_t in _msg_l for _t in ('my stats', 'my dossier', 'my stat sheet', 'my sheet',
+                                               'my profile', 'my numbers', 'stat sheet',
+                                               'give me my stat', 'show me my stat')):
+                    try:
+                        from cogs.registry import build_self_dossier as _bsd
+                        _role_ids = [r.id for r in getattr(message.author, 'roles', [])]
+                        _dossier_block = await _bsd(discord_id_str, player_name, _role_ids)
+                        if _dossier_block:
+                            player_stats_ctx += ("\n\n[DOSSIER MODE: A full formatted stat dossier is shown ABOVE "
+                                                 "your reply. Do NOT repeat any numbers or list any stats. Reply with "
+                                                 "ONLY a single dry closing remark, one sentence.]")
+                    except Exception as _de:
+                        print(f"[BUTLER] dossier build error: {_de}")
                 # Detect rude messages — force idiot emoji regardless of AI response
                 rude_words = ['fuck you', 'fuck off', 'shut up', 'idiot', 'stupid', 'useless', 'trash', 'garbage', 'dumb', 'moron', 'shut it']
                 is_rude = any(w in resolved_message.lower() for w in rude_words)
@@ -4032,6 +4051,10 @@ class PersonalityCog(commands.Cog):
                                 response_text = f"You're a **{_lab}**. " + response_text.lstrip()
                         except Exception:
                             pass
+                    # Prepend the deterministic dossier block; the model's line becomes
+                    # the closing quip beneath it.
+                    if _dossier_block:
+                        response_text = _dossier_block + "\n\n" + response_text.strip()
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     if _is_rules_q:
                         response_text = response_text.rstrip() + f"\n\nIt's all on record in the information centre. <#{config.CHALLENGE_RULES_CHANNEL_ID}>"

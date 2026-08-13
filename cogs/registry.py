@@ -362,6 +362,190 @@ async def get_player_bounties_completed(discord_id):
     except Exception:
         return 0
 
+
+async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data=None):
+    """Deterministic, emoji-rich dossier that mirrors the top of a player's
+    registry card — built in CODE (custom emoji tokens can't be reproduced by the
+    chat model) for the Butler's "give me my stats" reply. The Butler appends a
+    one-line closing quip. Best-effort: any section that fails is silently skipped
+    so a single bad datum never blanks the whole dossier. Returns a Discord string.
+    """
+    import config as _cfg
+    from utils.ranks import get_weapon_rank, get_player_title
+    did = str(discord_id)
+    roles = set(member_role_ids or [])
+    L = [f"\U0001F5C2️  **{name} — Dossier**"]
+
+    # --- Core line: title, marks, runs, boards ---
+    total_marks = n_runs = 0
+    try:
+        for _p in await _db.get_all_players():
+            if _p and _p[0].strip() == did:
+                total_marks = int(_p[3]) if len(_p) > 3 and _p[3] else 0
+                n_runs = int(_p[4]) if len(_p) > 4 and _p[4] else 0
+                break
+    except Exception:
+        pass
+    boards = 0
+    try:
+        _nm = (name or '').strip().lower()
+        _seen = set()
+        for _r in (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data():
+            if len(_r) < 3:
+                continue
+            if _r[2].strip() == did or ((_r[1] or '').strip().lower() == _nm):
+                _seen.add((_r[0] or '').strip())
+        boards = len(_seen)
+    except Exception:
+        pass
+    try:
+        _bounties = await get_player_bounties_completed(did)
+    except Exception:
+        _bounties = 0
+    L.append(f"\U0001F396️  {get_player_title(_bounties)} · {_bounties} "
+             f"{'bounty' if _bounties == 1 else 'bounties'} completed")
+    L.append(f"\U0001F4A0  {total_marks} marks · \U0001F4E5 {n_runs} runs · \U0001F4CB {boards} boards")
+
+    # --- Signature arms: top weapons with rank badges ---
+    try:
+        _wm = await calculate_weapon_marks_for_player(did, cached_data)
+        _top = sorted(((w, m) for w, m in (_wm or {}).items() if m), key=lambda kv: -kv[1])[:3]
+        _parts = []
+        for _w, _m in _top:
+            _rank = get_weapon_rank(_m)[0]
+            _badge = _cfg.WEAPON_RANK_EMOJIS.get(_rank, '')
+            _parts.append(f"{_badge} {_w} ({_m})".strip())
+        if _parts:
+            L.append("\U0001F3C5  Signature arms: " + " · ".join(_parts))
+    except Exception:
+        pass
+
+    # --- One pass over the player's runs: best game, feats, totals, curio ---
+    best = None            # (td, k, d, weapon, map)
+    feat_counts = {}
+    tot_td = tot_k = 0
+    wcount = {}; mcount = {}; fcount = {}
+    best_score = 0
+    _feat_src = {**getattr(_cfg, 'FEAT_EMOJIS', {}), **getattr(_cfg, 'SPECIAL_OPS_EMOJIS', {})}
+    try:
+        for r in await _db.get_submissions_by_player(did):
+            if len(r) < 9:
+                continue
+            if 'Unlisted' in (r[11] or '') or 'Resubmit' in (r[11] or ''):
+                continue
+            try:
+                td = int(r[7]); k = int(r[8]); d = int(r[9]) if r[9] else 0
+            except (ValueError, TypeError):
+                continue
+            tot_td += td; tot_k += k
+            _w = (r[3] or '').strip(); _m = (r[5] or '').strip(); _f = (r[6] or '').strip()
+            if _w: wcount[_w] = wcount.get(_w, 0) + 1
+            if _m: mcount[_m] = mcount.get(_m, 0) + 1
+            if _f: fcount[_f] = fcount.get(_f, 0) + 1
+            try:
+                _sc = int(r[24]) if len(r) > 24 and r[24] else 0
+            except (ValueError, TypeError):
+                _sc = 0
+            if _sc > best_score: best_score = _sc
+            if best is None or td > best[0]:
+                best = (td, k, d, _w, _m)
+            _tags = [t.strip() for t in (r[11] or '').split(',')] if len(r) > 11 else []
+            for _ft in _feat_src:
+                if _ft in _tags:
+                    feat_counts[_ft] = feat_counts.get(_ft, 0) + 1
+    except Exception:
+        pass
+    if best and best[3]:
+        L.append(f"⚔️  Best game: {best[0]} TD / {best[1]} K / {best[2]} D — "
+                 f"{best[3]}" + (f" on {best[4]}" if best[4] else ""))
+
+    # --- Best + average lethality ---
+    try:
+        _pb = await get_personal_bests(did, cached_data)
+        _ls = await get_lobby_stats_for_player(did, cached_data)
+        _bl = _pb.get('lethality') if _pb else None
+        _al = (_ls or {}).get('avg_lethality')
+        if _bl:
+            _line = f"\U0001FA78  Best lethality: {_bl}%"
+            if _al:
+                _line += f" · avg {_al:.0f}%"
+            L.append(_line)
+    except Exception:
+        _ls = None
+
+    # --- Feats ---
+    if feat_counts:
+        _fp = []
+        for _ft, _c in sorted(feat_counts.items(), key=lambda kv: -kv[1])[:6]:
+            _e = _feat_src.get(_ft, '')
+            _fp.append(f"{_e}×{_c}" if _e else f"{_ft}×{_c}")
+        L.append("\U0001F3AF  Feats: " + " · ".join(_fp))
+
+    # --- Titles currently held (role-based) ---
+    _title_roles = [
+        (getattr(_cfg, 'GRAND_MARSHAL_ROLE_ID', 0),  _cfg.TITLE_EMOJIS.get('Grand Marshal', ''),  'Grand Marshal'),
+        (getattr(_cfg, 'WEAPONS_MASTER_ROLE_ID', 0), _cfg.TITLE_EMOJIS.get('Weapons Master', ''), 'Weapons Master'),
+        (getattr(_cfg, 'CAMPAIGN_MASTER_ROLE_ID', 0),_cfg.TITLE_EMOJIS.get('Campaign Master', ''),'Campaign Master'),
+        (getattr(_cfg, 'MOST_LETHAL_ROLE_ID', 0),   '\U0001F947', 'Most Dominant'),
+        (getattr(_cfg, 'WARLORD_ROLE_ID', 0),       '⚔️', 'Warlord'),
+        (getattr(_cfg, 'HUNDRED_HANDED_ROLE_ID', 0),'\U0001F4AF', 'Hundred-Handed'),
+    ]
+    _held = [f"{_e} {_n}".strip() for _rid, _e, _n in _title_roles if _rid and _rid in roles]
+    L.append("\U0001F451  Titles held: " + (" · ".join(_held) if _held else "— none yet"))
+
+    # --- Archetype + damage style ---
+    try:
+        _arch, _dmg = await get_player_descriptors(did, cached_data)
+        if _arch:
+            L.append("\U0001F9EC  " + _arch + (f" · {_dmg}" if _dmg else ""))
+    except Exception:
+        pass
+
+    # --- Lobby gauntlet (difficulty badges conquered) ---
+    try:
+        _diff = (_ls or {}).get('difficulty') or {}
+        if _diff:
+            _order = ['Brutal', 'Outmatched', 'Uphill']
+            _dp = [f"{_t} ×{_diff[_t]}" for _t in _order if _diff.get(_t)]
+            _dp += [f"{_t} ×{_c}" for _t, _c in _diff.items() if _t not in _order and _c]
+            if _dp:
+                L.append("\U0001F525  Lobby gauntlet: " + " · ".join(_dp))
+    except Exception:
+        pass
+
+    # --- Hundred-Handed ---
+    try:
+        from cogs.leaderboards import _HH_PRIMARIES, HH_TOTAL
+        _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
+        _done = await _db.get_hh_done_combos(did, name) & _req
+        if _req and _req.issubset(_done):
+            L.append(f"\U0001F4AF  Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) ✅")
+        else:
+            L.append(f"\U0001F4AF  Hundred-Handed: {len(_done)}/{HH_TOTAL}")
+    except Exception:
+        pass
+
+    # --- Curio: an obscure, player-unique stat (career totals + leanings) ---
+    try:
+        _bits = []
+        if tot_td or tot_k:
+            _bits.append(f"career {tot_td:,} takedowns / {tot_k:,} kills")
+        if fcount:
+            _ff = sorted(fcount.items(), key=lambda kv: -kv[1])
+            _ftot = sum(fcount.values())
+            _fpct = round(_ff[0][1] * 100 / _ftot) if _ftot else 0
+            _bits.append(f"{_fpct}% {_ff[0][0]}")
+        if mcount:
+            _bits.append(f"haunts {max(mcount.items(), key=lambda kv: kv[1])[0]}")
+        if best_score:
+            _bits.append(f"peak match score {best_score:,}")
+        if _bits:
+            L.append("\U0001F50E  Curio: " + ", ".join(_bits) + ".")
+    except Exception:
+        pass
+
+    return "\n".join(L)
+
 async def _season_score_bests(cached_data=None):
     """Per-player 100+kill and 200+TD run scores DURING THE CURRENT SEASON. Apex &
     Frenzied are season (bounty) stats that reset each month, so they are built from
