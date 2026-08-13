@@ -4010,19 +4010,19 @@ class PersonalityCog(commands.Cog):
                 # stat block built in code (mirrors the registry card header — custom emoji
                 # tokens the chat model can't reproduce), with the Butler adding a single
                 # closing quip. Built here; prepended to the reply below.
-                _dossier_block = None
+                _dossier_embed = None
                 _msg_l = resolved_message.lower()
                 if any(_t in _msg_l for _t in ('my stats', 'my dossier', 'my stat sheet', 'my sheet',
                                                'my profile', 'my numbers', 'stat sheet',
-                                               'give me my stat', 'show me my stat')):
+                                               'give me my stat', 'show me my stat', 'gimme my stat')):
                     try:
                         from cogs.registry import build_self_dossier as _bsd
                         _role_ids = [r.id for r in getattr(message.author, 'roles', [])]
-                        _dossier_block = await _bsd(discord_id_str, player_name, _role_ids)
-                        if _dossier_block:
-                            player_stats_ctx += ("\n\n[DOSSIER MODE: A full formatted stat dossier is shown ABOVE "
-                                                 "your reply. Do NOT repeat any numbers or list any stats. Reply with "
-                                                 "ONLY a single dry closing remark, one sentence.]")
+                        _dossier_embed = await _bsd(discord_id_str, player_name, _role_ids)
+                        if _dossier_embed is not None:
+                            player_stats_ctx += ("\n\n[DOSSIER MODE: A full formatted stat dossier embed is shown "
+                                                 "WITH your reply. Do NOT repeat any numbers or list any stats. Reply "
+                                                 "with ONLY a single dry closing remark, one sentence.]")
                     except Exception as _de:
                         print(f"[BUTLER] dossier build error: {_de}")
                 # Detect rude messages — force idiot emoji regardless of AI response
@@ -4051,10 +4051,6 @@ class PersonalityCog(commands.Cog):
                                 response_text = f"You're a **{_lab}**. " + response_text.lstrip()
                         except Exception:
                             pass
-                    # Prepend the deterministic dossier block; the model's line becomes
-                    # the closing quip beneath it.
-                    if _dossier_block:
-                        response_text = _dossier_block + "\n\n" + response_text.strip()
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     if _is_rules_q:
                         response_text = response_text.rstrip() + f"\n\nIt's all on record in the information centre. <#{config.CHALLENGE_RULES_CHANNEL_ID}>"
@@ -4068,10 +4064,18 @@ class PersonalityCog(commands.Cog):
                     # Model-generated text: never let an injected @everyone/role mention
                     # actually ping (belt-and-suspenders alongside the bot-wide default).
                     _am = discord.AllowedMentions(everyone=False, roles=False, users=True)
+                    # Dossier mode: the deterministic card embed rides along with the
+                    # Butler's one-line quip as the message content.
+                    _first = _chunks[0] if _chunks else ''
+                    # Only blank the content to None when we have an embed to carry the
+                    # message (Discord rejects an empty-content reply with no embed).
+                    if _dossier_embed is not None and not (_first and _first.strip()):
+                        _first = None
+                    _extra = {'embed': _dossier_embed} if _dossier_embed is not None else {}
                     try:
-                        sent_msg = await message.reply(_chunks[0], mention_author=False, allowed_mentions=_am)
+                        sent_msg = await message.reply(_first, mention_author=False, allowed_mentions=_am, **_extra)
                     except discord.HTTPException:
-                        sent_msg = await message.channel.send(_chunks[0], allowed_mentions=_am)
+                        sent_msg = await message.channel.send(_first, allowed_mentions=_am, **_extra)
                     for _ch in _chunks[1:]:
                         try:
                             await message.channel.send(_ch, allowed_mentions=_am)

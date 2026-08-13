@@ -364,19 +364,29 @@ async def get_player_bounties_completed(discord_id):
 
 
 async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data=None):
-    """Deterministic, emoji-rich dossier that mirrors the top of a player's
-    registry card — built in CODE (custom emoji tokens can't be reproduced by the
-    chat model) for the Butler's "give me my stats" reply. The Butler appends a
-    one-line closing quip. Best-effort: any section that fails is silently skipped
-    so a single bad datum never blanks the whole dossier. Returns a Discord string.
+    """Deterministic, emoji-rich registry-card dossier as a discord.Embed, for the
+    Butler's "give me my stats" reply (custom emoji tokens can't be reproduced by
+    the chat model). The Butler adds a one-line closing quip as the message content.
+    Best-effort: any section that fails is skipped so one bad datum never blanks the
+    dossier. Returns a discord.Embed (or None on total failure).
     """
     import config as _cfg
     from utils.ranks import get_weapon_rank, get_player_title
     did = str(discord_id)
     roles = set(member_role_ids or [])
-    L = [f"\U0001F5C2️  **{name} — Dossier**"]
+    emb = discord.Embed(title=f"\U0001F5C2\uFE0F  {name} — Dossier",
+                        colour=discord.Colour.from_str("#C9A24B"))
 
-    # --- Core line: title, marks, runs, boards ---
+    # --- Standing: title + bounties (description) ---
+    try:
+        _bdone = await get_bounty_completions_for_player(did, cached_data)
+        _nb = len(_bdone)
+    except Exception:
+        _nb = 0
+    emb.description = (f"\U0001F396\uFE0F  **{get_player_title(_nb)}**  ·  {_nb} "
+                       f"{'bounty' if _nb == 1 else 'bounties'} completed")
+
+    # --- Tally: marks / runs / boards ---
     total_marks = n_runs = 0
     try:
         for _p in await _db.get_all_players():
@@ -398,33 +408,15 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         boards = len(_seen)
     except Exception:
         pass
-    try:
-        _bounties = await get_player_bounties_completed(did)
-    except Exception:
-        _bounties = 0
-    L.append(f"\U0001F396️  {get_player_title(_bounties)} · {_bounties} "
-             f"{'bounty' if _bounties == 1 else 'bounties'} completed")
-    L.append(f"\U0001F4A0  {total_marks} marks · \U0001F4E5 {n_runs} runs · \U0001F4CB {boards} boards")
+    emb.add_field(name="\U0001F4CA Tally",
+                  value=f"\U0001F4A0 {total_marks} marks\n\U0001F4E5 {n_runs} runs\n\U0001F4CB {boards} boards",
+                  inline=True)
 
-    # --- Signature arms: top weapons with rank badges ---
-    try:
-        _wm = await calculate_weapon_marks_for_player(did, cached_data)
-        _top = sorted(((w, m) for w, m in (_wm or {}).items() if m), key=lambda kv: -kv[1])[:3]
-        _parts = []
-        for _w, _m in _top:
-            _rank = get_weapon_rank(_m)[0]
-            _badge = _cfg.WEAPON_RANK_EMOJIS.get(_rank, '')
-            _parts.append(f"{_badge} {_w} ({_m})".strip())
-        if _parts:
-            L.append("\U0001F3C5  Signature arms: " + " · ".join(_parts))
-    except Exception:
-        pass
-
-    # --- One pass over the player's runs: best game, feats, totals, curio ---
-    best = None            # (td, k, d, weapon, map)
+    # --- One pass over runs: best game, feats, career totals, curio ---
+    best = None
     feat_counts = {}
     tot_td = tot_k = 0
-    wcount = {}; mcount = {}; fcount = {}
+    wc = {}; mc = {}; fc = {}
     best_score = 0
     _feat_src = {**getattr(_cfg, 'FEAT_EMOJIS', {}), **getattr(_cfg, 'SPECIAL_OPS_EMOJIS', {})}
     try:
@@ -439,9 +431,9 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
                 continue
             tot_td += td; tot_k += k
             _w = (r[3] or '').strip(); _m = (r[5] or '').strip(); _f = (r[6] or '').strip()
-            if _w: wcount[_w] = wcount.get(_w, 0) + 1
-            if _m: mcount[_m] = mcount.get(_m, 0) + 1
-            if _f: fcount[_f] = fcount.get(_f, 0) + 1
+            if _w: wc[_w] = wc.get(_w, 0) + 1
+            if _m: mc[_m] = mc.get(_m, 0) + 1
+            if _f: fc[_f] = fc.get(_f, 0) + 1
             try:
                 _sc = int(r[24]) if len(r) > 24 and r[24] else 0
             except (ValueError, TypeError):
@@ -455,53 +447,62 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
                     feat_counts[_ft] = feat_counts.get(_ft, 0) + 1
     except Exception:
         pass
-    if best and best[3]:
-        L.append(f"⚔️  Best game: {best[0]} TD / {best[1]} K / {best[2]} D — "
-                 f"{best[3]}" + (f" on {best[4]}" if best[4] else ""))
 
-    # --- Best + average lethality ---
+    # --- Best game + lethality (side by side with Tally) ---
+    if best and best[3]:
+        emb.add_field(name="\u2694\uFE0F Best Game",
+                      value=f"{best[0]} TD / {best[1]} K / {best[2]} D\n{best[3]}"
+                            + (f" · {best[4]}" if best[4] else ""),
+                      inline=True)
+    _ls = None
     try:
         _pb = await get_personal_bests(did, cached_data)
         _ls = await get_lobby_stats_for_player(did, cached_data)
         _bl = _pb.get('lethality') if _pb else None
         _al = (_ls or {}).get('avg_lethality')
         if _bl:
-            _line = f"\U0001FA78  Best lethality: {_bl}%"
+            _lv = f"best {_bl}%"
             if _al:
-                _line += f" · avg {_al:.0f}%"
-            L.append(_line)
+                _lv += f"\navg {_al:.0f}%"
+            emb.add_field(name="\U0001FA78 Lethality", value=_lv, inline=True)
     except Exception:
-        _ls = None
+        pass
+
+    # --- Signature arms: top weapon/subclass combos with rank badges ---
+    try:
+        _wm = await calculate_weapon_marks_for_player(did, cached_data)
+        _top = sorted(((w, m) for w, m in (_wm or {}).items() if m), key=lambda kv: -kv[1])[:4]
+        _lines = []
+        for _key, _m in _top:
+            _wname = _key[0] if isinstance(_key, tuple) else _key
+            _sub = _key[1] if isinstance(_key, tuple) and len(_key) > 1 else None
+            _rank = get_weapon_rank(_m)[0]
+            _badge = _cfg.WEAPON_RANK_EMOJIS.get(_rank, '')
+            _label = _wname + (f" ({_sub})" if _sub else "")
+            _lines.append(f"{_badge} {_label} · {_m}".strip())
+        if _lines:
+            emb.add_field(name="\U0001F3C5 Signature Arms", value="\n".join(_lines), inline=False)
+    except Exception:
+        pass
 
     # --- Feats ---
     if feat_counts:
         _fp = []
-        for _ft, _c in sorted(feat_counts.items(), key=lambda kv: -kv[1])[:6]:
+        for _ft, _c in sorted(feat_counts.items(), key=lambda kv: -kv[1])[:8]:
             _e = _feat_src.get(_ft, '')
             _fp.append(f"{_e}×{_c}" if _e else f"{_ft}×{_c}")
-        L.append("\U0001F3AF  Feats: " + " · ".join(_fp))
+        emb.add_field(name="\U0001F3AF Feats", value="  ".join(_fp), inline=False)
 
-    # --- Titles currently held (role-based) ---
-    _title_roles = [
-        (getattr(_cfg, 'GRAND_MARSHAL_ROLE_ID', 0),  _cfg.TITLE_EMOJIS.get('Grand Marshal', ''),  'Grand Marshal'),
-        (getattr(_cfg, 'WEAPONS_MASTER_ROLE_ID', 0), _cfg.TITLE_EMOJIS.get('Weapons Master', ''), 'Weapons Master'),
-        (getattr(_cfg, 'CAMPAIGN_MASTER_ROLE_ID', 0),_cfg.TITLE_EMOJIS.get('Campaign Master', ''),'Campaign Master'),
-        (getattr(_cfg, 'MOST_LETHAL_ROLE_ID', 0),   '\U0001F947', 'Most Dominant'),
-        (getattr(_cfg, 'WARLORD_ROLE_ID', 0),       '⚔️', 'Warlord'),
-        (getattr(_cfg, 'HUNDRED_HANDED_ROLE_ID', 0),'\U0001F4AF', 'Hundred-Handed'),
-    ]
-    _held = [f"{_e} {_n}".strip() for _rid, _e, _n in _title_roles if _rid and _rid in roles]
-    L.append("\U0001F451  Titles held: " + (" · ".join(_held) if _held else "— none yet"))
-
-    # --- Archetype + damage style ---
+    # --- Playstyle (archetype + damage) ---
     try:
         _arch, _dmg = await get_player_descriptors(did, cached_data)
         if _arch:
-            L.append("\U0001F9EC  " + _arch + (f" · {_dmg}" if _dmg else ""))
+            emb.add_field(name="\U0001F9EC Playstyle",
+                          value=_arch + (f"\n{_dmg}" if _dmg else ""), inline=True)
     except Exception:
         pass
 
-    # --- Lobby gauntlet (difficulty badges conquered) ---
+    # --- Lobby gauntlet ---
     try:
         _diff = (_ls or {}).get('difficulty') or {}
         if _diff:
@@ -509,7 +510,7 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
             _dp = [f"{_t} ×{_diff[_t]}" for _t in _order if _diff.get(_t)]
             _dp += [f"{_t} ×{_c}" for _t, _c in _diff.items() if _t not in _order and _c]
             if _dp:
-                L.append("\U0001F525  Lobby gauntlet: " + " · ".join(_dp))
+                emb.add_field(name="\U0001F525 Lobby Gauntlet", value="\n".join(_dp), inline=True)
     except Exception:
         pass
 
@@ -519,32 +520,45 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         _req = {(sc, w) for sc, ws in _HH_PRIMARIES.items() for w in ws}
         _done = await _db.get_hh_done_combos(did, name) & _req
         if _req and _req.issubset(_done):
-            L.append(f"\U0001F4AF  Hundred-Handed: COMPLETE ({HH_TOTAL}/{HH_TOTAL}) ✅")
+            _hhv = f"COMPLETE {HH_TOTAL}/{HH_TOTAL} \u2705"
         else:
-            L.append(f"\U0001F4AF  Hundred-Handed: {len(_done)}/{HH_TOTAL}")
+            _hhv = f"{len(_done)}/{HH_TOTAL}"
+        emb.add_field(name="\U0001F4AF Hundred-Handed", value=_hhv, inline=True)
     except Exception:
         pass
 
-    # --- Curio: an obscure, player-unique stat (career totals + leanings) ---
+    # --- Titles currently held (role-based) ---
+    _title_roles = [
+        (getattr(_cfg, 'GRAND_MARSHAL_ROLE_ID', 0),  _cfg.TITLE_EMOJIS.get('Grand Marshal', ''),  'Grand Marshal'),
+        (getattr(_cfg, 'WEAPONS_MASTER_ROLE_ID', 0), _cfg.TITLE_EMOJIS.get('Weapons Master', ''), 'Weapons Master'),
+        (getattr(_cfg, 'CAMPAIGN_MASTER_ROLE_ID', 0),_cfg.TITLE_EMOJIS.get('Campaign Master', ''),'Campaign Master'),
+        (getattr(_cfg, 'MOST_LETHAL_ROLE_ID', 0),   '\U0001F947', 'Most Dominant'),
+        (getattr(_cfg, 'WARLORD_ROLE_ID', 0),       '\u2694\uFE0F', 'Warlord'),
+        (getattr(_cfg, 'HUNDRED_HANDED_ROLE_ID', 0),'\U0001F4AF', 'Hundred-Handed'),
+    ]
+    _held = [f"{_e} {_n}".strip() for _rid, _e, _n in _title_roles if _rid and _rid in roles]
+    if _held:
+        emb.add_field(name="\U0001F451 Titles Held", value="  ·  ".join(_held), inline=False)
+
+    # --- Curio: an obscure, player-unique stat ---
     try:
         _bits = []
         if tot_td or tot_k:
             _bits.append(f"career {tot_td:,} takedowns / {tot_k:,} kills")
-        if fcount:
-            _ff = sorted(fcount.items(), key=lambda kv: -kv[1])
-            _ftot = sum(fcount.values())
-            _fpct = round(_ff[0][1] * 100 / _ftot) if _ftot else 0
-            _bits.append(f"{_fpct}% {_ff[0][0]}")
-        if mcount:
-            _bits.append(f"haunts {max(mcount.items(), key=lambda kv: kv[1])[0]}")
+        if fc:
+            _ff = sorted(fc.items(), key=lambda kv: -kv[1]); _ftot = sum(fc.values())
+            _bits.append(f"{round(_ff[0][1] * 100 / _ftot)}% {_ff[0][0]}" if _ftot else "")
+        if mc:
+            _bits.append(f"haunts {max(mc.items(), key=lambda kv: kv[1])[0]}")
         if best_score:
             _bits.append(f"peak match score {best_score:,}")
+        _bits = [b for b in _bits if b]
         if _bits:
-            L.append("\U0001F50E  Curio: " + ", ".join(_bits) + ".")
+            emb.add_field(name="\U0001F50E Curio", value=", ".join(_bits) + ".", inline=False)
     except Exception:
         pass
 
-    return "\n".join(L)
+    return emb
 
 async def _season_score_bests(cached_data=None):
     """Per-player 100+kill and 200+TD run scores DURING THE CURRENT SEASON. Apex &
