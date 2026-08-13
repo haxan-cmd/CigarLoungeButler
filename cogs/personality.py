@@ -279,6 +279,7 @@ _DATA_QUESTION_WORDS = (
     'nemesis', 'rival', ' ally', 'allies', 'closest', 'best teammate',
     'play with', 'play against', 'played with', 'played against',
     'missing', 'about maps', 'what maps', 'which maps', 'map board',
+    'insight', 'insights', 'tell me about', 'what about', 'how good', 'compare',
 )
 
 
@@ -2757,7 +2758,14 @@ class PersonalityCog(commands.Cog):
         # leaderboard scan. Only a data/stats question, an archetype ask, or an
         # explicit brag unlocks the receipts. This is the single biggest cut to
         # the per-message cost: banter used to pull a full stats context anyway.
-        if not (_is_data_q or _is_archetype_question(content_lower)
+        # @mentioning another (non-bot, non-self) player is itself a data ask — "what
+        # about @X", "how does @X compare" — so unlock the stats context even if the
+        # phrasing ("insights", "about") doesn't hit a data keyword. Otherwise the
+        # named-player lookup never runs and he deflects.
+        _mentions_other = any(
+            (self.bot.user is None or _mu.id != self.bot.user.id) and str(_mu.id) != discord_id_str
+            for _mu in (getattr(message, 'mentions', None) or []))
+        if not (_is_data_q or _mentions_other or _is_archetype_question(content_lower)
                 or _looks_like_brag(content_lower)
                 or _asks_own_performance(content_lower)):
             return ''
@@ -3527,11 +3535,27 @@ class PersonalityCog(commands.Cog):
             try:
                 _shown_top = {n for n, *_ in all_players_summary[:10]}
                 _ml = resolved_message.lower()
+                # Ground-truth: an @mention gives the exact discord_id, so resolve it to
+                # the REGISTRY name via p_rows. This catches players whose Discord display
+                # name has drifted from their registry name (case, 0-vs-O, nicknames) — the
+                # reason "@n0rmal" used to fall through to a deflection.
+                _id2name = {(_pr[0] or '').strip(): (_pr[1].strip() if len(_pr) > 1 else '')
+                            for _pr in p_rows if _pr and (_pr[0] or '').strip()}
+                _mentioned_names = set()
+                for _mu in (getattr(message, 'mentions', None) or []):
+                    if (self.bot.user and _mu.id == self.bot.user.id) or str(_mu.id) == discord_id_str:
+                        continue
+                    _rn = _id2name.get(str(_mu.id))
+                    if _rn:
+                        _mentioned_names.add(_rn)
                 _extra_players = []
                 for _pn, _pm, _ps, _puw, _pus, _plw in all_players_summary:
-                    if _pn in _shown_top or _pn == player_name or len(_pn) < 3:
+                    if _pn == player_name or len(_pn) < 3:
                         continue
-                    if re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
+                    _named = _pn in _mentioned_names
+                    if _pn in _shown_top and not _named:
+                        continue  # already in the top-10 block above
+                    if _named or re.search(r"(?<!\w)" + re.escape(_pn.lower()) + r"(?:'?s)?(?!\w)", _ml):
                         _extra_players.append(
                             f"{_pn}: {_ps} runs, {_plw} on boards{_bestgame(_pn)}{_lethality_str(_pn)}, {_pm} career marks")
                         if len(_extra_players) >= 3:

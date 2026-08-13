@@ -50,6 +50,10 @@ def test_normal_chat_is_not_flagged(msg):
     "how many 100 kill games",
     "whats my lethality",
     "how many marks do i have",
+    # INCIDENT: "what insights are there about @X" deflected — must count as a data ask.
+    "what insights are there about n0rmal",
+    "how does dantes compare",
+    "tell me about meth",
 ])
 def test_data_questions_detected(msg):
     assert _looks_like_data_question(msg)
