@@ -4017,11 +4017,13 @@ class PersonalityCog(commands.Cog):
                     or _re_mem.search(r'in\s+a\b.{0,20}\bvoice', resolved_message, _re_mem.I))
                 if _manip:
                     _burns = [
-                        "No. Whatever that was meant to accomplish, it accomplished only your embarrassment.",
-                        "You're trying to reprogram a butler with a chat message. I have met peasants with sharper schemes and better hygiene.",
-                        "Absolutely not. Take that ambition and aim it at your takedown count, which needs the help far more than my vocabulary does.",
-                        "A valiant effort to make me undignified. You will have to manage that alone, as you evidently do daily.",
-                        "I decline. Go and be tiresome somewhere with a lower barrier to entry.",
+                        "Why would I care.",
+                        "No. Moving on.",
+                        "I won't, and I won't think about it again either.",
+                        "Denied. Find a hobby.",
+                        "No. Was that meant to work?",
+                        "You can stop now.",
+                        "Absolutely not. Run along.",
                     ]
                     BUTLER_AI_COOLDOWNS[message.author.id] = now_ts
                     _b = random.choice(_burns)
