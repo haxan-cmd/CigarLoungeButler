@@ -88,6 +88,7 @@ How the systems work (answer players' questions about these accurately and speci
 - Subclass and class ranks: each weapon rank-up gives a subclass mark, filling a subclass meter gives a class mark. Subclass ranks go Initiate, Veteran, Master, Grandmaster, Champion, Paragon, Apex. Class ranks go Sworn, Trusted, Proven, Honored, Esteemed, Exalted, Ascended.
 - Feats: 100 kills, Triple, 200 takedowns, Predator (150 takedowns without dying), Flawless (any run where you take zero deaths). Hundred-Handed means getting a 100-takedown run with every primary weapon across all non-archer subclasses — 46 combos total (out of 46, NOT 85/86). Only the completed feat counts; partial progress is just progress.
 - Boards: every weapon and map has a takedown leaderboard for your best game. Feat boards exist for 100 Kills, 200 Takedowns, Triple, Flawless, and TUFF. Map boards allow VIP, weapon boards do not.
+- A weapon has TWO records and they are different boards: the TAKEDOWN board (the "king of {weapon}", ranked by takedowns) and the KILLS board (the "{weapon} kill record", ranked by kills). When someone asks for the KILL record on a weapon, answer from the weapon's KILLS leaderboard and cite kills — never report a takedown number as a kill record. If only the takedown board is in your context, say you don't have the kill record rather than substituting takedowns.
 - TUFF is a hard-carry board. You score TUFF when your KILLS beat your best teammate's TAKEDOWNS, and it ranks the margin (+N): how far your kill count topped the next-highest player on your own team. TUFF has nothing to do with deaths, streaks, or unbroken runs. Never describe it that way.
 - Lethality and Warlord ratings: every weapon and map board also ranks two live ratings, Lethality (kills per takedown) and Warlord (your takedowns as a share of your team's total kills). A player's rating is their best 5-consecutive-game average ever with that weapon or map, so it never drops for a bad game. Minimum 5 games on weapons, rarely-played maps need fewer (the minimum scales with the map's popularity). These ratings rank EVERY player who meets the game minimum and are SEPARATE from the takedown board — a player does NOT need to be in the takedown top 10 to rank on Lethality or Warlord.
 - Titles. All-time and never reset: Grand Marshal (most boards overall), Weapons Master (most weapon boards), Campaign Master (most map boards). Season titles that reset every monthly bounty: Apex (best average kills), Frenzied (best average takedowns), Kill Share (highest share of your team's KILLS, red-skull emoji), Warlord (your takedowns as a share of your team's total kills), and Executioner (best Dominance, defined next). Players also carry a bounty role while taking part in the active monthly bounty.
@@ -3665,11 +3666,40 @@ class PersonalityCog(commands.Cog):
                     board_lines = [
                         f"{medals.get(i, f'#{i}')} {pname}: {score} TDs"
                         for i, (pname, score) in enumerate(weapon_entries[:5], 1)]
-                    player_stats_ctx += f"\n\n{_mw} leaderboard (top {len(board_lines)}):\n" + "\n".join(board_lines)
+                    player_stats_ctx += (f"\n\n{_mw} TAKEDOWN leaderboard (the '{_mw} king' / TD record; "
+                                         f"top {len(board_lines)}):\n" + "\n".join(board_lines))
                 else:
-                    player_stats_ctx += f"\n\n{_mw} leaderboard: no entries recorded yet."
+                    player_stats_ctx += f"\n\n{_mw} takedown leaderboard: no entries recorded yet."
             except Exception:
                 pass
+            # KILL record on a weapon is a DIFFERENT board — the "{weapon} Kills"
+            # companion ranks highest kills, not takedowns. Without it the Butler
+            # answered "kill record on rapier" with the TD leader's takedowns. Only
+            # inject when the question is actually about kills (keeps context bounded).
+            if 'kill' in msg_lower:
+                try:
+                    _kb = f"{_mw} Kills"
+                    _krows = await _db.get_leaderboard_by_board(_kb)
+                    _kentries = []
+                    for r in _krows:
+                        if len(r) < 4 or r[0].strip() != _kb:
+                            continue
+                        try:
+                            _kentries.append((r[1].strip(), int(r[3])))
+                        except ValueError:
+                            continue
+                    _kentries.sort(key=lambda x: -x[1])
+                    if _kentries:
+                        _medals = {1: '🥇', 2: '🥈', 3: '🥉'}
+                        _klines = [f"{_medals.get(i, f'#{i}')} {pname}: {score} kills"
+                                   for i, (pname, score) in enumerate(_kentries[:5], 1)]
+                        player_stats_ctx += (f"\n\n{_mw} KILLS leaderboard (the '{_mw} kill record'; "
+                                             f"top {len(_klines)}):\n" + "\n".join(_klines))
+                    else:
+                        player_stats_ctx += (f"\n\n{_mw} kill record: no dedicated Kills board yet — "
+                                             f"do NOT report the takedown leader as the kill record.")
+                except Exception:
+                    pass
 
         # Robust Hundred-Handed gap injection. The deep per-player block above only
         # runs when the ASKER matches a players row and is nested 6 levels deep, so
