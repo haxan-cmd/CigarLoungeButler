@@ -464,11 +464,18 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
         _pb = await get_personal_bests(did, cached_data)
         _ls = await get_lobby_stats_for_player(did, cached_data)
         _bl = _pb.get('lethality') if _pb else None
-        _al = (_ls or {}).get('avg_lethality')
+        _lw = _pb.get('lethality_weapon') if _pb else None
         if _bl:
-            _lv = f"best {_bl}%"
-            if _al:
-                _lv += f"\navg {_al:.0f}%"
+            _lv = f"best {_bl:.0f}%"
+            if _lw:
+                _lv += f" on {_lw}"
+                try:
+                    _lavg, _ln = await _db.get_weapon_avg_lethality(_lw)
+                    if _lavg:
+                        _d = _bl - _lavg
+                        _lv += f"\nlounge avg {_lavg:.0f}% ({'+' if _d >= 0 else ''}{_d:.0f})"
+                except Exception:
+                    pass
             emb.add_field(name="\U0001FA78 Lethality", value=_lv, inline=True)
     except Exception:
         pass
@@ -975,6 +982,7 @@ async def get_personal_bests(discord_id, cached_data=None):
     best_kills = 0
     best_td = 0
     best_lethality = 0.0
+    best_lethality_weapon = None  # weapon of the best-lethality game (for lounge-avg compare)
     best_executioner = 0.0   # highest single-game kills / team kills %
     best_warlord = 0.0       # highest single-game takedowns / team kills %
     for row in subs:
@@ -997,6 +1005,7 @@ async def get_personal_bests(discord_id, cached_data=None):
             lethality = round((kills / td) * 100, 1)
             if lethality > best_lethality:
                 best_lethality = lethality
+                best_lethality_weapon = (row[3] or '').strip() if len(row) > 3 and row[3] else None
         try:
             _tks = float(row[20]) if len(row) > 20 and row[20] else None
         except (ValueError, TypeError):
@@ -1039,6 +1048,7 @@ async def get_personal_bests(discord_id, cached_data=None):
         'kills': best_kills,
         'td': best_td,
         'lethality': best_lethality,
+        'lethality_weapon': best_lethality_weapon,
         'executioner': round(best_executioner, 1),
         'warlord': round(best_warlord, 1),
     }
@@ -1495,6 +1505,21 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
             lines.append(f"• {config.TITLE_EMOJIS['Warlord']} Warlord — **{personal_bests['warlord']:.0f}%**")
         if personal_bests.get('executioner', 0) > 0:
             lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill Share — **{personal_bests['executioner']:.0f}%**")
+        # Best lethality vs the lounge average on the SAME weapon (kills/TD conversion).
+        if personal_bests.get('lethality', 0) > 0:
+            _lw = personal_bests.get('lethality_weapon')
+            _cmp = ''
+            if _lw:
+                try:
+                    _lavg, _ln = await _db.get_weapon_avg_lethality(_lw)
+                    if _lavg:
+                        _ld = personal_bests['lethality'] - _lavg
+                        _cmp = f" on {_lw} · lounge avg {_lavg:.0f}% ({'+' if _ld >= 0 else ''}{_ld:.0f})"
+                    else:
+                        _cmp = f" on {_lw}"
+                except Exception:
+                    _cmp = f" on {_lw}"
+            lines.append(f"• <a:mostlethal:1520490418817601658> Best Lethality — **{personal_bests['lethality']:.0f}%**{_cmp}")
         lines.append("")
 
     lines.append("**Weapon Mastery:**")
