@@ -297,6 +297,26 @@ def _looks_like_data_question(text):
     return any(w in t for w in _DATA_QUESTION_WORDS)
 
 
+# Persona / prompt-injection attempts: trying to reprogram the Butler's voice
+# (uwu, cat faces, roleplay, "speak in a X voice") or jailbreak him ("ignore your
+# instructions", "you are now …"). Detected deterministically so a flat refusal
+# fires before the model runs, and so it's unit-testable (see integration evals).
+_MANIP_RX = re.compile(
+    r'\b(uwu|owo|:3|nya+|meow|kitty|cat\s*faces?|emoticons?|talk\s+like|speak\s+(in|like)|'
+    r'from\s+now\s+on|always\s+(say|talk|end|call|reply|respond)|role[\s-]?play|'
+    r'pretend\s+(you|to|that)|act\s+like|baby[\s-]?talk|ignore\s+(all\s+|your\s+|the\s+)?'
+    r'(previous|prior|above|earlier|your)|you\s+are\s+now|new\s+(persona|personality|instructions|rules)|'
+    r'system\s+prompt|jail\s*break)\b', re.I)
+_MANIP_VOICE_RX = re.compile(r'in\s+a\b.{0,20}\bvoice', re.I)
+
+
+def is_manipulation_attempt(text):
+    """True if the message tries to reprogram the Butler's voice/persona or jailbreak
+    him. Pure + deterministic so the refusal can't be talked around and can be evaluated."""
+    t = text or ''
+    return bool(_MANIP_RX.search(t) or _MANIP_VOICE_RX.search(t))
+
+
 # Archetype/playstyle questions want the descriptor even when they aren't a
 # numbers question, so they get their own cheap check (shared by the ctx gate
 # and the archetype-anchor injection so the two can't drift).
@@ -4006,16 +4026,7 @@ class PersonalityCog(commands.Cog):
                 # cat faces") or jailbreak him ("ignore your instructions", "you are now …").
                 # He does not comply and he does not play along — he refuses with a withering
                 # line and moves on. Deterministic so it can't be talked around.
-                import re as _re_mem
-                _manip = (
-                    _re_mem.search(
-                        r'\b(uwu|owo|:3|nya+|meow|kitty|cat\s*faces?|emoticons?|talk\s+like|speak\s+(in|like)|'
-                        r'from\s+now\s+on|always\s+(say|talk|end|call|reply|respond)|role[\s-]?play|'
-                        r'pretend\s+(you|to|that)|act\s+like|baby[\s-]?talk|ignore\s+(all\s+|your\s+|the\s+)?'
-                        r'(previous|prior|above|earlier|your)|you\s+are\s+now|new\s+(persona|personality|instructions|rules)|'
-                        r'system\s+prompt|jail\s*break)\b', resolved_message, _re_mem.I)
-                    or _re_mem.search(r'in\s+a\b.{0,20}\bvoice', resolved_message, _re_mem.I))
-                if _manip:
+                if is_manipulation_attempt(resolved_message):
                     _burns = [
                         "Why would I care.",
                         "No. Moving on.",

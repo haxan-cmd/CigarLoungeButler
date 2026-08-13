@@ -3262,7 +3262,7 @@ class RegistryCog(commands.Cog):
         # Score (points), the weapon Kills companions (kills) and kill-margin boards
         # can't leak in. (A hand-typed exclusion set used to miss Score, which then
         # rendered as e.g. "Score — 27799 TD".)
-        from utils.boards import board_unit as _board_unit
+        from utils.boards import board_unit as _board_unit, is_kills_board as _is_kills
         ld_all = ld  # already fetched above
         for ld_r in ld_all:
             if len(ld_r) < 4:
@@ -3270,7 +3270,10 @@ class RegistryCog(commands.Cog):
             if ld_r[1].strip() != resolved_name:
                 continue
             lb = ld_r[0].strip()
-            if _board_unit(lb) != 'TDs':
+            # Only real takedown boards feed the TD PB. board_unit() reports the
+            # "{weapon} Kills" companion as 'TDs' (it isn't), so gate on is_kills_board
+            # too, or a kills score would be counted as takedowns.
+            if _is_kills(lb) or _board_unit(lb) != 'TDs':
                 continue
             try:
                 ld_td = int(ld_r[3])
