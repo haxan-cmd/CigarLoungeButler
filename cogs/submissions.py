@@ -597,6 +597,11 @@ class SubmitView(discord.ui.View):
                     _suffix = f", along with your {' and '.join(_need_pick)}" if _need_pick else ""
                     lines.append(f"\n*Could not read: {', '.join(_real_missing)} \u2014 "
                                  f"you'll be asked for {'those' if len(_real_missing) > 1 else 'that'} next{_suffix}.*")
+                    try:
+                        from utils.helpers import record_event
+                        record_event('vision', f"couldn't read {_real_missing} for {getattr(interaction.user, 'display_name', '?')}", 'warn')
+                    except Exception:
+                        pass
                 elif _need_pick:
                     lines.append(f"\n*Next: pick your {' and '.join(_need_pick)}.*")
                 # Cropped / photographed board: the faction KILL TOTALS at the top didn't

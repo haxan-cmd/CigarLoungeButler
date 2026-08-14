@@ -78,6 +78,7 @@ _INDEXES = [
     ("idx_submissions_map_time",   "submissions",      "(map, submitted_at)"),
     ("idx_sub_rosters_sid",        "submission_rosters", "(submission_id)"),
     ("idx_lab_opens_time",         "lab_opens",          "(opened_at)"),
+    ("idx_bot_events_cat_time",    "bot_events",         "(category, ts)"),
 ]
 
 
@@ -161,6 +162,13 @@ _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS ign_pending ("
     "discord_id TEXT NOT NULL, name TEXT NOT NULL, seen INTEGER DEFAULT 1, "
     "PRIMARY KEY (discord_id, name))",
+    # Persistent bot event log — survives restarts / Railway's ~1000-line truncation.
+    # Only curated, review-worthy events are written (errors, deploys, fabrication
+    # flags, vision failures, Butler Q&A), buffered and flushed in batches. 30-day
+    # retention. Reviewed via /logs.
+    "CREATE TABLE IF NOT EXISTS bot_events ("
+    "id BIGSERIAL PRIMARY KEY, ts TIMESTAMP DEFAULT NOW(), "
+    "category TEXT NOT NULL, level TEXT DEFAULT 'inf', message TEXT)",
 ]
 
 
@@ -938,6 +946,53 @@ def _ign_is_duplicate(candidate: str, existing: list[str], threshold: float = 0.
         if _SM(None, cn, en).ratio() >= threshold:
             return True
     return False
+
+
+async def insert_bot_events(rows):
+    """Batch-write buffered events to the persistent log. rows: iterable of
+    (category, level, message). Best-effort — logging must never crash the bot."""
+    rows = [(str(c or 'misc')[:40], str(l or 'inf')[:8], (str(m) if m is not None else '')[:1500])
+            for (c, l, m) in (rows or [])]
+    if not rows:
+        return
+    try:
+        pool = _pool_check()
+        async with pool.acquire() as conn:
+            await conn.executemany(
+                "INSERT INTO bot_events (category, level, message) VALUES ($1, $2, $3)", rows)
+    except Exception as e:
+        print(f"[EVENTS] insert failed: {e}")
+
+
+async def get_bot_events(category=None, hours=168, limit=200):
+    """Recent events for /logs review — newest first, optionally by category, within a
+    window (default 7 days). Returns list of dicts."""
+    try:
+        pool = _pool_check()
+        clauses = ["ts >= NOW() - ($1 || ' hours')::interval"]
+        args = [str(int(hours))]
+        if category:
+            args.append(str(category)); clauses.append(f"category = ${len(args)}")
+        args.append(int(limit))
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT ts, category, level, message FROM bot_events WHERE "
+                + " AND ".join(clauses) + f" ORDER BY ts DESC LIMIT ${len(args)}", *args)
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[EVENTS] query failed: {e}")
+        return []
+
+
+async def prune_bot_events(days=30):
+    """Retention: drop events older than `days`. Called periodically."""
+    try:
+        pool = _pool_check()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM bot_events WHERE ts < NOW() - ($1 || ' days')::interval", str(int(days)))
+    except Exception as e:
+        print(f"[EVENTS] prune failed: {e}")
 
 
 async def bump_ign_pending(discord_id: str, name: str) -> int:

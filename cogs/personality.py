@@ -1279,9 +1279,26 @@ class PersonalityCog(commands.Cog):
         except Exception as _e:
             print(f"[LAB] could not post stats-lab panel: {_e}")
 
+    @tasks.loop(seconds=90)
+    async def events_flush_loop(self):
+        """Drain the buffered event log into Postgres, with an occasional retention pass."""
+        from utils.helpers import flush_events
+        await flush_events()
+        if random.random() < 0.01:   # ~ every few hours: drop events older than 30 days
+            await _db.prune_bot_events(30)
+
+    @events_flush_loop.before_loop
+    async def _before_events_flush(self):
+        await self.bot.wait_until_ready()
+
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'[PERSONALITY] on_ready fired, starting tasks')
+        try:
+            from utils.helpers import record_event
+            record_event('deploy', 'bot ready (on_ready)')
+        except Exception:
+            pass
         if not getattr(self, '_lab_view_added', False):
             try:
                 self.bot.add_view(StatsLabEntry())
@@ -1302,6 +1319,8 @@ class PersonalityCog(commands.Cog):
             self.nerve_center_digest.start()
         if not self.daily_cycle_tasks.is_running():
             self.daily_cycle_tasks.start()
+        if not self.events_flush_loop.is_running():
+            self.events_flush_loop.start()
         # Fire nerve center immediately on startup so it always posts on deploy
 
         # Update butlers-manual
@@ -1637,6 +1656,41 @@ class PersonalityCog(commands.Cog):
                             description=header + "\n\n" + "\n".join(lines))
         if len(changes) > 15:
             emb.set_footer(text=f"+{len(changes) - 15} more players")
+        await interaction.followup.send(embed=emb, ephemeral=True)
+
+    @app_commands.command(name="logs", description="Review the persistent bot event log (mod only).")
+    @app_commands.describe(category="Filter to one kind of event", hours="How far back (default 168 = 7 days)")
+    @app_commands.choices(category=[
+        app_commands.Choice(name="Errors", value="error"),
+        app_commands.Choice(name="Fabrication flags", value="fabrication"),
+        app_commands.Choice(name="Deploys", value="deploy"),
+        app_commands.Choice(name="Butler Q&A", value="butler"),
+        app_commands.Choice(name="Vision failures", value="vision"),
+    ])
+    async def logs(self, interaction: discord.Interaction,
+                   category: app_commands.Choice[str] = None, hours: int = 168):
+        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("Mods only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        cat = category.value if category else None
+        rows = await _db.get_bot_events(category=cat, hours=max(1, min(hours, 720)), limit=40)
+        if not rows:
+            await interaction.followup.send(
+                f"No {cat or 'events'} logged in the last {hours}h.", ephemeral=True)
+            return
+        _lvl = {'err': '🔴', 'warn': '🟠'}
+        lines = []
+        for r in rows:
+            _t = r['ts'].strftime('%m-%d %H:%M') if r.get('ts') else '?'
+            _e = _lvl.get(r.get('level'), '·')
+            lines.append(f"{_e} `{_t}` [{r.get('category')}] {(r.get('message') or '')[:140]}")
+        body = "\n".join(lines)
+        if len(body) > 3900:
+            body = body[:3900] + "\n…(truncated)"
+        emb = discord.Embed(
+            title=f"Event log — {cat or 'all'} · last {hours}h ({len(rows)} shown)",
+            description=body, colour=discord.Colour.dark_grey())
         await interaction.followup.send(embed=emb, ephemeral=True)
 
     @app_commands.command(name="serverstats", description="Server activity dashboard over a window: totals, top players and weapons.")
@@ -4186,6 +4240,11 @@ class PersonalityCog(commands.Cog):
                             except Exception:
                                 pass
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
+                    try:
+                        from utils.helpers import record_event
+                        record_event('butler', f"{player_name} [{_ctx_kind}] {message.content[:200]} -> {response_text[:300]}")
+                    except Exception:
+                        pass
                     print(f"[BUTLER] reply={response_text!r}")
                     # Anti-fabrication (LOG-ONLY): on a data answer, flag material numbers in
                     # the reply that aren't grounded in the context he was given. Never alters

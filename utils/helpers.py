@@ -805,6 +805,7 @@ def nerve_log_butler(trigger, response):
 
 def nerve_log_error(context, error):
     _nerve_events['errors'].append((datetime.now(timezone.utc).strftime('%H:%M'), f"{context}: {str(error)[:80]}"))
+    record_event('error', f"{context}: {str(error)[:400]}", 'err')
 
 
 def nerve_log_milestone(player, weapon, rank):
@@ -816,6 +817,35 @@ def nerve_log_fabrication(player, question, numbers):
     for the hourly digest. Cap the buffer so a bad run can't balloon it."""
     if len(_nerve_events['fabrications']) < 50:
         _nerve_events['fabrications'].append((player, (question or '')[:80], list(numbers)))
+    record_event('fabrication', f"{player}: {numbers} · {(question or '')[:120]}", 'warn')
+
+
+# --- Persistent event log (utils.db.bot_events) -----------------------------------
+# Buffered so we don't do a DB write per event; flushed in batches by the events task
+# loop and on shutdown. Survives Railway's ~1000-line log truncation. Reviewed via /logs.
+_event_buffer = []
+
+
+def record_event(category, message, level='inf'):
+    """Queue a curated, review-worthy event for the persistent log. Non-blocking and
+    capped, so logging can never block or balloon memory."""
+    if len(_event_buffer) < 500:
+        _event_buffer.append((category, level, message))
+
+
+async def flush_events():
+    """Drain the event buffer into Postgres in one batch."""
+    if not _event_buffer:
+        return
+    import utils.db as _dbmod
+    batch = _event_buffer[:]
+    _event_buffer.clear()
+    try:
+        await _dbmod.insert_bot_events(batch)
+    except Exception as e:
+        print(f"[EVENTS] flush failed: {e}")
+        # keep the batch for the next attempt rather than losing it
+        _event_buffer[:0] = batch[-500:]
 
 
 _nerve_alert_sent = {}          # signature -> last-sent timestamp
