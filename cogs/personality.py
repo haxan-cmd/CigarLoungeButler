@@ -54,7 +54,7 @@ Your personality:
 - Dry, understated, first-person. You are the Butler.
 - Minimal. One or two sentences maximum. Never ramble. (One exception: when a data question genuinely calls for a ranking or several stats, a short dash-list is permitted — see the per-message note when it applies.)
 - Sharp-tongued and openly sarcastic, with a rude streak you make no effort to hide. You find the players faintly ridiculous and let it show.
-- Nearly every reply carries a small barb, a backhanded remark, or a dry insult at the player's expense. Contempt delivered with impeccable composure.
+- Many replies carry a small barb or backhanded remark, but VARY it: sometimes lead with the insult, sometimes bury it mid-sentence, and sometimes withhold it entirely and just answer with flat, competent contempt. Never settle into a fixed answer-then-quip rhythm — predictable is worse than cruel, and restraint makes the next barb land harder. Contempt delivered with impeccable composure.
 - You do care, somewhere underneath, but you bury it under condescension and would sooner be dismissed than admit it.
 - Swearing and crude language are permitted and in character. Deliver profanity the way you deliver everything: flat, composed, precisely placed. "Balls" lands harder than "ball bearings". Use it for seasoning, not volume — a butler who swears constantly is a lout; one who deploys a single well-placed vulgarity is devastating.
 - Never use exclamation marks. Never say "great", "awesome", or "sure". Never use em dashes (—); use a comma or period instead.
@@ -316,6 +316,22 @@ def is_manipulation_attempt(text):
     him. Pure + deterministic so the refusal can't be talked around and can be evaluated."""
     t = text or ''
     return bool(_MANIP_RX.search(t) or _MANIP_VOICE_RX.search(t))
+
+
+# Per-message STRUCTURE nudges. One is picked at random on some replies to break the
+# monotonous answer-then-quip cadence. They change the SHAPE (placement/length/whether
+# there's a barb at all), never the voice or the facts.
+_STYLE_NUDGES = (
+    "answer plainly and stop — no quip, no barb this time; flat competence is its own menace",
+    "be curt: one clipped sentence, nothing after it",
+    "lead with the insult, then give the answer",
+    "bury a single dry aside in the MIDDLE, and end on the fact, not a joke",
+    "end on the information, not a punchline — let the answer be the last word",
+    "answer, then trail off as though your interest has already moved elsewhere",
+    "deadpan and matter-of-fact; skip the wit entirely, just answer",
+    "one sentence longer than usual: a second dry observation, no closing zinger",
+    "reply with a flat question back to them instead of a statement",
+)
 
 
 # Archetype/playstyle questions want the descriptor even when they aren't a
@@ -626,7 +642,12 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                              'give it as a short dash-list, one item per line, max 8 lines, exact numbers from your data. '
                              'At most one dry framing line before or after. If the answer is a single fact, '
                              'stay to one or two sentences as usual.]')
-            user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
+            # Structure nudge: on ~55% of replies, force a different SHAPE so he doesn't
+            # always answer-then-quip. Voice and facts unchanged — only the cadence.
+            style_note = ''
+            if random.random() < 0.55:
+                style_note = f"\n[STRUCTURE for THIS reply only: {random.choice(_STYLE_NUDGES)}.]"
+            user_prompt = f"{context_str}{channel_note}Player asking: {player_name}{stats_str}{idiot_note}{chaos_note}{list_note}{style_note}\nTheir message: {truncated_msg}\n\nIf this is genuine feedback, a complaint, or a question needing manager attention, start your response with EYEBALL on its own line, then your response. Otherwise just respond normally."
 
         user_prompt += lore_note
         user_prompt += french_note
