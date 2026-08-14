@@ -2592,7 +2592,13 @@ class RegistryCog(commands.Cog):
 
     @app_commands.command(name="refreshcard", description="Refresh your registry card (mods can target another player).")
     @app_commands.describe(player="(Mods only) refresh someone else's card instead of your own.")
-    @discord.app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
+    # Cooldown keys on the CARD being refreshed (the target player), not the invoker —
+    # so a mod refreshing their own card doesn't lock them out of refreshing someone
+    # else's. Same-card spam is still rate-limited.
+    @discord.app_commands.checks.cooldown(
+        1, 300,
+        key=lambda i: (getattr(i.namespace, 'player', None).id
+                       if getattr(i.namespace, 'player', None) else i.user.id))
     async def refresh_card(self, interaction: discord.Interaction, player: discord.Member = None):
         await interaction.response.defer(ephemeral=True)
         try:
