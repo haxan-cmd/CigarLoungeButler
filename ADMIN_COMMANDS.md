@@ -102,3 +102,8 @@
 - `/purge_forum` **[Admin]** — Delete ALL threads in a forum channel. ⚠️ Irreversible — run with `confirm: False` first for a dry-run count.
 - `/seed_players` **[Admin]** — Seed the Players table from a Discord role.
 - `/populate_butlers_archive` **[Mod]** — Pre-populate the ButlersArchive sheet.
+
+## Observability
+- `/logs` **[Mod]** — Review the persistent event log. Filter by category (Errors / Fabrication flags / Deploys / Butler Q&A / Vision failures) and a lookback window (default 7 days). Survives Railway's log truncation; a weekly rollup is also auto-posted to the nerve centre.
+- `/health` **[Mod]** — Butler self-check across subsystems; posts to the nerve centre only when something is wrong.
+- `/statslab_usage` **[Mod]** — How often the web Stats Lab deep-link is opened.

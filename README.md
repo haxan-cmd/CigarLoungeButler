@@ -83,7 +83,9 @@ flowchart TD
 Live weapon leaderboards for all 1H and 2H weapons, plus map boards and feat boards. Multi-message chunking handles large boards. Shared weapons across subclasses are deduplicated by `(weapon, subclass)` key.
 
 ### 📇 Registry Cards
-Per-player forum threads in the Butler's Archive. Weapon marks are merged from live submissions, leaderboard data, and legacy records. Includes class rank progression, personal bests, and Best Placements sorted by dominance gap (gap between 1st and 2nd place). `/repair_marks` backfills missing High Score marks in bulk.
+Per-player forum threads in the Butler's Archive. Weapon marks are merged from live submissions, leaderboard data, and legacy records. Includes class rank progression, personal bests (with best **lethality vs the lounge average on that weapon**), Best Placements sorted by dominance gap (gap between 1st and 2nd place), a **Feats of Legend** ladder, and a **Legendary Games** trophy cabinet — a capped, variety-balanced set of your most impressive feat games, best-of-each-type first, each linking to the actual match. `/repair_marks` backfills missing High Score marks in bulk.
+
+Ask the Butler to **"show me my stats"** for a live emoji **dossier** embed of the same profile — title/rank, marks, signature arms with rank badges, best game, lethality-vs-lounge, feats, archetype, Hundred-Handed, and a per-player *Curio* (career totals plus the map they're most over-indexed on versus the lounge).
 
 ### 🎖️ Butler's Report
 Weekly stats and all-time prestige titles posted as a Discord embed. Titles recalculated after every submission — one holder per title at a time, with a stability margin so a title only changes hands when a challenger clearly beats the current holder. Weekly stats reset each Monday.
@@ -108,8 +110,11 @@ Hourly summary posted to a private channel covering submissions, milestones, But
 ### ⚠️ Anomaly Detection
 Flags suspicious runs to a private notes channel when stats exceed 2x the server record or a leaderboard gap exceeds 80%. `/remove_submission` rolls back fraudulent entries; `/unlist_submission` toggles a legit-but-unfair run (lopsided lobby, farm game) off all boards and records while keeping its marks and bounty progress.
 
+### 🔎 Observability & Evals
+A persistent `bot_events` log (Postgres, 30-day retention) captures errors, deploys, vision misses, Butler Q&A, and **suspected stat fabrications** — a grounding check that flags any number the Butler cites in a data answer that isn't present in the context it was given. Reviewed with `/logs`, delivered as a **weekly rollup** to the nerve centre, and it survives Railway's ~1000-line log truncation. A growing regression **eval suite** (`tests/test_regressions.py`, `tests/integration/`, `docs/EVALS.md`) pins every fixed bug so it can't silently return.
+
 ### 🃏 Butler Personality
-Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, and Hundred Handed progress using live database context. Powered by OpenAI GPT-5.6 Luna.
+Dry, sardonic responses to pings and unprompted one-liners in the main channel every few hours. Dry-spell warnings after 48 hours of inactivity. Answers player questions about stats, leaderboard standings, weapon **kill vs takedown records**, the current **bounty/season timeline** ("when does the bounty end"), stats about **@mentioned players**, and Hundred-Handed progress using live database context. Reply *structure* varies (he doesn't always end on a quip), and attempts to reprogram his voice or persona ("talk in uwu", "ignore your instructions") are refused flatly rather than obeyed. Powered by OpenAI GPT-5.6 Luna.
 
 ---
 
@@ -146,7 +151,9 @@ Environment variables (via `.env` locally, Railway variables in production):
 | `OPENAI_API_KEY` | optional | Butler chat/quips (falls back to canned lines) |
 | `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
 | `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
-| `EXPORT_TOKEN` | optional | Enables `GET /export/submissions`, a bearer-token, read-only cursor export of the submissions table for community mirrors. Off when unset. |
+| `EXPORT_TOKEN` | optional | Enables `GET /export/submissions`, a bearer-token, read-only cursor export of the submissions table for community mirrors. Off when unset. Also the default signing secret for the Stats Lab. |
+| `LAB_BASE_URL` | optional | Public base URL of the bot's web server (e.g. the Railway domain). Turns on the interactive web **Stats Lab** deep-link from the `/correlate` panel. |
+| `LAB_SECRET` | optional | HMAC secret signing the Lab's short-lived link tokens. Falls back to `EXPORT_TOKEN`, so the Lab turns on with just `LAB_BASE_URL` when an export token already exists. |
 | `PORT` | optional | Healthcheck server port (default 8080) |
 
 All server-specific IDs (guild, channels, roles, emojis) live in `config.py`; a
@@ -167,6 +174,9 @@ shapes, the hot-path query rules, and known gotchas.
 - **Discord cache** falls back to `fetch_channel()` / `fetch_thread()` after restarts
 - **Bulk imports** suppress per-card updates and milestone announcements; index rebuilt once at completion
 - **Manual feat count floors** allow mods to correct historical undercounts via `/set_feat_count` without suppressing future auto-detection
+- **Player names are sanitized** (`utils.parsing.md_safe`) before going into markdown links, so a crafted display name can't inject its own hyperlink into a board or card
+- **Butler answers are grounded** — a check flags any stat he cites that isn't in the context he was given (anti-fabrication), logged for review rather than shown to players
+- **Persistent event log** (`bot_events`) survives restarts and log truncation; reviewed via `/logs` and an auto-posted weekly rollup
 
 ---
 
