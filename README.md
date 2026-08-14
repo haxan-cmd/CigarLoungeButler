@@ -98,6 +98,9 @@ Weekly stats and all-time prestige titles posted as a Discord embed. Titles reca
 
 Weekly stats include **Lethality** (kills per takedown), **Warlord** (your share of your team's takedowns), Busiest player, Top Weapons, and Top Maps. The Lethality and Warlord ratings use a recency-weighted, volume-adjusted (Bayesian) average, so a handful of lucky games can't top the board — 3-run minimum.
 
+### 📊 Stats Lab & Exploration
+`/explore` breaks any stat down across weapons, players, or maps as a themed chart. `/correlate` opens a button-driven panel that plots any two stats against each other — a scatter with optional colour-by (weapon / class / subclass / grip / faction), a full correlation matrix, and head-to-head compare charts — all filterable by weapon, class, map, side, and season. For deeper slicing there's an interactive web **Stats Lab**: a client-side page (Activity and Rankings tabs) that filters and correlates every run in the browser, reached from the `/correlate` panel via a signed, short-lived deep link — no login, and it expires automatically. Turned on with `LAB_BASE_URL`; open-rate tracked via `/statslab_usage`.
+
 ### 🎯 Bounty System
 Monthly bounty cards with per-player progress tracking, a live Top Hunters board, and archival on completion. Supports per-weapon custom targets. Player commands: `/bounty_hunt`, `/my_bounty`, `/bounty_status`.
 
