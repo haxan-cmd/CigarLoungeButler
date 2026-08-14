@@ -914,6 +914,7 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     # Board setup rows (small) fetched once; each board's ENTRIES are read targeted
     # inside the loop via the indexed get_leaderboard_by_board — no full-table scan.
     all_lb_rows = await _get_lb_records()
+    _map_rendered = False  # did the loop below already re-render the submitted map board?
 
     for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
         board_values = await _db.get_leaderboard_by_board(lb_name)
@@ -1049,8 +1050,26 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             new_ids = await _sync_board_messages(thread, embeds, message_ids, msg_content=header_content, close_frame=_is_kills_board(lb_name))
             if new_ids != message_ids:
                 await _db.update_leaderboard_messages(lb_name, '|'.join(str(m) for m in new_ids))
+            if lb_name == map_lb_name:
+                _map_rendered = True
         except Exception as e:
             print(f"Discord update error for {lb_name}: {e}")
+
+    # The map board's Kills / Kill Share / Warlord sections are recomputed LIVE from all
+    # submissions on every render, but the loop above only re-renders the board when this
+    # run's TAKEDOWNS moved the TD ranking. A run that sets a new map KILLS record without
+    # improving the player's takedowns would hit `continue` and never refresh — the
+    # recurring "map kill record didn't update" report. Force one render so the live
+    # sections always reflect the new run (skipped if the loop already did it).
+    if (not _map_rendered and selected_map and str(selected_map).strip()
+            and str(selected_map).strip().lower() != 'none'
+            and faction and str(faction).strip() and takedowns > 0 and not is_pacifist):
+        try:
+            _mrow = next((r for r in all_lb_rows if r['Leaderboard Name'] == map_lb_name), None)
+            if _mrow:
+                await _render_board(guild, _mrow, map_lb_name)
+        except Exception as _mre:
+            print(f"[BOARD] map live-section refresh error for {map_lb_name}: {_mre}")
 
     return any_updated, placements
 

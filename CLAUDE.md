@@ -92,7 +92,12 @@ Sheets era). Cogs index into them positionally. Key maps:
   right under the takedowns list and before Kill Share/Warlord. `_map_kills_ranking`
   computes top-10 by best kills per player for that `"{Map} - {Faction}"` live from
   submissions (VIP included, unlisted excluded), threaded through `_rated_embeds` →
-  `format_leaderboard_embeds` → `_append_rating_fields` as `kills_rows`. (An earlier
+  `format_leaderboard_embeds` → `_append_rating_fields` as `kills_rows`. Because those
+  sections are LIVE-computed on render, but `update_leaderboards`'s per-board loop only
+  re-renders the map board when a run's TAKEDOWNS move the TD ranking, a kills-only record
+  used to leave the Kills/Kill Share/Warlord sections stale ("map kill record didn't
+  update", recurring). Fixed by a forced `_render_board(map_lb_name)` after the loop
+  whenever the loop didn't already render it (`_map_rendered` flag) — do NOT remove it. (An earlier
   separate-board approach was reverted; `/remove_map_kills_boards` cleans up any stray
   `map_kills` boards a prior `/setup_map_kills_boards` run created. `_classify_board`
   still recognises `map_kills` so those strays are found and stay out of the Campaign
