@@ -919,6 +919,101 @@ async def get_feats_for_player(discord_id, cached_data=None):
         pass
     return named_feats, feats, board_counts, flawless_pb_link
 
+
+async def get_legendary_games_for_player(discord_id, cached_data=None, cap=6):
+    """A capped, variety-balanced 'trophy cabinet' of a player's most impressive feat
+    games. Best game of each feat TYPE first (so it shows range, not just their best
+    night), then fill remaining slots by impressiveness; deduped by game (a Triple that
+    is also a 200-TD game shows once). Each line links to the actual game with its
+    stats. Returns rendered card lines, or [] when the player has no feat games.
+    """
+    did = str(discord_id)
+    _emoji = {
+        'Triple':        FEAT_EMOJIS.get('Triple', ''),
+        'Flawless':      FEAT_EMOJIS.get('Flawless', ''),
+        '200 Takedowns': FEAT_EMOJIS.get('200 Takedowns', ''),
+        '100 Kills':     FEAT_EMOJIS.get('100 Kills', ''),
+        'TUFF':          '<a:TUFF2:1520779243879927898>',
+    }
+    _priority = ['Triple', 'Flawless', '200 Takedowns', '100 Kills', 'TUFF']
+    try:
+        ld = (cached_data or {}).get('leaderboard_data') or await _db.get_all_leaderboard_data()
+        subs = (cached_data or {}).get('submissions') or await _db.get_all_submissions()
+    except Exception:
+        return []
+    _by_link = {(s[12] or '').strip(): s for s in subs if len(s) > 12 and (s[12] or '').strip()}
+    _nm = ''
+    try:
+        for _p in (cached_data or {}).get('players') or await _db.get_all_players():
+            if _p and _p[0].strip() == did:
+                _nm = (_p[1].strip().lower() if len(_p) > 1 else '')
+                break
+    except Exception:
+        pass
+    _cand = {t: [] for t in _emoji}
+    for r in ld:
+        if len(r) < 5:
+            continue
+        _bn = (r[0] or '').strip()
+        if _bn not in _emoji:
+            continue
+        if not (r[2].strip() == did or (_nm and (r[1] or '').strip().lower() == _nm)):
+            continue
+        _link = (r[4] or '').strip()
+        try:
+            _score = int(r[3])
+        except (ValueError, TypeError):
+            _score = 0
+        _sub = _by_link.get(_link)
+        if _sub:
+            try:
+                _td = int(_sub[7]); _k = int(_sub[8]); _d = int(_sub[9]) if _sub[9] else 0
+            except (ValueError, TypeError):
+                _td = _k = _d = 0
+            _map = (_sub[5] or '').strip(); _wpn = (_sub[3] or '').strip()
+        else:
+            _td = _k = _d = 0
+            _map = ''; _wpn = (r[5] or '').strip() if len(r) > 5 else ''
+        _cand[_bn].append({'imp': (_td or _score), 'link': _link, 'td': _td, 'k': _k,
+                           'map': _map, 'weapon': _wpn, 'score': _score, 'feat': _bn})
+    for t in _cand:
+        _cand[t].sort(key=lambda g: -g['imp'])
+    # Variety fill: round 0 = best of each type, round 1 = second-best, ... dedup by game.
+    chosen, seen, seen_stats = [], set(), set()
+    _round = 0
+    while len(chosen) < cap:
+        added = False
+        for t in _priority:
+            if _round < len(_cand[t]) and len(chosen) < cap:
+                g = _cand[t][_round]
+                # Dedup by game link, and (safety net for legacy rows with mismatched
+                # links) by resolved stats — a Triple that's also a 200-TD game shows once.
+                _st = (g['td'], g['k'], g['map']) if g['td'] else None
+                if (g['link'] and g['link'] in seen) or (_st and _st in seen_stats):
+                    continue
+                if g['link']:
+                    seen.add(g['link'])
+                if _st:
+                    seen_stats.add(_st)
+                chosen.append(g)
+                added = True
+        if not added:
+            break
+        _round += 1
+    if not chosen:
+        return []
+    chosen.sort(key=lambda g: -g['imp'])
+    out = []
+    for g in chosen[:cap]:
+        _e = _emoji.get(g['feat'], '')
+        if g['td'] or g['k']:
+            _stat = f"{g['td']} TD / {g['k']} K" + (f" · {g['map']}" if g['map'] else "")
+        else:
+            _unit = 'K' if g['feat'] == '100 Kills' else ('margin' if g['feat'] == 'TUFF' else 'TD')
+            _stat = f"{g['score']} {_unit}" + (f" · {g['weapon']}" if g['weapon'] else "")
+        out.append(f"• {_e} [{_stat}]({g['link']})" if g['link'] else f"• {_e} {_stat}")
+    return out
+
 # NOTE: _SUBCLASS_PRIMARIES is defined once, at module top (line ~27), as an alias
 # of config._SUBCLASS_PRIMARIES. A second hardcoded copy used to live here and was
 # stale relative to config.py (e.g. missing Falchion for Man-at-Arms after config.py
@@ -1518,6 +1613,19 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
     if _fol_lines:
         lines.append("**Feats of Legend:**")
         lines.extend(_fol_lines)
+        lines.append("")
+
+    # Legendary Games: a capped, variety-balanced trophy cabinet linking to the actual
+    # feat games (best of each feat type first). The ladder above is the counts; this is
+    # the games themselves.
+    try:
+        _legend_lines = await get_legendary_games_for_player(discord_id, cached_data)
+    except Exception as _lge:
+        print(f"[CARD] legendary games error: {_lge}")
+        _legend_lines = []
+    if _legend_lines:
+        lines.append("**⭐ Legendary Games:**")
+        lines.extend(_legend_lines)
         lines.append("")
 
     if best_placements:
