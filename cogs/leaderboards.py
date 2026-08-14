@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 import config
 import utils.db as _db
 from utils.helpers import nerve_log_error
+from utils.parsing import md_safe
 
 
 async def _rank_name_ac(interaction: discord.Interaction, current: str):
@@ -362,7 +363,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
 
         def make_links(items):
             return ' • '.join(
-                f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                 for name, t in items
             )
 
@@ -399,7 +400,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 grp = [(n, t) for n, t in deduped if n and start <= n[0].upper() <= end]
                 if grp:
                     val = "\n".join(
-                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                         for name, t in grp
                     )
                     embed_fields.append((gname, val))
@@ -407,7 +408,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             other = [(n, t) for n, t in deduped if n not in placed]
             if other:
                 val = "\n".join(
-                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                     for name, t in sorted(other, key=lambda x: x[0])
                 )
                 embed_fields.append(("#", val))
@@ -424,7 +425,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 grp = [(n, t) for n, t in deduped if n and start[0] <= n[0].upper() <= end[0]]
                 if grp:
                     val = "\n".join(
-                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                         for name, t in grp
                     )
                     embed_fields.append((gname, val))
@@ -432,7 +433,7 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
             other_maps = [(n, t) for n, t in deduped if n not in placed_maps]
             if other_maps:
                 val = "\n".join(
-                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                     for name, t in other_maps
                 )
                 embed_fields.append(("Other", val))
@@ -444,14 +445,14 @@ async def update_leaderboard_index(guild, forum_channel_id: int, index_label: st
                 grp = [(n, t) for n, t in deduped if n and start[0] <= n[0].upper() <= end[0]]
                 if grp:
                     val = "\n".join(
-                        f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                        f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                         for name, t in grp
                     )
                     embed_fields.append((group_name, val))
             other = [(n, t) for n, t in deduped if not n or not n[0].upper().isalpha()]
             if other:
                 val = "\n".join(
-                    f"[{name}](https://discord.com/channels/{guild.id}/{t.id})"
+                    f"[{md_safe(name)}](https://discord.com/channels/{guild.id}/{t.id})"
                     for name, t in other
                 )
                 embed_fields.append(('#', val))
@@ -1325,7 +1326,7 @@ async def _peasant_embed():
     def _namelink(did, name):
         tid = _thread_by_id.get((did or '').strip(), '')
         if tid and _gid:
-            return f"[{name}](https://discord.com/channels/{_gid}/{tid})"
+            return f"[{md_safe(name)}](https://discord.com/channels/{_gid}/{tid})"
         return f"`{name}`"
 
     emoji = getattr(config, 'PEASANT_EMOJI', '👨')

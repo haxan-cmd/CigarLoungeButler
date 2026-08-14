@@ -19,6 +19,7 @@ from utils.helpers import (
     build_manual_content, build_manual_embed, build_favourites_explainer_embed, nerve_log_butler, nerve_log_error, nerve_flush, submission_state,
 )
 from cogs.favourites import calculate_butler_stats, build_favourites_embed, update_title_roles
+from utils.parsing import md_safe
 
 GUILD_ID                    = config.GUILD_ID
 MAIN_CHANNEL_ID             = config.MAIN_CHANNEL_ID
@@ -737,7 +738,7 @@ async def _linkify_reply(text, guild):
                 if is_feat:
                     repl = f"<#{raw_tid}>"
                 else:
-                    repl = f"[{m.group(0)}](https://discord.com/channels/{gid}/{tid})"
+                    repl = f"[{md_safe(m.group(0))}](https://discord.com/channels/{gid}/{tid})"
                 out = out[:s] + repl + out[e:]
                 delta = len(repl) - (e - s)
                 spans = [(a if a < s else a + delta, b if b <= s else b + delta)

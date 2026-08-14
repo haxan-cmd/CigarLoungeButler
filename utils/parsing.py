@@ -93,3 +93,14 @@ def parse_submission_text(text):
                 detected_weapon = _alt[0]
 
     return detected_weapon, detected_subclass
+
+
+def md_safe(s):
+    """Strip the characters a user-controlled name could use to break out of Discord
+    markdown link TEXT ('[name](url)') and inject their own hyperlink. Only removes the
+    square brackets that delimit link text — parens etc. render harmlessly as literals,
+    so legit names like 'Brittany (OF)' are untouched. Applied wherever a name is placed
+    in the [text](url) label position (boards, cards, blurbs, Butler links)."""
+    if not s:
+        return s
+    return str(s).replace('[', '').replace(']', '')

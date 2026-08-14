@@ -33,6 +33,7 @@ from utils.helpers import (
     submission_state, butler_quip, vision_parse_scorecard,
     submission_start, submission_end, swallow,
 )
+from utils.parsing import md_safe
 
 # Bounty reactions and blurb links follow the ACTIVE bounty's theme emoji.
 # These were hardcoded to the Meowy Massacre cat and kept showing it after the
@@ -1254,6 +1255,11 @@ class PeasantStatsModal(discord.ui.Modal, title="Peasant Run — Stats"):
             await interaction.response.send_message(
                 "Those numbers aren't possible (kills can't exceed takedowns). Try again.", ephemeral=True)
             return
+        # Upper bound so a manual entry can't plant an absurd fake score on the board.
+        if td > 1000 or k > 1000 or d > 1000 or score > 9_999_999:
+            await interaction.response.send_message(
+                "Those numbers aren't possible. Try again.", ephemeral=True)
+            return
         if self.kind == "extraction" and d != 0:
             await interaction.response.send_message(
                 "An Extraction means you SURVIVED to the end — deaths must be 0. "
@@ -1625,6 +1631,17 @@ class StatsModal(discord.ui.Modal, title="Enter Your Run Statistics"):
             view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "negative")
             await interaction.response.send_message(
                 "Those numbers aren't possible. Try again.",
+                view=view,
+                ephemeral=True
+            )
+            return
+
+        # Upper bound: no real Chivalry run approaches these. Caps a manual entry from
+        # planting an absurd fake score on the boards (the record is ~278 TD).
+        if takedowns > 1000 or kills > 1000 or deaths > 1000:
+            view = RetryStatsView(self.original_message, self.prompt_msg, self.selected_class, self.selected_weapon, self.selected_map, self.faction, "too_high")
+            await interaction.response.send_message(
+                "Those numbers aren't possible. No one takes down a thousand. Try again.",
                 view=view,
                 ephemeral=True
             )
@@ -2247,7 +2264,7 @@ async def _apply_edit(interaction, ev):
     _edit_thread_id = _edit_player_row[2] if _edit_player_row and _edit_player_row[2] else None
     _edit_guild_id = ev.original_message.guild.id
     _edit_name = (
-        f"[{ev.author.display_name}](https://discord.com/channels/{_edit_guild_id}/{_edit_thread_id})"
+        f"[{md_safe(ev.author.display_name)}](https://discord.com/channels/{_edit_guild_id}/{_edit_thread_id})"
         if _edit_thread_id else ev.author.display_name
     )
     _feats = ev.feats if isinstance(ev.feats, list) else ([f.strip() for f in str(ev.feats).split(',')] if ev.feats and str(ev.feats) != 'None' else [])
@@ -3023,7 +3040,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _thread_id = _player_row[2]
     _guild_id = interaction.guild.id
     _name_display = (
-        f"[{interaction.user.display_name}](https://discord.com/channels/{_guild_id}/{_thread_id})"
+        f"[{md_safe(interaction.user.display_name)}](https://discord.com/channels/{_guild_id}/{_thread_id})"
         if _thread_id else f"`{interaction.user.display_name}`"
     )
 
@@ -3793,7 +3810,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _tid = None
             if _tid:
                 _plain = f"`{_user_name}`"
-                _link = f"[{_user_name}](https://discord.com/channels/{_guild.id}/{_tid})"
+                _link = f"[{md_safe(_user_name)}](https://discord.com/channels/{_guild.id}/{_tid})"
                 _fdesc = await blurb_read()
                 if _plain in _fdesc:
                     blurb_write(_fdesc.replace(_plain, _link, 1))
