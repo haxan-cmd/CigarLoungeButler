@@ -2561,8 +2561,56 @@ class PersonalityCog(commands.Cog):
                 return
             await self._bounty_prep_reminder(guild)
             await self._health_digest(guild)
+            await self._weekly_log_rollup(guild)
         except Exception as e:
             print(f"[DAILY] cycle tasks error: {e}")
+
+    async def _weekly_log_rollup(self, guild):
+        """Once a week, post a rollup of the persistent event log to the nerve centre so
+        the review comes to the mods instead of them remembering to run /logs. Deploy-proof:
+        a 'log_rollup' marker row means a burst of restarts can't repost it, and it only
+        fires ~7 days after the last one."""
+        try:
+            if await _db.get_bot_events(category='log_rollup', hours=156, limit=1):
+                return  # already posted within ~6.5 days
+            counts = await _db.get_bot_event_counts(168)
+            n_err = counts.get('error', 0); n_fab = counts.get('fabrication', 0)
+            n_vis = counts.get('vision', 0); n_dep = counts.get('deploy', 0)
+            n_btl = counts.get('butler', 0)
+            errs = await _db.get_bot_events(category='error', hours=168, limit=5)
+            fabs = await _db.get_bot_events(category='fabrication', hours=168, limit=5)
+            vis = await _db.get_bot_events(category='vision', hours=168, limit=5)
+            emb = discord.Embed(
+                title="📋 Weekly Log Rollup — last 7 days",
+                colour=0x4BC96A if n_err == 0 else 0xC9524B,
+                description=("✅ No errors. All quiet." if n_err == 0
+                             else f"⚠️ {n_err} error(s) logged this week — worth a look."))
+            emb.add_field(name="Tallies", value=(
+                f"🔴 Errors: {n_err}\n🧮 Fabrication flags: {n_fab}\n"
+                f"👁️ Vision misses: {n_vis}\n🚀 Deploys: {n_dep}\n💬 Butler Q&A: {n_btl}"), inline=False)
+
+            def _fmt(rows):
+                return "\n".join(
+                    f"`{r['ts'].strftime('%m-%d %H:%M')}` {(r.get('message') or '')[:110]}"
+                    for r in rows)[:1000] or "—"
+            if errs:
+                emb.add_field(name="Recent errors", value=_fmt(errs), inline=False)
+            if fabs:
+                emb.add_field(name="Recent fabrication flags", value=_fmt(fabs), inline=False)
+            if vis:
+                emb.add_field(name="Recent vision misses", value=_fmt(vis), inline=False)
+            emb.set_footer(text="Full detail: /logs")
+            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
+                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            if ch:
+                if isinstance(ch, discord.Thread) and getattr(ch, 'archived', False):
+                    await ch.edit(archived=False)
+                await ch.send(embed=emb)
+                # Persist the marker IMMEDIATELY (not via the buffered writer) so a restart
+                # right after posting can't cause a repost.
+                await _db.insert_bot_events([('log_rollup', 'inf', 'weekly rollup posted')])
+        except Exception as e:
+            print(f"[ROLLUP] weekly log rollup error: {e}")
 
     async def _health_digest(self, guild):
         """Post the self-check to the nerve centre, but only when there are

@@ -984,6 +984,21 @@ async def get_bot_events(category=None, hours=168, limit=200):
         return []
 
 
+async def get_bot_event_counts(hours=168):
+    """Counts per category over a window — for the weekly rollup. {} on failure."""
+    try:
+        pool = _pool_check()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT category, COUNT(*) AS n FROM bot_events "
+                "WHERE ts >= NOW() - ($1 || ' hours')::interval GROUP BY category",
+                str(int(hours)))
+        return {r['category']: int(r['n']) for r in rows}
+    except Exception as e:
+        print(f"[EVENTS] counts failed: {e}")
+        return {}
+
+
 async def prune_bot_events(days=30):
     """Retention: drop events older than `days`. Called periodically."""
     try:
