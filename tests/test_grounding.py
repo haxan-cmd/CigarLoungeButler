@@ -30,3 +30,11 @@ def test_display_rounding_is_tolerated():
 
 def test_multiple_fabrications_sorted_and_deduped():
     assert ungrounded_numbers("500 and 500 and 800", "nothing") == [500.0, 800.0]
+
+
+def test_years_are_not_flagged():
+    # INCIDENT: "rank the best CoD games" answered with years 2009/2011/2023 got
+    # flagged as fabricated stats. Years (1900-2100) are general knowledge, not stats.
+    assert ungrounded_numbers("Modern Warfare 2009, MW3 2011, and the 2023 one", "") == []
+    # but a real out-of-range fabricated stat still flags
+    assert ungrounded_numbers("a 2400-mark career", "") == [2400.0]

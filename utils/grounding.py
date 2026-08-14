@@ -39,6 +39,11 @@ def ungrounded_numbers(reply, context, threshold=13):
     for v in extract_numbers(reply):
         if v < threshold:
             continue
+        # Skip year-shaped numbers. Server stats (marks/TD/kills/scores) never land in
+        # 1900-2100, but off-topic answers do ("rank the best CoD games" -> 2009, 2011),
+        # and those years aren't fabricated stats. Prevents that false positive.
+        if 1900 <= v <= 2100 and float(v).is_integer():
+            continue
         if round(v) in ctx:
             continue
         bad.add(v)
