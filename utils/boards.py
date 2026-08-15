@@ -32,6 +32,9 @@ _PROGRESS_BOARDS = {"The Hundred Handed"}
 _BOARD_UNITS = {
     "Score": "points", "Top Score": "points", "Pacifist": "points",
     "100 Kills": "kills", "TUFF": "kill margin",
+    # Healing boards store a HEALING total, not takedowns — without this they defaulted
+    # to 'TDs' and a player's healing score leaked in as their "highest takedowns" PB.
+    "Healing Banner": "healing", "Healing Horn": "healing",
 }
 
 

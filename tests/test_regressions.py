@@ -36,6 +36,16 @@ def test_tuff_is_kill_margin():
     assert board_unit("TUFF") != "TDs"
 
 
+# INCIDENT: Healing boards store a HEALING total, but defaulted to 'TDs', so a player's
+# healing-banner score showed up as their "highest takedowns" on the profile.
+def test_healing_boards_are_not_takedowns():
+    assert board_unit("Healing Banner") != "TDs"
+    assert board_unit("Healing Horn") != "TDs"
+    # Mallet / Knife ARE takedown-ranked boards, so those must stay 'TDs'.
+    assert board_unit("Mallet") == "TDs"
+    assert board_unit("Knife") == "TDs"
+
+
 # INCIDENT: kill-record vs king (feat classification feeds titles + routing).
 def test_feat_board_classification():
     assert is_feat_board("100 Kills")
