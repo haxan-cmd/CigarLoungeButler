@@ -2997,9 +2997,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # TUFF: gap between player kills and best teammate's takedowns (kills - best_teammate_TD).
     # Documented rule (challenge-rules embed): "you score TUFF when your kills beat your
     # best teammate's takedowns" — the board tracks the +N margin.
-    _second_place_td = None
-    if _team_td:
-        _second_place_td = sorted(_team_td, reverse=True)[0]
+    # Best teammate takedown = the max of the cleaned teammate-TD array AND the vision's
+    # DEDICATED single-value read (`best_teammate_takedown`). A dense 30-row T column
+    # loses individual rows to OCR, so the array's max sometimes misses the true highest
+    # (the false-TUFF bug); the dedicated field is a focused "find the biggest T on this
+    # side" read that catches it. Taking the MAX of both means a miss in either source
+    # can't hand out a false TUFF — it errs toward NOT awarding one.
+    _bt_candidates = list(_team_td)
+    _bt_vision = vd.get('best_teammate_takedown')
+    if isinstance(_bt_vision, int) and 0 < _bt_vision <= _TDMAX and _bt_vision != takedowns:
+        _bt_candidates.append(_bt_vision)
+    _second_place_td = max(_bt_candidates) if _bt_candidates else None
     # Log the computation so TUFF outcomes are visible in the logs — board updates
     # themselves aren't logged, which made "is TUFF working?" impossible to answer.
     if _second_place_td is not None and kills is not None:

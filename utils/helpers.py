@@ -162,6 +162,8 @@ The scoreboard shows TWO teams side by side. For ALL other rows (excluding the h
 - enemy_names: the NAME column text for players on the ENEMY team, in the SAME ROW ORDER as enemy_takedowns/enemy_kills
 Read each name EXACTLY as printed (keep clan tags and symbols); do not translate or invent. These identify who was in the lobby.
 
+- best_teammate_takedown: the SINGLE HIGHEST value in the T (takedowns) column among players on the SAME team as the highlighted player, EXCLUDING the highlighted player themselves. Scan EVERY teammate row on the highlighted player's side of the board and return the largest T value. This ONE number decides the TUFF metric, so find it carefully even if some rows are faint — it is often NOT the second row from the top (the board is sorted by SCORE, not by takedowns, so a lower-scoring teammate can have the most takedowns). Return an integer, or null only if no teammate T is readable.
+
 CRITICAL — these four arrays take T and K ONLY, never SCORE. T values are small
 (typically 0-200). SCORE values are thousands (e.g. 9,260). If any number you are
 about to put in these arrays is above 600, you are reading the wrong column: go
@@ -189,7 +191,7 @@ Your response must be ONLY the JSON object below - no explanation, no preamble, 
 
 Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
 
-{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"team_names":[],"enemy_takedowns":[],"enemy_kills":[],"enemy_names":[],"faction_kills":{},"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
+{"weapon":null,"subclass":null,"map":null,"faction":null,"name":null,"takedowns":null,"kills":null,"deaths":null,"score":null,"team_takedowns":[],"team_kills":[],"team_names":[],"enemy_takedowns":[],"enemy_kills":[],"enemy_names":[],"best_teammate_takedown":null,"faction_kills":{},"team_total_kills":null,"enemy_total_kills":null,"match_result":null}"""
 
 
 _HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
@@ -244,6 +246,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         'team_scores': [], 'team_kills': [], 'enemy_scores': [], 'enemy_kills': [],
         'team_names': [], 'enemy_names': [],
         'faction_kills': {}, 'team_total_kills': None, 'enemy_total_kills': None, 'match_result': None,
+        'best_teammate_takedown': None,
     }
     print(f"[VISION] Attempting parse for URL: {image_url[:80]}...")
     if not _gemini_client:
@@ -570,6 +573,13 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         for list_field in ('team_scores', 'team_kills', 'enemy_scores', 'enemy_kills'):
             if not isinstance(data.get(list_field), list):
                 data[list_field] = []
+        # Dedicated TUFF input: the single highest teammate takedown. Keep only a sane
+        # takedown-range integer (column bleed / a stray SCORE reads far higher).
+        try:
+            _btt = int(data.get('best_teammate_takedown'))
+            data['best_teammate_takedown'] = _btt if 0 < _btt <= 600 else None
+        except (ValueError, TypeError):
+            data['best_teammate_takedown'] = None
         for _nf in ('team_names', 'enemy_names'):
             _v = data.get(_nf)
             data[_nf] = ([str(x).strip() for x in _v if str(x).strip()]
