@@ -2383,7 +2383,10 @@ async def _apply_edit(interaction, ev):
     else:
         new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
     if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
-        new_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{ev.kills - ev.second_place_td}"
+        # Drop the margin number on thin TUFFs (+1/+2): in the awards list next to
+        # "+1 Submission" / "+1 High Score" the small "+N" reads like a mark count.
+        _tm = ev.kills - ev.second_place_td
+        new_summary += "\n<a:TUFF2:1520779243879927898> **TUFF**" + (f" +{_tm}" if _tm > 2 else "")
     if "Flawless" in _feats:
         new_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
     def _pline(lb, pos):
@@ -3100,7 +3103,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_summary = f"\n\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
     # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
     if kills is not None and _second_place_td is not None and kills > _second_place_td:
-        marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF** +{kills - _second_place_td}"
+        # Drop the margin number on thin TUFFs (+1/+2): next to "+1 Submission" /
+        # "+1 High Score" in the awards list the small "+N" reads like a mark count.
+        _tm = kills - _second_place_td
+        marks_summary += "\n<a:TUFF2:1520779243879927898> **TUFF**" + (f" +{_tm}" if _tm > 2 else "")
     if "Flawless" in feats:
         marks_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
 
