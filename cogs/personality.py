@@ -3880,6 +3880,51 @@ class PersonalityCog(commands.Cog):
                 except Exception:
                     pass
 
+        # Board-dominance: "who has the most #1 placements / first places / most boards".
+        # Count each board's #1 holder split by category so he can answer for weapon-kills,
+        # weapon-TD, map, or feat boards (or overall) instead of deflecting.
+        if any(_k in msg_lower for _k in ('number 1', 'number one', '#1', 'no. 1', 'no.1',
+                                          'first place', 'first-place', 'most placements',
+                                          'most first', 'dominate', 'who tops', 'most boards',
+                                          'most #1', 'most number')):
+            try:
+                from utils.boards import is_kills_board, is_feat_board
+                from collections import Counter
+                _best = {}   # board -> (score, name)
+                for _r in await _db.get_all_leaderboard_data():
+                    if len(_r) < 4:
+                        continue
+                    _bn = (_r[0] or '').strip(); _nm = (_r[1] or '').strip()
+                    if not _bn or not _nm:
+                        continue
+                    try:
+                        _sc = int(_r[3])
+                    except (ValueError, TypeError):
+                        continue
+                    if _bn not in _best or _sc > _best[_bn][0]:
+                        _best[_bn] = (_sc, _nm)
+                _cats = {'weapon-kills': Counter(), 'weapon (takedowns)': Counter(),
+                         'map': Counter(), 'feat': Counter()}
+                for _bn, (_sc, _nm) in _best.items():
+                    if is_feat_board(_bn):
+                        _cats['feat'][_nm] += 1
+                    elif ' - ' in _bn:
+                        _cats['map'][_nm] += 1
+                    elif is_kills_board(_bn):
+                        _cats['weapon-kills'][_nm] += 1
+                    else:
+                        _cats['weapon (takedowns)'][_nm] += 1
+                _dlines = []
+                for _cat, _ctr in _cats.items():
+                    if _ctr:
+                        _dlines.append(f"{_cat} boards — "
+                                       + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(4)))
+                if _dlines:
+                    player_stats_ctx += ("\n\nBoard #1 leaders (who holds the most first-place spots, "
+                                         "counted per board and grouped by board type):\n" + "\n".join(_dlines))
+            except Exception as _dome:
+                print(f"[BUTLER] board-dominance ctx error: {_dome}")
+
         # Robust Hundred-Handed gap injection. The deep per-player block above only
         # runs when the ASKER matches a players row and is nested 6 levels deep, so
         # it silently misses (the Butler then says "I don't have the records"). Here,
