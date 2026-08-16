@@ -3571,6 +3571,28 @@ class PersonalityCog(commands.Cog):
                             if _mine:
                                 player_stats_ctx += f" … {_mine}"
 
+                    # The asker's REAL games-this-season count, so the Butler cites it
+                    # instead of inventing one — it once rendered the bounty's 8 weapons
+                    # as "8 games logged".
+                    try:
+                        _sstart = _season.get('started_at')
+                        _sstart = _sstart.replace(tzinfo=None) if getattr(_sstart, 'tzinfo', None) else _sstart
+                        if _sstart:
+                            _sn = 0
+                            for _sr in await _db.get_submissions_by_player(discord_id_str):
+                                if len(_sr) < 12 or 'Resubmit' in (_sr[11] or '') or 'Unlisted' in (_sr[11] or ''):
+                                    continue
+                                try:
+                                    _t = _sr[0] if hasattr(_sr[0], 'year') else datetime.fromisoformat(str(_sr[0]))
+                                    if _t.replace(tzinfo=None) >= _sstart:
+                                        _sn += 1
+                                except Exception:
+                                    pass
+                            player_stats_ctx += (f"\n{player_name} has logged {_sn} games this season. "
+                                                 f"Cite THIS number for 'games this season' — never estimate it.")
+                    except Exception as _sge:
+                        print(f"[BUTLER] season game-count error: {_sge}")
+
                     def _lead(key):
                         v = _sstats.get(key) or []
                         if not v:
