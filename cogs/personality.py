@@ -281,6 +281,8 @@ _DATA_QUESTION_WORDS = (
     'play with', 'play against', 'played with', 'played against',
     'missing', 'about maps', 'what maps', 'which maps', 'map board',
     'insight', 'insights', 'tell me about', 'what about', 'how good', 'compare',
+    'placements', 'podium', 'first place', 'second place', 'third place',
+    '#1', '#2', '#3', 'kill count', 'most number',
 )
 
 
@@ -3896,17 +3898,26 @@ class PersonalityCog(commands.Cog):
                 except Exception:
                     pass
 
-        # Board-dominance: "who has the most #1 placements / first places / most boards".
-        # Count each board's #1 holder split by category so he can answer for weapon-kills,
-        # weapon-TD, map, or feat boards (or overall) instead of deflecting.
-        if any(_k in msg_lower for _k in ('number 1', 'number one', '#1', 'no. 1', 'no.1',
-                                          'first place', 'first-place', 'most placements',
-                                          'most first', 'dominate', 'who tops', 'most boards',
-                                          'most #1', 'most number')):
+        # Board-placement dominance: "who has the most #1 / #2 / #3 placements". Detect
+        # which podium rank(s) the question asks for, then count each board's holders of
+        # that rank — using DISTINCT-score tiers so a tie for #1 makes the next distinct
+        # score #2 — split by board type. Answers instead of deflecting.
+        _rank_kw = {1: ('#1', 'number 1', 'number one', 'no. 1', 'no.1', 'first place', 'first-place', '1st'),
+                    2: ('#2', 'number 2', 'no. 2', 'no.2', 'second place', 'second-place', '2nd', 'runner-up', 'runner up'),
+                    3: ('#3', 'number 3', 'no. 3', 'third place', 'third-place', '3rd')}
+        _want_ranks = [rk for rk, kws in _rank_kw.items() if any(k in msg_lower for k in kws)]
+        if any(k in msg_lower for k in ('podium', 'top 3', 'top three', 'top-3')):
+            _want_ranks = [1, 2, 3]
+        _dom_generic = any(k in msg_lower for k in ('most placements', 'dominate', 'who tops',
+                                                    'most boards', 'most number', 'most first'))
+        if _want_ranks or _dom_generic:
+            if not _want_ranks:
+                _want_ranks = [1]
+            _want_ranks = sorted(set(_want_ranks))
             try:
                 from utils.boards import is_kills_board, is_feat_board
-                from collections import Counter
-                _top = {}   # board -> (max_score, {names tied at that score})
+                from collections import Counter, defaultdict
+                _bp = defaultdict(dict)   # board -> {score: set(names)}
                 for _r in await _db.get_all_leaderboard_data():
                     if len(_r) < 4:
                         continue
@@ -3917,29 +3928,30 @@ class PersonalityCog(commands.Cog):
                         _sc = int(_r[3])
                     except (ValueError, TypeError):
                         continue
-                    _cur = _top.get(_bn)
-                    if _cur is None or _sc > _cur[0]:
-                        _top[_bn] = (_sc, {_nm})
-                    elif _sc == _cur[0]:
-                        _cur[1].add(_nm)   # tie for #1 — everyone at the top score counts
-                _cats = {'weapon-kills': Counter(), 'weapon (takedowns)': Counter(),
-                         'map': Counter(), 'feat': Counter()}
-                for _bn, (_sc, _names) in _top.items():
+                    _bp[_bn].setdefault(_sc, set()).add(_nm)
+                _cats = ['weapon-kills', 'weapon (takedowns)', 'map', 'feat']
+                _tally = {c: {rk: Counter() for rk in _want_ranks} for c in _cats}
+                for _bn, _smap in _bp.items():
                     _cat = ('feat' if is_feat_board(_bn) else 'map' if ' - ' in _bn
                             else 'weapon-kills' if is_kills_board(_bn) else 'weapon (takedowns)')
-                    for _nm in _names:
-                        _cats[_cat][_nm] += 1
+                    for _i, _s in enumerate(sorted(_smap.keys(), reverse=True)):   # distinct scores desc
+                        _rk = _i + 1
+                        if _rk in _want_ranks:
+                            for _nm in _smap[_s]:
+                                _tally[_cat][_rk][_nm] += 1
                 _dlines = []
-                for _cat, _ctr in _cats.items():
-                    if _ctr:
-                        _dlines.append(f"{_cat} boards — "
-                                       + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(5)))
+                for _rk in _want_ranks:
+                    for _cat in _cats:
+                        _ctr = _tally[_cat][_rk]
+                        if _ctr:
+                            _dlines.append(f"#{_rk} on {_cat} boards — "
+                                           + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(5)))
                 if _dlines:
-                    player_stats_ctx += ("\n\nBoard #1 leaders (who holds the most first-place spots; a "
-                                         "TIE for #1 counts for every tied player. Counted per board, "
-                                         "grouped by board type):\n" + "\n".join(_dlines))
+                    player_stats_ctx += ("\n\nBoard PLACEMENT leaders (how many boards each player ranks "
+                                         "at a given position on, by board type; a TIE shares the rank, so "
+                                         "the next DISTINCT score is the next rank):\n" + "\n".join(_dlines))
             except Exception as _dome:
-                print(f"[BUTLER] board-dominance ctx error: {_dome}")
+                print(f"[BUTLER] board-placement ctx error: {_dome}")
 
         # Robust Hundred-Handed gap injection. The deep per-player block above only
         # runs when the ASKER matches a players row and is nested 6 levels deep, so
