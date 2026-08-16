@@ -284,6 +284,7 @@ _DATA_QUESTION_WORDS = (
     'placements', 'podium', 'first place', 'second place', 'third place',
     '#1', '#2', '#3', 'kill count', 'most number',
     'top 5', 'top five', 'top 3', 'top three', 'finishes',
+    '100 kill', '200 takedown', 'pacifist', 'tuff', 'kill game',
 )
 
 
@@ -4000,6 +4001,64 @@ class PersonalityCog(commands.Cog):
                     player_stats_ctx += _hdr + "\n".join(_dlines)
             except Exception as _dome:
                 print(f"[BUTLER] board-placement ctx error: {_dome}")
+
+        # Feat-count leaders: "who has the most 100-kill / flawless / triple / pacifist /
+        # 200-takedown / tuff games". These feat boards STACK (one row per qualifying run),
+        # so count rows per canonical player. Manual overrides on players[8]/[9] win for
+        # 100 Kills / 200 Takedowns, matching the registry card. Answers instead of deflecting.
+        _feat_kw = [
+            (['100 kill', '100-kill', 'hundred kill'], '100 Kills', 8),
+            (['200 takedown', '200-takedown', '200 td'], '200 Takedowns', 9),
+            (['flawless'], 'Flawless', None),
+            (['triple'], 'Triple', None),
+            (['pacifist'], 'Pacifist', None),
+        ]
+        _fc_target = None
+        for _kws, _b, _ovx in _feat_kw:
+            if any(_k in msg_lower for _k in _kws):
+                _fc_target = (_b, _ovx); break
+        if _fc_target is None and re.search(r'\btuff\b', msg_lower):
+            _fc_target = ('TUFF', None)
+        _fc_ask = any(k in msg_lower for k in ('most', 'how many', 'who has', 'who have',
+                                               'lead', 'ranking', 'ranked', 'top '))
+        if _fc_target and _fc_ask and not _topn and not _want_ranks:
+            try:
+                from collections import Counter
+                _fb, _ovx = _fc_target
+                _name2id = await _db.get_name_to_id_map()
+                _ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+                _did2name, _override_ct = {}, {}
+                for _p in await _db.get_all_players():
+                    _pd = (_p[0] or '').strip()
+                    if not _pd:
+                        continue
+                    _did2name[_pd] = (_p[1] or '').strip()
+                    if _ovx is not None and len(_p) > _ovx and _p[_ovx] is not None:
+                        try:
+                            _override_ct[_pd] = int(_p[_ovx])
+                        except (ValueError, TypeError):
+                            pass
+                _ct, _disp = Counter(), {}
+                for _r in await _db.get_all_leaderboard_data():
+                    if len(_r) < 4 or (_r[0] or '').strip() != _fb:
+                        continue
+                    _nm = (_r[1] or '').strip()
+                    if not _nm:
+                        continue
+                    _rdid = (_r[2] or '').strip() if len(_r) > 2 else ''
+                    _did = _rdid or _name2id.get(_nm.lower(), '')
+                    _key = _did or _nm.lower()
+                    _disp[_key] = _ov.get(_did) or _did2name.get(_did) or _nm
+                    _ct[_key] += 1
+                for _pd, _n in _override_ct.items():   # manual override wins over auto count
+                    _ct[_pd] = _n
+                    _disp.setdefault(_pd, _ov.get(_pd) or _did2name.get(_pd) or _pd)
+                if _ct:
+                    _topline = ", ".join(f"{_disp.get(k, k)} ({c})" for k, c in _ct.most_common(8))
+                    player_stats_ctx += (f"\n\n{_fb} leaders (how many {_fb} games each player has "
+                                         f"logged, most first; one game = one qualifying run): " + _topline)
+            except Exception as _fce:
+                print(f"[BUTLER] feat-count ctx error: {_fce}")
 
         # Robust Hundred-Handed gap injection. The deep per-player block above only
         # runs when the ASKER matches a players row and is nested 6 levels deep, so
