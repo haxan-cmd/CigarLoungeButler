@@ -1324,22 +1324,10 @@ class PersonalityCog(commands.Cog):
             self.events_flush_loop.start()
         # Fire nerve center immediately on startup so it always posts on deploy
 
-        # Update butlers-manual
-        try:
-            real_guild = self.bot.get_guild(GUILD_ID)
-            if real_guild:
-                manual_channel = real_guild.get_channel(BUTLERS_MANUAL_CHANNEL_ID) or await real_guild.fetch_channel(BUTLERS_MANUAL_CHANNEL_ID)
-                if manual_channel:
-                    embed = build_manual_embed()
-                    async for msg in manual_channel.history(limit=10):
-                        if msg.author == real_guild.me:
-                            await msg.edit(content=None, embed=embed)
-                            break
-                    else:
-                        await manual_channel.send(embed=embed)
-                    print("butlers-manual updated")
-        except Exception as e:
-            print(f"butlers-manual update error: {e}")
+        # butlers-manual RETIRED: the player command list now lives in the information
+        # centre (challenge-rules channel) via build_challenge_rules_embeds — "Player
+        # Commands" / "Ask the Butler" / "Stats Lab" sections. No longer auto-posted here,
+        # so the old channel can be archived. (/refresh_manual is left in place unused.)
 
         # butlers-favourites explainer removed: the live season board
         # (build_favourites_embed) self-labels every stat, and the old explainer

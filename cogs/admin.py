@@ -198,8 +198,10 @@ def build_challenge_rules_embeds():
         "• **Weapon boards** — best takedown game per weapon. "
         "⚠️ **VIP runs do NOT count** (the VIP kill feed is inflated).\n"
         "• **Map boards** — best takedown game per map/faction. **VIP runs DO count here.**\n"
-        "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF\n"
-        "• 🏆 **Score** — highest scoreboard points in a match, one row per player"
+        "• **Feat boards** — 100 Kills, 200 Takedowns, Triple, Flawless, TUFF, Pacifist, Hybrid\n"
+        "• 🏆 **Score** — highest scoreboard points in a match, one row per player\n"
+        "• 🩹 **Healing boards** — best Healing Horn / Healing Banner totals (submit the healing popup screenshot)\n"
+        "• 🏃 **Peasant board** — highscore run as the peasant on the Coxwell / Bridgetown defence stage"
     ), inline=False)
     e.add_field(name="<a:TUFF2:1520779243879927898>  TUFF", value=(
         "A hard-carry board: you score **TUFF** when your **kills** beat your best "
@@ -344,6 +346,68 @@ def build_challenge_rules_embeds():
     ), inline=False)
     embeds.append(e)
 
+    # 8. Ask the Butler (chat)
+    e = discord.Embed(
+        title="💬  Ask the Butler",
+        description=(
+            "The Butler answers in the main channel — mention him or just address him. He reads "
+            "from the live database, so ask about real numbers."
+        ),
+        colour=C("#4B5D8A"),
+    )
+    e.add_field(name="Things to ask", value=(
+        "• **\"show me my stats\"** — your full dossier: title, marks, signature arms, best game, "
+        "lethality vs the lounge, feats, archetype, Hundred-Handed, and a curio.\n"
+        "• **\"who's king of Messer?\"** — the takedown leader on any weapon. "
+        "**\"kill record on Messer?\"** — the kills leader (a different board).\n"
+        "• **\"when does the bounty end?\"** · **\"how am I doing this season?\"** · **\"what's my archetype?\"**\n"
+        "• **\"what about @player?\"** — someone else's stats, or your head-to-head.\n"
+        "• Lore, trivia, or nonsense. He'll oblige, in his fashion."
+    ), inline=False)
+    e.set_footer(text="He cites only what's on record — he won't invent your numbers, but he will judge them.")
+    embeds.append(e)
+
+    # 9. Player commands (folded in from the retired butlers-manual channel)
+    e = discord.Embed(
+        title="⌨️  Player Commands",
+        description="*Slash commands anyone can run. `/help` anywhere shows the list scoped to you.*",
+        colour=C("#2B6CB0"),
+    )
+    e.add_field(name="📊 Your stats", value=(
+        "`/playerstats` — your all-time profile (title, weapon ranks, marks); add a name for anyone else.\n"
+        "`/season` — your season standing and where each point came from.\n"
+        "`/next` — your nearest goal on each track (next rank, mastery, Hundred-Handed).\n"
+        "`/versus` — your head-to-head with another player.\n"
+        "`/refreshcard` — refresh your registry card."
+    ), inline=False)
+    e.add_field(name="🏆 Rankings & the season", value=(
+        "`/top` — top 10 for any weapon or class board, e.g. `/top Messer`.\n"
+        "`/standings` · `/titles` · `/report` — live season leaders and all-time title holders.\n"
+        "`/wrapped` — your season recap · `/superlatives` — the season's tongue-in-cheek awards."
+    ), inline=False)
+    e.add_field(name="📈 Explore the data", value=(
+        "`/serverstats` — server activity over 24h / 7d / 30d.\n"
+        "`/explore` — any metric grouped any way (weapon, player, map, subclass, feat), filterable.\n"
+        "`/tilt_stats` — the lobby-difficulty ladder across every game.\n"
+        "`/correlate` — chart any two stats, plus a link to the interactive **Stats Lab** (below).\n"
+        "`/bounty status` — the active bounty and your progress."
+    ), inline=False)
+    embeds.append(e)
+
+    # 10. The Stats Lab (web)
+    e = discord.Embed(
+        title="🔬  The Stats Lab",
+        description=(
+            "`/correlate` opens a panel to chart the lounge's data — scatter any two stats, a "
+            "correlation matrix, head-to-head compares — all filterable by weapon, class, map, side, "
+            "and season. A button on it opens the **web Stats Lab**: an interactive page (Activity, "
+            "Rankings, and Weapons tabs) that slices every run in your browser. The link is private "
+            "and expires on its own; no login."
+        ),
+        colour=C("#3AA6A0"),
+    )
+    embeds.append(e)
+
     return embeds
 
 
@@ -359,7 +423,8 @@ async def save_challenge_rules_message_ids(msg_ids):
     # label rather than dropping, so a future section can't desync the save.
     labels = ['Intro', 'Earning Marks', 'Lobby Difficulty', 'Weapon Ranks',
               'Subclass & Class', 'Feats of Legend', 'Leaderboards', 'Titles',
-              'Season', 'Player Titles', 'Monthly Cycle']
+              'Season', 'Player Titles', 'Monthly Cycle',
+              'Ask the Butler', 'Player Commands', 'Stats Lab']
     labels += [f'Section {i}' for i in range(len(labels), len(msg_ids))]
     labels = labels[:len(msg_ids)]
     try:
