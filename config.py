@@ -364,6 +364,10 @@ LETHALITY_BLURB_MIN_DELTA = 5.0
 DEATHS_STICKER_NAME = "certifiedlounger"   # 30+ deaths -> reply with the Certified Lounger sticker
 DEATHS_STICKER_THRESHOLD = 30
 
+# Flawless sticker — the bot replies with this sticker on a Flawless (no-death) run.
+# Set NAME to the exact sticker name in the server (Server Settings -> Stickers). "" disables.
+FLAWLESS_STICKER_NAME = "flawlesslounger"
+
 # Lobby tilt — PERCENTAGE gap between the two faction banner kill totals,
 # relative to the smaller team (so +50% and -50% mean the same imbalance).
 # Positive = your team led. Percentage instead of raw diff so long games and

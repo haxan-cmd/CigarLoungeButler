@@ -2772,6 +2772,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     except Exception as _e_dstk:
         print(f"[STICKER] high-deaths sticker error: {_e_dstk}")
 
+    # Flawless sticker: reply on a no-death run (same condition as the Flawless feat —
+    # zero deaths, a real combat run, not a pacifist objective run).
+    try:
+        if deaths == 0 and takedowns > 0 and not (kills == 0 and takedowns <= 10):
+            _fname = getattr(config, 'FLAWLESS_STICKER_NAME', '') or ''
+            if _fname:
+                _fg = original_message.guild
+                _fstk = discord.utils.get(_fg.stickers, name=_fname)
+                if _fstk is None:
+                    try:
+                        _fstk = discord.utils.get(await _fg.fetch_stickers(), name=_fname)
+                    except Exception:
+                        _fstk = None
+                if _fstk:
+                    await original_message.reply(stickers=[_fstk], mention_author=False)
+    except Exception as _e_fstk:
+        print(f"[STICKER] flawless sticker error: {_e_fstk}")
+
     # Clear the "Scorecard detected" prompt in the background (never blocks).
     async def _cleanup_prompt():
         try:
