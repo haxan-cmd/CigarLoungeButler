@@ -97,6 +97,7 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="galaxy">🌌 Galaxy</button>
   <button class="tab" data-v="activity">🕒 Activity</button>
   <button class="tab" data-v="ranking">🏅 Rankings</button>
+  <button class="tab" data-v="weapons">🗡️ Weapons</button>
   </div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
@@ -127,6 +128,7 @@ const state={
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   activity:{tz:0},
   ranking:{stat:'tilt',min:5,order:'desc',agg:'avg'},
+  weapons:{by:'runs',order:'asc',archer:'hide'},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -739,6 +741,49 @@ function renderRanking(){
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
   render();}
+// ---- weapon activity (submissions + unique players per weapon; find the neglected ones for bounties) ----
+function renderWeapons(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  ctrl.appendChild(pickSelect('Sort by',[['runs','Submissions'],['players','Unique players']],state.weapons.by,function(v){state.weapons.by=v;renderWeapons();}));
+  ctrl.appendChild(pickSelect('Order',[['asc','Least used first'],['desc','Most used first']],state.weapons.order,function(v){state.weapons.order=v;renderWeapons();}));
+  ctrl.appendChild(pickSelect('Archer weapons',[['hide','Hide'],['show','Show']],state.weapons.archer,function(v){state.weapons.archer=v;renderWeapons();}));
+  view.appendChild(ctrl);
+  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
+  const ARCHER=new Set(['Bow','War Bow','Crossbow','Siege Crossbow','Javelin','Throwing Axe']);
+  const SKIP=new Set(['','Hybrid','Multiple Weapons','Other','None']);
+  const runs={}, pl={};
+  for(const r of rows){
+    let w=r[IDX.weapon]; if(w==null) continue; w=String(w).trim();
+    if(SKIP.has(w)) continue;
+    if(state.weapons.archer==='hide' && ARCHER.has(w)) continue;
+    const nm=r[IDX.name]||'', key=(r[IDX.did]||'')||('name:'+nm.toLowerCase());
+    runs[w]=(runs[w]||0)+1; (pl[w]=pl[w]||new Set()).add(key);
+  }
+  let items=Object.keys(runs).map(function(w){return {w:w,runs:runs[w],players:pl[w].size,archer:ARCHER.has(w)};});
+  const by=state.weapons.by, asc=state.weapons.order==='asc';
+  items.sort(function(a,b){var d=asc?(a[by]-b[by]):(b[by]-a[by]); return d||(asc?a.runs-b.runs:b.runs-a.runs)||a.w.localeCompare(b.w);});
+  const maxRuns=items.reduce(function(m,i){return Math.max(m,i.runs);},1);
+  let html='<div class="card"><div style="font-weight:700;margin-bottom:2px">🗡️ Weapon activity</div>'
+    +'<div style="color:#8b8f9a;font-size:12px;margin-bottom:10px">'+items.length+' weapons in view · least-used first for bounty planning</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+    +'<tr style="color:#8b8f9a;text-align:left"><th style="padding:4px 6px">Weapon</th>'
+    +'<th style="padding:4px 6px;text-align:right">Runs</th><th style="padding:4px 6px;text-align:right">Players</th>'
+    +'<th style="padding:4px 6px;width:34%"></th></tr>';
+  for(const it of items){
+    const pct=Math.round(it.runs/maxRuns*100);
+    html+='<tr style="border-top:1px solid var(--grid)">'
+      +'<td style="padding:4px 6px">'+esc(it.w)+(it.archer?' <span style="color:#8b8f9a;font-size:11px">archer</span>':'')+'</td>'
+      +'<td style="padding:4px 6px;text-align:right;color:#e0a84c;font-weight:600">'+it.runs+'</td>'
+      +'<td style="padding:4px 6px;text-align:right;color:#c9ccd3">'+it.players+'</td>'
+      +'<td style="padding:4px 6px"><span style="display:block;height:10px;background:#2a2c33;border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:'+pct+'%;background:#4fb3a1"></span></span></td>'
+      +'</tr>';
+  }
+  html+='</table></div>';
+  const holder=document.createElement('div'); holder.innerHTML=html; while(holder.firstChild) view.appendChild(holder.firstChild);
+}
+
 function render(){
   const bits=activeBits(); const rows=filtered();
   document.getElementById('sub').textContent=DATA.length+' runs total · '+rows.length+' in view'+(bits.length?(' · '+bits.join(' · ')):'');
@@ -749,6 +794,7 @@ function render(){
   else if(state.view==='trends')renderTrends();
   else if(state.view==='activity')renderActivity();
   else if(state.view==='ranking')renderRanking();
+  else if(state.view==='weapons')renderWeapons();
   else renderGalaxy();
 }
 
