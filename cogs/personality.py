@@ -283,6 +283,7 @@ _DATA_QUESTION_WORDS = (
     'insight', 'insights', 'tell me about', 'what about', 'how good', 'compare',
     'placements', 'podium', 'first place', 'second place', 'third place',
     '#1', '#2', '#3', 'kill count', 'most number',
+    'top 5', 'top five', 'top 3', 'top three', 'finishes',
 )
 
 
@@ -3906,14 +3907,19 @@ class PersonalityCog(commands.Cog):
                     2: ('#2', 'number 2', 'no. 2', 'no.2', 'second place', 'second-place', '2nd', 'runner-up', 'runner up'),
                     3: ('#3', 'number 3', 'no. 3', 'third place', 'third-place', '3rd')}
         _want_ranks = [rk for rk, kws in _rank_kw.items() if any(k in msg_lower for k in kws)]
-        if any(k in msg_lower for k in ('podium', 'top 3', 'top three', 'top-3')):
-            _want_ranks = [1, 2, 3]
+        # "top N" = a CUMULATIVE count of boards where the player finishes within the top N
+        # (a different question from per-rank). Parse the N; 'podium' = top 3.
+        _topn = None
+        _tm = re.search(r'top[\s-]*(\d+|three|five|ten)', msg_lower)
+        if _tm:
+            _topn = {'three': 3, 'five': 5, 'ten': 10}.get(_tm.group(1))
+            if _topn is None and _tm.group(1).isdigit():
+                _topn = min(int(_tm.group(1)), 25)
+        if 'podium' in msg_lower:
+            _topn = 3
         _dom_generic = any(k in msg_lower for k in ('most placements', 'dominate', 'who tops',
                                                     'most boards', 'most number', 'most first'))
-        if _want_ranks or _dom_generic:
-            if not _want_ranks:
-                _want_ranks = [1]
-            _want_ranks = sorted(set(_want_ranks))
+        if _topn or _want_ranks or _dom_generic:
             try:
                 from utils.boards import is_kills_board, is_feat_board
                 from collections import Counter, defaultdict
@@ -3930,26 +3936,47 @@ class PersonalityCog(commands.Cog):
                         continue
                     _bp[_bn].setdefault(_sc, set()).add(_nm)
                 _cats = ['weapon-kills', 'weapon (takedowns)', 'map', 'feat']
-                _tally = {c: {rk: Counter() for rk in _want_ranks} for c in _cats}
-                for _bn, _smap in _bp.items():
-                    _cat = ('feat' if is_feat_board(_bn) else 'map' if ' - ' in _bn
+
+                def _classify(_bn):
+                    return ('feat' if is_feat_board(_bn) else 'map' if ' - ' in _bn
                             else 'weapon-kills' if is_kills_board(_bn) else 'weapon (takedowns)')
-                    for _i, _s in enumerate(sorted(_smap.keys(), reverse=True)):   # distinct scores desc
-                        _rk = _i + 1
-                        if _rk in _want_ranks:
-                            for _nm in _smap[_s]:
-                                _tally[_cat][_rk][_nm] += 1
+
                 _dlines = []
-                for _rk in _want_ranks:
+                if _topn:
+                    # Cumulative: count boards where the player is within the top-N distinct scores.
+                    _tally = {c: Counter() for c in _cats}
+                    for _bn, _smap in _bp.items():
+                        _cat = _classify(_bn)
+                        for _s in sorted(_smap.keys(), reverse=True)[:_topn]:
+                            for _nm in _smap[_s]:
+                                _tally[_cat][_nm] += 1
                     for _cat in _cats:
-                        _ctr = _tally[_cat][_rk]
-                        if _ctr:
-                            _dlines.append(f"#{_rk} on {_cat} boards — "
-                                           + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(5)))
+                        if _tally[_cat]:
+                            _dlines.append(f"top-{_topn} on {_cat} boards — "
+                                           + ", ".join(f"{n} ({c})" for n, c in _tally[_cat].most_common(6)))
+                    _hdr = (f"\n\nTop-{_topn} board finishes (how many boards each player ranks in the top "
+                            f"{_topn} on, by board type; ties share a rank):\n")
+                else:
+                    # Per-rank: #1 / #2 / #3 (generic dominance -> #1).
+                    _ranks = sorted(set(_want_ranks)) or [1]
+                    _tally = {c: {rk: Counter() for rk in _ranks} for c in _cats}
+                    for _bn, _smap in _bp.items():
+                        _cat = _classify(_bn)
+                        for _i, _s in enumerate(sorted(_smap.keys(), reverse=True)):
+                            _rk = _i + 1
+                            if _rk in _ranks:
+                                for _nm in _smap[_s]:
+                                    _tally[_cat][_rk][_nm] += 1
+                    for _rk in _ranks:
+                        for _cat in _cats:
+                            if _tally[_cat][_rk]:
+                                _dlines.append(f"#{_rk} on {_cat} boards — "
+                                               + ", ".join(f"{n} ({c})" for n, c in _tally[_cat][_rk].most_common(5)))
+                    _hdr = ("\n\nBoard PLACEMENT leaders (how many boards each player ranks at a given "
+                            "position on, by board type; a TIE shares the rank, so the next DISTINCT "
+                            "score is the next rank):\n")
                 if _dlines:
-                    player_stats_ctx += ("\n\nBoard PLACEMENT leaders (how many boards each player ranks "
-                                         "at a given position on, by board type; a TIE shares the rank, so "
-                                         "the next DISTINCT score is the next rank):\n" + "\n".join(_dlines))
+                    player_stats_ctx += _hdr + "\n".join(_dlines)
             except Exception as _dome:
                 print(f"[BUTLER] board-placement ctx error: {_dome}")
 
