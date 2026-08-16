@@ -612,7 +612,8 @@ async def build_self_dossier(discord_id, name, member_role_ids=None, cached_data
             _bits.append(f"career {tot_td:,} takedowns / {tot_k:,} kills")
         if fc:
             _ff = sorted(fc.items(), key=lambda kv: -kv[1]); _ftot = sum(fc.values())
-            _bits.append(f"{round(_ff[0][1] * 100 / _ftot)}% {_ff[0][0]}" if _ftot else "")
+            _fce = (getattr(_cfg, 'FACTION_EMOJIS', {}) or {}).get(_ff[0][0], '')
+            _bits.append((f"{_fce} " if _fce else "") + f"{round(_ff[0][1] * 100 / _ftot)}% {_ff[0][0]}" if _ftot else "")
         if _haunt:
             _bits.append(f"haunts {_haunt}")
         if best_score:

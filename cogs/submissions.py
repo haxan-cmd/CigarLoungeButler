@@ -133,10 +133,13 @@ def _link_weapon(weapon, guild_id, lb_thread_map):
     return f"[{weapon}](https://discord.com/channels/{guild_id}/{tid})" if tid and weapon else (weapon or "")
 
 def _link_map_faction(map_name, faction, guild_id, lb_thread_map):
-    """Hyperlink the 'Map / Faction' text to its shared map-board thread, if one exists."""
+    """Hyperlink the 'Map / Faction' text to its shared map-board thread, if one exists.
+    Prefixed with the faction crest emoji when one is configured."""
     tid = lb_thread_map.get(f"{map_name} - {faction}")
+    _fe = (getattr(config, 'FACTION_EMOJIS', {}) or {}).get(faction, '')
+    _pre = f"{_fe} " if _fe else ""
     plain = f"{map_name} / {faction}"
-    return f"[{plain}](https://discord.com/channels/{guild_id}/{tid})" if tid else plain
+    return _pre + (f"[{plain}](https://discord.com/channels/{guild_id}/{tid})" if tid else plain)
 
 MOD_ROLE_ID            = config.MOD_ROLE_ID
 _ASSETS_DIR            = os.path.join(os.path.dirname(__file__), '..', 'assets')
