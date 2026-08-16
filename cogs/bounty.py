@@ -41,6 +41,7 @@ async def get_active_bounty():
                 'bonus_msg_id': int(row[12]) if len(row) > 12 and row[12] else None,
                 'progress_msg_id': int(row[13]) if len(row) > 13 and row[13] else None,
                 'bonus_completions': json.loads(row[16]) if len(row) > 16 and row[16] else [],
+                'start_date': row[14] if len(row) > 14 and row[14] else None,
             }
     return None
 

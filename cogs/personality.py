@@ -2888,10 +2888,27 @@ class PersonalityCog(commands.Cog):
         try:
             from cogs.favourites import estimate_season_end as _est_end
             _seas = await _db.get_current_season()
-            if _seas and _seas.get('started_at'):
-                _sst = _seas.get('started_at')
+            _sst = (_seas.get('started_at') if _seas else None)
+            _slabel = (_seas.get('label') if _seas else None)
+            # Fallback: the SEASON row often has no started_at (a mod opens the bounty
+            # without running /season_start), which left "when does the bounty end"
+            # deflecting. The active BOUNTY has its OWN start_date — use it (they start
+            # together, and the bounty is what the player is actually asking about).
+            if not _sst:
+                try:
+                    from cogs.bounty import get_active_bounty
+                    _ab = await get_active_bounty()
+                    if _ab:
+                        _slabel = _slabel or _ab.get('title')
+                        _bsd = _ab.get('start_date')
+                        if _bsd:
+                            from datetime import datetime as _dt2
+                            _sst = _bsd if hasattr(_bsd, 'year') else _dt2.fromisoformat(str(_bsd)[:10])
+                except Exception as _abe:
+                    print(f"[BUTLER] bounty-start fallback error: {_abe}")
+            if _sst:
                 _sstn = _sst.replace(tzinfo=None) if getattr(_sst, 'tzinfo', None) else _sst
-                _send, _sdays = _est_end(_sst)
+                _send, _sdays = _est_end(_sstn)
                 if _send:
                     if _sdays > 1:
                         _swhen = f"about {_sdays} days left, ends ~{_send:%b %d}"
@@ -2899,12 +2916,11 @@ class PersonalityCog(commands.Cog):
                         _swhen = f"ends within a day (~{_send:%b %d})"
                     else:
                         _swhen = "already past its scheduled month; it now ends whenever a mod closes it"
-                    _slabel = (_seas.get('label') or 'current')
                     player_stats_ctx += (
-                        f"SEASON/BOUNTY TIMELINE: the {_slabel} season and its bounty started "
-                        f"{_sstn:%b %d} and run about a month, so the bounty {_swhen}. This end "
-                        f"date is an ESTIMATE (a mod closes it manually) — answer with 'around' "
-                        f"or 'roughly', and never state it as an exact guaranteed date.\n"
+                        f"SEASON/BOUNTY TIMELINE: the {_slabel or 'current'} bounty/season started "
+                        f"{_sstn:%b %d} and runs about a month, so it {_swhen}. This end date is an "
+                        f"ESTIMATE (a mod closes it manually) — answer with 'around' or 'roughly', and "
+                        f"never state it as an exact guaranteed date.\n"
                     )
         except Exception as _tl_e:
             print(f"[BUTLER] season timeline ctx error: {_tl_e}")
