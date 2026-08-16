@@ -706,7 +706,7 @@ async def _linkify_reply(text, guild):
         for p in await _db.get_all_players():
             nm = (p[1] or '').strip()
             tid = (p[2] or '').strip()
-            if nm and tid and len(nm) >= 3:
+            if nm and tid and len(nm) >= 2:
                 targets.append((nm, tid, 0, False, tid))
         targets.sort(key=lambda t: -len(t[0]))
         spans = []  # regions occupied by links we've inserted
@@ -3923,7 +3923,18 @@ class PersonalityCog(commands.Cog):
             try:
                 from utils.boards import is_kills_board, is_feat_board
                 from collections import Counter, defaultdict
-                _bp = defaultdict(dict)   # board -> {score: set(names)}
+                # Canonicalise identity so a player's multiple IGNs (e.g. "Llama" /
+                # "Arbiter of Lethality") collapse to ONE person, counted once and
+                # displayed under the registry name (which _linkify_reply can link).
+                _name2id = await _db.get_name_to_id_map()
+                _ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+                _did2name = {}
+                for _p in await _db.get_all_players():
+                    _pd = (_p[0] or '').strip()
+                    if _pd:
+                        _did2name[_pd] = (_p[1] or '').strip()
+                _disp_by_key = {}
+                _bp = defaultdict(dict)   # board -> {score: set(identity_key)}
                 for _r in await _db.get_all_leaderboard_data():
                     if len(_r) < 4:
                         continue
@@ -3934,26 +3945,36 @@ class PersonalityCog(commands.Cog):
                         _sc = int(_r[3])
                     except (ValueError, TypeError):
                         continue
-                    _bp[_bn].setdefault(_sc, set()).add(_nm)
+                    _rdid = (_r[2] or '').strip() if len(_r) > 2 else ''
+                    _did = _rdid or _name2id.get(_nm.lower(), '')
+                    _key = _did or _nm.lower()
+                    _disp_by_key[_key] = _ov.get(_did) or _did2name.get(_did) or _nm
+                    _bp[_bn].setdefault(_sc, set()).add(_key)
                 _cats = ['weapon-kills', 'weapon (takedowns)', 'map', 'feat']
 
                 def _classify(_bn):
                     return ('feat' if is_feat_board(_bn) else 'map' if ' - ' in _bn
                             else 'weapon-kills' if is_kills_board(_bn) else 'weapon (takedowns)')
 
+                def _disp(_k):
+                    return _disp_by_key.get(_k, _k)
+
                 _dlines = []
                 if _topn:
-                    # Cumulative: count boards where the player is within the top-N distinct scores.
+                    # Cumulative: each board contributes at most once per player.
                     _tally = {c: Counter() for c in _cats}
                     for _bn, _smap in _bp.items():
                         _cat = _classify(_bn)
+                        _seen = set()
                         for _s in sorted(_smap.keys(), reverse=True)[:_topn]:
-                            for _nm in _smap[_s]:
-                                _tally[_cat][_nm] += 1
+                            for _k in _smap[_s]:
+                                if _k not in _seen:
+                                    _seen.add(_k)
+                                    _tally[_cat][_k] += 1
                     for _cat in _cats:
                         if _tally[_cat]:
                             _dlines.append(f"top-{_topn} on {_cat} boards — "
-                                           + ", ".join(f"{n} ({c})" for n, c in _tally[_cat].most_common(6)))
+                                           + ", ".join(f"{_disp(n)} ({c})" for n, c in _tally[_cat].most_common(6)))
                     _hdr = (f"\n\nTop-{_topn} board finishes (how many boards each player ranks in the top "
                             f"{_topn} on, by board type; ties share a rank):\n")
                 else:
@@ -3965,13 +3986,13 @@ class PersonalityCog(commands.Cog):
                         for _i, _s in enumerate(sorted(_smap.keys(), reverse=True)):
                             _rk = _i + 1
                             if _rk in _ranks:
-                                for _nm in _smap[_s]:
-                                    _tally[_cat][_rk][_nm] += 1
+                                for _k in _smap[_s]:
+                                    _tally[_cat][_rk][_k] += 1
                     for _rk in _ranks:
                         for _cat in _cats:
                             if _tally[_cat][_rk]:
                                 _dlines.append(f"#{_rk} on {_cat} boards — "
-                                               + ", ".join(f"{n} ({c})" for n, c in _tally[_cat][_rk].most_common(5)))
+                                               + ", ".join(f"{_disp(n)} ({c})" for n, c in _tally[_cat][_rk].most_common(5)))
                     _hdr = ("\n\nBoard PLACEMENT leaders (how many boards each player ranks at a given "
                             "position on, by board type; a TIE shares the rank, so the next DISTINCT "
                             "score is the next rank):\n")
