@@ -2913,6 +2913,19 @@ class PersonalityCog(commands.Cog):
                         if _bsd:
                             from datetime import datetime as _dt2
                             _sst = _bsd if hasattr(_bsd, 'year') else _dt2.fromisoformat(str(_bsd)[:10])
+                        if not _sst:
+                            # Last resort: this bounty row has NO start_date and the table has
+                            # no created_at. A Discord snowflake encodes its creation time, and
+                            # the bounty card was posted when the bounty began — decode the
+                            # earliest stored message id. Always present once a card exists, so
+                            # "when does the bounty end" can never fall back to a deflection.
+                            _mid = next((_ab.get(_k) for _k in
+                                         ('message_id', 'progress_msg_id', 'bonus_msg_id', 'completions_msg_id')
+                                         if _ab.get(_k)), None)
+                            if _mid:
+                                from datetime import datetime as _dt3, timezone as _tz3
+                                _ms = (int(_mid) >> 22) + 1420070400000  # Discord epoch
+                                _sst = _dt3.fromtimestamp(_ms / 1000, _tz3.utc).replace(tzinfo=None)
                 except Exception as _abe:
                     print(f"[BUTLER] bounty-start fallback error: {_abe}")
             if _sst:
