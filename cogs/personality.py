@@ -3906,7 +3906,7 @@ class PersonalityCog(commands.Cog):
             try:
                 from utils.boards import is_kills_board, is_feat_board
                 from collections import Counter
-                _best = {}   # board -> (score, name)
+                _top = {}   # board -> (max_score, {names tied at that score})
                 for _r in await _db.get_all_leaderboard_data():
                     if len(_r) < 4:
                         continue
@@ -3917,27 +3917,27 @@ class PersonalityCog(commands.Cog):
                         _sc = int(_r[3])
                     except (ValueError, TypeError):
                         continue
-                    if _bn not in _best or _sc > _best[_bn][0]:
-                        _best[_bn] = (_sc, _nm)
+                    _cur = _top.get(_bn)
+                    if _cur is None or _sc > _cur[0]:
+                        _top[_bn] = (_sc, {_nm})
+                    elif _sc == _cur[0]:
+                        _cur[1].add(_nm)   # tie for #1 — everyone at the top score counts
                 _cats = {'weapon-kills': Counter(), 'weapon (takedowns)': Counter(),
                          'map': Counter(), 'feat': Counter()}
-                for _bn, (_sc, _nm) in _best.items():
-                    if is_feat_board(_bn):
-                        _cats['feat'][_nm] += 1
-                    elif ' - ' in _bn:
-                        _cats['map'][_nm] += 1
-                    elif is_kills_board(_bn):
-                        _cats['weapon-kills'][_nm] += 1
-                    else:
-                        _cats['weapon (takedowns)'][_nm] += 1
+                for _bn, (_sc, _names) in _top.items():
+                    _cat = ('feat' if is_feat_board(_bn) else 'map' if ' - ' in _bn
+                            else 'weapon-kills' if is_kills_board(_bn) else 'weapon (takedowns)')
+                    for _nm in _names:
+                        _cats[_cat][_nm] += 1
                 _dlines = []
                 for _cat, _ctr in _cats.items():
                     if _ctr:
                         _dlines.append(f"{_cat} boards — "
-                                       + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(4)))
+                                       + ", ".join(f"{n} ({c})" for n, c in _ctr.most_common(5)))
                 if _dlines:
-                    player_stats_ctx += ("\n\nBoard #1 leaders (who holds the most first-place spots, "
-                                         "counted per board and grouped by board type):\n" + "\n".join(_dlines))
+                    player_stats_ctx += ("\n\nBoard #1 leaders (who holds the most first-place spots; a "
+                                         "TIE for #1 counts for every tied player. Counted per board, "
+                                         "grouped by board type):\n" + "\n".join(_dlines))
             except Exception as _dome:
                 print(f"[BUTLER] board-dominance ctx error: {_dome}")
 
