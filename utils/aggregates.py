@@ -29,8 +29,11 @@ Row shapes (see CLAUDE.md):
   leaderboard: 0 board_name 1 name 2 did 3 score
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
+from utils.feats import is_pacifist
 
 # submissions column indices
 _S_NAME, _S_DID, _S_WEAPON, _S_MAP = 1, 2, 3, 5
@@ -149,6 +152,19 @@ def _c_weapon_usage(row, identity, param):
     return (k, d, 1)
 
 
+def _c_pacifist(row, identity, param):
+    # Pacifist runs STACK per game, but the Pacifist BOARD keeps one row per player
+    # (personal-best by score) — so counting board rows gives everyone 1. Count the
+    # qualifying submissions instead, via the shared predicate.
+    if len(row) <= max(_S_KILLS, _S_TD) or _excluded(row):
+        return None
+    kills, td = _num(row[_S_KILLS]), _num(row[_S_TD])
+    if kills is None or td is None or not is_pacifist(kills, td):
+        return None
+    k, d = _sub_id(row, identity)
+    return (k, d, 1)
+
+
 def _c_marks(row, identity, param):
     did = _s(row[0]) if row else ''
     if not did:
@@ -185,6 +201,7 @@ class AggSpec:
     fmt: str = '{:.0f}'      # per-value number format
     parametric: bool = False # needs a weapon param (and its keywords stay OUT of the gate)
     override_idx: Optional[int] = None  # players[] index whose manual count wins (board specs)
+    regexes: tuple = ()      # extra triggers needing word boundaries (e.g. r'\btuff\b' vs "stuff")
 
 
 def _reduce(spec, vals):
@@ -332,8 +349,12 @@ SPECS = [
             'board', 'Most Flawless games', _c_board('Flawless'), reduce='count', unit=' games'),
     AggSpec('feat_triple', ('triple',),
             'board', 'Most Triple games', _c_board('Triple'), reduce='count', unit=' games'),
-    AggSpec('feat_pacifist', ('pacifist',),
-            'board', 'Most Pacifist games', _c_board('Pacifist'), reduce='count', unit=' games'),
+    # Pacifist STACKS per game but its board keeps one row per player, so count runs
+    # from submissions (via the shared is_pacifist predicate), not board rows.
+    AggSpec('most_pacifist', ('pacifist',),
+            'submissions', 'Most Pacifist runs', _c_pacifist, reduce='count', unit=' runs'),
+    AggSpec('feat_tuff', (), 'board', 'Most TUFF games', _c_board('TUFF'),
+            reduce='count', unit=' games', regexes=(r'\btuff\b',)),
 ]
 
 
@@ -353,7 +374,8 @@ def match_specs(question, param_weapon=None):
     q = (question or '').lower()
     hits = []
     for spec in SPECS:
-        if not any(k in q for k in spec.keywords):
+        if not (any(k in q for k in spec.keywords)
+                or any(re.search(rx, q) for rx in spec.regexes)):
             continue
         if spec.parametric:
             if not param_weapon:

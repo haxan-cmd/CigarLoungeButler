@@ -149,6 +149,26 @@ def test_feat_manual_override_wins():
     assert 'A (7 games)' in out
 
 
+def test_pacifist_counts_runs_from_submissions_not_board():
+    # The Pacifist BOARD keeps one row per player; the real count is qualifying runs
+    # (0 kills, <=10 TD). A single board row must not cap everyone at 1.
+    subs = [sub('A', '1', kills=0, td=3), sub('A', '1', kills=0, td=8),
+            sub('A', '1', kills=5, td=20),          # not pacifist (has kills)
+            sub('B', '2', kills=0, td=2)]
+    boards = [board('Pacifist', 'A', '1'), board('Pacifist', 'B', '2')]  # one row each
+    d = data_of(subs, boards=boards, players=[player('1', 'A'), player('2', 'B')])
+    out = agg.context_block('who has the most pacifist runs', d, name_to_id={'a': '1', 'b': '2'})
+    assert 'Most Pacifist runs' in out
+    assert 'A (2 runs)' in out and 'B (1 runs)' in out
+
+
+def test_tuff_matches_word_not_stuff():
+    boards = [board('TUFF', 'A', '1'), board('TUFF', 'A', '1'), board('TUFF', 'B', '2')]
+    d = data_of(boards=boards, players=[player('1', 'A'), player('2', 'B')])
+    assert 'A (2 games)' in agg.context_block('most tuff games', d, name_to_id={'a': '1', 'b': '2'})
+    assert agg.context_block('who has the most stuff', d, name_to_id={'a': '1', 'b': '2'}) == ''
+
+
 def test_feat_identity_collapse():
     boards = [board('Flawless', 'Llama', '111'), board('Flawless', 'Arbiter of Lethality', '111')]
     d = data_of(boards=boards, players=[player('111', 'Llama')])
