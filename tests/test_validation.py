@@ -6,7 +6,7 @@ incomplete. Uses the real config.MAP_FACTIONS so the tests track the map pool.
 import config
 from utils.validation import (impossible_submission_reason, below_takedown_minimum,
                               scoreboard_looks_incomplete, kofi_verification_result,
-                              clean_donation_amount)
+                              clean_donation_amount, reconcile_weapon_subclass)
 
 
 def test_kofi_verification_fails_closed_when_unconfigured():
@@ -83,6 +83,45 @@ def test_every_map_accepts_both_its_own_factions():
     for mp, factions in MF.items():
         for f in factions:
             assert impossible_submission_reason(mp, f, MF) is None, f"{mp}/{f} wrongly rejected"
+
+
+def test_warhammer_officer_corrects_to_guardian():
+    # Warhammer is Guardian-only; an "Officer" tag from a caption is impossible.
+    out, was = reconcile_weapon_subclass("Warhammer", "Officer", config.CLASS_WEAPON_MAP)
+    assert out == "Guardian" and was == "Officer"
+
+
+def test_valid_pair_untouched():
+    # Axe is a legit Officer weapon -> no change.
+    out, was = reconcile_weapon_subclass("Axe", "Officer", config.CLASS_WEAPON_MAP)
+    assert out == "Officer" and was is None
+
+
+def test_ambiguous_weapon_left_alone():
+    # Messer is on multiple subclasses; a wrong tag can't be uniquely corrected.
+    out, was = reconcile_weapon_subclass("Messer", "Officer", config.CLASS_WEAPON_MAP)
+    assert out == "Officer" and was is None
+
+
+def test_pseudo_class_never_touched():
+    # The synthetic 'Archer' class must never be coerced into Longbowman/Crossbowman,
+    # even when the weapon has a single underlying archer owner.
+    out, was = reconcile_weapon_subclass("Crossbow", "Archer", config.CLASS_WEAPON_MAP)
+    assert out == "Archer" and was is None
+
+
+def test_incomplete_pair_passes():
+    assert reconcile_weapon_subclass(None, "Officer", config.CLASS_WEAPON_MAP) == ("Officer", None)
+    assert reconcile_weapon_subclass("Warhammer", None, config.CLASS_WEAPON_MAP) == (None, None)
+
+
+def test_every_config_weapon_pair_is_stable():
+    # Sanity: for every (subclass, weapon) the config itself declares, reconcile is a
+    # no-op — the guard never "corrects" a pair the game actually allows.
+    for cls, weps in config.CLASS_WEAPON_MAP.items():
+        for w in weps:
+            out, was = reconcile_weapon_subclass(w, cls, config.CLASS_WEAPON_MAP)
+            assert was is None and out == cls, f"{cls}/{w} wrongly changed to {out}"
 
 
 def test_tenosia_only_maps_reject_agatha_where_applicable():

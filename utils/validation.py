@@ -57,6 +57,36 @@ def impossible_submission_reason(selected_map, faction, map_factions):
     return None
 
 
+_ARCHER_PSEUDO = frozenset({"Archer", "Hybrid", "Peasant Run", "Marksman",
+                            "Longbowman", "Crossbowman", "Skirmisher"})
+
+
+def reconcile_weapon_subclass(weapon, subclass, class_weapon_map, pseudo_subclasses=_ARCHER_PSEUDO):
+    """A weapon can only be wielded by the subclasses that actually list it, so an
+    impossible pair (e.g. Warhammer — which only Guardian carries — tagged as Officer,
+    from a free-text caption like "warhammer officer") is bad data.
+
+    Returns (subclass_out, corrected_from):
+      - pair is valid, or inputs incomplete, or weapon unknown to us -> (subclass, None).
+      - weapon owned by exactly ONE real subclass -> (that subclass, old_subclass).
+      - weapon owned by several -> (subclass, None): we can't tell which, so don't guess.
+
+    The synthetic/collapsed classes (Archer, Hybrid, Peasant Run, and the underlying
+    Longbowman/Crossbowman/Skirmisher we store as 'Archer') are never touched — we
+    neither judge them as wrong nor coerce a weapon INTO one. Pure; unit-tested."""
+    if not weapon or not subclass:
+        return subclass, None
+    if subclass in pseudo_subclasses:
+        return subclass, None
+    owners = [cls for cls, weps in (class_weapon_map or {}).items() if weapon in (weps or [])]
+    if not owners or subclass in owners:
+        return subclass, None
+    real_owners = [c for c in owners if c not in pseudo_subclasses]
+    if len(real_owners) == 1:
+        return real_owners[0], subclass
+    return subclass, None
+
+
 def scoreboard_looks_incomplete(team_total_kills, enemy_total_kills):
     """True when a submitted scoreboard is missing the top-of-screen faction KILL
     TOTALS (one or both). Those two big numbers set the lobby-difficulty read, and a

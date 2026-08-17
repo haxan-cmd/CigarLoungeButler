@@ -2079,6 +2079,18 @@ async def _apply_edit(interaction, ev):
     except Exception:
         pass
 
+    # Same weapon/subclass sanity as the fresh-submit path: an edit could set an
+    # impossible pair (e.g. Warhammer/Officer). Correct ev.cls to the weapon's sole owner
+    # so the rebuilt boards, marks, and card use the real class.
+    try:
+        from utils.validation import reconcile_weapon_subclass as _recon_ws
+        _fx, _wc = _recon_ws(getattr(ev, 'weapon', None), getattr(ev, 'cls', None), CLASS_WEAPON_MAP)
+        if _wc:
+            print(f"[EDIT] Corrected impossible pair {ev.weapon}/{_wc} -> {_fx}")
+            ev.cls = _fx
+    except Exception as _ece:
+        print(f"[EDIT] weapon/subclass reconcile error: {_ece}")
+
     # Recompute stat-derived feats from the EDITED numbers. Stats edits used to
     # leave ev.feats frozen at submit-time values, so a corrected 200/100 run
     # kept no feat lines, wrong marks, and a stale DB feats column. Non-stat
@@ -2566,6 +2578,33 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         except Exception as e:
             print(f"[FINALISE] Picker reroute failed: {e}")
         return
+
+    # Weapon/subclass sanity: a free-text caption can pair a weapon with a subclass that
+    # can't wield it (e.g. "warhammer officer" — Warhammer is Guardian-only). The
+    # constrained pickers can't produce this; the caption parser can. Auto-correct to the
+    # weapon's sole owning subclass so class marks and the registry card stay honest.
+    try:
+        from utils.validation import reconcile_weapon_subclass as _recon_ws
+        _fixed_cls, _was_cls = _recon_ws(selected_weapon, selected_class, CLASS_WEAPON_MAP)
+        if _was_cls:
+            print(f"[FINALISE] Corrected impossible pair {selected_weapon}/{_was_cls} -> {_fixed_cls}")
+            selected_class = _fixed_cls
+            if vision_data is not None:
+                vision_data['subclass'] = _fixed_cls
+            try:
+                _ncid = getattr(config, 'NERVE_CENTER_CHANNEL_ID', None)
+                if _ncid:
+                    _nc = original_message.guild.get_channel(_ncid) \
+                        or await original_message.guild.fetch_channel(_ncid)
+                    if _nc:
+                        await _nc.send(
+                            f"🛡️ Corrected an impossible weapon/class pair on "
+                            f"{interaction.user.display_name}'s run: {selected_weapon} was tagged "
+                            f"`{_was_cls}` (that class can't wield it) → logged as `{_fixed_cls}`.")
+            except Exception as _nce:
+                print(f"[FINALISE] pair-correction nerve alert failed: {_nce}")
+    except Exception as _rce:
+        print(f"[FINALISE] weapon/subclass reconcile error: {_rce}")
 
     # Impossible-data guard: reject a run whose (map, faction) pair can't exist
     # in-game — e.g. Agatha on Askandir, which is a Mason/Tenosia map. This is
