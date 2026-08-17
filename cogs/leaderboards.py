@@ -275,8 +275,10 @@ async def _build_ledger_entrance_impl(guild, stats=None):
              ("⚔️ 2H Weapons",             INDEX_THREAD_2H),
              ("🗡️ 1H Weapons",             INDEX_THREAD_1H)],
             [("🏛️ Feats of War",           INDEX_THREAD_FEATS)],
-            [("🗄️ Hall of Fame",            config.HALL_OF_FAME_FORUM_ID)],
         ]
+        if not getattr(config, 'HALL_OF_FAME_WEB', False):
+            # HoF moved to the public /hof page; drop the forum entrance button.
+            message_groups.append([("🗄️ Hall of Fame", config.HALL_OF_FAME_FORUM_ID)])
 
         # Delete all previous entrance messages then resend fresh
         bot_id = guild.me.id
@@ -2915,8 +2917,13 @@ async def render_monthly_boards(guild, only_boards=None):
 async def snapshot_monthly_to_hof(guild):
     """Month-end: snapshot monthly Lethality/Warlord top-5 for every weapon and map
     board into a Butler Hall of Fame thread. Non-destructive. Returns (n, url)."""
+    if getattr(config, 'HALL_OF_FAME_WEB', False):
+        return 0, None   # Hall of Fame is the public /hof page now — monthly forum snapshot retired
     fid = config.HALL_OF_FAME_FORUM_ID
-    forum = guild.get_channel(fid) or await guild.fetch_channel(fid)
+    try:
+        forum = guild.get_channel(fid) or await guild.fetch_channel(fid)
+    except Exception:
+        forum = None   # forum deleted -> tolerate
     if not forum:
         print("[MONTHLY HOF] Hall of Fame forum not found.")
         return 0, None
@@ -3147,6 +3154,11 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     async def season_reset(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        if getattr(config, 'HALL_OF_FAME_WEB', False):
+            await interaction.followup.send(
+                "The Monthly Report snapshot is retired — the Hall of Fame lives on the public "
+                "web page now (see `/setup_lounge`). Nothing to snapshot.", ephemeral=True)
+            return
         try:
             n, url = await snapshot_monthly_to_hof(interaction.guild)
         except Exception as e:

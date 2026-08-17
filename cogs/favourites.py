@@ -979,7 +979,12 @@ async def build_hof_payload():
 
 
 async def _hof_index_refresh(guild):
-    forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
+    if getattr(config, 'HALL_OF_FAME_WEB', False):
+        return  # index lives on the public /hof page — no forum thread to refresh
+    try:
+        forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
+    except Exception:
+        forum = None   # forum deleted -> tolerate, don't raise
     if not forum:
         return
     lines = ["**\U0001f3c1 Hall of Fame — Index**", "", "*Each season's category champions inside.*", ""]
