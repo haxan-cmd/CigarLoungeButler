@@ -165,6 +165,22 @@ def _c_pacifist(row, identity, param):
     return (k, d, 1)
 
 
+def _c_feat_tag(*tags):
+    """Count submissions whose feats column carries any of these tags — used for the
+    lobby-difficulty hard tail (Brutal/Outmatched/Uphill), which is written there so the
+    mark math sees it. Tags are distinctive words, safe as substrings."""
+    low = tuple(t.lower() for t in tags)
+    def f(row, identity, param):
+        if len(row) <= _S_FEATS or _excluded(row):
+            return None
+        feats = _s(row[_S_FEATS]).lower()
+        if not any(t in feats for t in low):
+            return None
+        k, d = _sub_id(row, identity)
+        return (k, d, 1)
+    return f
+
+
 def _c_marks(row, identity, param):
     did = _s(row[0]) if row else ''
     if not did:
@@ -331,6 +347,17 @@ SPECS = [
             ('most maps played', 'most different maps', 'map variety', 'most map variety',
              'widest map', 'most varied maps', 'most maps'),
             'submissions', 'Most maps played (distinct)', _c_map, reduce='distinct', unit=' maps'),
+    # Lobby difficulty (the tilt hard tail, tagged on the feats column). "Most brutal
+    # lobbies" = count of Brutal-tagged runs; the broader tier folds in Outmatched/Uphill.
+    AggSpec('brutal_lobbies',
+            ('brutal lobb', 'most brutal', 'brutal game', 'brutal run', 'brutal matches'),
+            'submissions', 'Most Brutal lobbies (hardest tier)', _c_feat_tag('Brutal'),
+            reduce='count', unit=' Brutal games'),
+    AggSpec('hard_lobbies',
+            ('hardest lobb', 'toughest lobb', 'most uphill', 'uphill lobb', 'hard lobbies',
+             'most outmatched', 'roughest lobb', 'hardest games', 'most difficult lobb'),
+            'submissions', 'Most uphill lobbies (Uphill + Outmatched + Brutal)',
+            _c_feat_tag('Brutal', 'Outmatched', 'Uphill'), reduce='count', unit=' uphill games'),
     # Parametric: "who plays <weapon> the most". Keywords stay OUT of the gate (a weapon
     # mention trips the gate on its own); needs param_weapon to fire.
     AggSpec('weapon_usage',

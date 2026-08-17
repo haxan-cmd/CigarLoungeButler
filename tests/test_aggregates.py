@@ -132,6 +132,26 @@ def test_weapon_usage_needs_param():
 
 # ── feat boards + overrides ──────────────────────────────────────────────────
 
+def test_brutal_lobbies_counts_feat_tag():
+    subs = [sub('A', '1', feats='Brutal, High Score'), sub('A', '1', feats='Brutal'),
+            sub('A', '1', feats='Outmatched'),          # not Brutal
+            sub('B', '2', feats='Brutal'), sub('C', '3', feats='Even')]  # Even isn't tagged
+    d = data_of(subs, players=[player('1', 'A'), player('2', 'B'), player('3', 'C')])
+    out = agg.context_block('who plays in the most brutal lobbies', d,
+                            name_to_id={'a': '1', 'b': '2', 'c': '3'})
+    assert 'Most Brutal lobbies' in out
+    assert 'A (2 Brutal games)' in out and 'B (1 Brutal games)' in out
+    assert 'C (' not in out
+
+
+def test_hard_lobbies_folds_in_the_tail():
+    subs = [sub('A', '1', feats='Brutal'), sub('A', '1', feats='Outmatched'),
+            sub('A', '1', feats='Uphill'), sub('B', '2', feats='Brutal')]
+    d = data_of(subs, players=[player('1', 'A'), player('2', 'B')])
+    out = agg.context_block('who plays the hardest lobbies', d, name_to_id={'a': '1', 'b': '2'})
+    assert 'A (3 uphill games)' in out and 'B (1 uphill games)' in out
+
+
 def test_feat_count_board():
     boards = [board('100 Kills', 'A', '1'), board('100 Kills', 'A', '1'), board('100 Kills', 'B', '2'),
               board('Messer', 'A', '1')]  # non-feat board ignored
