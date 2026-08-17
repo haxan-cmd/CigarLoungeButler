@@ -2687,10 +2687,21 @@ class PersonalityCog(commands.Cog):
             marker = cycle_end.strftime('%Y-%m-%d')      # fire once per cycle end
             if getattr(self, "_bounty_reminder_month", None) == marker:
                 return
-            self._bounty_reminder_month = marker
+            # Restart-proof: the 24h loop re-fires on every startup and every push restarts
+            # the bot, so the in-memory marker alone let a burst of deploys repost the
+            # reminder (it double-fired 11 min apart during a deploy). A persisted
+            # 'bounty_reminder' marker survives restarts. Cycles are ~monthly, so ANY marker
+            # in the last 10 days belongs to this same cycle end.
+            try:
+                if await _db.get_bot_events(category='bounty_reminder', hours=240, limit=1):
+                    self._bounty_reminder_month = marker
+                    return
+            except Exception as _bge:
+                print(f"[DAILY] bounty reminder guard check failed (non-fatal): {_bge}")
             ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
                   or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
             if ch:
+                self._bounty_reminder_month = marker
                 mention = f"<@{config.MANAGER_ID}>"
                 _lead = (f"**{days_left} day(s) left** in the current bounty/season"
                          if days_left > 0 else "The current bounty/season is **due to roll over**")
@@ -2700,6 +2711,12 @@ class PersonalityCog(commands.Cog):
                     f"`/bounty_create` when ready to roll it over.",
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
                 )
+                # Persist the marker IMMEDIATELY (not via the buffered writer) so a restart
+                # right after posting can't repost, matching the weekly-rollup guard.
+                try:
+                    await _db.insert_bot_events([('bounty_reminder', 'inf', f'reminder posted for cycle {marker}')])
+                except Exception as _bie:
+                    print(f"[DAILY] bounty reminder marker write failed (non-fatal): {_bie}")
         except Exception as e:
             print(f"[DAILY] bounty reminder error: {e}")
 
