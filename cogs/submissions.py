@@ -132,14 +132,32 @@ def _link_weapon(weapon, guild_id, lb_thread_map):
     tid = lb_thread_map.get(weapon)
     return f"[{weapon}](https://discord.com/channels/{guild_id}/{tid})" if tid and weapon else (weapon or "")
 
+def _faction_crest(emoji_source, faction):
+    """The faction crest emoji, resolved LIVE from the bot's/guild's emojis BY NAME
+    (case-insensitive) so a re-uploaded emoji (new id) can't blank it — the hardcoded
+    config id is only a fallback. Emojis are named agatha / mason / tenosia. This is why
+    the crest was inconsistent: a stale config id renders as nothing for that faction."""
+    if not faction:
+        return ''
+    low = str(faction).strip().lower()
+    try:
+        for e in (getattr(emoji_source, 'emojis', []) or []):
+            if getattr(e, 'name', '').lower() == low:
+                return str(e)
+    except Exception:
+        pass
+    fmap = getattr(config, 'FACTION_EMOJIS', {}) or {}
+    return fmap.get(str(faction).strip().title(), '') or fmap.get(str(faction), '')
+
+
 def _link_map_faction(map_name, faction, guild_id, lb_thread_map):
     """Hyperlink the 'Map / Faction' text to its shared map-board thread, if one exists.
-    Prefixed with the faction crest emoji when one is configured."""
+    The faction crest is now added by the CALLER on the base line, so it shows even when
+    the run didn't place on the map board (the emoji used to live here, so it only
+    appeared on placing runs)."""
     tid = lb_thread_map.get(f"{map_name} - {faction}")
-    _fe = (getattr(config, 'FACTION_EMOJIS', {}) or {}).get(faction, '')
-    _pre = f"{_fe} " if _fe else ""
     plain = f"{map_name} / {faction}"
-    return _pre + (f"[{plain}](https://discord.com/channels/{guild_id}/{tid})" if tid else plain)
+    return f"[{plain}](https://discord.com/channels/{guild_id}/{tid})" if tid else plain
 
 MOD_ROLE_ID            = config.MOD_ROLE_ID
 _ASSETS_DIR            = os.path.join(os.path.dirname(__file__), '..', 'assets')
@@ -2307,11 +2325,13 @@ async def _apply_edit(interaction, ev):
     _wpn_disp = _blink(ev.weapon, ev.weapon) if ev.weapon in _placed else ev.weapon
     _mapboard = f"{ev.map_name} - {ev.faction}"
     _mapfac = _blink(_mapboard, f"{ev.map_name} / {ev.faction}") if _mapboard in _placed else f"{ev.map_name} / {ev.faction}"
+    _ec = _faction_crest(interaction.client, ev.faction)
+    _edit_crest_pre = f"{_ec} " if _ec else ""
     # "(edited)" lives in the embed title, not the description
     new_summary = (
         f"│ {_edit_name}\n"
         f"│ {_wpn_disp} • {ev.cls}\n"
-        f"│ {_mapfac}\n"
+        f"│ {_edit_crest_pre}{_mapfac}\n"
         f"│ {ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
         f"│ VIP: {'Yes' if ev.vip else 'No'}"
     )
@@ -3118,10 +3138,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     _pac_run = (kills == 0 and takedowns <= 10)
     _score_suffix = f"  ·  {_score:,} score" if (_pac_run and isinstance(_score, int) and _score > 0) else ""
     # "Run Submitted" header lives in the embed TITLE now, not the description
+    _crest = _faction_crest(interaction.client, faction)
+    _crest_pre = f"{_crest} " if _crest else ""
     summary = (
         f"│ {_name_display}\n"
         f"│ {selected_weapon} • {selected_class}\n"
-        f"│ {selected_map} / {faction}\n"
+        f"│ {_crest_pre}{selected_map} / {faction}\n"
         f"│ {takedowns} TD / {kills} K / {deaths} D{_score_suffix}\n"
         f"│ VIP: {vip_str}"
     )
@@ -3797,8 +3819,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 if map_lb_name in placed_boards:
                     map_link = _link_map_faction(selected_map, faction, _guild_id, _lb_thread_map)
                     new_content = new_content.replace(
-                        f"│ {selected_map} / {faction}",
-                        f"│ {map_link}",
+                        f"{selected_map} / {faction}",
+                        map_link,
                         1,
                     )
                 if bounty_line:
