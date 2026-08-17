@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cigar Lounge — Hall of Fame</title>
+<style>
+:root{
+  --bg:#22242a;--panel:#2b2d34;--panel2:#31343c;--ink:#f2f3f5;--mut:#8b8f9a;
+  --gold:#e0a84c;--blue:#5b8dd9;--coral:#d85a30;--teal:#4fb3a1;--purple:#7a89c2;--grid:#34373f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Poppins',system-ui,-apple-system,sans-serif;font-size:14px}
+a{color:var(--gold)}
+.wrap{max-width:1080px;margin:0 auto;padding:22px 20px 70px}
+.head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:2px}
+.head h1{font-size:24px;margin:0;font-weight:700;letter-spacing:.3px}
+.head .sub{color:var(--mut);font-size:12.5px}
+.rule{height:1px;background:linear-gradient(90deg,var(--gold),transparent);margin:10px 0 18px;opacity:.6}
+.season{background:var(--panel);border:1px solid var(--grid);border-radius:14px;padding:18px 20px;margin-bottom:16px;box-shadow:0 4px 18px #0003}
+.season.live{border-color:var(--gold)}
+.stitle{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
+.stitle h2{margin:0;font-size:18px;font-weight:700}
+.stitle .dates{color:var(--mut);font-size:11.5px}
+.badge{font-size:10px;text-transform:uppercase;letter-spacing:.5px;background:var(--gold);color:#241c08;border-radius:999px;padding:2px 9px;font-weight:700}
+.champ{display:flex;align-items:center;gap:10px;margin:12px 0 4px;font-size:19px;font-weight:700}
+.champ .pts{color:var(--mut);font-size:13px;font-weight:500}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+@media(max-width:680px){.sgrid{grid-template-columns:1fr}}
+.block h3{margin:0 0 8px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.stand{list-style:none;margin:0;padding:0}
+.stand li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--grid);font-size:13px}
+.stand li:last-child{border-bottom:none}
+.stand .r{color:var(--mut);width:26px;display:inline-block;text-align:right;margin-right:8px}
+.stand .p{color:var(--mut);font-size:12px}
+.stand li.top .nm{color:var(--gold);font-weight:700}
+.cat{display:flex;flex-direction:column;gap:2px;padding:6px 0;border-bottom:1px solid var(--grid)}
+.cat:last-child{border-bottom:none}
+.cat .k{font-size:12.5px;font-weight:600}
+.cat .v{font-size:12px;color:var(--ink)}
+.cat .a{font-size:11px;color:var(--mut)}
+.feat{font-size:12.5px;padding:4px 0;color:var(--ink)}
+.feat b{color:var(--gold)}
+.foot{color:var(--mut);font-size:11px;text-align:center;margin-top:26px}
+.loading{color:var(--mut);padding:60px;text-align:center;font-size:14px}
+.err{color:var(--coral);padding:40px;text-align:center}
+.emptyseason{color:var(--mut);font-size:12.5px;font-style:italic}
+.clnav{display:flex;align-items:center;gap:4px;max-width:1080px;margin:0 auto;padding:14px 20px 0;flex-wrap:wrap}
+.clnav .brand{font-weight:700;font-size:15px;color:var(--gold);margin-right:12px;letter-spacing:.3px}
+.clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
+.clnav a:hover{color:var(--ink)}
+.clnav a.on{background:var(--gold);color:#241c08}
+</style>
+</head>
+<body>
+<nav class="clnav"><span class="brand">🚬 Cigar Lounge</span><a href="/hof" class="on">Hall of Fame</a><a href="/lab">Stats Lab</a></nav>
+<div class="wrap">
+  <div class="head">
+    <h1>🏆 Cigar Lounge — Hall of Fame</h1>
+    <span class="sub" id="sub">Champions of every season</span>
+  </div>
+  <div class="rule"></div>
+  <div id="root"><div class="loading">Summoning the champions…</div></div>
+  <div class="foot" id="foot"></div>
+</div>
+<script>
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function seasonCard(s){
+  const live = s.in_progress;
+  const dates = [s.started_at, s.ended_at||(live?'now':'')].filter(Boolean).join(' → ');
+  let champHtml = '';
+  if(s.gp_mode && s.champion){
+    champHtml = `<div class="champ">🏆 <span>${esc(s.champion.name)}</span>`
+      + `<span class="pts">${esc(s.champion.points)} pts</span></div>`;
+  }
+  // Standings (GP mode)
+  let standHtml = '';
+  if(s.gp_mode && s.standings && s.standings.length){
+    const rows = s.standings.map(r =>
+      `<li class="${r.rank===1?'top':''}"><span><span class="r">${r.rank}.</span>`
+      + `<span class="nm">${esc(r.name)}</span></span><span class="p">${esc(r.points)} pts</span></li>`
+    ).join('');
+    standHtml = `<div class="block"><h3>Standings</h3><ul class="stand">${rows}</ul></div>`;
+  }
+  // Category champions
+  let catHtml = '';
+  if(s.categories && s.categories.length){
+    const rows = s.categories.map(c=>{
+      const sv = c.season ? `${esc(c.season.name)}${c.season.value?' '+esc(c.season.value):''}` : '—';
+      const av = c.all_time ? `${esc(c.all_time.name)}${c.all_time.value?' '+esc(c.all_time.value):''}` : '—';
+      return `<div class="cat"><span class="k">${esc(c.category)}</span>`
+        + `<span class="v">🥇 ${sv}</span><span class="a">all-time: ${av}</span></div>`;
+    }).join('');
+    catHtml = `<div class="block"><h3>Category Champions</h3>${rows}</div>`;
+  }
+  // Featured
+  let featHtml = '';
+  if(s.featured && s.featured.length){
+    const rows = s.featured.map(f=>{
+      const w = f.winner ? `<b>${esc(f.winner)}</b>${f.value?' ('+esc(f.value)+')':''}` : '—';
+      return `<div class="feat">✨ ${esc(f.label)} — ${esc(f.focus)}: ${w}</div>`;
+    }).join('');
+    featHtml = `<div class="block"><h3>Special Features</h3>${rows}</div>`;
+  }
+  const left = standHtml || featHtml;
+  const right = catHtml + (standHtml ? featHtml : '');
+  const body = (left||right)
+    ? `<div class="sgrid"><div>${left}</div><div>${right}</div></div>`
+    : `<div class="emptyseason">No results recorded for this season yet.</div>`;
+  return `<div class="season ${live?'live':''}">`
+    + `<div class="stitle"><h2>${esc(s.label)}</h2>`
+    + (live?`<span class="badge">In progress</span>`:'')
+    + (dates?`<span class="dates">${esc(dates)}</span>`:'')
+    + `</div>${champHtml}${body}</div>`;
+}
+
+async function load(){
+  const root = document.getElementById('root');
+  try{
+    const r = await fetch('/hof/data', {cache:'no-store'});
+    if(!r.ok) throw new Error('status '+r.status);
+    const d = await r.json();
+    if(!d.seasons || !d.seasons.length){
+      root.innerHTML = `<div class="loading">No seasons have been crowned yet. Check back after the first one closes.</div>`;
+      return;
+    }
+    document.getElementById('sub').textContent =
+      `${d.season_count} season${d.season_count===1?'':'s'} · ${d.gp_mode?'Grand Prix champions':'category champions'}`;
+    root.innerHTML = d.seasons.map(seasonCard).join('');
+    document.getElementById('foot').textContent = `Cigar Lounge Butler · updated ${d.generated_at}`;
+  }catch(e){
+    root.innerHTML = `<div class="err">Couldn't load the Hall of Fame right now.<br><span style="color:var(--mut);font-size:12px">${esc(e.message)}</span></div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

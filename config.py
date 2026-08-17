@@ -33,7 +33,8 @@ WEAPONS_2H_FORUM_ID         = 1456639902077812868
 WEAPONS_1H_FORUM_ID         = 1486118387800346768
 FEATS_FORUM_ID              = 1486143184542105680
 BOUNTY_CARDS_FORUM_ID       = 1518657580174676021
-HALL_OF_FAME_FORUM_ID       = 1521858440593670235   # season Hall of Fame forum
+HALL_OF_FAME_FORUM_ID       = 1521858440593670235   # season Hall of Fame forum (legacy; web page now)
+HALL_OF_FAME_WEB            = True   # Hall of Fame lives on the public /hof page, not per-season forum threads
 ALLTIME_RECORDS_FORUM_ID    = 0   # retired (Monthly Report removed; season stats live on the butler-season-board)
 
 # Optional banner image shown atop the Ledger entrance dashboard (paste a Discord

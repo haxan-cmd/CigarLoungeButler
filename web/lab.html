@@ -77,9 +77,15 @@ canvas{display:block;width:100%;border-radius:8px}
   .cmp .k{font-size:11px}
   .card{padding:12px 12px}
 }
+.clnav{display:flex;align-items:center;gap:4px;max-width:1180px;margin:0 auto;padding:14px 20px 0;flex-wrap:wrap}
+.clnav .brand{font-weight:700;font-size:15px;color:var(--gold);margin-right:12px;letter-spacing:.3px}
+.clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
+.clnav a:hover{color:var(--ink)}
+.clnav a.on{background:var(--gold);color:#241c08}
 </style>
 </head>
 <body>
+<nav class="clnav"><span class="brand">🚬 Cigar Lounge</span><a href="/hof">Hall of Fame</a><a href="/lab" class="on">Stats Lab</a></nav>
 <div class="wrap">
   <div class="head">
     <h1>🎲 Cigar Lounge — Stats Lab</h1>

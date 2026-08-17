@@ -75,31 +75,14 @@ async def run_healthcheck():
             {"rows": rows, "nextCursor": next_cursor},
             dumps=lambda d: json.dumps(d, default=str, ensure_ascii=False))
 
-    def _lab_secret():
-        # Reuse EXPORT_TOKEN as the signing secret if no dedicated one is set,
-        # so the Lab can be enabled with a single env var.
-        return os.environ.get("LAB_SECRET") or os.environ.get("EXPORT_TOKEN", "")
-
     async def lab_page(request):
-        # The interactive web Stats Lab. Token-gated (short-lived signed link
-        # minted by the /correlate panel). Off unless LAB_SECRET/EXPORT_TOKEN set.
-        secret = _lab_secret()
-        if not secret:
-            return web.Response(status=503, text="lab disabled")
-        from utils.lab_auth import verify_token
-        _payload = verify_token(request.query.get("t", ""), secret)
-        if _payload is None:
-            return web.Response(
-                status=403, content_type="text/html",
-                text="<body style='background:#22242a;color:#f2f3f5;font-family:sans-serif;"
-                     "text-align:center;padding-top:16vh'><h2>This Stats Lab link has expired.</h2>"
-                     "<p style='color:#8b8f9a'>Run <b>/correlate</b> in Discord for a fresh link.</p></body>")
-        # Record the open (best-effort). The signed token carries the opener's id/name,
-        # so it's trustworthy and can't be spoofed by editing the URL.
+        # The interactive web Stats Lab. PUBLIC read-only — it shows the same community
+        # game stats already visible on the Discord boards, so it needs no gate. (Was
+        # token-gated via a /correlate-minted link; now one model with the Hall of Fame.)
+        # Record an anonymous open for the usage counter; a public URL has no per-user id.
         try:
             from utils.db import record_lab_open
-            await record_lab_open(_payload.get("u"), _payload.get("n"))
-            print(f"[LAB] opened by {_payload.get('n') or 'unknown'} ({_payload.get('u') or '?'})")
+            await record_lab_open(None, None)
         except Exception:
             pass
         try:
@@ -116,15 +99,8 @@ async def run_healthcheck():
 
     async def lab_data(request):
         # Per-run numeric+categorical records for the Lab to filter and correlate
-        # client-side. Same token gate as the page. The serialized payload is
-        # cached ~30s so a token holder can't hammer the DB/CPU by reloading, and
-        # every visitor's first paint is cheap.
-        secret = _lab_secret()
-        if not secret:
-            return web.Response(status=503, text="lab disabled")
-        from utils.lab_auth import verify_token
-        if verify_token(request.query.get("t", ""), secret) is None:
-            return web.Response(status=403, text="link expired or invalid")
+        # client-side. PUBLIC (same as the page). The serialized payload is cached ~30s
+        # so reloads can't hammer the DB/CPU, and every visitor's first paint is cheap.
         import time as _t
         now = _t.time()
         if _lab_data_cache["body"] is not None and (now - _lab_data_cache["ts"]) < 30:
@@ -173,12 +149,47 @@ async def run_healthcheck():
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
 
+    _hof_cache = {"body": None, "ts": 0.0}
+
+    async def hof_data(request):
+        # Public Hall of Fame JSON: every season's champions/standings/category winners.
+        # Read-only, cached ~60s. Numbers come from the SAME season_total path as the
+        # bot embeds, so the page and Discord can never disagree.
+        import time as _t
+        now = _t.time()
+        if _hof_cache["body"] is not None and (now - _hof_cache["ts"]) < 60:
+            return web.Response(text=_hof_cache["body"], content_type="application/json")
+        try:
+            from cogs.favourites import build_hof_payload
+            payload = await build_hof_payload()
+        except RuntimeError:
+            return web.Response(status=503, text="database unavailable")
+        except Exception as _e:
+            print(f"[HOF] data build error: {_e}")
+            return web.Response(status=500, text="hall of fame unavailable")
+        body = json.dumps(payload, default=str, ensure_ascii=False)
+        _hof_cache["body"], _hof_cache["ts"] = body, now
+        return web.Response(text=body, content_type="application/json")
+
+    async def hof_page(request):
+        # Public Hall of Fame page. No token — it's a showcase of season champions.
+        try:
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "hof.html")
+            with open(_p, encoding="utf-8") as f:
+                html = f.read()
+        except Exception:
+            return web.Response(status=500, text="hall of fame page missing")
+        return web.Response(text=html, content_type="text/html",
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
     app = _web_app
     app.router.add_get("/", handle)
     app.router.add_post("/kofi", kofi_webhook)
     app.router.add_get("/export/submissions", export_submissions)
     app.router.add_get("/lab", lab_page)
     app.router.add_get("/lab/data", lab_data)
+    app.router.add_get("/hof", hof_page)
+    app.router.add_get("/hof/data", hof_data)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))

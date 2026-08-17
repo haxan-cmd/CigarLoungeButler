@@ -971,25 +971,19 @@ def _server_aggregates(subs):
 
 
 def build_lab_url(view='matrix', extra=None, uid=None, uname=None):
-    """Build a signed, 24h Stats Lab deep link, or None if the Lab isn't
-    configured. Tolerant of a LAB_BASE_URL set without a scheme (prepends
-    https://) so a missing 'https://' can never crash a command again."""
+    """Build a public Stats Lab deep link, or None if LAB_BASE_URL isn't set. The Lab is
+    public now (no signed token), so this is just base + view/extra query params. `uid`/
+    `uname` are ignored (kept for call-site compatibility — opens are anonymous now).
+    Tolerant of a scheme-less LAB_BASE_URL so a missing 'https://' can't crash a command."""
     import os as _os
     base = _os.environ.get('LAB_BASE_URL', '').strip().rstrip('/')
-    secret = _os.environ.get('LAB_SECRET') or _os.environ.get('EXPORT_TOKEN', '')
-    if not (base and secret):
+    if not base:
         return None
     if not (base.startswith('http://') or base.startswith('https://')):
         base = 'https://' + base
     try:
-        from utils.lab_auth import make_token
         from urllib.parse import urlencode
-        _tok_extra = {}
-        if uid:
-            _tok_extra['u'] = str(uid)
-        if uname:
-            _tok_extra['n'] = str(uname)[:80]
-        params = {'t': make_token(secret, ttl_seconds=86400, extra=_tok_extra or None), 'view': view}
+        params = {'view': view}
         if extra:
             params.update({k: v for k, v in extra.items() if v})
         url = f"{base}/lab?{urlencode(params)}"
