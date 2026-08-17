@@ -908,6 +908,76 @@ async def build_season_embed(season):
                     description="\n".join(lines), color=0x8b6914)
 
 
+def _iso(dt):
+    """A season timestamp as an ISO date string (naive UTC in the DB), or None."""
+    if not dt:
+        return None
+    try:
+        return dt.strftime('%Y-%m-%d')
+    except Exception:
+        return str(dt)[:10] or None
+
+
+async def _season_hof_dict(season, all_time_stats):
+    """One season as a JSON-able dict for the web Hall of Fame. Reuses the SAME
+    season_total / category logic as build_season_embed, so the page and the bot can
+    never disagree. `all_time_stats` is calculate_butler_stats() passed in once."""
+    standings, s_stats, featured = await season_total(season)
+    gp = getattr(config, 'SEASON_GP_CHAMPION', True)
+    label = season.get("label") or f"Season {season['id']}"
+    out = {
+        "id": season["id"],
+        "label": label,
+        "started_at": _iso(season.get("started_at")),
+        "ended_at": _iso(season.get("ended_at")),
+        "in_progress": season.get("ended_at") is None,
+        "gp_mode": bool(gp),
+        "champion": None,
+        "standings": [],
+        "featured": [],
+        "categories": [],
+    }
+    if standings and gp:
+        out["champion"] = {"name": standings[0][0], "points": standings[0][1]}
+        out["standings"] = [{"rank": i, "name": nm, "points": pts}
+                            for i, (nm, pts) in enumerate(standings[:10], 1)]
+    for flabel, focus, top in (featured or []):
+        out["featured"].append({
+            "label": flabel, "focus": focus,
+            "winner": (top[0][0] if top else None),
+            "value": (str(top[0][1]) if top and len(top[0]) > 1 else ""),
+        })
+    for cat, key, plain in _SEASON_CATEGORIES:
+        s_nm, s_val = _cat_top(s_stats.get(key), plain)
+        a_nm, a_val = _cat_top(all_time_stats.get(key), plain)
+        out["categories"].append({
+            "category": cat,
+            "season": ({"name": s_nm, "value": s_val} if s_nm else None),
+            "all_time": ({"name": a_nm, "value": a_val} if a_nm else None),
+        })
+    return out
+
+
+async def build_hof_payload():
+    """The whole Hall of Fame as JSON for the public /hof page. Newest season first,
+    all-time category leaders computed once. Read-only; served ungated."""
+    from datetime import datetime, timezone
+    seasons = await _db.get_all_seasons()
+    all_time = await calculate_butler_stats()
+    out_seasons = []
+    for season in seasons:
+        try:
+            out_seasons.append(await _season_hof_dict(season, all_time))
+        except Exception as _e:
+            print(f"[HOF] season {season.get('id')} payload error: {_e}")
+    return {
+        "generated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+        "gp_mode": bool(getattr(config, 'SEASON_GP_CHAMPION', True)),
+        "season_count": len(out_seasons),
+        "seasons": out_seasons,
+    }
+
+
 async def _hof_index_refresh(guild):
     forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
     if not forum:
@@ -940,8 +1010,25 @@ async def _hof_index_refresh(guild):
     await _db.upsert_index_post("hall_of_fame", str(created.thread.id), str(created.message.id))
 
 
+def build_hof_url():
+    """Public Hall of Fame page URL (no token — it's a showcase), or None if the web
+    server's base URL isn't configured. Tolerant of a scheme-less LAB_BASE_URL."""
+    import os as _os
+    base = _os.environ.get('LAB_BASE_URL', '').strip().rstrip('/')
+    if not base:
+        return None
+    if not (base.startswith('http://') or base.startswith('https://')):
+        base = 'https://' + base
+    return f"{base}/hof"
+
+
 async def finalize_season(guild, season):
-    """Create or refresh a season's Hall of Fame forum thread, then update the index."""
+    """Create or refresh a season's Hall of Fame forum thread, then update the index.
+    When HALL_OF_FAME_WEB is on, the public /hof page IS the Hall of Fame, so we skip the
+    per-season forum thread entirely — the season data lives in Postgres and renders live."""
+    if getattr(config, 'HALL_OF_FAME_WEB', False):
+        print(f"[HOF] web mode — skipping forum thread for {season.get('label') or season.get('id')}")
+        return
     forum = guild.get_channel(config.HALL_OF_FAME_FORUM_ID) or await guild.fetch_channel(config.HALL_OF_FAME_FORUM_ID)
     if not forum:
         print("[HOF] Hall of Fame forum not found")
@@ -1844,6 +1931,39 @@ class FavouritesCog(commands.Cog):
         await finalize_season(interaction.guild, season)
         label = season.get("label") or f"Season {season['id']}"
         await interaction.followup.send(f"Posted/refreshed the Hall of Fame entry for {label}.", ephemeral=True)
+
+    @app_commands.command(name="setup_lounge", description="Pin the Cigar Lounge web links — Hall of Fame + Stats Lab (mod only).")
+    async def setup_lounge(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        import os as _os
+        base = _os.environ.get('LAB_BASE_URL', '').strip().rstrip('/')
+        if not base:
+            await interaction.response.send_message(
+                "Set the `LAB_BASE_URL` env var (the bot's public web domain) first — "
+                "that's what the links are built from.", ephemeral=True)
+            return
+        if not (base.startswith('http://') or base.startswith('https://')):
+            base = 'https://' + base
+        await interaction.response.send_message("Posting the Cigar Lounge links…", ephemeral=True)
+        # One pinned card, two clearly-separate destinations. They share a top nav on the
+        # site, so either link lands you somewhere you can reach the other.
+        emb = discord.Embed(
+            title="🚬 Cigar Lounge",
+            description=("The community's stats and history, always up to date.\n\n"
+                         f"🏆 **[Hall of Fame →]({base}/hof)**  ·  champions of every season\n"
+                         f"📊 **[Stats Lab →]({base}/lab)**  ·  explore every run: correlations, trends, rankings"),
+            color=0xe0a84c)
+        emb.set_footer(text="Public pages · render live from the records")
+        try:
+            msg = await interaction.channel.send(embed=emb)
+            try:
+                await msg.pin()
+            except Exception as _pe:
+                print(f"[LOUNGE] pin failed (non-fatal): {_pe}")
+        except Exception as _e:
+            await interaction.followup.send(f"Couldn't post here: {_e}", ephemeral=True)
 
     @app_commands.command(name="lounge_graphs", description="Post the macro graphs: power creep, contested boards, Hundred-Handed histogram (mod only).")
     async def lounge_graphs(self, interaction: discord.Interaction):

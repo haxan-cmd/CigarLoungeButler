@@ -21,7 +21,8 @@
 - `/season_set_start` **[Mod]** — Backdate the current season's start date.
 - `/season_reset` **[Admin]** — Snapshot this month's Lethality/Warlord to the Hall of Fame (non-destructive).
 - `/roll_features` **[Mod]** — Roll this season's Special Features.
-- `/force_finalize_season` **[Mod]** — Post/refresh the current season's Hall of Fame entry.
+- `/force_finalize_season` **[Mod]** — Refresh the current season's Hall of Fame data. (With `HALL_OF_FAME_WEB` on, this no longer posts a forum thread — the champions render live on the public `/hof` page.)
+- `/setup_lounge` **[Mod]** — Pin one card in the current channel with BOTH public web links: 🏆 Hall of Fame (`<domain>/hof`, season champions) and 📊 Stats Lab (`<domain>/lab`, run explorer). Two separate pages that share a "Cigar Lounge" top nav; needs `LAB_BASE_URL` set. (Boards, submissions, reactions stay native Discord — only the read-only archive/analytics surfaces live on the web.)
 
 ## Leaderboards & Boards
 **Which render command? →** `/rebuild_boards` is THE one: it recomputes a board's entries from full submission history AND repaints it correctly (maps, weapons, kills sections, ratings). Reach for it whenever a board is wrong or a render change needs to land. `/refresh_all` only reframes threads whose *structure* changed — it skips threads that already look right, so it will NOT apply a content-only change (e.g. a new embed section). `/refresh` repaints a single board in place.
