@@ -1246,42 +1246,33 @@ class PersonalityCog(commands.Cog):
         self.bot = bot
 
     async def _ensure_stats_lab_panel(self):
-        """Self-heal a bot-owned, pinned Stats Lab panel in the Lounge Stats
-        channel: edit it in place if it exists, else post+pin+remember it. The
-        button is persistent, so a single pinned message serves everyone and
-        never goes stale. No-op when STATS_LAB_CHANNEL_ID is unset."""
-        ch_id = getattr(config, 'STATS_LAB_CHANNEL_ID', 0)
-        if not ch_id:
-            return
-        channel = self.bot.get_channel(ch_id)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(ch_id)
-            except Exception:
-                return
-        embed = stats_lab_panel_embed()
-        idx = next((p for p in await _db.get_all_index_posts() if p[0] == 'stats_lab_panel'), None)
-        if idx and len(idx) > 2 and idx[2]:
-            try:
-                msg = await channel.fetch_message(int(idx[2]))
-                await msg.edit(embed=embed, view=StatsLabEntry())
-                if not msg.pinned:
-                    try:
-                        await msg.pin()
-                    except Exception:
-                        pass
-                return
-            except Exception:
-                pass   # stored message gone — fall through and re-post
+        """RETIRED. The Stats Lab now lives on the public web page, linked from the
+        pinned /setup_lounge card, so the old self-healing channel panel — which minted
+        expiring 24h token links — is redundant and was double-pinning. This is now a
+        one-shot janitor: on startup it unpins+deletes any panel this bot previously
+        posted and forgets it, so the stale pin disappears on deploy with no manual
+        unpin, then does nothing on later boots."""
         try:
-            msg = await channel.send(embed=embed, view=StatsLabEntry())
+            idx = next((p for p in await _db.get_all_index_posts() if p[0] == 'stats_lab_panel'), None)
+        except Exception:
+            return
+        if not (idx and len(idx) > 2 and idx[1] and idx[2]):
+            return
+        try:
+            channel = self.bot.get_channel(int(idx[1])) or await self.bot.fetch_channel(int(idx[1]))
+            msg = await channel.fetch_message(int(idx[2]))
             try:
-                await msg.pin()
+                await msg.unpin()
             except Exception:
                 pass
-            await _db.upsert_index_post('stats_lab_panel', str(channel.id), str(msg.id))
-        except Exception as _e:
-            print(f"[LAB] could not post stats-lab panel: {_e}")
+            await msg.delete()
+            print("[LAB] retired the old pinned Stats Lab panel (superseded by /setup_lounge + public page)")
+        except Exception:
+            pass   # message already gone
+        try:
+            await _db.upsert_index_post('stats_lab_panel', '', '')   # forget it → no-op next boot
+        except Exception:
+            pass
 
     @tasks.loop(seconds=90)
     async def events_flush_loop(self):

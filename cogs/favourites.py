@@ -1950,12 +1950,12 @@ class FavouritesCog(commands.Cog):
         # One pinned card, two clearly-separate destinations. They share a top nav on the
         # site, so either link lands you somewhere you can reach the other.
         emb = discord.Embed(
-            title="🚬 Cigar Lounge",
-            description=("The community's stats and history, always up to date.\n\n"
+            title="Cigar Lounge",
+            description=("<:cigar:1444893851427803298> The community's stats and history, always up to date.\n\n"
                          f"🏆 **[Hall of Fame →]({base}/hof)**  ·  champions of every season\n"
-                         f"📊 **[Stats Lab →]({base}/lab)**  ·  explore every run: correlations, trends, rankings"),
+                         f"📊 **[Stats Lab →]({base}/lab)**  ·  explore every run: correlations, trends, rankings\n\n"
+                         "*Opens in your browser · public pages, live from the records*"),
             color=0xe0a84c)
-        emb.set_footer(text="Public pages · render live from the records")
         try:
             msg = await interaction.channel.send(embed=emb)
             try:
