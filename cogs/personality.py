@@ -285,6 +285,8 @@ _DATA_QUESTION_WORDS = (
     '#1', '#2', '#3', 'kill count', 'most number',
     'top 5', 'top five', 'top 3', 'top three', 'finishes',
     '100 kill', '200 takedown', 'pacifist', 'tuff', 'kill game',
+    'handed', 'hundred', '100 hand', 'weapons left', 'weapons do i',
+    'need a mark', 'get a mark', 'mark with', 'combos left', 'combos remain',
 )
 
 from utils import aggregates as _agg
@@ -4050,8 +4052,13 @@ class PersonalityCog(commands.Cog):
         # Coors have left") — and inject that player's exact gaps + count.
         try:
             _cl = content_lower
-            if (('hundred' in _cl or 'handed' in _cl)
-                    and 'HUNDRED-HANDED' not in player_stats_ctx.upper()):
+            # Fire on an explicit Hundred-Handed mention OR the way people actually phrase
+            # it ("which weapons do I still need a mark with / have left") — a weapon/mark/
+            # combo ask that never says "hundred-handed" but means exactly that.
+            _hh_ask = (('hundred' in _cl or 'handed' in _cl)
+                       or (('mark' in _cl or 'combo' in _cl)
+                           and any(k in _cl for k in ('weapon', 'left', 'need', 'remain', 'still', 'missing'))))
+            if _hh_ask and 'HUNDRED-HANDED' not in player_stats_ctx.upper():
                 _tid, _tname = None, None
                 if any(t in _cl for t in (' i ', "i'm", 'am i', ' my ', ' me ', 'do i', 'what do i')):
                     _tid, _tname = str(message.author.id), player_name
