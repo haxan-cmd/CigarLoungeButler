@@ -266,6 +266,13 @@ async def on_app_command_error(
     interaction: discord.Interaction,
     error: discord.app_commands.AppCommandError,
 ):
+    if isinstance(error, discord.app_commands.CommandNotFound):
+        # Benign and self-resolving: a client invoked a command the running instance
+        # hasn't synced yet — normal right after a deploy while clients hold a stale
+        # command cache (Ctrl+R fixes it). Do NOT nerve-alert or log an error for it,
+        # or every deploy spams a fake failure into the nerve centre + event log.
+        print(f"[CMD] ignored stale/unknown command invocation: {error}")
+        return
     if isinstance(error, discord.app_commands.CommandOnCooldown):
         retry = int(error.retry_after)
         minutes, seconds = divmod(retry, 60)
