@@ -2259,7 +2259,8 @@ class PersonalityCog(commands.Cog):
         await interaction.followup.send(
             file=discord.File(io.BytesIO(_png), filename=_fn), view=_view)
 
-    @app_commands.command(name="statslab", description="Open the interactive web Stats Lab (correlations, matrix, 1H vs 2H, and more).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="statslab", description="Open the interactive web Stats Lab (correlations, matrix, 1H vs 2H, and more).")
     async def statslab(self, interaction: discord.Interaction):
         url = build_lab_url('matrix', uid=interaction.user.id, uname=interaction.user.display_name)
         if not url:
@@ -2269,14 +2270,16 @@ class PersonalityCog(commands.Cog):
         await interaction.response.send_message(
             "Your Stats Lab link (good for 24 hours):", view=_lab_link_view(url), ephemeral=True)
 
-    @app_commands.command(name="statslab_panel", description="Post a pinnable Stats Lab button here (mod only).")
-    @app_commands.checks.has_permissions(administrator=True)
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="statslab_panel", description="Post a pinnable Stats Lab button here (mod only).")
+    # @app_commands.checks.has_permissions(administrator=True)
     async def statslab_panel(self, interaction: discord.Interaction):
         await interaction.channel.send(embed=stats_lab_panel_embed(), view=StatsLabEntry())
         await interaction.response.send_message("Posted — pin it wherever you like.", ephemeral=True)
 
-    @app_commands.command(name="statslab_usage", description="See who opens the Stats Lab and how often (mod only).")
-    @app_commands.checks.has_permissions(administrator=True)
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="statslab_usage", description="See who opens the Stats Lab and how often (mod only).")
+    # @app_commands.checks.has_permissions(administrator=True)
     async def statslab_usage(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -2503,7 +2506,8 @@ class PersonalityCog(commands.Cog):
             lines.append(f"`{_fmt(val):>7}`{_extra} {lbl}")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="refresh_manual", description="Repost/refresh the butlers-manual command list (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="refresh_manual", description="Repost/refresh the butlers-manual command list (mod only).")
     async def refresh_manual(self, interaction: discord.Interaction):
         if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)

@@ -1891,7 +1891,8 @@ class FavouritesCog(commands.Cog):
         )
         await interaction.followup.send(header + "\n".join(out).rstrip())
 
-    @app_commands.command(name="setup_titles_board", description="Post the combined All-Time Titles board in THIS thread (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="setup_titles_board", description="Post the combined All-Time Titles board in THIS thread (mod only).")
     async def setup_titles_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -1920,7 +1921,8 @@ class FavouritesCog(commands.Cog):
         await refresh_all_time_titles_board(interaction.guild)
         await interaction.followup.send("\u2705 All-Time Titles board refreshed.", ephemeral=True)
 
-    @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
     async def force_finalize_season(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)

@@ -3150,8 +3150,9 @@ class LeaderboardsCog(commands.Cog):
         await interaction.followup.send(("Forum tags:\n" + "\n".join(lines)) if lines else "Nothing to do.", ephemeral=True)
 
 
-    @app_commands.command(name="season_reset", description="Snapshot this month's Lethality/Warlord boards to the Hall of Fame (admin only). Non-destructive.")
-    @app_commands.checks.has_permissions(administrator=True)
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="season_reset", description="Snapshot this month's Lethality/Warlord boards to the Hall of Fame (admin only). Non-destructive.")
+    # @app_commands.checks.has_permissions(administrator=True)
     async def season_reset(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         if getattr(config, 'HALL_OF_FAME_WEB', False):
@@ -3177,8 +3178,9 @@ class LeaderboardsCog(commands.Cog):
             f"Nothing was cleared — takedown boards stay permanent; the Monthly Report resets with the new season window.",
             ephemeral=True)
 
-    @app_commands.command(name="refresh_monthly", description="Rebuild all Monthly Report boards + pinned index now (admin only).")
-    @app_commands.checks.has_permissions(administrator=True)
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="refresh_monthly", description="Rebuild all Monthly Report boards + pinned index now (admin only).")
+    # @app_commands.checks.has_permissions(administrator=True)
     async def refresh_monthly(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         if not (getattr(config, 'ALLTIME_RECORDS_FORUM_ID', 0) or 0):
@@ -3499,7 +3501,8 @@ class LeaderboardsCog(commands.Cog):
 
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
     async def create_missing_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4280,7 +4283,8 @@ class LeaderboardsCog(commands.Cog):
         await interaction.edit_original_response(
             content=f"✅ Set **{player}** = {score} on **{board}**.{note}")
 
-    @app_commands.command(name="setup_healing_banner_board", description="Create the Healing Banner board thread in the feats forum (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="setup_healing_banner_board", description="Create the Healing Banner board thread in the feats forum (mod only).")
     async def setup_healing_banner_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4308,7 +4312,8 @@ class LeaderboardsCog(commands.Cog):
             f"✅ Created **{lb_name}** board: {thread.mention}. "
             f"Players submit with a HEALING popup screenshot captioned `banner`.", ephemeral=True)
 
-    @app_commands.command(name="setup_hybrid_board", description="Create the Hybrid (weapon-swap) board thread in the feats forum (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="setup_hybrid_board", description="Create the Hybrid (weapon-swap) board thread in the feats forum (mod only).")
     async def setup_hybrid_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4337,7 +4342,8 @@ class LeaderboardsCog(commands.Cog):
             f"Players log it by picking **Hybrid** as their class on submission. "
             f"Ranked by takedowns, one row per player, no weapon marks.", ephemeral=True)
 
-    @app_commands.command(name="setup_score_board", description="Create the Score (highest match points) board thread in the feats forum (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="setup_score_board", description="Create the Score (highest match points) board thread in the feats forum (mod only).")
     async def setup_score_board(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4401,7 +4407,8 @@ class LeaderboardsCog(commands.Cog):
             "as their class (Coxwell or Bridgetown). Re-run this command in another channel or "
             "thread to move it.", ephemeral=True)
 
-    @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
@@ -4510,7 +4517,8 @@ class LeaderboardsCog(commands.Cog):
             f"({len(knames)} weapon threads). New submissions update them automatically.",
             ephemeral=True)
 
-    @app_commands.command(name="remove_map_kills_boards", description="Remove the old SEPARATE map Kills boards (kills now render inside the map embed) (mod only).")
+    # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
+    # @app_commands.command(name="remove_map_kills_boards", description="Remove the old SEPARATE map Kills boards (kills now render inside the map embed) (mod only).")
     async def remove_map_kills_boards(self, interaction: discord.Interaction):
         if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
             await interaction.response.send_message("That's not for you.", ephemeral=True)

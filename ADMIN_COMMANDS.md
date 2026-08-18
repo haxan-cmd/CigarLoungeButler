@@ -6,6 +6,8 @@
 
 **Also new:** `/explore` (any metric grouped any way, filtered by feat or season, as a chart). Player titles are now the lounge ladder: Lounger → Insider → Regular → Made Man → High Roller → Kingpin → Legend, by total bounties completed.
 
+**Currently unregistered** (code kept, uncomment the `@app_commands.command` decorator to re-enable — these sit out to stay under Discord's 100-command guild cap): `/statslab`, `/statslab_panel`, `/statslab_usage` (Lab is public now, linked from `/setup_lounge`), `/refresh_manual` (butlers-manual retired), `/refresh_monthly` · `/season_reset` · `/force_finalize_season` (Monthly Report + forum Hall of Fame retired), and the one-time board builders `/setup_titles_board` · `/setup_score_board` · `/setup_healing_banner_board` · `/setup_hybrid_board` · `/setup_kills_boards` · `/create_missing_boards` · `/remove_map_kills_boards`.
+
 ---
 
 ## Season & Bounty
