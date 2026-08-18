@@ -1659,24 +1659,40 @@ class PersonalityCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         cat = category.value if category else None
-        rows = await _db.get_bot_events(category=cat, hours=max(1, min(hours, 720)), limit=40)
+        win = max(1, min(hours, 720))   # cap at 30 days (retention window)
+        # A Discord message truncates hard, so the review lands as an ATTACHED .log file:
+        # full messages, no 40-row cap, greppable/saveable. The command is mod-only and
+        # ephemeral, so only the requester sees it.
+        rows = await _db.get_bot_events(category=cat, hours=win, limit=5000)
         if not rows:
             await interaction.followup.send(
                 f"No {cat or 'events'} logged in the last {hours}h.", ephemeral=True)
             return
-        _lvl = {'err': '🔴', 'warn': '🟠'}
-        lines = []
+        from datetime import datetime as _dt, timezone as _tz, datetime
+        rows = sorted(rows, key=lambda r: (r.get('ts') or _dt.min))   # chronological
+        _lvl = {'err': 'ERROR', 'warn': 'WARN', 'inf': 'INFO'}
+        # Per-category tally for the header (so a quick glance still works).
+        _tally = {}
         for r in rows:
-            _t = r['ts'].strftime('%m-%d %H:%M') if r.get('ts') else '?'
-            _e = _lvl.get(r.get('level'), '·')
-            lines.append(f"{_e} `{_t}` [{r.get('category')}] {(r.get('message') or '')[:140]}")
-        body = "\n".join(lines)
-        if len(body) > 3900:
-            body = body[:3900] + "\n…(truncated)"
-        emb = discord.Embed(
-            title=f"Event log — {cat or 'all'} · last {hours}h ({len(rows)} shown)",
-            description=body, colour=discord.Colour.dark_grey())
-        await interaction.followup.send(embed=emb, ephemeral=True)
+            _tally[r.get('category') or '?'] = _tally.get(r.get('category') or '?', 0) + 1
+        _tally_str = ", ".join(f"{k}:{v}" for k, v in sorted(_tally.items(), key=lambda kv: -kv[1]))
+        header = (f"Cigar Lounge Butler — event log\n"
+                  f"Filter: {cat or 'all'}   Window: last {win}h   Events: {len(rows)}\n"
+                  f"By category: {_tally_str}\n"
+                  f"Generated: {_dt.now(_tz.utc):%Y-%m-%d %H:%M UTC}\n"
+                  + "=" * 72)
+        out = [header]
+        for r in rows:
+            _t = r['ts'].strftime('%Y-%m-%d %H:%M:%S') if r.get('ts') else '?'
+            _l = _lvl.get(r.get('level'), (r.get('level') or '·'))
+            out.append(f"[{_t}] {str(_l):<5} [{r.get('category')}] {(r.get('message') or '').strip()}")
+        import io as _io
+        buf = _io.BytesIO("\n".join(out).encode('utf-8', 'replace'))
+        fname = f"clb_logs_{cat or 'all'}_{win}h.log"
+        await interaction.followup.send(
+            content=(f"📋 Event log — **{cat or 'all'}**, last {win}h · **{len(rows)}** events "
+                     f"({_tally_str}). Full file attached — open or grep it."),
+            file=discord.File(buf, filename=fname), ephemeral=True)
 
     @app_commands.command(name="serverstats", description="Server activity dashboard over a window: totals, top players and weapons.")
     @app_commands.describe(window="How far back to look")
