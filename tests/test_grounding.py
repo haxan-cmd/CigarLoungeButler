@@ -18,6 +18,25 @@ def test_fabricated_number_is_flagged():
     assert ungrounded_numbers("An imperious 999 takedown effort.", ctx) == [999.0]
 
 
+def test_discord_jump_links_are_not_fabrications():
+    # The real log false positive: linkifier-inserted jump links carry snowflake ids.
+    reply = ("[GutenPranken](https://discord.com/channels/1324379304544567356/1519370577721298994) "
+             "and [Jagg](https://discord.com/channels/1324379304544567356/1534774115817226255), "
+             "tied with one Brutal lobby apiece.")
+    assert ungrounded_numbers(reply, "") == []
+
+
+def test_mentions_and_custom_emoji_ids_ignored():
+    reply = "At your service, <@1517967002940080269>. <:cigar:1444893851427803298>"
+    assert ungrounded_numbers(reply, "") == []
+
+
+def test_real_stat_still_caught_alongside_a_link():
+    # A genuine fabricated stat must still fire even when the reply also has a link.
+    reply = "[kc](https://discord.com/channels/1324379304544567356/1519370577721298994) averages 114 kills."
+    assert ungrounded_numbers(reply, "375 marks") == [114.0]
+
+
 def test_small_numbers_are_ignored():
     # ranks / counts / 'one or two' must not trip it, even absent from context
     assert ungrounded_numbers("You're #1, top 3, no contest.", "no numbers here") == []
