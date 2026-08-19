@@ -928,7 +928,7 @@ function renderRanking(){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
     row.innerHTML='<span style="width:22px;text-align:right;color:#8b8f9a;font-size:12px;flex:none">'+(i+1)+'.</span>'
-      +'<span data-player="'+esc(p.name)+'" style="width:120px;color:#c9ccd3;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" title="Filter to '+esc(p.name)+'">'+esc(p.name)+'</span>'
+      +'<span class="pl" data-card="'+esc(p.name)+'" style="width:120px;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" title="View card">'+esc(p.name)+'</span>'
       + bar
       +'<span style="width:56px;text-align:right;color:'+col+';font-size:12px;flex:none">'+fmt(p.value)+'</span>';
     card.appendChild(row);
@@ -961,7 +961,7 @@ function renderRecords(){
     const r=best.r,nm=r[IDX.name]||'?',mp=r[IDX.map]||'',wp=r[IDX.weapon]||'',lk=r[IDX.link]||'';
     const sign=(key==='tilt_pct'&&best.v>0)?'+':'';
     html+='<div style="font-size:22px;font-weight:700;margin:2px 0 4px">'+sign+fmt(best.v)+unit+'</div>'
-      +'<div style="font-size:12.5px"><span data-player="'+esc(nm)+'" style="cursor:pointer;color:var(--gold)" title="Filter to '+esc(nm)+'">'+esc(nm)+'</span></div>'
+      +'<div style="font-size:12.5px"><span class="pl" data-card="'+esc(nm)+'" style="cursor:pointer;color:var(--gold)" title="View card">'+esc(nm)+'</span></div>'
       +'<div style="font-size:11.5px;color:var(--mut)">'+esc(mp)+(wp?(' · '+esc(wp)):'')
       +(lk?(' · <a href="'+esc(lk)+'" target="_blank" rel="noopener" style="color:var(--blue)">open ↗</a>'):'')+'</div></div>';
   });
@@ -980,7 +980,7 @@ function emojiImg(token){
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
 function _brow(i,nm,sc,lk,suffix){
-  return html`<div class="brow"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-player="${nm||'?'}" title="Filter to ${nm||''}">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
+  return html`<div class="brow"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-card="${nm||'?'}" title="View ${nm||''}'s card">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
 }
 function _rateSection(title,emoji,rows){
   if(!rows||!rows.length) return '';
@@ -1189,8 +1189,13 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
     if(d.stat_labels){ Object.assign(LABELS,d.stat_labels); ALL_STATS=Object.keys(d.stat_labels); }
     BOARDS=d.boards||{}; EMOJI=d.emoji||{};
     buildFilters();
-    // Delegated: click any player name (data-player) to filter the whole Lab to them.
+    // Delegated view clicks. A player name (data-card) opens that player's card;
+    // a board name (data-board) jumps to that board; data-player is the legacy
+    // filter-to-player path, kept for any spot that still uses it.
     document.getElementById('view').addEventListener('click',function(e){
+      const cel=e.target.closest('[data-card]');
+      if(cel){ e.preventDefault(); const nm=cel.getAttribute('data-card')||'';
+        if(nm){ state.playercard.name=nm; state.playercard.data=null; state.playercard.loading=false; setView('players'); } return; }
       const bel=e.target.closest('[data-board]');
       if(bel){ e.preventDefault(); navBoard(bel.getAttribute('data-board')||''); return; }
       const el=e.target.closest('[data-player]');
