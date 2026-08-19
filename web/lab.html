@@ -699,19 +699,22 @@ function renderRanking(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
   const ctrl=document.createElement('div'); ctrl.className='bar';
-  const statOpts=ALL_STATS.map(function(k){return [k,LABELS[k]];}).concat([['career_marks','Career marks (all-time)']]);
+  const statOpts=ALL_STATS.map(function(k){return [k,LABELS[k]];})
+    .concat([['career_marks','Career marks (all-time)'],['lobby_difficulty','Lobby difficulty (single games)']]);
   ctrl.appendChild(pickSelect('Stat',statOpts,state.ranking.stat,function(v){state.ranking.stat=v;renderRanking();}));
   const isCareer=state.ranking.stat==='career_marks';
-  if(!isCareer){
+  const isLobby=state.ranking.stat==='lobby_difficulty';
+  if(!isCareer && !isLobby){
     ctrl.appendChild(pickSelect('Min runs',[['3','3+'],['5','5+'],['10','10+'],['20','20+']],String(state.ranking.min),function(v){state.ranking.min=+v;renderRanking();}));
     ctrl.appendChild(pickSelect('Aggregate',[['avg','Average / run'],['total','Total (sum)']],state.ranking.agg,function(v){state.ranking.agg=v;renderRanking();}));
   }
   ctrl.appendChild(pickSelect('Order',[['desc','Highest first'],['asc','Lowest first']],state.ranking.order,function(v){state.ranking.order=v;renderRanking();}));
   view.appendChild(ctrl);
-  // For a lobby-gap stat, lead with the single-GAME extremes list (band-accurate %),
-  // then the per-player averages below.
-  if(state.ranking.stat==='tilt' || state.ranking.stat==='tilt_pct'){
-    const _lg=lobbyGameRanking(); if(_lg) view.appendChild(_lg);
+  // "Lobby difficulty" is its OWN entry: single-game % gap list only, no per-player graph.
+  if(isLobby){
+    const _lg=lobbyGameRanking();
+    view.appendChild(_lg || (function(){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No lobby-gap data in view.</div>';return c;})());
+    return;
   }
   const stat=state.ranking.stat, isTilt=stat==='tilt', _mode=state.ranking.agg;
   let players=[];
