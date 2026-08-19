@@ -150,6 +150,11 @@ select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 
 /* animated loading, so a slow fetch doesn't look frozen */
 .loading{animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+/* header copy-link button, always reachable */
+#copybtn{margin-left:auto;align-self:center;flex:none}
+/* empty / no-data states read differently from a live loading spinner */
+.empty{color:var(--mut);padding:34px 20px;text-align:center;font-size:13.5px;line-height:1.6}
+.empty::before{content:"🗒️";display:block;font-size:26px;margin-bottom:8px;opacity:.7}
 /* thin themed scrollbars */
 .cblist,.mtx{scrollbar-width:thin;scrollbar-color:var(--grid) transparent}
 .cblist::-webkit-scrollbar,.mtx::-webkit-scrollbar{height:8px;width:8px}
@@ -166,6 +171,7 @@ select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 
   <div class="head">
     <h1>Stats Lab</h1>
     <span class="sub" id="sub">loading…</span>
+    <button class="btn" id="copybtn" title="Copy a link to this exact view and filters">🔗 Copy link</button>
   </div>
   <div class="rule"></div>
 
@@ -324,12 +330,15 @@ function buildFilters(){
   reset.style.alignSelf='flex-end';
   reset.addEventListener('click',()=>{for(const k in state.filters)state.filters[k]='';buildFilters();render();});
   bar.appendChild(reset);
-  const copy=document.createElement('button'); copy.className='btn'; copy.textContent='🔗 Copy link'; copy.style.alignSelf='flex-end';
-  copy.addEventListener('click',()=>{const u=shareUrl();
-    (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject())
-      .then(()=>{copy.textContent='✓ Copied';setTimeout(()=>copy.textContent='🔗 Copy link',1400);})
-      .catch(()=>{window.prompt('Copy this link:',u);});});
-  bar.appendChild(copy);
+  // (Copy-link lives in the header now, so it's available on every view — not just
+  // the filtered ones where this bar is shown.)
+}
+// Shared copy-link: writes the current view+filters URL to the clipboard with inline
+// confirmation, falling back to a prompt where the clipboard API is blocked.
+function doCopy(btn){
+  const u=shareUrl(), orig=btn.textContent, ok=()=>{btn.textContent='✓ Copied';setTimeout(()=>btn.textContent=orig,1400);};
+  if(navigator.clipboard){navigator.clipboard.writeText(u).then(ok).catch(()=>window.prompt('Copy this link:',u));}
+  else{window.prompt('Copy this link:',u);}
 }
 
 // ---- matrix ----
@@ -416,7 +425,7 @@ function renderScatter(){
   for(const r of rows){const x=val(r,state.x),y=val(r,state.y); if(x!=null&&y!=null)pts.push({x,y,cat:catOf(r),name:r[IDX.name],w:r[IDX.weapon],link:r[IDX.link]});}
   const card=document.createElement('div'); card.className='card';
   card.innerHTML='<h3>'+LABELS[state.x]+' vs '+LABELS[state.y]+' · '+pts.length+' runs</h3>';
-  if(pts.length<5){card.innerHTML+='<div class="loading">Not enough runs — widen the filters.</div>';view.appendChild(card);return;}
+  if(pts.length<5){card.innerHTML+='<div class="empty">Not enough runs — widen the filters.</div>';view.appendChild(card);return;}
   const wrap=document.createElement('div'); wrap.id='scWrap';
   const cv=document.createElement('canvas'); wrap.appendChild(cv); card.appendChild(wrap); view.appendChild(card);
   drawScatter(cv,wrap,pts);
@@ -522,7 +531,7 @@ function renderCompare(){
   const card=document.createElement('div'); card.className='card cmp';
   const _noteMap={delta:'bars = % difference vs '+esc(base)+'  (teal ↑ / coral ↓)',prop:'bars proportional · % vs '+esc(base),spread:'bars scaled to the spread · % vs '+esc(base)};
   card.innerHTML='<h3>'+(titleMap[state.group]||'Compare')+' · '+rows.length+' runs'+(base?(' · '+(state.compareScale==='auto'?'auto → ':'')+_noteMap[scaleMode]):'')+'</h3>';
-  if(groups.length<2){card.innerHTML+='<div class="loading">Only '+groups.length+' group meets the run threshold — lower Min runs, change the grouping, or widen the filters.</div>';view.appendChild(card);return;}
+  if(groups.length<2){card.innerHTML+='<div class="empty">Only '+groups.length+' group meets the run threshold — lower Min runs, change the grouping, or widen the filters.</div>';view.appendChild(card);return;}
   const leg=document.createElement('div'); leg.className='chips';
   leg.innerHTML=groups.map(g=>'<span class="chip on"><span class="sw" style="background:'+cmap[g]+'"></span>'+esc(g)+' (n='+acc[g].n+')'+(acc[g].n<10?' · low':'')+'</span>').join('');
   card.appendChild(leg);
@@ -605,7 +614,7 @@ function renderTrends(){
   const periods=Object.keys(buckets).sort();
   const card=document.createElement('div'); card.className='card';
   card.innerHTML='<h3>'+LABELS[stat]+' over time · '+(period==='week'?'weekly':'monthly')+' · '+rows.length+' runs</h3>';
-  if(periods.length<2){card.innerHTML+='<div class="loading">Not enough time range yet — widen the filters.</div>';view.appendChild(card);return;}
+  if(periods.length<2){card.innerHTML+='<div class="empty">Not enough time range yet — widen the filters.</div>';view.appendChild(card);return;}
   let groups=[...groupsSet];
   if(split){
     const cnt={}; for(const pk of periods) for(const g in buckets[pk]) cnt[g]=(cnt[g]||0)+buckets[pk][g][1];
@@ -678,7 +687,7 @@ function renderGalaxy(){
     pts.push({name:a.name,n:a.n,x:a.x[0]/a.x[1],y:a.y[0]/a.y[1],cat});}
   const card=document.createElement('div'); card.className='card';
   card.innerHTML='<h3>The playstyle galaxy · '+LABELS[state.galaxy.x]+' vs '+LABELS[state.galaxy.y]+' · '+pts.length+' players (each dot = a player)</h3>';
-  if(pts.length<3){card.innerHTML+='<div class="loading">Not enough players at this run threshold — lower Min runs or widen filters.</div>';view.appendChild(card);return;}
+  if(pts.length<3){card.innerHTML+='<div class="empty">Not enough players at this run threshold — lower Min runs or widen filters.</div>';view.appendChild(card);return;}
   const wrap=document.createElement('div'); wrap.id='scWrap'; const cv=document.createElement('canvas'); wrap.appendChild(cv); card.appendChild(wrap); view.appendChild(card);
   drawGalaxy(cv,wrap,pts);
 }
@@ -758,7 +767,7 @@ function renderActivity(){
   const ctrl=document.createElement('div'); ctrl.className='bar';
   ctrl.appendChild(pickSelect('Time zone',[['0','UTC'],['-4','UTC-4 (ET)'],['-5','UTC-5 (ET)'],['-6','UTC-6 (CT)'],['-7','UTC-7 (MT)'],['-8','UTC-8 (PT)'],['1','UTC+1 (CET)'],['10','UTC+10 (AEST)']],String(state.activity.tz),v=>{state.activity.tz=+v;renderActivity();}));
   view.appendChild(ctrl);
-  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
+  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="empty">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
   const tz=state.activity.tz;
   const hours=new Array(24).fill(0), wdays=new Array(7).fill(0);
   const perPlayer={}; let dated=0;
@@ -853,7 +862,7 @@ function renderRanking(){
   // "Lobby difficulty" is its OWN entry: single-game % gap list only, no per-player graph.
   if(isLobby){
     const _lg=lobbyGameRanking();
-    view.appendChild(_lg || (function(){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No lobby-gap data in view.</div>';return c;})());
+    view.appendChild(_lg || (function(){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="empty">No lobby-gap data in view.</div>';return c;})());
     return;
   }
   const stat=state.ranking.stat, isTilt=stat==='tilt', _mode=state.ranking.agg;
@@ -889,7 +898,7 @@ function renderRanking(){
     if(isTilt) sub+=' \u00b7 higher = easier lobbies (your team outkilled), lower/negative = harder (outmatched)';
   }
   card.innerHTML='<h3>'+esc(head)+'</h3><div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">'+esc(sub)+'</div>';
-  if(players.length<1){card.innerHTML+='<div class="loading">'+(isCareer?'No players with marks yet.':'No players at this run threshold \u2014 lower Min runs or widen filters.')+'</div>';view.appendChild(card);return;}
+  if(players.length<1){card.innerHTML+='<div class="empty">'+(isCareer?'No players with marks yet.':'No players at this run threshold \u2014 lower Min runs or widen filters.')+'</div>';view.appendChild(card);return;}
   players.sort(function(x,y){return state.ranking.order==='asc' ? x.value-y.value : y.value-x.value;});
   if(state.ranking.q){const _q=state.ranking.q.toLowerCase();players=players.filter(function(p){return (p.name||'').toLowerCase().indexOf(_q)>=0;});}
   players=players.slice(0,50);
@@ -977,7 +986,7 @@ function renderBoardCategory(kind){
   const view=document.getElementById('view'); view.innerHTML='';
   const names=Object.keys(BOARDS).filter(function(n){return (BOARDS[n].kind||'weapon')===kind;}).sort();
   const TITLE={map:'Map',weapon:'Weapon',feat:'Feat board'};
-  if(!names.length){ view.innerHTML='<div class="loading">No records loaded yet.</div>'; return; }
+  if(!names.length){ view.innerHTML='<div class="empty">No records loaded yet.</div>'; return; }
   if(!state.boards[kind] || (BOARDS[state.boards[kind]]||{}).kind!==kind) state.boards[kind]=names[0];
   const ctrl=document.createElement('div'); ctrl.className='bar';
   const f=document.createElement('div'); f.className='f'; f.innerHTML='<label>'+esc(TITLE[kind]||'Board')+'</label>';
@@ -1002,7 +1011,7 @@ function renderBoardCategory(kind){
     const noData=!entries.length && !kills;
     body=html`<div class="bhead">${kind==='weapon'?html`<img class="wimg" src="/assets/weapons/${wkey}.webp" alt="" onerror="this.remove()">`:''}${name}</div>`
       +html`<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">${kind==='feat'?'Feat board':'Weapon board'}</div>`
-      +(noData?html`<div class="loading">No entries yet.</div>`
+      +(noData?html`<div class="empty">No entries yet.</div>`
         :html`${kind==='feat'?'':html`<div class="bsub">Takedowns</div>`}${(kind==='feat'?entries:entries.slice(0,10)).map((e,i)=>_brow(i,e.name,e.score,e.link,''))}${_rateSection('Warlord',warE,B.warlord)}${kills?html`<div class="bsub">Kills</div>${kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Lethality',lethE,B.lethality)}`);
   }
   card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()">${raw(String(body))}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">`;
@@ -1068,11 +1077,11 @@ function loadCard(name){
 function paintCard(){
   const h=document.getElementById('cardholder'); if(!h) return;
   const pc=state.playercard;
-  if(!pc.name){ h.innerHTML='<div class="loading">Pick a player to see their card.</div>'; return; }
+  if(!pc.name){ h.innerHTML='<div class="empty">Pick a player from the list, or type a name above, to see their card.</div>'; return; }
   if(pc.loading){ h.innerHTML=String(html`<div class="loading">Summoning ${pc.name}’s dossier…</div>`); return; }
   if(pc.err){ h.innerHTML=String(html`<div class="loading" style="color:var(--coral)">${pc.err}</div>`); return; }
   const d=pc.data;
-  if(!d||!d.messages||!d.messages.length){ h.innerHTML=String(html`<div class="loading">No card on file for ${pc.name} yet.</div>`); return; }
+  if(!d||!d.messages||!d.messages.length){ h.innerHTML=String(html`<div class="empty">No card on file for ${pc.name} yet.</div>`); return; }
   const card=document.createElement('div'); card.className='card pcard';
   const banner=raw('<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin:16px auto" onerror="this.remove()">');
   card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()"><div class="cardtitle">🗂️ ${d.name}</div>${d.messages.map(function(m,i){
@@ -1104,7 +1113,7 @@ function renderWeapons(){
   ctrl.appendChild(pickSelect('Order',[['asc','Least used first'],['desc','Most used first']],state.weapons.order,function(v){state.weapons.order=v;renderWeapons();}));
   ctrl.appendChild(pickSelect('Archer weapons',[['hide','Hide'],['show','Show']],state.weapons.archer,function(v){state.weapons.archer=v;renderWeapons();}));
   view.appendChild(ctrl);
-  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="loading">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
+  if(!rows.length){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="empty">No runs in view — widen the filters.</div>';view.appendChild(c);return;}
   const ARCHER=new Set(['Bow','War Bow','Crossbow','Siege Crossbow','Javelin','Throwing Axe']);
   const SKIP=new Set(['','Hybrid','Multiple Weapons','Other','None']);
   const runs={}, pl={};
@@ -1165,6 +1174,7 @@ function render(){
 
 // ---- boot ----
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setView(t.dataset.v)));
+document.getElementById('copybtn').addEventListener('click',function(){doCopy(this);});
 fetch('/lab/data?t='+encodeURIComponent(TOKEN))
   .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
   .then(d=>{
