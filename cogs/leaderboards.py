@@ -2118,32 +2118,40 @@ async def build_boards_payload():
         return out
 
     out = {}
+    maps = {}
     for bn, entries in grouped.items():
         # Discord splits a weapon across two threads (Takedowns + "{Weapon} Kills"); the web
-        # unifies them into ONE weapon board, so skip the standalone Kills companion here and
-        # fold its entries into the parent weapon below.
+        # unifies them, so skip the standalone Kills companion (folded into the weapon below).
         if _is_kills_board(bn):
             continue
         kind = 'feat' if bn in _FEAT_BOARD_NAMES else ('map' if ' - ' in bn else 'weapon')
-        rec = {'kind': kind, 'entries': entries[:10],
-               'lethality': None, 'kill_share': None, 'warlord': None, 'kills': None}
         try:
             if kind == 'map':
+                # Fold "{Map} - {Faction}" into ONE map entry with a section per faction.
+                _parts = bn.rsplit(' - ', 1)
+                _mp = _parts[0].strip()
+                _fac = _parts[1].strip() if len(_parts) > 1 else ''
                 lr, wr, _rmin = await compute_board_ratings(bn, True, subs)
-                rec['kill_share'] = _rate(lr)
-                rec['warlord'] = _rate(wr)
-                rec['kills'] = _kills(_map_kills_ranking(bn, subs))
+                maps.setdefault(_mp, {'kind': 'map', 'map': _mp, 'factions': []})['factions'].append({
+                    'faction': _fac, 'entries': entries[:10],
+                    'kills': _kills(_map_kills_ranking(bn, subs)),
+                    'kill_share': _rate(lr), 'warlord': _rate(wr)})
             elif kind == 'weapon':
                 lr, wr, _rmin = await compute_board_ratings(bn, False, subs)
-                rec['lethality'] = _rate(lr)   # unified web board shows BOTH ratings
-                rec['warlord'] = _rate(wr)
-                _kb = grouped.get(_kills_board_name(bn))   # fold in the Kills companion
-                if _kb:
-                    rec['kills'] = [{'name': e['name'], 'kills': e['score'], 'link': e['link'],
-                                     'did': e['did']} for e in _kb[:10]]
+                _kb = grouped.get(_kills_board_name(bn))
+                out[bn] = {
+                    'kind': 'weapon', 'entries': entries[:10],
+                    'lethality': _rate(lr), 'warlord': _rate(wr), 'kill_share': None,
+                    'kills': ([{'name': e['name'], 'kills': e['score'], 'link': e['link'],
+                                'did': e['did']} for e in _kb[:10]] if _kb else None)}
+            else:
+                out[bn] = {'kind': 'feat', 'entries': entries[:10],
+                           'lethality': None, 'kill_share': None, 'warlord': None, 'kills': None}
         except Exception as _e:
             print(f"[BOARDS] section compute for {bn}: {_e}")
-        out[bn] = rec
+    for _mp, _rec in maps.items():
+        _rec['factions'].sort(key=lambda x: x['faction'])
+        out[_mp] = _rec
     return out
 
 

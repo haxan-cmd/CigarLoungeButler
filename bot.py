@@ -208,6 +208,13 @@ async def run_healthcheck():
     app.router.add_get("/lab/data", lab_data)
     app.router.add_get("/hof", hof_page)
     app.router.add_get("/hof/data", hof_data)
+    # Static assets (weapon PNGs, decorative board borders) for the web Boards tab.
+    try:
+        _assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+        if os.path.isdir(_assets_dir):
+            app.router.add_static("/assets", _assets_dir, show_index=False)
+    except Exception as _ae:
+        print(f"[WEB] static assets route failed: {_ae}")
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
