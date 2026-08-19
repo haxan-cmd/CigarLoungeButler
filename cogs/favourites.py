@@ -358,8 +358,8 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     for p, v in map_placements.items():
         combined.setdefault(p, []).extend(v)
 
-    grand_marshal = best_placement_title(combined, min_boards=15, breadth_first=True)
-    weapons_master = best_placement_title(weapon_placements, min_boards=9, breadth_first=True)
+    grand_marshal = best_placement_title(combined, min_boards=30, breadth_first=True)
+    weapons_master = best_placement_title(weapon_placements, min_boards=18, breadth_first=True)
     campaign_master = best_placement_title(map_placements, min_boards=6, breadth_first=True)
 
     # Apex / Frenzied — ROLLING WEEKLY window: highest AVERAGE among a player's
@@ -1321,8 +1321,8 @@ def _render_macro_png(period, changes, hh_counts, hh_total):
 
 
 _ATT_TITLES = [
-    ("Grand Marshal",   "_combined_placements", 15),
-    ("Weapons Master",  "_weapon_placements",    9),
+    ("Grand Marshal",   "_combined_placements", 30),
+    ("Weapons Master",  "_weapon_placements",   18),
     ("Campaign Master", "_map_placements",       6),
 ]
 
@@ -1901,8 +1901,8 @@ class FavouritesCog(commands.Cog):
         await interaction.response.defer()
         stats = await calculate_butler_stats()  # all-time (no window)
         titles = [
-            ("Grand Marshal",   "_combined_placements", 15),
-            ("Weapons Master",  "_weapon_placements",    9),
+            ("Grand Marshal",   "_combined_placements", 30),
+            ("Weapons Master",  "_weapon_placements",   18),
             ("Campaign Master", "_map_placements",       6),
         ]
         out = []

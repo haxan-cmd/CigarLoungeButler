@@ -110,16 +110,23 @@ def test_combined_total_is_weapons_plus_maps(fake_db):
     assert s["_combined_board_total"] == 4
 
 
-def _many_weapon_boards(n, player="Alice"):
-    weapons = ["Messer", "Maul", "Longsword", "Greatsword", "Poleaxe", "Warhammer",
-               "Axe", "Mace", "Spear", "Halberd", "Falchion", "Dagger"]
-    return [lb(weapons[i], player) for i in range(n)]
+_WEAPONS = ["Messer", "Maul", "Longsword", "Greatsword", "Poleaxe", "Warhammer",
+            "Axe", "Mace", "Spear", "Halberd", "Falchion", "Dagger"]
 
 
-def test_weapons_master_needs_nine_boards(fake_db):
-    # min_boards=9 for the Weapons Master title.
-    fake_db.leaderboard_data = _many_weapon_boards(8)
+def _weapon_and_kills(n, player="Alice"):
+    """n weapons, each contributing its TD board AND its Kills board -> 2*n boards."""
+    rows = []
+    for i in range(n):
+        rows.append(lb(_WEAPONS[i], player))
+        rows.append(lb(_WEAPONS[i] + " Kills", player))
+    return rows
+
+
+def test_weapons_master_needs_eighteen_boards(fake_db):
+    # min_boards=18 now (per-weapon TD + Kills boards both count).
+    fake_db.leaderboard_data = _weapon_and_kills(8)   # 16 boards -> not enough
     assert stats(fake_db)["weapons_master"] == "N/A"
 
-    fake_db.leaderboard_data = _many_weapon_boards(9)
+    fake_db.leaderboard_data = _weapon_and_kills(9)   # 18 boards -> qualifies
     assert stats(fake_db)["weapons_master"] == "Alice"
