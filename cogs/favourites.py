@@ -310,11 +310,19 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
     for lb_name, entries in lb_groups.items():
         if lb_name in SKIP_LB:
             continue
+        # Per-weapon Kills companion boards ("{Weapon} Kills") NOW count toward the titles
+        # as their own weapon board (policy change). MAP kills boards ("{Map} - {Faction}
+        # Kills") stay OUT — those are a deprecated/stray board; the live map embed owns map
+        # kills. Strip the " Kills" suffix so the archer exclusion still catches "{Bow} Kills".
         if is_kills_board(lb_name):
-            continue   # a weapon's Highest-Kills companion is NOT a separate weapon board
-        if is_archer_weapon(lb_name):
-            continue   # Archer/ranged weapons don't count toward the melee titles
-                       # (Weapons Master / Grand Marshal) by policy
+            if ' - ' in lb_name:
+                continue   # map kills companion — not a real standalone board
+            _base = lb_name[:-6].strip()
+        else:
+            _base = lb_name
+        if is_archer_weapon(_base):
+            continue   # Archer/ranged weapons (and their Kills boards) don't count toward
+                       # the melee titles (Weapons Master / Grand Marshal) by policy
         is_map = ' - ' in lb_name
         if is_map:
             _map_board_set.add(lb_name)
