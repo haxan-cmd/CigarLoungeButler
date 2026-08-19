@@ -168,7 +168,25 @@ const state={
 };
 
 function val(rec,key){return rec[IDX[key]];}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// ---- tiny auto-escaping HTML templating (no build step) ----
+// html`...` escapes every ${value} by default, so a forgotten esc() can't XSS. Wrap
+// trusted markup in raw() to inject it verbatim (nested html`` results are already
+// Raw, so they compose without double-escaping). Arrays are joined. Assign the result
+// straight to .innerHTML — the setter calls toString().
+class Raw{constructor(s){this.s=s==null?'':String(s);}toString(){return this.s;}}
+function raw(s){return new Raw(s);}
+function _hv(v){
+  if(v==null||v===false||v===true)return '';
+  if(v instanceof Raw)return v.s;
+  if(Array.isArray(v))return v.map(_hv).join('');
+  return esc(v);
+}
+function html(strings,...vals){
+  let out=strings[0];
+  for(let i=0;i<vals.length;i++)out+=_hv(vals[i])+strings[i+1];
+  return new Raw(out);
+}
 function pearson(pairs){
   const n=pairs.length; if(n<3) return null;
   let mx=0,my=0; for(const p of pairs){mx+=p[0];my+=p[1];} mx/=n;my/=n;
@@ -878,25 +896,20 @@ function renderRecords(){
 }
 // ---- boards (Discord-parity weapon/map/feat leaderboards) ----
 function emojiImg(token){
-  if(!token) return '';
+  if(!token) return raw('');
   const m=String(token).match(/^<(a?):(\w+):(\d+)>$/);
-  if(!m) return esc(token);   // a plain unicode emoji
+  if(!m) return raw(esc(token));   // a plain unicode emoji
   const ext=m[1]==='a'?'gif':'png';
-  return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+m[3]+'.'+ext+'" alt="'+esc(m[2])+'" title="'+esc(m[2])+'">';
+  return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.${ext}" alt="${m[2]}" title="${m[2]}">`;
 }
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
 function _brow(i,nm,sc,lk,suffix){
-  return '<div class="brow"><span class="rk">'+(i+1)+'.</span>'
-    +'<span class="bnm"><span class="pl" data-player="'+esc(nm||'?')+'" title="Filter to '+esc(nm||'')+'">'+esc(nm||'?')+'</span></span>'
-    +'<span class="bsc">'+sc+(suffix||'')+'</span>'
-    +(lk?(' <a href="'+esc(lk)+'" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>'):'')+'</div>';
+  return html`<div class="brow"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-player="${nm||'?'}" title="Filter to ${nm||''}">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
 }
 function _rateSection(title,emoji,rows){
   if(!rows||!rows.length) return '';
-  let h='<div class="bsub">'+emoji+' '+esc(title)+'</div>';
-  rows.forEach(function(r,i){ h+=_brow(i,r.name,r.pct,'', '%'); });
-  return h;
+  return html`<div class="bsub">${emoji} ${title}</div>${rows.map((r,i)=>_brow(i,r.name,r.pct,'','%'))}`;
 }
 function renderBoardCategory(kind){
   const view=document.getElementById('view'); view.innerHTML='';
@@ -914,38 +927,24 @@ function renderBoardCategory(kind){
   const lethE=(EMOJI.titles&&EMOJI.titles.Lethality)?emojiImg(EMOJI.titles.Lethality):'🧪';
   const warE=(EMOJI.titles&&EMOJI.titles.Warlord)?emojiImg(EMOJI.titles.Warlord):'🛡️';
   const card=document.createElement('div'); card.className='card';
-  let html='<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()">';
+  let body;
   if(kind==='map'){
-    html+='<div class="bhead">🗺️ '+esc(B.map||name)+'</div>';
-    (B.factions||[]).forEach(function(fs){
+    body=html`<div class="bhead">🗺️ ${B.map||name}</div>${(B.factions||[]).map(function(fs){
       const col=FACTION_THEME[fs.faction]||'#8b8f9a';
       const crest=(EMOJI.factions&&EMOJI.factions[fs.faction])?emojiImg(EMOJI.factions[fs.faction]):'';
-      html+='<div class="facsec" style="border-left-color:'+col+'">'
-        +'<div class="bhead" style="font-size:15px;color:'+col+'">'+crest+' '+esc(fs.faction)+'</div>'
-        +'<div class="bsub">Takedowns</div>';
-      (fs.entries||[]).slice(0,10).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });
-      html+=_rateSection('Warlord',warE,fs.warlord);        // Warlord under Takedowns
-      if(fs.kills&&fs.kills.length){ html+='<div class="bsub">Kills</div>'; fs.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
-      html+=_rateSection('Kill Share',lethE,fs.kill_share); // Kill Share under Kills
-      html+='</div>';
-    });
+      return html`<div class="facsec" style="border-left-color:${col}"><div class="bhead" style="font-size:15px;color:${col}">${crest} ${fs.faction}</div><div class="bsub">Takedowns</div>${(fs.entries||[]).slice(0,10).map((e,i)=>_brow(i,e.name,e.score,e.link,''))}${_rateSection('Warlord',warE,fs.warlord)}${(fs.kills&&fs.kills.length)?html`<div class="bsub">Kills</div>${fs.kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Kill Share',lethE,fs.kill_share)}</div>`;
+    })}`;
   } else {
     const wkey=name.toLowerCase().replace(/[^a-z0-9]/g,'');
-    const wimg=(kind==='weapon')?'<img class="wimg" src="/assets/weapons/'+wkey+'.webp" alt="" onerror="this.remove()">':'';
-    html+='<div class="bhead">'+wimg+esc(name)+'</div>'
-      +'<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">'+(kind==='feat'?'Feat board':'Weapon board')+'</div>';
-    const entries=B.entries||[];
-    if(!entries.length && !(B.kills&&B.kills.length)){ html+='<div class="loading">No entries yet.</div>'; }
-    else {
-      html+=(kind==='feat'?'':'<div class="bsub">Takedowns</div>');
-      (kind==='feat'?entries:entries.slice(0,10)).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });  // feats uncapped, like Discord
-      html+=_rateSection('Warlord',warE,B.warlord);      // Warlord under Takedowns
-      if(B.kills&&B.kills.length){ html+='<div class="bsub">Kills</div>'; B.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
-      html+=_rateSection('Lethality',lethE,B.lethality);  // Lethality under Kills
-    }
+    const entries=B.entries||[], kills=(B.kills&&B.kills.length)?B.kills:null;
+    const noData=!entries.length && !kills;
+    body=html`<div class="bhead">${kind==='weapon'?html`<img class="wimg" src="/assets/weapons/${wkey}.webp" alt="" onerror="this.remove()">`:''}${name}</div>`
+      +html`<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">${kind==='feat'?'Feat board':'Weapon board'}</div>`
+      +(noData?html`<div class="loading">No entries yet.</div>`
+        :html`${kind==='feat'?'':html`<div class="bsub">Takedowns</div>`}${(kind==='feat'?entries:entries.slice(0,10)).map((e,i)=>_brow(i,e.name,e.score,e.link,''))}${_rateSection('Warlord',warE,B.warlord)}${kills?html`<div class="bsub">Kills</div>${kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Lethality',lethE,B.lethality)}`);
   }
-  html+='<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">';
-  card.innerHTML=html; view.appendChild(card);
+  card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()">${raw(String(body))}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">`;
+  view.appendChild(card);
 }
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
