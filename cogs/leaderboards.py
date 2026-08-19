@@ -2145,7 +2145,8 @@ async def build_boards_payload():
                     'kills': ([{'name': e['name'], 'kills': e['score'], 'link': e['link'],
                                 'did': e['did']} for e in _kb[:10]] if _kb else None)}
             else:
-                out[bn] = {'kind': 'feat', 'entries': entries[:10],
+                # Feat boards are UNCAPPED on Discord (every qualifying run stacks) — send all.
+                out[bn] = {'kind': 'feat', 'entries': entries,
                            'lethality': None, 'kill_share': None, 'warlord': None, 'kills': None}
         except Exception as _e:
             print(f"[BOARDS] section compute for {bn}: {_e}")
