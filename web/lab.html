@@ -916,18 +916,23 @@ function renderBoards(){
       +'<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">'+(kind==='feat'?'Feat board':'Weapon board')+'</div>';
   }
   let html=head;
-  if(!entries.length && kind!=='map'){ html+='<div class="loading">No entries yet.</div>'; card.innerHTML=html; view.appendChild(card); return; }
-  html+=(kind==='map'?'<div class="bsub">Takedowns</div>':'');
+  const hasAny=entries.length||(B.kills&&B.kills.length)||(B.lethality&&B.lethality.length)||(B.kill_share&&B.kill_share.length)||(B.warlord&&B.warlord.length);
+  if(!hasAny){ html+='<div class="loading">No entries yet.</div>'; card.innerHTML=html; view.appendChild(card); return; }
+  // Takedowns (maps + weapons show the header; feat boards are a single list)
+  html+=(kind==='feat'?'':'<div class="bsub">Takedowns</div>');
   entries.slice(0,10).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });
+  // Kills (maps and weapons — the folded companion)
+  if(B.kills&&B.kills.length){ html+='<div class="bsub">Kills</div>'; B.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
+  // Ratings
   if(kind==='map'){
-    if(B.kills&&B.kills.length){ html+='<div class="bsub">Kills</div>'; B.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
     html+=_rateSection('Kill Share',lethE,B.kill_share);
     html+=_rateSection('Warlord',warE,B.warlord);
-  } else if(kind==='weapon'){
+  } else {
     html+=_rateSection('Lethality',lethE,B.lethality);
     html+=_rateSection('Warlord',warE,B.warlord);
   }
-  html+='<div style="font-size:11px;color:var(--mut);margin-top:10px">Kill Share &amp; Warlord: best 5-game average, never drops — mirrors the Discord board.</div>';
+  if((B.kill_share&&B.kill_share.length)||(B.lethality&&B.lethality.length)||(B.warlord&&B.warlord.length))
+    html+='<div style="font-size:11px;color:var(--mut);margin-top:10px">Ratings: best 5-game average, never drops — mirrors the Discord board.</div>';
   card.innerHTML=html; view.appendChild(card);
 }
 function setView(v){state.view=v;

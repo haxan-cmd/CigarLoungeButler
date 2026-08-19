@@ -2088,7 +2088,7 @@ async def build_boards_payload():
     for r in ld:
         if len(r) < 4:
             continue
-        bn = (r[0] or '').strip()
+        bn = (r[0] or '').strip().strip('"').strip()   # tolerate stray quoted board names
         if not bn:
             continue
         try:
@@ -2119,6 +2119,11 @@ async def build_boards_payload():
 
     out = {}
     for bn, entries in grouped.items():
+        # Discord splits a weapon across two threads (Takedowns + "{Weapon} Kills"); the web
+        # unifies them into ONE weapon board, so skip the standalone Kills companion here and
+        # fold its entries into the parent weapon below.
+        if _is_kills_board(bn):
+            continue
         kind = 'feat' if bn in _FEAT_BOARD_NAMES else ('map' if ' - ' in bn else 'weapon')
         rec = {'kind': kind, 'entries': entries[:10],
                'lethality': None, 'kill_share': None, 'warlord': None, 'kills': None}
@@ -2129,15 +2134,13 @@ async def build_boards_payload():
                 rec['warlord'] = _rate(wr)
                 rec['kills'] = _kills(_map_kills_ranking(bn, subs))
             elif kind == 'weapon':
-                src = bn[:-6] if _is_kills_board(bn) else bn
-                lr, wr, _rmin = await compute_board_ratings(src, False, subs)
-                if _is_kills_board(bn):
-                    rec['lethality'] = _rate(lr)          # Kills board carries Lethality
-                elif _kills_board_name(bn) in names:
-                    rec['warlord'] = _rate(wr)            # TD board keeps Warlord only
-                else:
-                    rec['lethality'] = _rate(lr)          # no Kills companion -> both
-                    rec['warlord'] = _rate(wr)
+                lr, wr, _rmin = await compute_board_ratings(bn, False, subs)
+                rec['lethality'] = _rate(lr)   # unified web board shows BOTH ratings
+                rec['warlord'] = _rate(wr)
+                _kb = grouped.get(_kills_board_name(bn))   # fold in the Kills companion
+                if _kb:
+                    rec['kills'] = [{'name': e['name'], 'kills': e['score'], 'link': e['link'],
+                                     'did': e['did']} for e in _kb[:10]]
         except Exception as _e:
             print(f"[BOARDS] section compute for {bn}: {_e}")
         out[bn] = rec
