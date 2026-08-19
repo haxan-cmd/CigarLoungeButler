@@ -959,6 +959,20 @@ function renderBoardCategory(kind){
   view.appendChild(card);
 }
 // ---- player cards (mirror the Discord registry card from its markdown) ----
+function _unesc(s){return String(s).replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");}
+// A card link whose text names one of OUR boards -> keep it on the site (jump to that
+// board tab). Everything else (individual games) keeps its Discord jump link.
+function _boardFromText(t){
+  if(BOARDS[t]) return {kind:(BOARDS[t].kind||'weapon'),key:t};
+  if(t.indexOf(' - ')>=0){ const mp=t.split(' - ')[0].trim(); if(BOARDS[mp]&&(BOARDS[mp].kind==='map')) return {kind:'map',key:mp}; }
+  const wk=t.replace(/ Kills$/,''); if(wk!==t && BOARDS[wk]) return {kind:'weapon',key:wk};
+  return null;
+}
+function navBoard(t){
+  const bd=_boardFromText(t); if(!bd) return;
+  state.boards[bd.kind]=bd.key;
+  setView({map:'maps',weapon:'weaponboards',feat:'feats'}[bd.kind]);
+}
 function _mdInline(s){
   s=esc(s).replace(/&lt;(a?):(\w+):(\d+)&gt;/g,function(_,a,nm,id){
     return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.png" alt="" title="'+nm+'">';});
@@ -968,7 +982,11 @@ function _mdInline(s){
     const pct=total?Math.round(filled/total*100):0;
     return '<span class="meter" title="'+filled+'/'+total+'"><span class="meterfill" style="width:'+pct+'%"></span></span>';
   });
-  s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" style="color:var(--blue)">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,function(_,t,u){
+    const bd=_boardFromText(_unesc(t));
+    if(bd) return '<a href="#" data-board="'+esc(_unesc(t))+'" style="color:var(--blue)">'+t+'</a>';  // on-site board
+    return '<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue)">'+t+'</a>';       // individual game -> Discord
+  });
   s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
   s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
   s=s.replace(/`([^`]+)`/g,'<code style="background:var(--panel2);padding:0 4px;border-radius:4px;font-size:12px">$1</code>');
@@ -1102,8 +1120,10 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
     buildFilters();
     // Delegated: click any player name (data-player) to filter the whole Lab to them.
     document.getElementById('view').addEventListener('click',function(e){
-      const el=e.target.closest('[data-player]'); if(!el) return;
-      e.preventDefault(); state.filters.player=el.getAttribute('data-player')||''; buildFilters(); render();
+      const bel=e.target.closest('[data-board]');
+      if(bel){ e.preventDefault(); navBoard(bel.getAttribute('data-board')||''); return; }
+      const el=e.target.closest('[data-player]');
+      if(el){ e.preventDefault(); state.filters.player=el.getAttribute('data-player')||''; buildFilters(); render(); }
     });
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
     render();
