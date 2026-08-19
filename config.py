@@ -116,7 +116,7 @@ LOUNGER_ROLE_ID         = 1433215577173786758
 ADMIN_CHANNEL_ID        = 1350112524204245002
 # Public channel where /suggest_bounty posts community bounty ideas (upvote + mod actions).
 # Set to your #bounty-suggestions channel id; left at 0 the command tells mods to configure it.
-BOUNTY_SUGGESTIONS_CHANNEL_ID = 0
+BOUNTY_SUGGESTIONS_CHANNEL_ID = 1539757951248629880
 # Optional static invite the /join flow falls back to if the bot can't mint one.
 DISCORD_INVITE_URL      = ""
 
