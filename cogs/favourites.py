@@ -979,6 +979,8 @@ async def _season_hof_dict(season, all_time_stats):
             "category": cat,
             "season": ({"name": s_nm, "value": s_val} if s_nm else None),
             "all_time": ({"name": a_nm, "value": a_val} if a_nm else None),
+            # Full season top-5 for this category (web renders it for the live season).
+            "top": [{"name": nm, "value": val} for nm, val in _cat_pairs(s_stats.get(key), plain)],
         })
     return out
 
