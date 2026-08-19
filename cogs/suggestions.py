@@ -81,9 +81,113 @@ class SuggestionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._cooldown = {}  # discord_id -> last-suggest timestamp
+        self._board_dirty = False
 
     async def cog_load(self):
         self.bot.add_view(SuggestionView(self.bot))
+        self._board_loop.start()
+
+    async def cog_unload(self):
+        self._board_loop.cancel()
+
+    # ---- pinned "Top Suggestions" leaderboard ----
+    async def _votes(self, channel, message_id):
+        """Live 👍 count on a suggestion's card, excluding the bot's seed reaction."""
+        if not message_id:
+            return 0
+        try:
+            m = await channel.fetch_message(int(message_id))
+            for r in m.reactions:
+                if str(r.emoji) == _UPVOTE:
+                    return max(0, r.count - 1)
+        except Exception:
+            pass
+        return 0
+
+    async def refresh_suggestion_board(self, guild):
+        ch_id = getattr(config, "BOUNTY_SUGGESTIONS_CHANNEL_ID", 0)
+        channel = guild.get_channel(ch_id) if ch_id else None
+        if channel is None:
+            return
+        rows = await _db.list_bounty_suggestions(statuses=["open", "shortlisted"], limit=25)
+        scored = []
+        for s in rows:
+            scored.append((await self._votes(channel, s.get("message_id")), s))
+        scored.sort(key=lambda x: (-x[0], -x[1]["id"]))
+        medals = ["\U0001f947", "\U0001f948", "\U0001f949"]
+        lines = []
+        for i, (votes, s) in enumerate(scored[:10]):
+            rank = medals[i] if i < 3 else f"`{i+1}.`"
+            star = " ⭐" if s["status"] == "shortlisted" else ""
+            txt = (s["text"] or "").strip()
+            snippet = (txt[:80] + "…") if len(txt) > 80 else txt
+            link = (f" [·](https://discord.com/channels/{guild.id}/{channel.id}/{s['message_id']})"
+                    if s.get("message_id") else "")
+            lines.append(f"{rank} 👍 **{votes}** — {snippet} *(by {s.get('name') or '—'})*{star}{link}")
+        desc = "\n".join(lines) if lines else "No suggestions yet — use `/suggest_bounty` to add one."
+        emb = discord.Embed(title="\U0001f3c6 Top Bounty Suggestions", description=desc, colour=0xe0a84c)
+        emb.set_footer(text="👍 to upvote · /suggest_bounty to add yours")
+        ptr = await _db.get_suggestion_board()
+        msg = None
+        if ptr and ptr[1]:
+            try:
+                msg = await channel.fetch_message(int(ptr[1]))
+            except Exception:
+                msg = None
+        if msg:
+            try:
+                await msg.edit(embed=emb)
+                return
+            except Exception:
+                msg = None
+        # (re)create + pin
+        msg = await channel.send(embed=emb)
+        try:
+            await msg.pin()
+        except Exception as e:
+            print(f"[SUGGEST] board pin failed: {e}")
+        await _db.set_suggestion_board(channel.id, msg.id)
+
+    @tasks.loop(seconds=20)
+    async def _board_loop(self):
+        if not self._board_dirty:
+            return
+        self._board_dirty = False
+        guild = self.bot.get_guild(config.GUILD_ID)
+        if guild:
+            try:
+                await self.refresh_suggestion_board(guild)
+            except Exception as e:
+                print(f"[SUGGEST] board refresh failed: {e}")
+
+    @_board_loop.before_loop
+    async def _board_before(self):
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        if str(payload.emoji) == _UPVOTE and payload.channel_id == getattr(config, "BOUNTY_SUGGESTIONS_CHANNEL_ID", 0):
+            self._board_dirty = True
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload):
+        if str(payload.emoji) == _UPVOTE and payload.channel_id == getattr(config, "BOUNTY_SUGGESTIONS_CHANNEL_ID", 0):
+            self._board_dirty = True
+
+    @app_commands.command(name="setup_suggestion_board", description="Post & pin the Top Suggestions leaderboard (mod only).")
+    async def setup_suggestion_board(self, interaction: discord.Interaction):
+        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not getattr(config, "BOUNTY_SUGGESTIONS_CHANNEL_ID", 0):
+            await interaction.followup.send("Set `BOUNTY_SUGGESTIONS_CHANNEL_ID` first.", ephemeral=True)
+            return
+        try:
+            await self.refresh_suggestion_board(interaction.guild)
+            await interaction.followup.send("✅ Suggestions leaderboard posted and pinned.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     @app_commands.command(name="suggest_bounty", description="Suggest a bounty idea for the community to upvote.")
     @app_commands.describe(idea="Your bounty idea — weapons, theme, a twist. One or two sentences.")
@@ -132,6 +236,7 @@ class SuggestionsCog(commands.Cog):
             await interaction.followup.send(f"Couldn't post it: {e}", ephemeral=True)
             return
         self._cooldown[uid] = now
+        self._board_dirty = True
         await interaction.followup.send(f"Filed it in {channel.mention} — the community can upvote it now. \U0001f3af", ephemeral=True)
 
     @app_commands.command(name="suggestions", description="List open bounty suggestions ranked by upvotes (mod only).")
