@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import hmac
 import json
 import traceback
@@ -9,6 +10,28 @@ import discord
 from discord.ext import commands
 
 import config
+
+# --- public-facing ID anonymizer ---------------------------------------------
+# The public web payloads (Stats Lab, player cards) must NEVER leak a raw Discord
+# snowflake — that would publish a name->Discord-ID map to the open web. The client
+# only needs a STABLE per-player key to group a player's runs, so we emit a salted
+# hash instead of the real id. The salt makes the public value un-linkable to the
+# real snowflake; set LAB_ID_SALT in the environment to rotate it.
+_ID_SALT = os.environ.get('LAB_ID_SALT', 'cigar-lounge-public-v1').encode()
+
+def _anon_id(did):
+    s = (str(did) if did is not None else '').strip()
+    if not s:
+        return ''
+    return 'p' + hashlib.blake2s(s.encode(), key=_ID_SALT, digest_size=6).hexdigest()
+
+def _scrub_ids(obj):
+    """Recursively replace any 'did' value in a nested dict/list with its anon hash."""
+    if isinstance(obj, dict):
+        return {k: (_anon_id(v) if k == 'did' else _scrub_ids(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_ids(x) for x in obj]
+    return obj
 
 # Graceful-shutdown state lives in utils.helpers. Don't move it here: cogs
 # can't `import bot` (this file runs as __main__, so importing it re-executes
@@ -142,7 +165,7 @@ async def run_healthcheck():
                 except (ValueError, TypeError):
                     _mk = 0
                 if _mk > 0 and (_d or _n):
-                    _pmarks.append([_d, _n, _mk])
+                    _pmarks.append([_anon_id(_d), _n, _mk])
             _name2did = await get_name_to_id_map()
         except Exception as _ce:
             print(f"[LAB] canonical-name map failed: {_ce}")
@@ -156,7 +179,8 @@ async def run_healthcheck():
                 _rec['name'] = _canon
                 if _d:
                     _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
-        data = [[_rec.get(f) for f in fields] for _rec in recs]
+        # Emit the anon hash for did (never the raw snowflake); every other field verbatim.
+        data = [[(_anon_id(_rec.get(f)) if f == 'did' else _rec.get(f)) for f in fields] for _rec in recs]
         # Leaderboard boards (weapon/map/feat) for the web Boards tab — a 1:1 mirror of the
         # Discord boards: stored Takedowns entries + the same live Kills / Lethality /
         # Warlord sections, computed by the board cog's own functions.
@@ -175,7 +199,7 @@ async def run_healthcheck():
             _emoji = {}
         body = json.dumps({"fields": fields, "rows": data, "player_marks": _pmarks,
                            "stat_labels": {k: v[1] for k, v in _SE.STAT_EXTRACTORS.items()},
-                           "boards": _boards, "emoji": _emoji},
+                           "boards": _scrub_ids(_boards), "emoji": _emoji},
                           default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
@@ -221,12 +245,20 @@ async def run_healthcheck():
             n2i = await get_name_to_id_map()
             did = n2i.get(p.lower(), "")
             name = p
-            try:
-                for _pr in await get_all_players():
-                    if _pr and (_pr[0] or "").strip() == did and (_pr[1] or "").strip():
-                        name = (_pr[1] or "").strip(); break
-            except Exception:
-                pass
+            # Known-player set from data we already have to hand. Fast-404 an unknown
+            # name BEFORE the expensive registry build, so an attacker can't bust the
+            # per-name cache with junk ?p= values and force a build on every request.
+            known = set(n2i.keys())
+            for _pr in await get_all_players():
+                if not _pr or len(_pr) < 2:
+                    continue
+                _pn = (_pr[1] or "").strip()
+                if _pn:
+                    known.add(_pn.lower())
+                if (_pr[0] or "").strip() == did and did and _pn:
+                    name = _pn
+            if p.lower() not in known:
+                return web.Response(status=404, text="no such player")
             guild = bot.get_guild(config.GUILD_ID)
             msgs = await build_registry_messages(name, did, guild=guild)
         except RuntimeError:
@@ -234,7 +266,8 @@ async def run_healthcheck():
         except Exception as _e:
             print(f"[CARD] web card error for {p!r}: {_e}")
             return web.Response(status=500, text="card unavailable")
-        body = json.dumps({"name": name, "did": did, "messages": msgs},
+        # did is anonymized (hash) — the public card never carries a raw snowflake.
+        body = json.dumps({"name": name, "did": _anon_id(did), "messages": msgs},
                           default=str, ensure_ascii=False)
         if len(_card_cache) > 200:
             _card_cache.clear()
@@ -252,7 +285,54 @@ async def run_healthcheck():
         return web.Response(text=html, content_type="text/html",
                             headers={"Cache-Control": "no-cache, must-revalidate"})
 
+    _bounty_cache = {"body": None, "ts": 0.0}
+
+    async def bounty_data(request):
+        # Slim public snapshot of the active monthly bounty for the landing page.
+        # Completion names are already public in Discord; we return just a count.
+        # Cached ~60s so the landing page can't hammer the DB.
+        import time as _t
+        now = _t.time()
+        if _bounty_cache["body"] is not None and (now - _bounty_cache["ts"]) < 60:
+            return web.Response(text=_bounty_cache["body"], content_type="application/json")
+        try:
+            from cogs.bounty import get_active_bounty
+            b = await get_active_bounty()
+        except RuntimeError:
+            return web.Response(status=503, text="database unavailable")
+        except Exception as _e:
+            print(f"[BOUNTY] web data error: {_e}")
+            return web.Response(status=500, text="bounty unavailable")
+        if not b:
+            payload = {"active": False}
+        else:
+            _w = b.get("weapons") or {}
+            payload = {
+                "active": True,
+                "title": b.get("title") or "",
+                "theme_emoji": b.get("theme_emoji") or "",
+                # Just the objective target per weapon — no internal tracking fields.
+                "weapons": {k: (v.get("total") if isinstance(v, dict) else v) for k, v in _w.items()},
+                "special_challenge": b.get("special_challenge") or "",
+                "completions": len(b.get("completions") or []),
+                "start_date": b.get("start_date"),
+            }
+        body = json.dumps(payload, default=str, ensure_ascii=False)
+        _bounty_cache["body"], _bounty_cache["ts"] = body, now
+        return web.Response(text=body, content_type="application/json")
+
+    @web.middleware
+    async def _security_headers(request, handler):
+        # Baseline hardening on every response. (No CSP: the pages use inline scripts,
+        # so a strict policy would need nonces for little gain on a read-only stats site.)
+        resp = await handler(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        return resp
+
     app = _web_app
+    app.middlewares.append(_security_headers)
     app.router.add_get("/", handle)
     app.router.add_post("/kofi", kofi_webhook)
     app.router.add_get("/export/submissions", export_submissions)
@@ -261,6 +341,7 @@ async def run_healthcheck():
     app.router.add_get("/hof", hof_page)
     app.router.add_get("/hof/data", hof_data)
     app.router.add_get("/lab/card", card_data)
+    app.router.add_get("/bounty/data", bounty_data)
     # Static assets (weapon PNGs, decorative board borders) for the web Boards tab.
     try:
         _assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")

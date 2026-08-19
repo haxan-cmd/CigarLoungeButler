@@ -81,12 +81,41 @@ a{color:inherit}
 .fchip.m{color:var(--mason);border-color:var(--mason)}
 .fchip.t{color:var(--tenosia);border-color:var(--tenosia)}
 
+.panel{margin-top:22px;background:var(--panel);border:1px solid var(--grid);border-radius:16px;padding:22px 24px}
+.panel h3{margin:0 0 14px;font-size:16px;color:var(--gold)}
+.ce{height:1.15em;width:auto;vertical-align:-0.18em;margin:0 1px}
+
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.step{background:var(--panel2);border:1px solid var(--grid);border-radius:12px;padding:16px}
+.step .num{width:26px;height:26px;border-radius:8px;background:var(--gold);color:#241c08;font-weight:800;
+  display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:10px}
+.step h4{margin:0 0 4px;font-size:14.5px}
+.step p{margin:0;color:var(--mut);font-size:13px;line-height:1.5}
+
+/* current bounty */
+.bounty .btitle{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+.bounty .bsub{color:var(--mut);font-size:12.5px;margin-top:2px}
+.objs{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.obj{background:var(--panel2);border:1px solid var(--grid);border-radius:20px;padding:6px 12px;font-size:13px}
+.obj b{color:var(--gold)}
+.bmeta{color:#cbced6;font-size:13px;margin-top:14px}
+.bmeta .chal{color:var(--gold);font-weight:600}
+
+/* monthly cycle & titles */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.two h4{margin:0 0 6px;color:var(--ink);font-size:14.5px}
+.two p{margin:0 0 8px;color:#cbced6;font-size:13.5px;line-height:1.55}
+.two ul{margin:0;padding-left:18px;color:#cbced6;font-size:13.5px;line-height:1.6}
+
 .foot{margin-top:34px;text-align:center;color:var(--mut);font-size:12.5px}
 
 @media(max-width:680px){
   .cards{grid-template-columns:1fr}
   .hero{padding:32px 22px 28px}
   .hero h1{font-size:27px}
+  .steps{grid-template-columns:1fr}
+  .two{grid-template-columns:1fr;gap:16px}
 }
 </style>
 </head>
@@ -131,6 +160,63 @@ a{color:inherit}
     </a>
   </div>
 
+  <section class="panel bounty" id="bountyPanel" hidden>
+    <h3>🎯 This Month's Bounty</h3>
+    <div class="btitle" id="bTitle"></div>
+    <div class="bsub" id="bSub"></div>
+    <div class="objs" id="bObjs"></div>
+    <div class="bmeta" id="bMeta"></div>
+  </section>
+
+  <section class="panel">
+    <h3>How it works</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h4>Post your scorecard</h4>
+        <p>Finish a match and drop your end-of-game screenshot in the submissions channel.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h4>The Butler reads it</h4>
+        <p>Vision AI pulls your weapon, takedowns, kills and lobby, confirms the details, and logs the run.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h4>Climb the boards</h4>
+        <p>Every run feeds the weapon &amp; map records, your registry card, monthly bounties and season titles.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>The monthly cycle &amp; titles</h3>
+    <div class="two">
+      <div>
+        <h4>🗓️ Each month</h4>
+        <p>A new <b>bounty</b> and <b>season</b> open together and run about a month. Clear the bounty's weapon
+          objectives to climb your player title. When the month ends, the season champions are enshrined in the
+          Hall of Fame and the season titles reset — weapon ranks, marks and all-time titles carry over forever.</p>
+        <h4>Player ranks</h4>
+        <p>Earned by completing bounties: Lounger → Insider → Regular → Made Man → High Roller → Kingpin → Legend.</p>
+      </div>
+      <div>
+        <h4>🏆 All-time titles</h4>
+        <ul>
+          <li><b>Grand Marshal</b> — most boards held overall</li>
+          <li><b>Weapons Master</b> — most weapon boards</li>
+          <li><b>Campaign Master</b> — most map boards</li>
+        </ul>
+        <h4 style="margin-top:12px">Season titles (reset each month)</h4>
+        <ul>
+          <li><b>Apex</b> · best average kills</li>
+          <li><b>Frenzied</b> · best average takedowns</li>
+          <li><b>Most Dominant</b> · best blend of Kill Share &amp; Warlord</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
   <section class="about">
     <h3>What is this?</h3>
     <p>The Cigar Lounge is a Discord community for competitive Chivalry 2. Every scorecard players post is parsed
@@ -147,47 +233,56 @@ a{color:inherit}
 </div>
 
 <script>
-// Best-effort live headline stats, drawn from the same public feeds the Lab and
-// Hall of Fame use. Any fetch/shape failure just leaves that stat (or the whole
-// strip) hidden — the page is fully useful without it.
-(async function(){
+// Live headline stats + this month's bounty, from the same public feeds the Lab and
+// Hall of Fame use. Any fetch/shape failure just hides that piece; the page is fully
+// useful without it.
+(function(){
   const $ = id => document.getElementById(id);
-  let shown = false;
+  const jget = u => fetch(u,{headers:{'Accept':'application/json'}}).then(r=>r.ok?r.json():null).catch(()=>null);
+  const hide = el => { if(el && el.parentElement) el.parentElement.style.display='none'; };
+  const noTags = s => String(s==null?'':s).replace(/[<>]/g,'');           // strip any raw HTML tags
+  const emo = s => String(s==null?'':s).replace(/<a?:(\w+):(\d+)>/g,       // Discord emoji token -> img
+    (_,nm,id)=>'<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.png" alt="'+nm+'">');
 
-  // Runs + distinct players from the Lab feed: {fields:[...], rows:[[...]]}.
-  try{
-    const r = await fetch('/lab/data', {headers:{'Accept':'application/json'}});
-    if(r.ok){
-      const d = await r.json();
-      if(Array.isArray(d.rows)){
-        $('s-runs').textContent = d.rows.length.toLocaleString(); shown = true;
-        const ni = Array.isArray(d.fields) ? d.fields.indexOf('name') : -1;
-        if(ni >= 0){
-          const names = new Set();
-          for(const row of d.rows){
-            const nm = row[ni];
-            if(nm) names.add(String(nm).toLowerCase().trim());
-          }
-          if(names.size){ $('s-players').textContent = names.size.toLocaleString(); }
-          else { $('s-players').parentElement.style.display='none'; }
-        } else { $('s-players').parentElement.style.display='none'; }
-      }
-    }
-  }catch(e){ /* leave those two hidden */ }
+  // Headline strip: fetch both feeds in parallel, fill all three, then reveal once —
+  // so the season card never lingers on its "—" while a second request is in flight.
+  Promise.all([jget('/lab/data'), jget('/hof/data')]).then(([lab,hof])=>{
+    let shown=false;
+    if(lab && Array.isArray(lab.rows)){
+      $('s-runs').textContent = lab.rows.length.toLocaleString(); shown=true;
+      const ni = Array.isArray(lab.fields) ? lab.fields.indexOf('name') : -1;
+      if(ni>=0){
+        const names=new Set();
+        for(const row of lab.rows){ const nm=row[ni]; if(nm) names.add(String(nm).toLowerCase().trim()); }
+        if(names.size){ $('s-players').textContent=names.size.toLocaleString(); } else hide($('s-players'));
+      } else hide($('s-players'));
+    } else { hide($('s-runs')); hide($('s-players')); }
 
-  // Current season = newest entry in the Hall of Fame feed (seasons are newest-first).
-  try{
-    const r = await fetch('/hof/data', {headers:{'Accept':'application/json'}});
-    if(r.ok){
-      const d = await r.json();
-      const s0 = Array.isArray(d.seasons) && d.seasons.length ? d.seasons[0] : null;
-      const label = s0 && (s0.label || s0.name || (s0.id!=null ? ('Season '+s0.id) : null));
-      if(label){ $('s-season').textContent = label; shown = true; }
-      else { $('s-season').parentElement.style.display='none'; }
-    } else { $('s-season').parentElement.style.display='none'; }
-  }catch(e){ $('s-season').parentElement.style.display='none'; }
+    const s0 = hof && Array.isArray(hof.seasons) && hof.seasons.length ? hof.seasons[0] : null;
+    const label = s0 && (s0.label || s0.name || (s0.id!=null?('Season '+s0.id):null));
+    if(label){ $('s-season').textContent=label; shown=true; } else hide($('s-season'));
 
-  if(shown) $('strip').hidden = false;
+    if(shown) $('strip').hidden=false;
+  });
+
+  // This month's bounty card.
+  jget('/bounty/data').then(b=>{
+    if(!b || !b.active) return;
+    $('bTitle').innerHTML = emo(String(b.theme_emoji||'')) + ' ' + noTags(b.title||'Active Bounty');
+    const objs=$('bObjs'); objs.innerHTML='';
+    const w=b.weapons||{};
+    Object.keys(w).forEach(k=>{
+      const t = (w[k] && typeof w[k]==='object') ? w[k].total : w[k];
+      const el=document.createElement('span'); el.className='obj';
+      el.innerHTML = noTags(k) + (t!=null?' <b>×'+noTags(t)+'</b>':'');
+      objs.appendChild(el);
+    });
+    const bits=[];
+    if(b.special_challenge) bits.push('<span class="chal">Bonus:</span> '+noTags(b.special_challenge));
+    if(typeof b.completions==='number') bits.push(b.completions+' hunter'+(b.completions===1?'':'s')+' finished');
+    $('bMeta').innerHTML = bits.join(' &nbsp;·&nbsp; ');
+    $('bountyPanel').hidden=false;
+  });
 })();
 </script>
 </body>

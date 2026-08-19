@@ -1048,7 +1048,8 @@ function _mdInline(s){
   s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,function(_,t,u){
     const bd=_boardFromText(_unesc(t));
     if(bd) return '<a href="#" data-board="'+esc(_unesc(t))+'" style="color:var(--blue)">'+t+'</a>';  // on-site board
-    return '<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue)">'+t+'</a>';       // individual game -> Discord
+    const safe=/^https?:\/\//i.test(u)?u:'#';  // allowlist http(s) only; block javascript:/data: etc.
+    return '<a href="'+safe+'" target="_blank" rel="noopener" style="color:var(--blue)">'+t+'</a>';    // individual game -> Discord
   });
   s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
   s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
