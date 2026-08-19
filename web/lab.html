@@ -33,6 +33,7 @@ select:focus,input:focus{outline:1px solid var(--gold)}
 .tabs{display:inline-flex;border:1px solid var(--grid);border-radius:10px;overflow:hidden;margin-bottom:14px}
 .tab{padding:8px 16px;font-size:13px;cursor:pointer;color:var(--mut);background:var(--panel);border:none;font-family:inherit}
 .tab.on{background:var(--gold);color:#241c08;font-weight:700}
+.tabgap{width:1px;background:var(--grid);align-self:stretch;margin:0 5px}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -115,16 +116,17 @@ canvas{display:block;width:100%;border-radius:8px}
   <div class="bar" id="filters"></div>
 
   <div class="tabs" id="tabs">
+    <button class="tab" data-v="boards">📋 Boards</button>
+    <button class="tab" data-v="weapons">🗡️ Weapons</button>
+    <button class="tab" data-v="ranking">🏅 Rankings</button>
+    <button class="tab" data-v="records">🏆 Records</button>
+    <span class="tabgap"></span>
     <button class="tab" data-v="matrix">🔲 Matrix</button>
     <button class="tab" data-v="scatter">📊 Scatter</button>
     <button class="tab" data-v="compare">⚔️ Compare</button>
     <button class="tab" data-v="trends">📈 Trends</button>
     <button class="tab" data-v="galaxy">🌌 Galaxy</button>
-  <button class="tab" data-v="activity">🕒 Activity</button>
-  <button class="tab" data-v="ranking">🏅 Rankings</button>
-  <button class="tab" data-v="records">🏆 Records</button>
-  <button class="tab" data-v="boards">📋 Boards</button>
-  <button class="tab" data-v="weapons">🗡️ Weapons</button>
+    <button class="tab" data-v="activity">🕒 Activity</button>
   </div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
@@ -149,7 +151,7 @@ const TOKEN=qp.get('t')||'';
 let FIELDS=[], IDX={}, DATA=[], PMARKS=[], BOARDS={}, EMOJI={};
 let matrixStats=DEFAULT_MATRIX.slice();
 const state={
-  view:qp.get('view')||'matrix',
+  view:qp.get('view')||'boards',
   x:qp.get('x')||'td', y:qp.get('y')||'kills', colour:qp.get('colour')||'',
   group:'grip', compareStats:['kills','td','deaths','kd','kill_share','warlord'], compareMin:3, compareScale:'auto',
   trend:{stat:'kill_share',period:'week',split:''},
@@ -920,9 +922,9 @@ function renderBoards(){
         +'<div class="bhead" style="font-size:15px;color:'+col+'">'+crest+' '+esc(fs.faction)+'</div>'
         +'<div class="bsub">Takedowns</div>';
       (fs.entries||[]).slice(0,10).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });
+      html+=_rateSection('Warlord',warE,fs.warlord);        // Warlord under Takedowns
       if(fs.kills&&fs.kills.length){ html+='<div class="bsub">Kills</div>'; fs.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
-      html+=_rateSection('Kill Share',lethE,fs.kill_share);
-      html+=_rateSection('Warlord',warE,fs.warlord);
+      html+=_rateSection('Kill Share',lethE,fs.kill_share); // Kill Share under Kills
       html+='</div>';
     });
   } else {
@@ -935,9 +937,9 @@ function renderBoards(){
     else {
       html+=(kind==='feat'?'':'<div class="bsub">Takedowns</div>');
       entries.slice(0,10).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });
+      html+=_rateSection('Warlord',warE,B.warlord);      // Warlord under Takedowns
       if(B.kills&&B.kills.length){ html+='<div class="bsub">Kills</div>'; B.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
-      html+=_rateSection('Lethality',lethE,B.lethality);
-      html+=_rateSection('Warlord',warE,B.warlord);
+      html+=_rateSection('Lethality',lethE,B.lethality);  // Lethality under Kills
     }
   }
   html+='<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">';
