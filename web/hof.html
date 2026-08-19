@@ -63,13 +63,26 @@ a{color:var(--gold)}
 .clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
 .clnav a:hover{color:var(--ink)}
 .clnav a.on{background:var(--gold);color:#241c08}
+
+/* ---- interaction & polish pass ---- */
+html{scroll-behavior:smooth}
+::selection{background:var(--gold);color:#241c08}
+*{-webkit-tap-highlight-color:transparent}
+.clnav a{transition:background .14s ease,color .14s ease,transform .08s ease}
+.clnav a:active{transform:translateY(1px)}
+.clnav a:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.clnav{position:sticky;top:0;z-index:50;background:#22242aef;backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);border-bottom:1px solid var(--grid);padding-top:12px;padding-bottom:10px}
+.loading{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
 <nav class="clnav"><a href="/" class="brand">Cigar Lounge</a><a href="/hof" class="on">Hall of Fame</a><a href="/lab">Stats Lab</a></nav>
 <div class="wrap">
   <div class="head">
-    <h1>🏆 Cigar Lounge — Hall of Fame</h1>
+    <h1>🏆 Hall of Fame</h1>
     <span class="sub" id="sub">Champions of every season</span>
   </div>
   <div class="rule"></div>

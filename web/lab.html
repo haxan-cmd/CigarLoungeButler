@@ -128,13 +128,43 @@ canvas{display:block;width:100%;border-radius:8px}
 .clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
 .clnav a:hover{color:var(--ink)}
 .clnav a.on{background:var(--gold);color:#241c08}
+
+/* ---- interaction & polish pass ---- */
+html{scroll-behavior:smooth}
+::selection{background:var(--gold);color:#241c08}
+*{-webkit-tap-highlight-color:transparent}
+/* smooth state changes on interactive controls */
+.tab,.btn,.chip,.clnav a,.pl,.cbitem,select,input{
+  transition:background .14s ease,color .14s ease,border-color .14s ease,transform .08s ease,box-shadow .14s ease}
+.tab:active,.btn:active,.chip:active,.clnav a:active{transform:translateY(1px)}
+/* keyboard focus rings (mouse clicks stay clean) */
+.tab:focus-visible,.btn:focus-visible,.chip:focus-visible,.clnav a:focus-visible{
+  outline:2px solid var(--gold);outline-offset:2px}
+select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px #e0a84c33}
+/* sticky top nav so brand + sections stay reachable while scrolling */
+.clnav{position:sticky;top:0;z-index:50;background:#22242aef;backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);border-bottom:1px solid var(--grid);padding-top:12px;padding-bottom:10px}
+/* clickable player names read as links */
+.pl{text-decoration:underline;text-decoration-color:transparent;text-underline-offset:2px}
+.pl:hover{text-decoration-color:var(--gold)}
+/* animated loading, so a slow fetch doesn't look frozen */
+.loading{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+/* thin themed scrollbars */
+.cblist,.mtx{scrollbar-width:thin;scrollbar-color:var(--grid) transparent}
+.cblist::-webkit-scrollbar,.mtx::-webkit-scrollbar{height:8px;width:8px}
+.cblist::-webkit-scrollbar-thumb,.mtx::-webkit-scrollbar-thumb{background:var(--grid);border-radius:8px}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *{transition:none!important;animation:none!important}
+}
 </style>
 </head>
 <body>
 <nav class="clnav"><a href="/" class="brand">Cigar Lounge</a><a href="/hof">Hall of Fame</a><a href="/lab" class="on">Stats Lab</a></nav>
 <div class="wrap">
   <div class="head">
-    <h1>🎲 Cigar Lounge — Stats Lab</h1>
+    <h1>Stats Lab</h1>
     <span class="sub" id="sub">loading…</span>
   </div>
   <div class="rule"></div>
@@ -1154,7 +1184,7 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
     render();
   })
-  .catch(e=>{document.getElementById('view').innerHTML='<div class="loading">Could not load data ('+e.message+'). The link may have expired — run <b>/correlate</b> again.</div>';});
+  .catch(e=>{document.getElementById('view').innerHTML='<div class="loading">Could not load data ('+e.message+'). Try reloading the page.</div>';});
 </script>
 </body>
 </html>
