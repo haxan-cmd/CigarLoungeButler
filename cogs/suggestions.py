@@ -124,9 +124,11 @@ class SuggestionsCog(commands.Cog):
             link = (f" [·](https://discord.com/channels/{guild.id}/{channel.id}/{s['message_id']})"
                     if s.get("message_id") else "")
             lines.append(f"{rank} 👍 **{votes}** — {snippet} *(by {s.get('name') or '—'})*{star}{link}")
-        desc = "\n".join(lines) if lines else "No suggestions yet — use `/suggest_bounty` to add one."
-        emb = discord.Embed(title="\U0001f3c6 Top Bounty Suggestions", description=desc, colour=0xe0a84c)
-        emb.set_footer(text="👍 to upvote · /suggest_bounty to add yours")
+        intro = ("**Add an idea with `/suggest_bounty`, then 👍 the ones you like.**\n"
+                 "The most-upvoted rise to the top — mods build the next bounty from the leaders.\n\n")
+        body = "\n".join(lines) if lines else "_No suggestions yet — be the first with `/suggest_bounty`._"
+        emb = discord.Embed(title="\U0001f3c6 Top Bounty Suggestions", description=intro + body, colour=0xe0a84c)
+        emb.set_footer(text="This channel is for suggestions only — use the command and 👍, no chatter.")
         ptr = await _db.get_suggestion_board()
         msg = None
         if ptr and ptr[1]:
@@ -185,6 +187,14 @@ class SuggestionsCog(commands.Cog):
             return
         try:
             await self.refresh_suggestion_board(interaction.guild)
+            # Best-effort channel topic (needs Manage Channels).
+            _ch = interaction.guild.get_channel(getattr(config, "BOUNTY_SUGGESTIONS_CHANNEL_ID", 0))
+            if _ch is not None:
+                try:
+                    await _ch.edit(topic="💡 Suggest bounties with /suggest_bounty · 👍 to upvote · "
+                                         "top-voted ideas get used. Commands & reactions only — no chatter.")
+                except Exception as _te:
+                    print(f"[SUGGEST] topic set failed (needs Manage Channels): {_te}")
             await interaction.followup.send("✅ Suggestions leaderboard posted and pinned.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
