@@ -1954,11 +1954,15 @@ class FavouritesCog(commands.Cog):
         if not (base.startswith('http://') or base.startswith('https://')):
             base = 'https://' + base
         await interaction.response.send_message("Posting the Cigar Lounge links…", ephemeral=True)
-        # One pinned card, two clearly-separate destinations. They share a top nav on the
-        # site, so either link lands you somewhere you can reach the other.
+        # One pinned card. The title links to the landing page (the front door); the two
+        # deep links jump straight to their sections. Everything shares a top nav on the
+        # site, so any link lands you somewhere you can reach the rest.
+        _pretty = base.split('://', 1)[-1]  # e.g. thecigarlounge.app, for the display line
         emb = discord.Embed(
             title="Cigar Lounge",
+            url=base or None,
             description=("<:cigar:1444893851427803298> The community's stats and history, always up to date.\n\n"
+                         f"🏠 **[{_pretty} →]({base}/)**  ·  the front door\n"
                          f"🏆 **[Hall of Fame →]({base}/hof)**  ·  champions of every season\n"
                          f"📊 **[Stats Lab →]({base}/lab)**  ·  explore every run: correlations, trends, rankings\n\n"
                          "*Opens in your browser · public pages, live from the records*"),
