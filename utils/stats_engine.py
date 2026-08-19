@@ -116,9 +116,20 @@ def _gap(s):
 def _gap_pct(s):
     """Lobby kill gap as a PERCENT of the smaller team — the value the difficulty
     bands (Brutal … Training Grounds) are defined on. Positive = your team outkilled
-    them (easy); negative = you were outkilled (hard)."""
+    them (easy); negative = you were outkilled (hard).
+
+    Guards against vision misreads of the banner totals: a real Chiv match sees both
+    teams score well into the hundreds, so a tiny smaller-total or a gap beyond ~3x is
+    a misread banner (e.g. a '+881%' where one total was read wrong), not a real lobby.
+    Returns None for those so they can't dominate the extremes/averages."""
     from utils.tilt import raw_tilt as _rt
-    return _rt(_i(s, 25), _i(s, 26))
+    a, b = _i(s, 25), _i(s, 26)
+    if a is None or b is None or min(a, b) < 60:
+        return None
+    p = _rt(a, b)
+    if p is None or abs(p) > 200:
+        return None
+    return p
 
 
 def _lead2(s):

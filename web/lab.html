@@ -666,36 +666,38 @@ function renderActivity(){
 // ---- rankings (per-player average/total of any stat, or all-time career marks) ----
 const TILT_BANDS=[[40,'Training Grounds','🍼'],[22,'Favoured','🟢'],[10,'Slightly Favoured','🟢'],[-10,'Even','🟡'],[-22,'Slightly Uphill','🟠'],[-40,'Outmatched','🟠'],[-999,'Brutal','🔴']];
 function tiltBand(p){for(const b of TILT_BANDS){if(p>=b[0])return b;}return TILT_BANDS[TILT_BANDS.length-1];}
-function lobbyExtremes(){
-  const rows=filtered(); let hard=null, easy=null;
-  for(const r of rows){
-    const p=r[IDX.tilt_pct]; if(p==null) continue;
-    if(!hard || p<hard.p) hard={r:r,p:p};
-    if(!easy || p>easy.p) easy={r:r,p:p};
-  }
-  if(!hard && !easy) return null;
-  function box(x,emoji,title){
-    if(!x) return '';
-    const b=tiltBand(x.p), r=x.r, nm=r[IDX.name]||'?', mp=r[IDX.map]||'—', wp=r[IDX.weapon]||'';
-    const k=r[IDX.kills], td=r[IDX.td], sign=x.p>0?'+':'';
-    return '<div style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--grid);border-radius:10px;padding:12px 14px">'
-      +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">'+emoji+' '+esc(title)+'</div>'
-      +'<div style="font-size:20px;font-weight:700">'+b[2]+' '+sign+x.p+'%</div>'
-      +'<div style="font-size:12.5px;color:var(--gold);margin-top:2px">'+esc(b[1])+'</div>'
-      +'<div style="font-size:12.5px;margin-top:6px">'+esc(nm)+'</div>'
-      +'<div style="font-size:11.5px;color:var(--mut)">'+esc(mp)+(wp?(' · '+esc(wp)):'')+((k!=null&&td!=null)?(' · '+td+' TD / '+k+' K'):'')+'</div></div>';
-  }
+function lobbyGameRanking(){
+  // Single-game lobby difficulty, ranked by % gap. Respects the Order toggle:
+  // Highest first = biggest steamrolls, Lowest first = most brutal.
+  const rows=filtered(); const games=[];
+  for(const r of rows){ const p=r[IDX.tilt_pct]; if(p==null) continue; games.push({r:r,p:p}); }
+  if(!games.length) return null;
+  const asc=state.ranking.order==='asc';
+  games.sort(function(a,b){return asc? a.p-b.p : b.p-a.p;});
+  const top=games.slice(0,25);
+  const span=Math.max.apply(null,top.map(function(g){return Math.abs(g.p);}).concat([1]));
   const card=document.createElement('div'); card.className='card';
-  card.innerHTML='<h3>Lobby Extremes — single games'+(activeBits().length?' (filtered)':'')+'</h3>'
-    +'<div style="display:flex;gap:12px;flex-wrap:wrap">'
-    +box(hard,'🔴','Most brutal lobby')+box(easy,'🍼','Biggest steamroll')+'</div>'
-    +'<div style="color:var(--mut);font-size:11px;margin-top:8px">Gap = your kills minus enemy kills, as % of the smaller team. Negative = you were outkilled (hard); positive = you stomped.</div>';
+  let html='<h3>Lobby difficulty — single games'+(activeBits().length?' (filtered)':'')+'</h3>'
+    +'<div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">'
+    +(asc?'🔴 Hardest (most outmatched) first':'🍼 Easiest (biggest steamroll) first')
+    +' · % gap of the smaller team · '+games.length+' games</div>';
+  top.forEach(function(g,i){
+    const b=tiltBand(g.p), r=g.r, nm=r[IDX.name]||'?', mp=r[IDX.map]||'—';
+    const w=Math.max(2,Math.round(Math.abs(g.p)/span*100)), sign=g.p>0?'+':'';
+    const col=g.p<0?'var(--coral)':'var(--teal)';
+    html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid)">'
+      +'<span style="color:var(--mut);width:22px;text-align:right">'+(i+1)+'.</span>'
+      +'<span style="width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nm)+'</span>'
+      +'<span style="flex:1;min-width:50px"><span style="display:inline-block;height:11px;border-radius:3px;background:'+col+';width:'+w+'%"></span></span>'
+      +'<span style="width:170px;color:var(--mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+b[2]+' '+esc(b[1])+' · '+esc(mp)+'</span>'
+      +'<span style="width:50px;text-align:right;font-weight:600">'+sign+g.p+'%</span></div>';
+  });
+  card.innerHTML=html;
   return card;
 }
 function renderRanking(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
-  { const _lx=lobbyExtremes(); if(_lx) view.appendChild(_lx); }
   const ctrl=document.createElement('div'); ctrl.className='bar';
   const statOpts=ALL_STATS.map(function(k){return [k,LABELS[k]];}).concat([['career_marks','Career marks (all-time)']]);
   ctrl.appendChild(pickSelect('Stat',statOpts,state.ranking.stat,function(v){state.ranking.stat=v;renderRanking();}));
@@ -706,6 +708,11 @@ function renderRanking(){
   }
   ctrl.appendChild(pickSelect('Order',[['desc','Highest first'],['asc','Lowest first']],state.ranking.order,function(v){state.ranking.order=v;renderRanking();}));
   view.appendChild(ctrl);
+  // For a lobby-gap stat, lead with the single-GAME extremes list (band-accurate %),
+  // then the per-player averages below.
+  if(state.ranking.stat==='tilt' || state.ranking.stat==='tilt_pct'){
+    const _lg=lobbyGameRanking(); if(_lg) view.appendChild(_lg);
+  }
   const stat=state.ranking.stat, isTilt=stat==='tilt', _mode=state.ranking.agg;
   let players=[];
   if(isCareer){
