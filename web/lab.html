@@ -128,6 +128,8 @@ canvas{display:block;width:100%;border-radius:8px}
 .clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
 .clnav a:hover{color:var(--ink)}
 .clnav a.on{background:var(--gold);color:#241c08}
+.clnav a.joinbtn{margin-left:auto;background:var(--gold);color:#241c08;font-weight:700}
+.clnav a.joinbtn:hover{color:#241c08;filter:brightness(1.08)}
 
 /* ---- interaction & polish pass ---- */
 html{scroll-behavior:smooth}
@@ -166,7 +168,7 @@ select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 
 </style>
 </head>
 <body>
-<nav class="clnav"><a href="/" class="brand">Cigar Lounge</a><a href="/hof">Hall of Fame</a><a href="/lab" class="on">Stats Lab</a></nav>
+<nav class="clnav"><a href="/" class="brand">Cigar Lounge</a><a href="/hof">Hall of Fame</a><a href="/lab" class="on">Stats Lab</a><a class="joinbtn" href="/join" target="_blank" rel="noopener">Apply to join</a></nav>
 <div class="wrap">
   <div class="head">
     <h1>Stats Lab</h1>
