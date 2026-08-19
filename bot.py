@@ -189,6 +189,45 @@ async def run_healthcheck():
         _hof_cache["body"], _hof_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
 
+    _card_cache = {}   # player-name (lower) -> (body, ts)
+
+    async def card_data(request):
+        # One player's registry card as markdown — the SAME content build_registry_messages
+        # produces for Discord, so the web card mirrors the Discord card. Cached ~60s/player.
+        p = (request.query.get("p") or "").strip()
+        if not p:
+            return web.Response(status=400, text="?p= (player name) required")
+        import time as _t
+        now = _t.time()
+        _hit = _card_cache.get(p.lower())
+        if _hit and (now - _hit[1]) < 60:
+            return web.Response(text=_hit[0], content_type="application/json")
+        try:
+            from utils.db import get_name_to_id_map, get_all_players
+            from cogs.registry import build_registry_messages
+            n2i = await get_name_to_id_map()
+            did = n2i.get(p.lower(), "")
+            name = p
+            try:
+                for _pr in await get_all_players():
+                    if _pr and (_pr[0] or "").strip() == did and (_pr[1] or "").strip():
+                        name = (_pr[1] or "").strip(); break
+            except Exception:
+                pass
+            guild = bot.get_guild(config.GUILD_ID)
+            msgs = await build_registry_messages(name, did, guild=guild)
+        except RuntimeError:
+            return web.Response(status=503, text="database unavailable")
+        except Exception as _e:
+            print(f"[CARD] web card error for {p!r}: {_e}")
+            return web.Response(status=500, text="card unavailable")
+        body = json.dumps({"name": name, "did": did, "messages": msgs},
+                          default=str, ensure_ascii=False)
+        if len(_card_cache) > 200:
+            _card_cache.clear()
+        _card_cache[p.lower()] = (body, now)
+        return web.Response(text=body, content_type="application/json")
+
     async def hof_page(request):
         # Public Hall of Fame page. No token — it's a showcase of season champions.
         try:
@@ -208,6 +247,7 @@ async def run_healthcheck():
     app.router.add_get("/lab/data", lab_data)
     app.router.add_get("/hof", hof_page)
     app.router.add_get("/hof/data", hof_data)
+    app.router.add_get("/lab/card", card_data)
     # Static assets (weapon PNGs, decorative board borders) for the web Boards tab.
     try:
         _assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")

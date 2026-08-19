@@ -78,6 +78,13 @@ canvas{display:block;width:100%;border-radius:8px}
 .wimg{height:1.7em;width:auto;vertical-align:-0.45em;margin-right:7px}
 .bspacer{display:block;width:100%;max-width:520px;margin:0 auto;opacity:.85}
 .facsec{border-left:3px solid var(--grid);padding-left:12px;margin:18px 0 2px}
+.pcard{max-width:660px}
+.cardtitle{font-size:22px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.cardsec{font-weight:700;color:var(--gold);margin:15px 0 5px;font-size:13.5px}
+.cardh2{font-size:15px;font-weight:700;color:var(--ink);margin:16px 0 6px}
+.cardbul{padding:3px 0 3px 2px;font-size:13px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;line-height:1.5}
+.cardbul::before{content:"›";color:var(--mut);margin-right:2px}
+.cardbul img.ce,.cardsec img.ce{height:1.25em;vertical-align:-0.2em}
 @media(max-width:640px){
   .wrap{padding:10px 10px 46px}
   .head h1{font-size:17px}
@@ -121,6 +128,7 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="weaponboards">⚔️ Weapon Records</button>
     <button class="tab" data-v="feats">🏛️ Feats of War</button>
     <button class="tab" data-v="weapons">📊 Weapon Activity</button>
+    <button class="tab" data-v="players">🪪 Players</button>
     <button class="tab" data-v="ranking">🏅 Rankings</button>
     <button class="tab" data-v="records">🏆 Records</button>
     <span class="tablabel">Advanced Stats</span>
@@ -163,6 +171,7 @@ const state={
   ranking:{stat:'tilt',min:5,order:'desc',agg:'avg',q:''},
   weapons:{by:'runs',order:'asc',archer:'hide'},
   boards:{map:'',weapon:'',feat:''},
+  playercard:{name:'',loading:false,data:null,err:''},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -946,6 +955,64 @@ function renderBoardCategory(kind){
   card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()">${raw(String(body))}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">`;
   view.appendChild(card);
 }
+// ---- player cards (mirror the Discord registry card from its markdown) ----
+function _mdInline(s){
+  s=esc(s).replace(/&lt;(a?):(\w+):(\d+)&gt;/g,function(_,a,nm,id){
+    return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.'+(a==='a'?'gif':'png')+'" alt="'+nm+'">';});
+  s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" style="color:var(--blue)">$1</a>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  return s;
+}
+function mdToHtml(text){
+  const out=[];
+  String(text||'').split('\n').forEach(function(ln){
+    const t=ln.trim();
+    if(!t){ out.push('<div style="height:6px"></div>'); return; }
+    let m=t.match(/^\*\*(.+?):?\*\*:?$/);           // a lone bold label = section header
+    if(m){ out.push('<div class="cardsec">'+_mdInline(m[1])+'</div>'); return; }
+    m=t.match(/^#{1,3}\s+(.+)$/);
+    if(m){ out.push('<div class="cardh2">'+_mdInline(m[1])+'</div>'); return; }
+    m=t.match(/^•\s+(.+)$/);
+    if(m){ out.push('<div class="cardbul">'+_mdInline(m[1])+'</div>'); return; }
+    out.push('<div style="font-size:13px;padding:2px 0">'+_mdInline(t)+'</div>');
+  });
+  return raw(out.join(''));
+}
+function loadCard(name){
+  if(!name){ return; }
+  const pc=state.playercard; pc.name=name; pc.loading=true; pc.data=null; pc.err=''; paintCard();
+  fetch('/lab/card?p='+encodeURIComponent(name),{cache:'no-store'})
+    .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(d=>{ pc.loading=false; pc.data=d; paintCard(); })
+    .catch(e=>{ pc.loading=false; pc.err='Could not load this card ('+e.message+').'; paintCard(); });
+}
+function paintCard(){
+  const h=document.getElementById('cardholder'); if(!h) return;
+  const pc=state.playercard;
+  if(!pc.name){ h.innerHTML='<div class="loading">Pick a player to see their card.</div>'; return; }
+  if(pc.loading){ h.innerHTML=String(html`<div class="loading">Summoning ${pc.name}’s dossier…</div>`); return; }
+  if(pc.err){ h.innerHTML=String(html`<div class="loading" style="color:var(--coral)">${pc.err}</div>`); return; }
+  const d=pc.data;
+  if(!d||!d.messages||!d.messages.length){ h.innerHTML=String(html`<div class="loading">No card on file for ${pc.name} yet.</div>`); return; }
+  const card=document.createElement('div'); card.className='card pcard';
+  card.innerHTML=html`<div class="cardtitle">🗂️ ${d.name}</div>${d.messages.map(function(m,i){
+    return html`${i?raw('<hr style="border:none;border-top:1px solid var(--grid);margin:16px 0">'):''}${mdToHtml(m)}`;
+  })}`;
+  h.innerHTML=''; h.appendChild(card);
+}
+function renderPlayers(){
+  const view=document.getElementById('view'); view.innerHTML='';
+  const players=[...new Set(DATA.map(r=>r[IDX.name]).filter(Boolean))].sort(function(a,b){return a.toLowerCase()<b.toLowerCase()?-1:1;});
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  const f=document.createElement('div'); f.className='f'; f.innerHTML='<label>Player</label>';
+  const inp=document.createElement('input'); inp.type='text'; inp.setAttribute('list','playerlist'); inp.placeholder='type a name…'; inp.value=state.playercard.name||''; inp.style.minWidth='220px';
+  const dl=document.createElement('datalist'); dl.id='playerlist'; dl.innerHTML=players.map(function(p){return '<option value="'+esc(p)+'">';}).join('');
+  inp.addEventListener('change',function(){ loadCard(inp.value.trim()); });
+  f.appendChild(inp); f.appendChild(dl); ctrl.appendChild(f); view.appendChild(ctrl);
+  const holder=document.createElement('div'); holder.id='cardholder'; view.appendChild(holder);
+  if(state.playercard.name && !state.playercard.data && !state.playercard.loading){ loadCard(state.playercard.name); } else { paintCard(); }
+}
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
   render();}
@@ -1006,6 +1073,7 @@ function render(){
   else if(state.view==='maps')renderBoardCategory('map');
   else if(state.view==='weaponboards')renderBoardCategory('weapon');
   else if(state.view==='feats')renderBoardCategory('feat');
+  else if(state.view==='players')renderPlayers();
   else if(state.view==='weapons')renderWeapons();
   else renderGalaxy();
 }
