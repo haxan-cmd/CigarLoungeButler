@@ -974,6 +974,7 @@ async def build_hof_payload():
         "generated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
         "gp_mode": bool(getattr(config, 'SEASON_GP_CHAMPION', True)),
         "season_count": len(out_seasons),
+        "all_time_titles": build_all_time_titles_payload(all_time),
         "seasons": out_seasons,
     }
 
@@ -1316,6 +1317,32 @@ _ATT_TITLES = [
     ("Weapons Master",  "_weapon_placements",    9),
     ("Campaign Master", "_map_placements",       6),
 ]
+
+
+def build_all_time_titles_payload(stats):
+    """All-Time Titles (Grand Marshal / Weapons Master / Campaign Master) as JSON for the
+    public /hof page. SAME ranking as render_all_time_titles_embed: boards placed on,
+    average placement breaks ties (lower better), gated at 15/9/6 boards, #1 = holder."""
+    _te = getattr(config, 'TITLE_EMOJIS', {})
+    _totals = {"_combined_placements": stats.get('_combined_board_total', 0),
+               "_weapon_placements":   stats.get('_weapon_board_total', 0),
+               "_map_placements":       stats.get('_map_board_total', 0)}
+    _desc = {"Grand Marshal": "Most boards held overall",
+             "Weapons Master": "Most weapon boards",
+             "Campaign Master": "Most map boards"}
+    out = []
+    for label, key, min_boards in _ATT_TITLES:
+        dct = stats.get(key) or {}
+        total = _totals.get(key, 0)
+        ranked = sorted(
+            ((p, len(v), sum(v) / len(v)) for p, v in dct.items() if len(v) >= min_boards),
+            key=lambda t: (-t[1], t[2]))
+        rows = [{"rank": i, "name": p, "boards": cnt, "total": total,
+                 "avg": round(avg, 2), "holder": (i == 1)}
+                for i, (p, cnt, avg) in enumerate(ranked[:6], 1)]
+        out.append({"title": label, "emoji": _te.get(label, ""), "desc": _desc.get(label, ""),
+                    "min_boards": min_boards, "total": total, "ranking": rows})
+    return out
 
 
 def render_all_time_titles_embed(stats):

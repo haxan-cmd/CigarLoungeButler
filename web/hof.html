@@ -55,6 +55,22 @@ a{color:var(--gold)}
 .feat{font-size:12.5px;padding:4px 0;color:var(--ink)}
 .feat b{color:var(--gold)}
 .foot{color:var(--mut);font-size:11px;text-align:center;margin-top:26px}
+/* section headings + all-time titles */
+.sechead{font-size:15px;color:var(--gold);margin:6px 0 12px;letter-spacing:.3px}
+.atblock{margin-bottom:26px}
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.tcard{background:var(--panel);border:1px solid var(--grid);border-radius:14px;padding:14px 16px;box-shadow:0 4px 18px #0003}
+.th{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--grid)}
+.th .tt{font-size:16px;font-weight:700;color:var(--ink)}
+.th .td{font-size:11px;color:var(--mut);width:100%}
+.tem{height:1.1em;vertical-align:-0.15em}
+.trow{display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0}
+.trow .tr{width:20px;color:var(--mut);flex:none;text-align:right}
+.trow .tn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .tb{color:var(--mut);font-size:11px;flex:none}
+.trow.hold .tn{color:var(--gold);font-weight:700}
+.ttempty{color:var(--mut);font-size:12px;font-style:italic;padding:6px 0}
+@media(max-width:760px){.tgrid{grid-template-columns:1fr}}
 .loading{color:var(--mut);padding:60px;text-align:center;font-size:14px}
 .err{color:var(--coral);padding:40px;text-align:center}
 .emptyseason{color:var(--mut);font-size:12.5px;font-style:italic}
@@ -91,6 +107,27 @@ html{scroll-behavior:smooth}
 </div>
 <script>
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const emoImg = tok => { const m=String(tok||'').match(/<a?:(\w+):(\d+)>/); return m?`<img class="tem" src="https://cdn.discordapp.com/emojis/${m[2]}.png" alt="">`:''; };
+
+function titlesSection(titles){
+  if(!titles || !titles.length) return '';
+  const cards = titles.map(t=>{
+    let rows;
+    if(!t.ranking || !t.ranking.length){
+      rows = `<div class="ttempty">No one qualifies yet (needs ${esc(t.min_boards)}+ boards).</div>`;
+    } else {
+      rows = t.ranking.map(r=>{
+        const cnt = r.total ? `${esc(r.boards)}/${esc(r.total)}` : `${esc(r.boards)}`;
+        return `<div class="trow ${r.holder?'hold':''}"><span class="tr">${esc(r.rank)}.</span>`
+          + `<span class="tn">${esc(r.name)}${r.holder?' 👑':''}</span>`
+          + `<span class="tb">${cnt} boards · avg #${esc(r.avg)}</span></div>`;
+      }).join('');
+    }
+    return `<div class="tcard"><div class="th">${emoImg(t.emoji)}<span class="tt">${esc(t.title)}</span>`
+      + `<span class="td">${esc(t.desc)}</span></div>${rows}</div>`;
+  }).join('');
+  return `<div class="atblock"><h2 class="sechead">🏆 All-Time Titles</h2><div class="tgrid">${cards}</div></div>`;
+}
 
 function seasonCard(s){
   const live = s.in_progress;
@@ -147,13 +184,16 @@ async function load(){
     const r = await fetch('/hof/data', {cache:'no-store'});
     if(!r.ok) throw new Error('status '+r.status);
     const d = await r.json();
-    if(!d.seasons || !d.seasons.length){
-      root.innerHTML = `<div class="loading">No seasons have been crowned yet. Check back after the first one closes.</div>`;
+    const titles = titlesSection(d.all_time_titles);
+    const hasSeasons = d.seasons && d.seasons.length;
+    if(!titles && !hasSeasons){
+      root.innerHTML = `<div class="loading">No titles or seasons yet. Check back after the first bounty closes.</div>`;
       return;
     }
     document.getElementById('sub').textContent =
       `${d.season_count} season${d.season_count===1?'':'s'} · ${d.gp_mode?'Grand Prix champions':'category champions'}`;
-    root.innerHTML = d.seasons.map(seasonCard).join('');
+    root.innerHTML = titles
+      + (hasSeasons ? `<h2 class="sechead">📅 Seasonal Results</h2>` + d.seasons.map(seasonCard).join('') : '');
     document.getElementById('foot').textContent = `Cigar Lounge Butler · updated ${d.generated_at}`;
   }catch(e){
     root.innerHTML = `<div class="err">Couldn't load the Hall of Fame right now.<br><span style="color:var(--mut);font-size:12px">${esc(e.message)}</span></div>`;
