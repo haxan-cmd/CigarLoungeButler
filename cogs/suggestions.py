@@ -241,6 +241,19 @@ class SuggestionsCog(commands.Cog):
                 await msg.add_reaction(_UPVOTE)
             except Exception:
                 pass
+            # Auto-thread so people can discuss the idea without cluttering the channel.
+            try:
+                _tname = (idea if idea else f"Suggestion #{sid}")[:96]
+                try:
+                    th = await msg.create_thread(name=_tname, auto_archive_duration=10080)
+                except Exception:
+                    th = await msg.create_thread(name=_tname)
+                try:
+                    await th.send("Discuss this bounty idea here — and 👍 the card above if you like it.")
+                except Exception:
+                    pass
+            except Exception as _te:
+                print(f"[SUGGEST] thread create failed: {_te}")
             await _db.set_bounty_suggestion_message(sid, msg.id)
         except Exception as e:
             await interaction.followup.send(f"Couldn't post it: {e}", ephemeral=True)
