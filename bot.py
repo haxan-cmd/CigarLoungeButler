@@ -454,6 +454,7 @@ COGS = [
     "cogs.admin",
     "cogs.kofi",
     "cogs.join",
+    "cogs.suggestions",
 ]
 
 

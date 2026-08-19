@@ -80,6 +80,8 @@ _INDEXES = [
     ("idx_lab_opens_time",         "lab_opens",          "(opened_at)"),
     ("idx_bot_events_cat_time",    "bot_events",         "(category, ts)"),
     ("idx_join_requests_token",    "join_requests",      "(token)"),
+    ("idx_bounty_suggestions_msg", "bounty_suggestions", "(message_id)"),
+    ("idx_bounty_suggestions_stat","bounty_suggestions", "(status)"),
 ]
 
 
@@ -177,6 +179,15 @@ _SCHEMA_STATEMENTS = [
     "id BIGSERIAL PRIMARY KEY, token TEXT NOT NULL, ign TEXT, note TEXT, "
     "status TEXT DEFAULT 'pending', invite_url TEXT, message_id TEXT, "
     "decided_by TEXT, created_at TIMESTAMP DEFAULT NOW(), decided_at TIMESTAMP)",
+    # Community bounty suggestions: /suggest_bounty posts one to the public board where
+    # members upvote; mods shortlist / use / dismiss it. status: open|shortlisted|used|dismissed.
+    "CREATE TABLE IF NOT EXISTS bounty_suggestions ("
+    "id BIGSERIAL PRIMARY KEY, discord_id TEXT, name TEXT, text TEXT, "
+    "status TEXT DEFAULT 'open', message_id TEXT, "
+    "decided_by TEXT, created_at TIMESTAMP DEFAULT NOW(), decided_at TIMESTAMP)",
+    # Pointer (single row id=1) to the pinned "Top Suggestions" leaderboard message.
+    "CREATE TABLE IF NOT EXISTS suggestion_board ("
+    "id INTEGER PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
 ]
 
 
@@ -674,6 +685,85 @@ async def decide_join_request(req_id: int, status: str, decided_by: str, invite_
             "decided_at=NOW() WHERE id=$4 AND status='pending' RETURNING id",
             status, str(decided_by)[:80], invite_url, req_id)
         return row is not None
+
+
+async def create_bounty_suggestion(discord_id, name: str, text: str) -> int:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "INSERT INTO bounty_suggestions (discord_id, name, text) VALUES ($1, $2, $3) RETURNING id",
+            str(discord_id or ''), (name or '')[:80], (text or '')[:500]))
+
+
+def _bs_dict(r):
+    if not r:
+        return None
+    return {"id": int(r["id"]), "discord_id": r["discord_id"], "name": r["name"], "text": r["text"],
+            "status": r["status"], "message_id": r["message_id"], "decided_by": r["decided_by"],
+            "created_at": r["created_at"], "decided_at": r["decided_at"]}
+
+
+async def set_bounty_suggestion_message(sid: int, message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE bounty_suggestions SET message_id=$1 WHERE id=$2",
+                           str(message_id), sid)
+
+
+async def get_bounty_suggestion_by_message(message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return _bs_dict(await conn.fetchrow(
+            "SELECT * FROM bounty_suggestions WHERE message_id=$1", str(message_id)))
+
+
+async def set_bounty_suggestion_status(sid: int, status: str, decided_by: str) -> bool:
+    """Move a suggestion to open/shortlisted/used/dismissed. Returns True if it changed."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE bounty_suggestions SET status=$1, decided_by=$2, decided_at=NOW() "
+            "WHERE id=$3 AND status IS DISTINCT FROM $1 RETURNING id",
+            status, str(decided_by)[:80], sid)
+        return row is not None
+
+
+async def list_bounty_suggestions(statuses=None, limit: int = 25):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        if statuses:
+            rows = await conn.fetch(
+                "SELECT * FROM bounty_suggestions WHERE status = ANY($1::text[]) "
+                "ORDER BY created_at DESC LIMIT $2", list(statuses), limit)
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM bounty_suggestions ORDER BY created_at DESC LIMIT $1", limit)
+        return [_bs_dict(r) for r in rows]
+
+
+async def count_open_bounty_suggestions(discord_id) -> int:
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "SELECT COUNT(*) FROM bounty_suggestions WHERE discord_id=$1 AND status IN ('open','shortlisted')",
+            str(discord_id or '')) or 0)
+
+
+async def get_suggestion_board():
+    """(channel_id, message_id) of the pinned suggestions leaderboard, or None."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT channel_id, message_id FROM suggestion_board WHERE id=1")
+        return (r["channel_id"], r["message_id"]) if r else None
+
+
+async def set_suggestion_board(channel_id, message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO suggestion_board (id, channel_id, message_id) VALUES (1, $1, $2) "
+            "ON CONFLICT (id) DO UPDATE SET channel_id=$1, message_id=$2",
+            str(channel_id), str(message_id))
 
 
 async def get_submission_by_link(message_link: str):

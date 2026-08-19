@@ -114,6 +114,9 @@ GUEST_ROLE_ID           = 1445178964900581446
 LOUNGER_ROLE_ID         = 1433215577173786758
 # Channel where the website's "Apply to join" requests are posted for mod accept/deny.
 ADMIN_CHANNEL_ID        = 1350112524204245002
+# Public channel where /suggest_bounty posts community bounty ideas (upvote + mod actions).
+# Set to your #bounty-suggestions channel id; left at 0 the command tells mods to configure it.
+BOUNTY_SUGGESTIONS_CHANNEL_ID = 0
 # Optional static invite the /join flow falls back to if the bot can't mint one.
 DISCORD_INVITE_URL      = ""
 
