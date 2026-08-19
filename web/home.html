@@ -50,14 +50,18 @@ a{color:inherit}
     linear-gradient(180deg,#2b2d34,#25272d);
   background-size:cover;background-position:center;
   padding:44px 34px 40px;margin-top:18px}
-.hero:before{content:"";position:absolute;inset:0;
-  background:linear-gradient(180deg,rgba(34,36,42,.15),rgba(34,36,42,.72));pointer-events:none}
+/* Contrast scrim: darkest on the left where the text sits, fading to clear on the
+   right so the artwork still reads. A gentle bottom-darken backs the sub text too. */
+.hero:before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(16,17,20,.90) 0%, rgba(16,17,20,.78) 42%, rgba(16,17,20,.30) 78%, rgba(16,17,20,.12) 100%),
+    linear-gradient(180deg, rgba(16,17,20,.20), rgba(16,17,20,.50));}
 .hero-in{position:relative;display:flex;align-items:center;gap:22px;flex-wrap:wrap}
 .crest{width:76px;height:76px;border-radius:16px;border:1px solid var(--grid);
-  background:#1e2026;object-fit:cover;flex:none;box-shadow:0 6px 18px rgba(0,0,0,.35)}
-.hero h1{margin:0;font-size:34px;letter-spacing:.3px}
-.hero .tag{margin:6px 0 0;color:var(--gold);font-weight:600;font-size:15px}
-.hero .sub{margin:14px 0 0;color:#cfd2da;max-width:640px;font-size:15px}
+  background:#1e2026;object-fit:cover;flex:none;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.hero h1{margin:0;font-size:34px;letter-spacing:.3px;text-shadow:0 2px 6px rgba(0,0,0,.7)}
+.hero .tag{margin:6px 0 0;color:var(--gold);font-weight:600;font-size:15px;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.hero .sub{margin:14px 0 0;color:#eef0f4;max-width:640px;font-size:15px;text-shadow:0 1px 4px rgba(0,0,0,.75)}
 
 .cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
 .card{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--grid);
