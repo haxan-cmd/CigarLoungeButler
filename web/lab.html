@@ -63,6 +63,16 @@ canvas{display:block;width:100%;border-radius:8px}
 .foot{color:var(--mut);font-size:11px;text-align:right;margin-top:8px}
 .loading{color:var(--mut);padding:40px;text-align:center}
 .hide{display:none}
+.ce{height:1.15em;width:auto;vertical-align:-0.18em;margin:0 1px}
+.brow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--grid);font-size:13px}
+.brow:last-child{border-bottom:none}
+.brow .rk{width:26px;text-align:right;color:var(--mut);flex:none}
+.brow .bnm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow .bsc{font-weight:700;flex:none}
+.bhead{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;margin-bottom:2px}
+.bsub{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px}
+.pl{color:#c9ccd3;cursor:pointer}
+.pl:hover{color:var(--gold)}
 @media(max-width:640px){
   .wrap{padding:10px 10px 46px}
   .head h1{font-size:17px}
@@ -110,6 +120,7 @@ canvas{display:block;width:100%;border-radius:8px}
   <button class="tab" data-v="activity">🕒 Activity</button>
   <button class="tab" data-v="ranking">🏅 Rankings</button>
   <button class="tab" data-v="records">🏆 Records</button>
+  <button class="tab" data-v="boards">📋 Boards</button>
   <button class="tab" data-v="weapons">🗡️ Weapons</button>
   </div>
 
@@ -131,7 +142,7 @@ const DEFAULT_MATRIX=['kills','td','deaths','kd','kill_share','warlord','tilt'];
 
 const qp=new URLSearchParams(location.search);
 const TOKEN=qp.get('t')||'';
-let FIELDS=[], IDX={}, DATA=[], PMARKS=[];
+let FIELDS=[], IDX={}, DATA=[], PMARKS=[], BOARDS={}, EMOJI={};
 let matrixStats=DEFAULT_MATRIX.slice();
 const state={
   view:qp.get('view')||'matrix',
@@ -142,6 +153,7 @@ const state={
   activity:{tz:0},
   ranking:{stat:'tilt',min:5,order:'desc',agg:'avg',q:''},
   weapons:{by:'runs',order:'asc',archer:'hide'},
+  boards:{name:''},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
 };
@@ -855,6 +867,69 @@ function renderRecords(){
   html+='</div>';
   card.innerHTML=html; view.appendChild(card);
 }
+// ---- boards (Discord-parity weapon/map/feat leaderboards) ----
+function emojiImg(token){
+  if(!token) return '';
+  const m=String(token).match(/^<(a?):(\w+):(\d+)>$/);
+  if(!m) return esc(token);   // a plain unicode emoji
+  const ext=m[1]==='a'?'gif':'png';
+  return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+m[3]+'.'+ext+'" alt="'+esc(m[2])+'" title="'+esc(m[2])+'">';
+}
+const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
+function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
+function _brow(i,nm,sc,lk,suffix){
+  return '<div class="brow"><span class="rk">'+(i+1)+'.</span>'
+    +'<span class="bnm"><span class="pl" data-player="'+esc(nm||'?')+'" title="Filter to '+esc(nm||'')+'">'+esc(nm||'?')+'</span></span>'
+    +'<span class="bsc">'+sc+(suffix||'')+'</span>'
+    +(lk?(' <a href="'+esc(lk)+'" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>'):'')+'</div>';
+}
+function _rateSection(title,emoji,rows){
+  if(!rows||!rows.length) return '';
+  let h='<div class="bsub">'+emoji+' '+esc(title)+'</div>';
+  rows.forEach(function(r,i){ h+=_brow(i,r.name,r.pct,'', '%'); });
+  return h;
+}
+function renderBoards(){
+  const view=document.getElementById('view'); view.innerHTML='';
+  const names=Object.keys(BOARDS).sort();
+  if(!names.length){ view.innerHTML='<div class="loading">No boards loaded.</div>'; return; }
+  const groups={weapon:[],map:[],feat:[]}; names.forEach(function(n){groups[(BOARDS[n].kind)||boardKind(n)].push(n);});
+  if(!state.boards.name || !BOARDS[state.boards.name]) state.boards.name=(groups.weapon[0]||groups.map[0]||names[0]);
+  const ctrl=document.createElement('div'); ctrl.className='bar';
+  const f=document.createElement('div'); f.className='f'; f.innerHTML='<label>Board</label>';
+  const sel=document.createElement('select'); sel.style.minWidth='240px';
+  function og(label,arr){ return arr.length? '<optgroup label="'+label+'">'+arr.map(function(n){return '<option value="'+esc(n)+'"'+(n===state.boards.name?' selected':'')+'>'+esc(n)+'</option>';}).join('')+'</optgroup>':''; }
+  sel.innerHTML=og('Weapons',groups.weapon)+og('Maps',groups.map)+og('Feats',groups.feat);
+  sel.addEventListener('change',function(){state.boards.name=sel.value;renderBoards();});
+  f.appendChild(sel); ctrl.appendChild(f); view.appendChild(ctrl);
+  const name=state.boards.name, B=BOARDS[name]||{}, kind=B.kind||boardKind(name), entries=B.entries||[];
+  const lethE=(EMOJI.titles&&EMOJI.titles.Lethality)?emojiImg(EMOJI.titles.Lethality):'🧪';
+  const warE=(EMOJI.titles&&EMOJI.titles.Warlord)?emojiImg(EMOJI.titles.Warlord):'🛡️';
+  const card=document.createElement('div'); card.className='card';
+  let head;
+  if(kind==='map'){
+    const parts=name.split(' - '), fac=parts[parts.length-1].trim(), mp=parts.slice(0,-1).join(' - ').trim();
+    const crest=(EMOJI.factions&&EMOJI.factions[fac])?emojiImg(EMOJI.factions[fac]):'';
+    head='<div class="bhead">'+crest+' '+esc(mp)+' <span style="color:var(--mut);font-weight:400;font-size:13px">/ '+esc(fac)+'</span></div>';
+  } else {
+    head='<div class="bhead">'+esc(name)+'</div>'
+      +'<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">'+(kind==='feat'?'Feat board':'Weapon board')+'</div>';
+  }
+  let html=head;
+  if(!entries.length && kind!=='map'){ html+='<div class="loading">No entries yet.</div>'; card.innerHTML=html; view.appendChild(card); return; }
+  html+=(kind==='map'?'<div class="bsub">Takedowns</div>':'');
+  entries.slice(0,10).forEach(function(e,i){ html+=_brow(i,e.name,e.score,e.link,''); });
+  if(kind==='map'){
+    if(B.kills&&B.kills.length){ html+='<div class="bsub">Kills</div>'; B.kills.forEach(function(k,i){ html+=_brow(i,k.name,k.kills,k.link,''); }); }
+    html+=_rateSection('Kill Share',lethE,B.kill_share);
+    html+=_rateSection('Warlord',warE,B.warlord);
+  } else if(kind==='weapon'){
+    html+=_rateSection('Lethality',lethE,B.lethality);
+    html+=_rateSection('Warlord',warE,B.warlord);
+  }
+  html+='<div style="font-size:11px;color:var(--mut);margin-top:10px">Kill Share &amp; Warlord: best 5-game average, never drops — mirrors the Discord board.</div>';
+  card.innerHTML=html; view.appendChild(card);
+}
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
   render();}
@@ -912,6 +987,7 @@ function render(){
   else if(state.view==='activity')renderActivity();
   else if(state.view==='ranking')renderRanking();
   else if(state.view==='records')renderRecords();
+  else if(state.view==='boards')renderBoards();
   else if(state.view==='weapons')renderWeapons();
   else renderGalaxy();
 }
@@ -925,6 +1001,7 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
     DATA=d.rows;
     PMARKS=d.player_marks||[];
     if(d.stat_labels){ Object.assign(LABELS,d.stat_labels); ALL_STATS=Object.keys(d.stat_labels); }
+    BOARDS=d.boards||{}; EMOJI=d.emoji||{};
     buildFilters();
     // Delegated: click any player name (data-player) to filter the whole Lab to them.
     document.getElementById('view').addEventListener('click',function(e){

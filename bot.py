@@ -144,8 +144,25 @@ async def run_healthcheck():
                 if _d:
                     _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
         data = [[_rec.get(f) for f in fields] for _rec in recs]
+        # Leaderboard boards (weapon/map/feat) for the web Boards tab — a 1:1 mirror of the
+        # Discord boards: stored Takedowns entries + the same live Kills / Lethality /
+        # Warlord sections, computed by the board cog's own functions.
+        import config as _cfg
+        _boards = {}
+        try:
+            from cogs.leaderboards import build_boards_payload
+            _boards = await build_boards_payload()
+        except Exception as _be:
+            print(f"[LAB] boards build failed: {_be}")
+        try:
+            _emoji = {"factions": _cfg.FACTION_EMOJIS,
+                      "titles": {"Lethality": _cfg.TITLE_EMOJIS.get("Lethality", ""),
+                                 "Warlord": _cfg.TITLE_EMOJIS.get("Warlord", "")}}
+        except Exception:
+            _emoji = {}
         body = json.dumps({"fields": fields, "rows": data, "player_marks": _pmarks,
-                           "stat_labels": {k: v[1] for k, v in _SE.STAT_EXTRACTORS.items()}},
+                           "stat_labels": {k: v[1] for k, v in _SE.STAT_EXTRACTORS.items()},
+                           "boards": _boards, "emoji": _emoji},
                           default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")

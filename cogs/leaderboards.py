@@ -2075,6 +2075,75 @@ def _map_kills_ranking(lb_name, all_subs, top=10):
     return [(name, k, link, did) for k, name, link, did in rows]
 
 
+async def build_boards_payload():
+    """1:1 web mirror of the weapon / map / feat leaderboards. Stored Takedowns entries
+    PLUS the same live Kills / Lethality (Kill Share) / Warlord sections Discord renders,
+    computed by the very functions the board embeds use (compute_board_ratings,
+    _map_kills_ranking) with the same rating-placement rules — so the web page and the
+    Discord boards can never drift. Read-only; served on the public /lab/data payload."""
+    ld = await _db.get_all_leaderboard_data()
+    subs = await _db.get_all_submissions()
+    ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+    grouped = {}
+    for r in ld:
+        if len(r) < 4:
+            continue
+        bn = (r[0] or '').strip()
+        if not bn:
+            continue
+        try:
+            sc = int(r[3])
+        except (ValueError, TypeError):
+            continue
+        did = (r[2] or '').strip() if len(r) > 2 else ''
+        grouped.setdefault(bn, []).append({
+            'name': ov.get(did) or ((r[1] or '').strip()), 'did': did, 'score': sc,
+            'link': (r[4] or '').strip() if len(r) > 4 else ''})
+    for bn in grouped:
+        grouped[bn].sort(key=lambda x: -x['score'])
+    names = set(grouped.keys())
+    try:
+        names |= {r['Leaderboard Name'] for r in await _get_lb_records()}
+    except Exception:
+        pass
+
+    def _rate(rows):
+        return [{'name': p, 'pct': round(float(s), 1)} for p, s in (rows or [])[:5]]
+
+    def _kills(rows):
+        out = []
+        for kr in (rows or [])[:10]:
+            out.append({'name': kr[0], 'kills': kr[1],
+                        'link': (kr[2] if len(kr) > 2 else ''), 'did': (kr[3] if len(kr) > 3 else '')})
+        return out
+
+    out = {}
+    for bn, entries in grouped.items():
+        kind = 'feat' if bn in _FEAT_BOARD_NAMES else ('map' if ' - ' in bn else 'weapon')
+        rec = {'kind': kind, 'entries': entries[:10],
+               'lethality': None, 'kill_share': None, 'warlord': None, 'kills': None}
+        try:
+            if kind == 'map':
+                lr, wr, _rmin = await compute_board_ratings(bn, True, subs)
+                rec['kill_share'] = _rate(lr)
+                rec['warlord'] = _rate(wr)
+                rec['kills'] = _kills(_map_kills_ranking(bn, subs))
+            elif kind == 'weapon':
+                src = bn[:-6] if _is_kills_board(bn) else bn
+                lr, wr, _rmin = await compute_board_ratings(src, False, subs)
+                if _is_kills_board(bn):
+                    rec['lethality'] = _rate(lr)          # Kills board carries Lethality
+                elif _kills_board_name(bn) in names:
+                    rec['warlord'] = _rate(wr)            # TD board keeps Warlord only
+                else:
+                    rec['lethality'] = _rate(lr)          # no Kills companion -> both
+                    rec['warlord'] = _rate(wr)
+        except Exception as _e:
+            print(f"[BOARDS] section compute for {bn}: {_e}")
+        out[bn] = rec
+    return out
+
+
 async def _rated_embeds(lb_name, entries, is_map, all_subs=None, overflow=0, show_weapon=False, score_prefix="", show_title=True):
     """Takedown board embeds WITH live rating fields appended: weapon boards show
     Lethality (kills/TD) + Warlord (takedowns/team kills); map boards show
