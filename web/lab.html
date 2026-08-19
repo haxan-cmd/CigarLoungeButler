@@ -1088,9 +1088,15 @@ function renderWeapons(){
   const holder=document.createElement('div'); holder.innerHTML=html; while(holder.firstChild) view.appendChild(holder.firstChild);
 }
 
+const _NO_FILTER_VIEWS=['maps','weaponboards','feats','players'];
 function render(){
   const bits=activeBits(); const rows=filtered();
-  document.getElementById('sub').textContent=DATA.length+' runs total · '+rows.length+' in view'+(bits.length?(' · '+bits.join(' · ')):'');
+  // The run filters only apply to the analytics/records views — hide the whole bar on the
+  // board & player tabs, which pull their own data, so those pages aren't cluttered by it.
+  const _hideF=_NO_FILTER_VIEWS.indexOf(state.view)>=0;
+  document.getElementById('filters').style.display=_hideF?'none':'';
+  document.getElementById('sub').textContent=_hideF?(DATA.length+' runs on record')
+    :(DATA.length+' runs total · '+rows.length+' in view'+(bits.length?(' · '+bits.join(' · ')):''));
   document.getElementById('foot').textContent='Cigar Lounge Stats Lab · live from the bot';
   if(state.view==='matrix')renderMatrix();
   else if(state.view==='scatter')renderScatter();
