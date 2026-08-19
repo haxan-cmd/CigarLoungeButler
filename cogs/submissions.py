@@ -4024,13 +4024,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             except Exception as e:
                 print(f"Ledger entrance refresh error: {e}")
             try:
-                from cogs.favourites import calculate_butler_stats, update_title_roles
-                _now_t = datetime.now(timezone.utc)
-                _days_since_mon = _now_t.weekday()
-                _week_start = (_now_t - timedelta(days=_days_since_mon)).replace(hour=12, minute=0, second=0, microsecond=0)
-                if _week_start > _now_t:
-                    _week_start -= timedelta(weeks=1)
-                _title_stats = await calculate_butler_stats(week_start=_week_start.timestamp(), week_end=_now_t.timestamp())
+                from cogs.favourites import season_title_stats, update_title_roles
+                # Season window so Most Dominant / Warlord match the season standings card.
+                _title_stats = await season_title_stats()
                 await update_title_roles(_guild, _title_stats, include_weekly=False)
             except Exception as e:
                 print(f"Title roles refresh error: {e}")

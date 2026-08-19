@@ -574,6 +574,23 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     return embed
 
 
+async def season_title_stats():
+    """Stats for update_title_roles over the current SEASON window (weekly fallback when
+    there's no active season). Most Dominant / Warlord are season titles — they must be
+    computed over the same window the standings card shows, or the role holder drifts
+    from the displayed leader. Board titles (Grand Marshal etc.) are all-time regardless."""
+    from datetime import datetime, timezone, timedelta
+    _now = datetime.now(timezone.utc)
+    _season = await _db.get_current_season()
+    if _season and _season.get('started_at'):
+        return await calculate_butler_stats(
+            week_start=_season['started_at'].timestamp(), week_end=_now.timestamp())
+    _ws = (_now - timedelta(days=_now.weekday())).replace(hour=12, minute=0, second=0, microsecond=0)
+    if _ws > _now:
+        _ws -= timedelta(weeks=1)
+    return await calculate_butler_stats(week_start=_ws.timestamp(), week_end=_now.timestamp())
+
+
 async def update_title_roles(guild, stats, include_weekly=True):
     main_channel = guild.get_channel(MAIN_CHANNEL_ID)
 
