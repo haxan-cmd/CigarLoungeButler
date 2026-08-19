@@ -85,6 +85,8 @@ canvas{display:block;width:100%;border-radius:8px}
 .cardbul{padding:3px 0 3px 2px;font-size:13px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;line-height:1.5}
 .cardbul::before{content:"›";color:var(--mut);margin-right:2px}
 .cardbul img.ce,.cardsec img.ce{height:1.25em;vertical-align:-0.2em}
+.meter{display:inline-block;width:78px;height:9px;background:var(--panel2);border:1px solid var(--grid);border-radius:5px;overflow:hidden;vertical-align:middle;margin:0 4px}
+.meterfill{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--coral))}
 @media(max-width:640px){
   .wrap{padding:10px 10px 46px}
   .head h1{font-size:17px}
@@ -908,8 +910,9 @@ function emojiImg(token){
   if(!token) return raw('');
   const m=String(token).match(/^<(a?):(\w+):(\d+)>$/);
   if(!m) return raw(esc(token));   // a plain unicode emoji
-  const ext=m[1]==='a'?'gif':'png';
-  return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.${ext}" alt="${m[2]}" title="${m[2]}">`;
+  // Always .png: Discord serves a static first-frame PNG for EVERY custom emoji
+  // (animated included), whereas some .gif URLs 404 and fall back to alt text.
+  return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.png" alt="" title="${m[2]}">`;
 }
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
@@ -958,10 +961,17 @@ function renderBoardCategory(kind){
 // ---- player cards (mirror the Discord registry card from its markdown) ----
 function _mdInline(s){
   s=esc(s).replace(/&lt;(a?):(\w+):(\d+)&gt;/g,function(_,a,nm,id){
-    return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.'+(a==='a'?'gif':'png')+'" alt="'+nm+'">';});
+    return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.png" alt="" title="'+nm+'">';});
+  // progress meters `[■□□□]` / [▰▱▱] -> a real HTML bar
+  s=s.replace(/`?\[([■□▰▱▮▯█░]{2,})\]`?/g,function(_,bar){
+    const arr=[...bar], filled=arr.filter(c=>'■▰▮█'.indexOf(c)>=0).length, total=arr.length;
+    const pct=total?Math.round(filled/total*100):0;
+    return '<span class="meter" title="'+filled+'/'+total+'"><span class="meterfill" style="width:'+pct+'%"></span></span>';
+  });
   s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" style="color:var(--blue)">$1</a>');
   s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
   s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  s=s.replace(/`([^`]+)`/g,'<code style="background:var(--panel2);padding:0 4px;border-radius:4px;font-size:12px">$1</code>');
   return s;
 }
 function mdToHtml(text){
@@ -996,9 +1006,10 @@ function paintCard(){
   const d=pc.data;
   if(!d||!d.messages||!d.messages.length){ h.innerHTML=String(html`<div class="loading">No card on file for ${pc.name} yet.</div>`); return; }
   const card=document.createElement('div'); card.className='card pcard';
-  card.innerHTML=html`<div class="cardtitle">🗂️ ${d.name}</div>${d.messages.map(function(m,i){
-    return html`${i?raw('<hr style="border:none;border-top:1px solid var(--grid);margin:16px 0">'):''}${mdToHtml(m)}`;
-  })}`;
+  const banner=raw('<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin:16px auto" onerror="this.remove()">');
+  card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()"><div class="cardtitle">🗂️ ${d.name}</div>${d.messages.map(function(m,i){
+    return html`${i?banner:''}${mdToHtml(m)}`;
+  })}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:14px" onerror="this.remove()">`;
   h.innerHTML=''; h.appendChild(card);
 }
 function renderPlayers(){
