@@ -144,7 +144,8 @@ async def run_healthcheck():
                 if _d:
                     _rec['did'] = _d   # backfill id so galaxy/filter merge legacy runs too
         data = [[_rec.get(f) for f in fields] for _rec in recs]
-        body = json.dumps({"fields": fields, "rows": data, "player_marks": _pmarks},
+        body = json.dumps({"fields": fields, "rows": data, "player_marks": _pmarks,
+                           "stat_labels": {k: v[1] for k, v in _SE.STAT_EXTRACTORS.items()}},
                           default=str, ensure_ascii=False)
         _lab_data_cache["body"], _lab_data_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")

@@ -103,6 +103,7 @@ canvas{display:block;width:100%;border-radius:8px}
     <button class="tab" data-v="galaxy">🌌 Galaxy</button>
   <button class="tab" data-v="activity">🕒 Activity</button>
   <button class="tab" data-v="ranking">🏅 Rankings</button>
+  <button class="tab" data-v="records">🏆 Records</button>
   <button class="tab" data-v="weapons">🗡️ Weapons</button>
   </div>
 
@@ -119,7 +120,7 @@ const LABELS={kills:'Kills',td:'Takedowns',deaths:'Deaths',kd:'K/D ratio',
   aggression:'Aggression (K+D)',kill_share:'Kill share %',team_td_share:'Team TD share %',
   warlord:'Warlord %',dominance:'Dominance',lethality:'Lethality (K/TD)',score:'Score',
   lobby_kills:'Total lobby kills',tilt:'Lobby kill gap',td_lead:'TD lead over teammate',marks:'Marks earned'};
-const ALL_STATS=Object.keys(LABELS);
+let ALL_STATS=Object.keys(LABELS);
 const DEFAULT_MATRIX=['kills','td','deaths','kd','kill_share','warlord','tilt'];
 
 const qp=new URLSearchParams(location.search);
@@ -293,7 +294,7 @@ function renderScatter(){
   view.appendChild(ctrl);
 
   const pts=[];
-  for(const r of rows){const x=val(r,state.x),y=val(r,state.y); if(x!=null&&y!=null)pts.push({x,y,cat:catOf(r),name:r[IDX.name],w:r[IDX.weapon]});}
+  for(const r of rows){const x=val(r,state.x),y=val(r,state.y); if(x!=null&&y!=null)pts.push({x,y,cat:catOf(r),name:r[IDX.name],w:r[IDX.weapon],link:r[IDX.link]});}
   const card=document.createElement('div'); card.className='card';
   card.innerHTML='<h3>'+LABELS[state.x]+' vs '+LABELS[state.y]+' · '+pts.length+' runs</h3>';
   if(pts.length<5){card.innerHTML+='<div class="loading">Not enough runs — widen the filters.</div>';view.appendChild(card);return;}
@@ -353,9 +354,13 @@ function drawScatter(cv,wrap,pts){
     let best=null,bd=1e9;
     for(const s of screen){const d=(s.px-mx)**2+(s.py-my)**2; if(d<bd){bd=d;best=s;}}
     if(best&&bd<160){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';
-      tip.textContent=(best.p.name||'?')+' · '+(best.p.w||'?')+' · '+LABELS[state.x]+' '+fmt(best.p.x)+' / '+LABELS[state.y]+' '+fmt(best.p.y);}
-    else tip.style.opacity=0;};
-  cv.onmouseleave=()=>tip.style.opacity=0;
+      cv.style.cursor=best.p.link?'pointer':'default';
+      tip.textContent=(best.p.name||'?')+' · '+(best.p.w||'?')+' · '+LABELS[state.x]+' '+fmt(best.p.x)+' / '+LABELS[state.y]+' '+fmt(best.p.y)+(best.p.link?' · click ↗':'');}
+    else {tip.style.opacity=0; cv.style.cursor='default';}};
+  cv.onclick=e=>{const rect=cv.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let best=null,bd=1e9; for(const s of screen){const d=(s.px-mx)**2+(s.py-my)**2; if(d<bd){bd=d;best=s;}}
+    if(best&&bd<160&&best.p.link)window.open(best.p.link,'_blank','noopener');};
+  cv.onmouseleave=()=>{tip.style.opacity=0;cv.style.cursor='default';};
 }
 function fmt(v){return Math.abs(v)>=100?Math.round(v):(Math.round(v*100)/100);}
 
@@ -595,10 +600,13 @@ function drawGalaxy(cv,wrap,pts){
   const tip=document.getElementById('tip');
   cv.onmousemove=e=>{const rect=cv.getBoundingClientRect();const mxp=e.clientX-rect.left,myp=e.clientY-rect.top;
     let best=null,bd=1e9;for(const s of screen){const d=(s.px-mxp)**2+(s.py-myp)**2;if(d<bd){bd=d;best=s;}}
-    if(best&&bd<300){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';
-      tip.textContent=best.p.name+' · '+LABELS[state.galaxy.x]+' '+fmt(best.p.x)+' / '+LABELS[state.galaxy.y]+' '+fmt(best.p.y)+' · '+best.p.n+' runs';}
-    else tip.style.opacity=0;};
-  cv.onmouseleave=()=>tip.style.opacity=0;
+    if(best&&bd<300){tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';cv.style.cursor='pointer';
+      tip.textContent=best.p.name+' · '+LABELS[state.galaxy.x]+' '+fmt(best.p.x)+' / '+LABELS[state.galaxy.y]+' '+fmt(best.p.y)+' · '+best.p.n+' runs · click to filter';}
+    else {tip.style.opacity=0;cv.style.cursor='default';}};
+  cv.onclick=e=>{const rect=cv.getBoundingClientRect();const mxp=e.clientX-rect.left,myp=e.clientY-rect.top;
+    let best=null,bd=1e9;for(const s of screen){const d=(s.px-mxp)**2+(s.py-myp)**2;if(d<bd){bd=d;best=s;}}
+    if(best&&bd<300){state.filters.player=best.p.name||'';buildFilters();render();}};
+  cv.onmouseleave=()=>{tip.style.opacity=0;cv.style.cursor='default';};
 }
 
 // ---- shared selects ----
@@ -682,15 +690,20 @@ function lobbyGameRanking(){
     +(asc?'🔴 Hardest (most outmatched) first':'🍼 Easiest (biggest steamroll) first')
     +' · % gap of the smaller team · '+games.length+' games</div>';
   top.forEach(function(g,i){
-    const b=tiltBand(g.p), r=g.r, nm=r[IDX.name]||'?', mp=r[IDX.map]||'—';
+    const b=tiltBand(g.p), r=g.r, nm=r[IDX.name]||'?', mp=r[IDX.map]||'—', lk=r[IDX.link]||'';
     const w=Math.max(2,Math.round(Math.abs(g.p)/span*100)), sign=g.p>0?'+':'';
     const col=g.p<0?'var(--coral)':'var(--teal)';
-    html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid)">'
-      +'<span style="color:var(--mut);width:22px;text-align:right">'+(i+1)+'.</span>'
+    const inner='<span style="color:var(--mut);width:22px;text-align:right">'+(i+1)+'.</span>'
       +'<span style="width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nm)+'</span>'
       +'<span style="flex:1;min-width:50px"><span style="display:inline-block;height:11px;border-radius:3px;background:'+col+';width:'+w+'%"></span></span>'
       +'<span style="width:170px;color:var(--mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+b[2]+' '+esc(b[1])+' · '+esc(mp)+'</span>'
-      +'<span style="width:50px;text-align:right;font-weight:600">'+sign+g.p+'%</span></div>';
+      +'<span style="width:56px;text-align:right;font-weight:600">'+sign+g.p+'%'+(lk?' <span style="color:var(--mut)">↗</span>':'')+'</span>';
+    if(lk){
+      html+='<a href="'+esc(lk)+'" target="_blank" rel="noopener" title="Open the submission in Discord" '
+        +'style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid);text-decoration:none;color:inherit">'+inner+'</a>';
+    } else {
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid)">'+inner+'</div>';
+    }
   });
   card.innerHTML=html;
   return card;
@@ -774,7 +787,7 @@ function renderRanking(){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
     row.innerHTML='<span style="width:22px;text-align:right;color:#8b8f9a;font-size:12px;flex:none">'+(i+1)+'.</span>'
-      +'<span style="width:120px;color:#c9ccd3;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'
+      +'<span data-player="'+esc(p.name)+'" style="width:120px;color:#c9ccd3;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" title="Filter to '+esc(p.name)+'">'+esc(p.name)+'</span>'
       + bar
       +'<span style="width:56px;text-align:right;color:'+col+';font-size:12px;flex:none">'+fmt(p.value)+'</span>';
     card.appendChild(row);
@@ -783,6 +796,37 @@ function renderRanking(){
 }
 
 // ---- view switching ----
+const RECORD_DEFS=[
+  ['kills','max','Most kills',''],['td','max','Most takedowns',''],['kd','max','Best K/D',''],
+  ['score','max','Highest score',''],['lethality','max','Highest lethality','%'],
+  ['warlord','max','Highest Warlord','%'],['kill_share','max','Highest kill share','%'],
+  ['td_lead','max','Biggest TD lead over teammate',''],['lobby_kills','max','Biggest lobby (total kills)',''],
+  ['tilt_pct','max','Biggest steamroll','%'],['tilt_pct','min','Most brutal lobby','%'],['deaths','max','Most deaths (survivor)','']
+];
+function renderRecords(){
+  const rows=filtered();
+  const view=document.getElementById('view'); view.innerHTML='';
+  const card=document.createElement('div'); card.className='card';
+  let html='<h3>Single-game records'+(activeBits().length?' (filtered)':'')+'</h3>'
+    +'<div style="color:#8b8f9a;font-size:12px;margin:-4px 0 12px">The best single game for each stat · click a name to filter · ↗ opens the submission</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">';
+  RECORD_DEFS.forEach(function(def){
+    const key=def[0],dir=def[1],title=def[2],unit=def[3];
+    let best=null;
+    for(const r of rows){const v=r[IDX[key]]; if(v==null) continue; if(!best||(dir==='max'?v>best.v:v<best.v)) best={v:v,r:r};}
+    html+='<div style="background:var(--panel2);border:1px solid var(--grid);border-radius:10px;padding:12px 14px">'
+      +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">'+esc(title)+'</div>';
+    if(!best){ html+='<div style="color:var(--mut);margin-top:6px">—</div></div>'; return; }
+    const r=best.r,nm=r[IDX.name]||'?',mp=r[IDX.map]||'',wp=r[IDX.weapon]||'',lk=r[IDX.link]||'';
+    const sign=(key==='tilt_pct'&&best.v>0)?'+':'';
+    html+='<div style="font-size:22px;font-weight:700;margin:2px 0 4px">'+sign+fmt(best.v)+unit+'</div>'
+      +'<div style="font-size:12.5px"><span data-player="'+esc(nm)+'" style="cursor:pointer;color:var(--gold)" title="Filter to '+esc(nm)+'">'+esc(nm)+'</span></div>'
+      +'<div style="font-size:11.5px;color:var(--mut)">'+esc(mp)+(wp?(' · '+esc(wp)):'')
+      +(lk?(' · <a href="'+esc(lk)+'" target="_blank" rel="noopener" style="color:var(--blue)">open ↗</a>'):'')+'</div></div>';
+  });
+  html+='</div>';
+  card.innerHTML=html; view.appendChild(card);
+}
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
   render();}
@@ -839,6 +883,7 @@ function render(){
   else if(state.view==='trends')renderTrends();
   else if(state.view==='activity')renderActivity();
   else if(state.view==='ranking')renderRanking();
+  else if(state.view==='records')renderRecords();
   else if(state.view==='weapons')renderWeapons();
   else renderGalaxy();
 }
@@ -851,7 +896,13 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
     FIELDS=d.fields; FIELDS.forEach((f,i)=>IDX[f]=i);
     DATA=d.rows;
     PMARKS=d.player_marks||[];
+    if(d.stat_labels){ Object.assign(LABELS,d.stat_labels); ALL_STATS=Object.keys(d.stat_labels); }
     buildFilters();
+    // Delegated: click any player name (data-player) to filter the whole Lab to them.
+    document.getElementById('view').addEventListener('click',function(e){
+      const el=e.target.closest('[data-player]'); if(!el) return;
+      e.preventDefault(); state.filters.player=el.getAttribute('data-player')||''; buildFilters(); render();
+    });
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
     render();
   })
