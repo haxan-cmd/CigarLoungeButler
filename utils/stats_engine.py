@@ -113,6 +113,14 @@ def _gap(s):
     return (a - b) if (a is not None and b is not None) else None
 
 
+def _gap_pct(s):
+    """Lobby kill gap as a PERCENT of the smaller team — the value the difficulty
+    bands (Brutal … Training Grounds) are defined on. Positive = your team outkilled
+    them (easy); negative = you were outkilled (hard)."""
+    from utils.tilt import raw_tilt as _rt
+    return _rt(_i(s, 25), _i(s, 26))
+
+
 def _lead2(s):
     # Takedowns minus the best TEAMMATE's takedowns (col 22 = second_place_td, the
     # value TUFF uses). Positive = you topped your side's scoreboard; the margin by
@@ -167,6 +175,7 @@ STAT_EXTRACTORS = {
     'score':          (_score,   'Score'),
     'lobby_kills':    (_lobbyk,  'Total lobby kills'),
     'tilt':           (_gap,     'Lobby kill gap'),
+    'tilt_pct':       (_gap_pct, 'Lobby gap %'),
     'td_lead':        (_lead2,   'TD lead over teammate'),
     'marks':          (_marks,   'Marks earned'),
 }
