@@ -79,6 +79,7 @@ _INDEXES = [
     ("idx_sub_rosters_sid",        "submission_rosters", "(submission_id)"),
     ("idx_lab_opens_time",         "lab_opens",          "(opened_at)"),
     ("idx_bot_events_cat_time",    "bot_events",         "(category, ts)"),
+    ("idx_join_requests_token",    "join_requests",      "(token)"),
 ]
 
 
@@ -169,6 +170,13 @@ _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS bot_events ("
     "id BIGSERIAL PRIMARY KEY, ts TIMESTAMP DEFAULT NOW(), "
     "category TEXT NOT NULL, level TEXT DEFAULT 'inf', message TEXT)",
+    # Website "Apply to join" requests: a public form creates one (pending); a mod
+    # accepts (mints a single-use invite) or denies it from the admin channel; the
+    # applicant's status page reads the outcome by (id, token).
+    "CREATE TABLE IF NOT EXISTS join_requests ("
+    "id BIGSERIAL PRIMARY KEY, token TEXT NOT NULL, ign TEXT, note TEXT, "
+    "status TEXT DEFAULT 'pending', invite_url TEXT, message_id TEXT, "
+    "decided_by TEXT, created_at TIMESTAMP DEFAULT NOW(), decided_at TIMESTAMP)",
 ]
 
 
@@ -617,6 +625,55 @@ async def get_lab_usage():
             "SELECT name, opened_at FROM lab_opens ORDER BY opened_at DESC LIMIT 10")
         out['recent'] = [((r['name'] or 'unknown'), r['opened_at']) for r in _rec]
     return out
+
+
+async def create_join_request(token: str, ign: str, note: str) -> int:
+    """Insert a pending website join request; returns its id."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "INSERT INTO join_requests (token, ign, note) VALUES ($1, $2, $3) RETURNING id",
+            token, (ign or '')[:80], (note or '')[:500]))
+
+
+def _jr_dict(r):
+    if not r:
+        return None
+    return {"id": int(r["id"]), "token": r["token"], "ign": r["ign"], "note": r["note"],
+            "status": r["status"], "invite_url": r["invite_url"], "message_id": r["message_id"],
+            "decided_by": r["decided_by"], "created_at": r["created_at"], "decided_at": r["decided_at"]}
+
+
+async def get_join_request(req_id: int):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return _jr_dict(await conn.fetchrow("SELECT * FROM join_requests WHERE id=$1", req_id))
+
+
+async def set_join_request_message(req_id: int, message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE join_requests SET message_id=$1 WHERE id=$2",
+                           str(message_id), req_id)
+
+
+async def get_join_request_by_message(message_id):
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        return _jr_dict(await conn.fetchrow(
+            "SELECT * FROM join_requests WHERE message_id=$1", str(message_id)))
+
+
+async def decide_join_request(req_id: int, status: str, decided_by: str, invite_url: str = None) -> bool:
+    """Atomically move a request from pending -> accepted/denied. Returns True only if
+    THIS call made the transition, so two mods can't double-decide the same request."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE join_requests SET status=$1, decided_by=$2, invite_url=$3, "
+            "decided_at=NOW() WHERE id=$4 AND status='pending' RETURNING id",
+            status, str(decided_by)[:80], invite_url, req_id)
+        return row is not None
 
 
 async def get_submission_by_link(message_link: str):

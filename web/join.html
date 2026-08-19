@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apply to join — The Cigar Lounge</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#22242a">
+<link rel="icon" type="image/png" href="/assets/loungestaticcircle.png">
+<style>
+:root{--bg:#22242a;--panel:#2b2d34;--panel2:#31343c;--ink:#f2f3f5;--mut:#8b8f9a;
+  --gold:#e0a84c;--blue:#5b8dd9;--coral:#d85a30;--teal:#4fb3a1;--grid:#34373f;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5}
+a{color:var(--gold)}
+.clnav{display:flex;align-items:center;gap:4px;max-width:720px;margin:0 auto;padding:14px 20px 0;flex-wrap:wrap}
+.clnav .brand{font-weight:700;font-size:15px;color:var(--gold);margin-right:12px;text-decoration:none}
+.clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
+.clnav a:hover{color:var(--ink)}
+.wrap{max-width:720px;margin:0 auto;padding:24px 20px 60px}
+.panel{background:var(--panel);border:1px solid var(--grid);border-radius:16px;padding:26px 26px}
+h1{margin:0 0 6px;font-size:26px}
+.lead{color:#cbced6;font-size:14.5px;margin:0 0 20px}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut);margin:14px 0 5px}
+input,textarea{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--grid);border-radius:9px;
+  padding:10px 12px;font-size:14px;font-family:inherit}
+input:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px #e0a84c33}
+textarea{min-height:90px;resize:vertical}
+.hint{color:var(--mut);font-size:11.5px;margin-top:4px}
+.btn{margin-top:18px;background:var(--gold);color:#241c08;font-weight:700;font-size:15px;border:none;
+  border-radius:10px;padding:11px 20px;cursor:pointer;font-family:inherit}
+.btn:disabled{opacity:.6;cursor:default}
+.msg{margin-top:14px;font-size:13.5px}
+.msg.err{color:var(--coral)}
+.center{text-align:center}
+.big{font-size:20px;font-weight:700;margin:6px 0}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--grid);border-top-color:var(--gold);
+  border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.join{display:inline-block;margin-top:16px;background:#5865F2;color:#fff;font-weight:700;text-decoration:none;
+  padding:12px 22px;border-radius:10px}
+.muted{color:var(--mut);font-size:12.5px;margin-top:12px}
+</style>
+</head>
+<body>
+<nav class="clnav"><a href="/" class="brand">Cigar Lounge</a><a href="/hof">Hall of Fame</a><a href="/lab">Stats Lab</a></nav>
+<div class="wrap">
+
+  <div class="panel" id="formView" hidden>
+    <h1>Apply to join</h1>
+    <p class="lead">The Cigar Lounge is a competitive Chivalry 2 community. Tell us who you are and a mod
+      will review your request. If you're approved, you'll get a one-time invite right here.</p>
+    <form id="applyForm">
+      <label for="ign">Name / in-game name <span style="color:var(--coral)">*</span></label>
+      <input id="ign" name="ign" maxlength="80" autocomplete="off" required placeholder="Your Chivalry 2 IGN">
+      <label for="note">Anything to add? <span style="text-transform:none;color:var(--mut)">(optional)</span></label>
+      <textarea id="note" name="note" maxlength="500" placeholder="How you found us, who you play with, hours, etc."></textarea>
+      <div class="hint">Max 500 characters.</div>
+      <button class="btn" id="submitBtn" type="submit">Submit request</button>
+      <div class="msg" id="formMsg"></div>
+    </form>
+  </div>
+
+  <div class="panel center" id="statusView" hidden>
+    <div id="statusBody"></div>
+  </div>
+
+</div>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const qp = new URLSearchParams(location.search);
+  const id = qp.get('id'), tok = qp.get('t');
+
+  function showStatus(html){ $('statusView').hidden=false; $('statusBody').innerHTML=html; }
+
+  // ---- Form mode ----
+  if(!(id && tok)){
+    $('formView').hidden=false;
+    $('applyForm').addEventListener('submit', async e=>{
+      e.preventDefault();
+      const btn=$('submitBtn'), msg=$('formMsg'); msg.className='msg'; msg.textContent='';
+      const ign=$('ign').value.trim();
+      if(!ign){ msg.className='msg err'; msg.textContent='Please enter a name or in-game name.'; return; }
+      btn.disabled=true; btn.textContent='Sending…';
+      try{
+        const fd=new FormData(); fd.set('ign', ign); fd.set('note', $('note').value.trim());
+        const r=await fetch('/join/apply',{method:'POST',body:fd});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok){ throw new Error(d.error||('error '+r.status)); }
+        location.href = '/join/status?id='+encodeURIComponent(d.id)+'&t='+encodeURIComponent(d.token);
+      }catch(err){
+        msg.className='msg err'; msg.textContent=err.message||'Something went wrong. Try again.';
+        btn.disabled=false; btn.textContent='Submit request';
+      }
+    });
+    return;
+  }
+
+  // ---- Status mode ---- (no live waiting: show a received message, check on demand)
+  const PENDING = '<div class="big">✅ Request received</div>'
+    + '<p class="lead">The mods will review your application and make a decision when they can '
+    + '— no need to wait around. Bookmark this page and check back later for the outcome.</p>'
+    + '<button class="btn" id="refreshBtn" type="button">Check for a decision</button>';
+  const NOT_FOUND = '<div class="big">Request not found</div><div class="muted">This link may be wrong or expired. You can <a href="/join">apply again</a>.</div>';
+  const DENIED = '<div class="big">Not this time</div><div class="muted">Your request wasn’t approved. If you think that’s a mistake, reach out to a mod.</div>';
+
+  async function check(initial){
+    try{
+      const r=await fetch('/join/state?id='+encodeURIComponent(id)+'&t='+encodeURIComponent(tok),{cache:'no-store'});
+      if(r.status===404){ showStatus(NOT_FOUND); return; }
+      const d=await r.json();
+      if(d.status==='accepted'){
+        if(d.invite){
+          showStatus('<div class="big">You’re in! 🎉</div><p class="lead">A mod approved your request. Your one-time invite is ready.</p><a class="join" href="'+d.invite+'">Join the Discord →</a><div class="muted">This invite is single-use — use it now.</div>');
+        }else{
+          showStatus('<div class="big">Approved ✅</div><div class="muted">A mod approved you. Reach out to a mod for your invite link.</div>');
+        }
+        return;
+      }
+      if(d.status==='denied'){ showStatus(DENIED); return; }
+      showStatus(PENDING);
+    }catch(e){ if(initial) showStatus(PENDING); }
+  }
+  showStatus(PENDING);   // paint immediately
+  check(true);           // then quietly verify once, in case it's already decided
+  document.addEventListener('click', e=>{
+    if(e.target && e.target.id==='refreshBtn'){ e.target.textContent='Checking…'; e.target.disabled=true; check(false); }
+  });
+})();
+</script>
+</body>
+</html>

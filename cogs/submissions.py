@@ -3639,14 +3639,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
                     )
                     await main_channel.send(line if line.startswith('*') else f"*{line}*")
+                    # First submission earns the baseline Lounger role and clears Guest,
+                    # so a new arrival goes Guest -> Lounger the moment they log a game.
                     try:
-                        unbound_role = interaction.guild.get_role(config.UNBOUND_ROLE_ID)
                         member = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
-                        if unbound_role and member and unbound_role not in member.roles:
-                            await member.add_roles(unbound_role, reason="First blood — first submission")
-                            print(f"[UNBOUND] Assigned Unbound role to {player}")
+                        lounger_role = interaction.guild.get_role(config.LOUNGER_ROLE_ID)
+                        _gid = getattr(config, 'GUEST_ROLE_ID', 0)
+                        guest_role = interaction.guild.get_role(int(_gid)) if _gid else None
+                        if member and lounger_role and lounger_role not in member.roles:
+                            await member.add_roles(lounger_role, reason="First submission — promoted to Lounger")
+                            print(f"[LOUNGER] Promoted {player} to Lounger on first submission")
+                        if member and guest_role and guest_role in member.roles:
+                            await member.remove_roles(guest_role, reason="Promoted from Guest to Lounger")
                     except Exception as ub_e:
-                        nerve_log_error("Unbound role assign", ub_e)
+                        nerve_log_error("Lounger role assign", ub_e)
 
                 # New #1 on any leaderboard — plain factual update (no Butler flavour).
                 # "#1" links to the run itself; board and player names get linkified.

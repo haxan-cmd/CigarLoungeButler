@@ -107,6 +107,15 @@ MOST_LETHAL_ROLE_ID     = 1535424970816094238
 WARLORD_ROLE_ID         = 1518827620572205097
 HUNDRED_HANDED_ROLE_ID  = 1472321853023326361
 UNBOUND_ROLE_ID         = 1433215577173786758
+# Membership: Guest is assigned on join; a member is promoted to Lounger (baseline
+# member) on their FIRST SUBMISSION, at which point Guest is cleared. LOUNGER_ROLE_ID is
+# the same role the code historically called UNBOUND. Left at 0, the role steps no-op.
+GUEST_ROLE_ID           = 1445178964900581446
+LOUNGER_ROLE_ID         = 1433215577173786758
+# Channel where the website's "Apply to join" requests are posted for mod accept/deny.
+ADMIN_CHANNEL_ID        = 1350112524204245002
+# Optional static invite the /join flow falls back to if the bot can't mint one.
+DISCORD_INVITE_URL      = ""
 
 # ── Weapon lists ─────────────────────────────────────────────────────────────
 WEAPONS_2H = [

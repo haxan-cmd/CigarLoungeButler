@@ -321,6 +321,77 @@ async def run_healthcheck():
         _bounty_cache["body"], _bounty_cache["ts"] = body, now
         return web.Response(text=body, content_type="application/json")
 
+    # "Apply to join": public form -> pending request posted to the admin channel for
+    # mod accept/deny -> applicant's status page reveals a single-use invite on accept.
+    _join_rl = {"t": [], "ip": {}}   # global bucket + per-IP last-apply time
+
+    async def join_page(request):
+        # Serves both the application form and (with ?id=&t=) the status view — one file.
+        try:
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "join.html")
+            with open(_p, encoding="utf-8") as f:
+                html = f.read()
+        except Exception:
+            return web.Response(status=500, text="join page missing")
+        return web.Response(text=html, content_type="text/html",
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    async def join_apply(request):
+        import time as _t, secrets as _secrets
+        now = _t.time()
+        ip = (request.headers.get("X-Forwarded-For", "") or request.remote or "").split(",")[0].strip()
+        _join_rl["ip"] = {k: v for k, v in _join_rl["ip"].items() if now - v < 3600}
+        if ip and now - _join_rl["ip"].get(ip, 0) < 30:
+            return web.json_response({"error": "Please wait a moment before applying again."}, status=429)
+        _join_rl["t"] = [x for x in _join_rl["t"] if now - x < 600]
+        if len(_join_rl["t"]) >= 30:
+            return web.json_response({"error": "Too many applications right now — try again shortly."}, status=429)
+        try:
+            data = await request.post()
+        except Exception:
+            return web.json_response({"error": "bad form"}, status=400)
+        ign = (data.get("ign") or "").strip()[:80]
+        note = (data.get("note") or "").strip()[:500]
+        if not ign:
+            return web.json_response({"error": "Please enter a name or in-game name."}, status=400)
+        token = _secrets.token_urlsafe(16)
+        try:
+            from utils.db import create_join_request
+            req_id = await create_join_request(token, ign, note)
+        except RuntimeError:
+            return web.json_response({"error": "database unavailable — try again shortly"}, status=503)
+        except Exception as _e:
+            print(f"[JOIN] apply failed: {_e}")
+            return web.json_response({"error": "couldn't file your request"}, status=500)
+        cog = bot.get_cog("JoinCog")
+        if cog is not None:
+            try:
+                await cog.post_request(req_id, ign, note)
+            except Exception as _pe:
+                print(f"[JOIN] post_request error: {_pe}")
+        _join_rl["t"].append(now)
+        if ip:
+            _join_rl["ip"][ip] = now
+        return web.json_response({"id": req_id, "token": token})
+
+    async def join_state(request):
+        try:
+            rid = int(request.query.get("id", 0))
+        except ValueError:
+            return web.json_response({"error": "bad id"}, status=400)
+        tok = request.query.get("t", "")
+        try:
+            from utils.db import get_join_request
+            req = await get_join_request(rid)
+        except Exception:
+            return web.json_response({"error": "unavailable"}, status=503)
+        if not req or req["token"] != tok:
+            return web.json_response({"status": "unknown"}, status=404)
+        out = {"status": req["status"]}
+        if req["status"] == "accepted" and req.get("invite_url"):
+            out["invite"] = req["invite_url"]
+        return web.json_response(out)
+
     @web.middleware
     async def _security_headers(request, handler):
         # Baseline hardening on every response. (No CSP: the pages use inline scripts,
@@ -342,6 +413,10 @@ async def run_healthcheck():
     app.router.add_get("/hof/data", hof_data)
     app.router.add_get("/lab/card", card_data)
     app.router.add_get("/bounty/data", bounty_data)
+    app.router.add_get("/join", join_page)
+    app.router.add_get("/join/status", join_page)
+    app.router.add_post("/join/apply", join_apply)
+    app.router.add_get("/join/state", join_state)
     # Static assets (weapon PNGs, decorative board borders) for the web Boards tab.
     try:
         _assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -378,6 +453,7 @@ COGS = [
     "cogs.personality",
     "cogs.admin",
     "cogs.kofi",
+    "cogs.join",
 ]
 
 
