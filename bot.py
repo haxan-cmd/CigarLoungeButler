@@ -30,9 +30,17 @@ async def run_healthcheck():
             pass
         # A real browser hitting the bare domain should land on the site, not read "ok".
         # Railway's healthcheck probe doesn't ask for HTML, so it still gets the plain
-        # 200 above/here and the restart-on-503 behaviour is preserved.
+        # 200 below and the restart-on-503 behaviour is preserved.
         if "text/html" in (request.headers.get("Accept") or ""):
-            raise web.HTTPFound("/lab")
+            try:
+                _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "home.html")
+                with open(_p, encoding="utf-8") as f:
+                    html = f.read()
+                return web.Response(text=html, content_type="text/html",
+                                    headers={"Cache-Control": "no-cache, must-revalidate"})
+            except Exception:
+                # Landing page missing? Fall back to the Stats Lab so the domain still works.
+                raise web.HTTPFound("/lab")
         return web.Response(text="ok")
 
     async def kofi_webhook(request):

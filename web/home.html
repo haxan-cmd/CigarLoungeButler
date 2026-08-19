@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Cigar Lounge — Chivalry 2 Community</title>
+<meta name="description" content="The Cigar Lounge: a competitive Chivalry 2 community. Season champions, weapon &amp; map leaderboards, player cards and deep stats, always up to date.">
+<meta name="theme-color" content="#22242a">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="The Cigar Lounge">
+<meta property="og:title" content="The Cigar Lounge — Chivalry 2 Community">
+<meta property="og:description" content="Season champions, weapon &amp; map leaderboards, player cards and deep stats for the Cigar Lounge Chivalry 2 community.">
+<meta property="og:url" content="https://thecigarlounge.app/">
+<meta property="og:image" content="https://thecigarlounge.app/assets/butler.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The Cigar Lounge — Chivalry 2 Community">
+<meta name="twitter:description" content="Season champions, leaderboards, player cards and deep stats, always up to date.">
+<meta name="twitter:image" content="https://thecigarlounge.app/assets/butler.png">
+<link rel="icon" type="image/png" href="/assets/butler.png">
+<style>
+:root{
+  --bg:#22242a;--panel:#2b2d34;--panel2:#31343c;--ink:#f2f3f5;--mut:#8b8f9a;
+  --gold:#e0a84c;--blue:#5b8dd9;--coral:#d85a30;--teal:#4fb3a1;--purple:#7a89c2;--grid:#34373f;
+  --agatha:#5b8dd9;--mason:#d84343;--tenosia:#bcb23f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.5}
+a{color:inherit}
+.clnav{display:flex;align-items:center;gap:4px;max-width:1180px;margin:0 auto;padding:14px 20px 0;flex-wrap:wrap}
+.clnav .brand{font-weight:700;font-size:15px;color:var(--gold);margin-right:12px;letter-spacing:.3px;text-decoration:none}
+.clnav a{color:var(--mut);text-decoration:none;font-size:13px;padding:7px 14px;border-radius:9px;font-weight:600}
+.clnav a:hover{color:var(--ink)}
+.clnav a.on{background:var(--gold);color:#241c08}
+
+.wrap{max-width:1000px;margin:0 auto;padding:24px 20px 60px}
+
+/* Hero. The background gradient sits under an optional themed banner PNG:
+   drop a wide image at /assets/hero.png (or .webp) and set --hero below to
+   url('/assets/hero.png') to swap the art in without touching layout. */
+.hero{position:relative;overflow:hidden;border-radius:20px;border:1px solid var(--grid);
+  background:
+    var(--hero, none),
+    radial-gradient(1200px 400px at 15% -20%, rgba(91,141,217,.18), transparent 60%),
+    radial-gradient(900px 380px at 95% 0%, rgba(216,67,67,.14), transparent 55%),
+    linear-gradient(180deg,#2b2d34,#25272d);
+  background-size:cover;background-position:center;
+  padding:44px 34px 40px;margin-top:18px}
+.hero:before{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(34,36,42,.15),rgba(34,36,42,.72));pointer-events:none}
+.hero-in{position:relative;display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.crest{width:76px;height:76px;border-radius:16px;border:1px solid var(--grid);
+  background:#1e2026;object-fit:cover;flex:none;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.hero h1{margin:0;font-size:34px;letter-spacing:.3px}
+.hero .tag{margin:6px 0 0;color:var(--gold);font-weight:600;font-size:15px}
+.hero .sub{margin:14px 0 0;color:#cfd2da;max-width:640px;font-size:15px}
+
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
+.card{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--grid);
+  border-radius:16px;padding:22px 22px 20px;transition:transform .12s ease,border-color .12s ease,background .12s ease}
+.card:hover{transform:translateY(-3px);border-color:var(--gold);background:var(--panel2)}
+.card .ic{font-size:26px}
+.card h2{margin:10px 0 6px;font-size:19px;color:var(--ink)}
+.card p{margin:0;color:var(--mut);font-size:14px}
+.card .go{margin-top:14px;color:var(--gold);font-weight:700;font-size:13px}
+
+.strip{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+.stat{flex:1 1 150px;background:var(--panel);border:1px solid var(--grid);border-radius:14px;
+  padding:16px 18px;min-width:140px}
+.stat .n{font-size:26px;font-weight:800;color:var(--ink)}
+.stat .n small{font-size:14px;color:var(--mut);font-weight:600}
+.stat .l{color:var(--mut);font-size:12px;margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
+
+.about{margin-top:26px;background:var(--panel);border:1px solid var(--grid);border-radius:16px;padding:22px 24px}
+.about h3{margin:0 0 8px;font-size:16px;color:var(--gold)}
+.about p{margin:0;color:#cbced6;font-size:14.5px}
+.factions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.fchip{font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;border:1px solid}
+.fchip.a{color:var(--agatha);border-color:var(--agatha)}
+.fchip.m{color:var(--mason);border-color:var(--mason)}
+.fchip.t{color:var(--tenosia);border-color:var(--tenosia)}
+
+.foot{margin-top:34px;text-align:center;color:var(--mut);font-size:12.5px}
+
+@media(max-width:680px){
+  .cards{grid-template-columns:1fr}
+  .hero{padding:32px 22px 28px}
+  .hero h1{font-size:27px}
+}
+</style>
+</head>
+<body>
+<nav class="clnav">
+  <a href="/" class="brand">Cigar Lounge</a>
+  <a href="/hof">Hall of Fame</a>
+  <a href="/lab">Stats Lab</a>
+</nav>
+
+<div class="wrap">
+  <section class="hero">
+    <div class="hero-in">
+      <img class="crest" src="/assets/butler.png" alt="The Butler">
+      <div>
+        <h1>The Cigar Lounge</h1>
+        <div class="tag">🗡️ A competitive Chivalry 2 community</div>
+        <p class="sub">Players post their scorecards, the Butler reads them, and every run flows straight
+          into the leaderboards, player cards and season titles below. Public, read-only, and always up to date.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip" id="strip" hidden>
+    <div class="stat"><div class="n" id="s-runs">—</div><div class="l">Runs logged</div></div>
+    <div class="stat"><div class="n" id="s-players">—</div><div class="l">Players</div></div>
+    <div class="stat"><div class="n" id="s-season">—</div><div class="l">Current season</div></div>
+  </div>
+
+  <div class="cards">
+    <a class="card" href="/hof">
+      <div class="ic">🏆</div>
+      <h2>Hall of Fame</h2>
+      <p>Champions of every season and the all-time title holders: Grand Marshal, Weapons Master, Campaign Master and more.</p>
+      <div class="go">Enter the Hall →</div>
+    </a>
+    <a class="card" href="/lab">
+      <div class="ic">📊</div>
+      <h2>Stats Lab</h2>
+      <p>Every weapon and map leaderboard, feats of war, player cards, records, and deep-dive correlations and trends.</p>
+      <div class="go">Open the Lab →</div>
+    </a>
+  </div>
+
+  <section class="about">
+    <h3>What is this?</h3>
+    <p>The Cigar Lounge is a Discord community for competitive Chivalry 2. Every scorecard players post is parsed
+      and logged, feeding live weapon and map records, monthly bounties, seasonal titles, and a per-player registry
+      card. These pages are the public window into all of it, drawn live from the same records the community sees in Discord.</p>
+    <div class="factions">
+      <span class="fchip a">Agatha</span>
+      <span class="fchip m">Mason Order</span>
+      <span class="fchip t">Tenosia</span>
+    </div>
+  </section>
+
+  <div class="foot" id="foot">The Cigar Lounge · live from the records</div>
+</div>
+
+<script>
+// Best-effort live headline stats, drawn from the same public feeds the Lab and
+// Hall of Fame use. Any fetch/shape failure just leaves that stat (or the whole
+// strip) hidden — the page is fully useful without it.
+(async function(){
+  const $ = id => document.getElementById(id);
+  let shown = false;
+
+  // Runs + distinct players from the Lab feed: {fields:[...], rows:[[...]]}.
+  try{
+    const r = await fetch('/lab/data', {headers:{'Accept':'application/json'}});
+    if(r.ok){
+      const d = await r.json();
+      if(Array.isArray(d.rows)){
+        $('s-runs').textContent = d.rows.length.toLocaleString(); shown = true;
+        const ni = Array.isArray(d.fields) ? d.fields.indexOf('name') : -1;
+        if(ni >= 0){
+          const names = new Set();
+          for(const row of d.rows){
+            const nm = row[ni];
+            if(nm) names.add(String(nm).toLowerCase().trim());
+          }
+          if(names.size){ $('s-players').textContent = names.size.toLocaleString(); }
+          else { $('s-players').parentElement.style.display='none'; }
+        } else { $('s-players').parentElement.style.display='none'; }
+      }
+    }
+  }catch(e){ /* leave those two hidden */ }
+
+  // Current season = newest entry in the Hall of Fame feed (seasons are newest-first).
+  try{
+    const r = await fetch('/hof/data', {headers:{'Accept':'application/json'}});
+    if(r.ok){
+      const d = await r.json();
+      const s0 = Array.isArray(d.seasons) && d.seasons.length ? d.seasons[0] : null;
+      const label = s0 && (s0.label || s0.name || (s0.id!=null ? ('Season '+s0.id) : null));
+      if(label){ $('s-season').textContent = label; shown = true; }
+      else { $('s-season').parentElement.style.display='none'; }
+    } else { $('s-season').parentElement.style.display='none'; }
+  }catch(e){ $('s-season').parentElement.style.display='none'; }
+
+  if(shown) $('strip').hidden = false;
+})();
+</script>
+</body>
+</html>
