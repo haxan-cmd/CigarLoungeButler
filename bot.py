@@ -5,6 +5,7 @@ import json
 import traceback
 import os
 import signal
+import aiohttp
 from aiohttp import web
 import discord
 from discord.ext import commands
@@ -324,6 +325,26 @@ async def run_healthcheck():
     # "Apply to join": public form -> pending request posted to the admin channel for
     # mod accept/deny -> applicant's status page reveals a single-use invite on accept.
     _join_rl = {"t": [], "ip": {}}   # global bucket + per-IP last-apply time
+    _oauth_sessions = {}             # sid -> {did, uname, handle, avatar, ts}
+
+    def _oauth_conf():
+        cid = getattr(config, "DISCORD_CLIENT_ID", 0)
+        sec = os.environ.get("DISCORD_CLIENT_SECRET", "")
+        redir = os.environ.get("OAUTH_REDIRECT_URI", "") or getattr(config, "OAUTH_REDIRECT_URI", "")
+        return (str(cid) if cid else ""), sec, redir
+
+    def _oauth_ready():
+        cid, sec, redir = _oauth_conf()
+        return bool(cid and sec and redir)
+
+    def _current_oauth(request):
+        import time as _t
+        s = _oauth_sessions.get(request.cookies.get("join_sid", ""))
+        if not s:
+            return None
+        if _t.time() - s["ts"] > 3600:
+            return None
+        return s
 
     async def join_page(request):
         # Serves both the application form and (with ?id=&t=) the status view — one file.
@@ -335,6 +356,72 @@ async def run_healthcheck():
             return web.Response(status=500, text="join page missing")
         return web.Response(text=html, content_type="text/html",
                             headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    async def join_login(request):
+        import secrets as _secrets
+        from urllib.parse import quote as _q
+        cid, sec, redir = _oauth_conf()
+        if not (cid and sec and redir):
+            raise web.HTTPFound("/join")
+        state = _secrets.token_urlsafe(16)
+        url = ("https://discord.com/oauth2/authorize?response_type=code&scope=identify"
+               f"&client_id={cid}&redirect_uri={_q(redir, safe='')}&state={state}")
+        resp = web.HTTPFound(url)
+        resp.set_cookie("oauth_state", state, max_age=600, httponly=True, samesite="Lax")
+        raise resp
+
+    async def join_callback(request):
+        import secrets as _secrets, time as _t
+        cid, sec, redir = _oauth_conf()
+        if not (cid and sec and redir):
+            raise web.HTTPFound("/join")
+        code = request.query.get("code", "")
+        state = request.query.get("state", "")
+        if not code or not state or state != request.cookies.get("oauth_state", ""):
+            raise web.HTTPFound("/join?e=oauth")
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post("https://discord.com/api/oauth2/token", data={
+                        "client_id": cid, "client_secret": sec, "grant_type": "authorization_code",
+                        "code": code, "redirect_uri": redir}) as tr:
+                    if tr.status != 200:
+                        raise web.HTTPFound("/join?e=oauth")
+                    access = (await tr.json()).get("access_token")
+                async with sess.get("https://discord.com/api/users/@me",
+                                    headers={"Authorization": f"Bearer {access}"}) as ur:
+                    if ur.status != 200:
+                        raise web.HTTPFound("/join?e=oauth")
+                    u = await ur.json()
+        except web.HTTPException:
+            raise
+        except Exception as _e:
+            print(f"[OAUTH] callback error: {_e}")
+            raise web.HTTPFound("/join?e=oauth")
+        _now = _t.time()
+        for _k in [k for k, v in _oauth_sessions.items() if _now - v["ts"] > 3600]:
+            _oauth_sessions.pop(_k, None)
+        sid = _secrets.token_urlsafe(24)
+        _oauth_sessions[sid] = {
+            "did": str(u.get("id") or ""),
+            "uname": (u.get("global_name") or u.get("username") or "")[:100],
+            "handle": (u.get("username") or "")[:100],
+            "avatar": (u.get("avatar") or ""),
+            "ts": _now}
+        resp = web.HTTPFound("/join")
+        resp.del_cookie("oauth_state")
+        resp.set_cookie("join_sid", sid, max_age=3600, httponly=True, samesite="Lax")
+        raise resp
+
+    async def join_me(request):
+        if not _oauth_ready():
+            return web.json_response({"oauth": False})
+        s = _current_oauth(request)
+        if not s:
+            return web.json_response({"oauth": True, "signed_in": False})
+        av = (f"https://cdn.discordapp.com/avatars/{s['did']}/{s['avatar']}.png"
+              if s.get("avatar") else "")
+        return web.json_response({"oauth": True, "signed_in": True,
+                                  "username": s["uname"], "avatar": av})
 
     async def join_apply(request):
         import time as _t, secrets as _secrets
@@ -354,10 +441,19 @@ async def run_healthcheck():
         note = (data.get("note") or "").strip()[:500]
         if not ign:
             return web.json_response({"error": "Please enter a name or in-game name."}, status=400)
+        # When OAuth is configured, the applicant must be signed in with Discord; the
+        # verified identity comes from the server-side session, never from the client.
+        did = uname = avatar = None
+        if _oauth_ready():
+            s = _current_oauth(request)
+            if not s:
+                return web.json_response({"error": "Please sign in with Discord first.", "signin": True}, status=401)
+            did, uname, avatar = s["did"], s["uname"], s.get("avatar")
         token = _secrets.token_urlsafe(16)
         try:
             from utils.db import create_join_request
-            req_id = await create_join_request(token, ign, note)
+            req_id = await create_join_request(token, ign, note,
+                                               discord_id=did, discord_username=uname, avatar=avatar)
         except RuntimeError:
             return web.json_response({"error": "database unavailable — try again shortly"}, status=503)
         except Exception as _e:
@@ -366,7 +462,7 @@ async def run_healthcheck():
         cog = bot.get_cog("JoinCog")
         if cog is not None:
             try:
-                await cog.post_request(req_id, ign, note)
+                await cog.post_request(req_id, ign, note, discord_id=did, discord_username=uname)
             except Exception as _pe:
                 print(f"[JOIN] post_request error: {_pe}")
         _join_rl["t"].append(now)
@@ -415,6 +511,9 @@ async def run_healthcheck():
     app.router.add_get("/bounty/data", bounty_data)
     app.router.add_get("/join", join_page)
     app.router.add_get("/join/status", join_page)
+    app.router.add_get("/join/login", join_login)
+    app.router.add_get("/join/callback", join_callback)
+    app.router.add_get("/join/me", join_me)
     app.router.add_post("/join/apply", join_apply)
     app.router.add_get("/join/state", join_state)
     # Static assets (weapon PNGs, decorative board borders) for the web Boards tab.

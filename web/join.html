@@ -39,6 +39,10 @@ textarea{min-height:90px;resize:vertical}
 @keyframes sp{to{transform:rotate(360deg)}}
 .join{display:inline-block;margin-top:16px;background:#5865F2;color:#fff;font-weight:700;text-decoration:none;
   padding:12px 22px;border-radius:10px}
+.dbtn{display:inline-block;background:#5865F2;color:#fff;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:10px}
+.signed{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--grid);
+  border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:13.5px}
+.signed img{width:26px;height:26px;border-radius:50%}
 .muted{color:var(--mut);font-size:12.5px;margin-top:12px}
 </style>
 </head>
@@ -50,7 +54,12 @@ textarea{min-height:90px;resize:vertical}
     <h1>Apply to join</h1>
     <p class="lead">The Cigar Lounge is a competitive Chivalry 2 community. Tell us who you are and a mod
       will review your request. If you're approved, you'll get a one-time invite right here.</p>
-    <form id="applyForm">
+    <div id="signinGate" hidden>
+      <a class="dbtn" href="/join/login">Sign in with Discord to apply</a>
+      <div class="hint" style="margin-top:8px">We only read your Discord name so the mods know who's applying.</div>
+    </div>
+    <div id="signedAs" class="signed" hidden></div>
+    <form id="applyForm" hidden>
       <label for="ign">Name / in-game name <span style="color:var(--coral)">*</span></label>
       <input id="ign" name="ign" maxlength="80" autocomplete="off" required placeholder="Your Chivalry 2 IGN">
       <label for="note">Anything to add? <span style="text-transform:none;color:var(--mut)">(optional)</span></label>
@@ -77,9 +86,22 @@ textarea{min-height:90px;resize:vertical}
   // ---- Form mode ----
   if(!(id && tok)){
     $('formView').hidden=false;
-    $('applyForm').addEventListener('submit', async e=>{
+    const form=$('applyForm'), gate=$('signinGate'), signed=$('signedAs'), msg=$('formMsg');
+    if(qp.get('e')==='oauth'){ msg.className='msg err'; msg.textContent='Discord sign-in didn’t complete. Give it another go.'; }
+
+    // Decide whether Discord sign-in is required, and reflect who you're applying as.
+    fetch('/join/me',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+      if(d && d.oauth && !d.signed_in){ gate.hidden=false; form.hidden=true; return; }
+      if(d && d.oauth && d.signed_in){
+        signed.hidden=false;
+        signed.innerHTML = (d.avatar?'<img src="'+d.avatar+'" alt="">':'') + 'Applying as <b style="margin-left:2px">'+(d.username||'you')+'</b>';
+      }
+      form.hidden=false;   // OAuth off (anonymous) or signed in
+    }).catch(()=>{ form.hidden=false; });
+
+    form.addEventListener('submit', async e=>{
       e.preventDefault();
-      const btn=$('submitBtn'), msg=$('formMsg'); msg.className='msg'; msg.textContent='';
+      const btn=$('submitBtn'); msg.className='msg'; msg.textContent='';
       const ign=$('ign').value.trim();
       if(!ign){ msg.className='msg err'; msg.textContent='Please enter a name or in-game name.'; return; }
       btn.disabled=true; btn.textContent='Sending…';
@@ -87,6 +109,7 @@ textarea{min-height:90px;resize:vertical}
         const fd=new FormData(); fd.set('ign', ign); fd.set('note', $('note').value.trim());
         const r=await fetch('/join/apply',{method:'POST',body:fd});
         const d=await r.json().catch(()=>({}));
+        if(r.status===401 && d.signin){ form.hidden=true; gate.hidden=false; msg.textContent=''; return; }
         if(!r.ok){ throw new Error(d.error||('error '+r.status)); }
         location.href = '/join/status?id='+encodeURIComponent(d.id)+'&t='+encodeURIComponent(d.token);
       }catch(err){

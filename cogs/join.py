@@ -105,17 +105,20 @@ class JoinCog(commands.Cog):
         # Register the persistent view once so the buttons keep working after restarts.
         self.bot.add_view(JoinRequestView(self.bot))
 
-    async def post_request(self, req_id, ign, note):
+    async def post_request(self, req_id, ign, note, discord_id=None, discord_username=None):
         """Post a join-request card to the admin channel; record its message id."""
         ch = self.bot.get_channel(config.ADMIN_CHANNEL_ID)
         if ch is None:
             print("[JOIN] admin channel not found")
             return False
         emb = discord.Embed(title="\U0001f3ab New join request", colour=0xe0a84c)
+        if discord_id:
+            who = f"<@{discord_id}>" + (f" (`{discord_username}`)" if discord_username else "")
+            emb.add_field(name="Discord", value=who + f"\n`{discord_id}`", inline=False)
         emb.add_field(name="Name / IGN", value=(ign or "—")[:100], inline=False)
         if note:
             emb.add_field(name="Note", value=note[:1000], inline=False)
-        emb.set_footer(text=f"Request #{req_id} · from the website")
+        emb.set_footer(text=f"Request #{req_id} · from the website" + (" · Discord-verified" if discord_id else ""))
         try:
             msg = await ch.send(embed=emb, view=JoinRequestView(self.bot),
                                 allowed_mentions=discord.AllowedMentions.none())

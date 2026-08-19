@@ -119,6 +119,12 @@ ADMIN_CHANNEL_ID        = 1350112524204245002
 BOUNTY_SUGGESTIONS_CHANNEL_ID = 1539757951248629880
 # Optional static invite the /join flow falls back to if the bot can't mint one.
 DISCORD_INVITE_URL      = ""
+# Discord OAuth for the "Apply to join" flow: applicants sign in with Discord so the
+# request card shows their real account. CLIENT_ID is public (set here or via env);
+# the CLIENT SECRET must come from the DISCORD_CLIENT_SECRET env var (never commit it).
+# OAUTH_REDIRECT_URI must EXACTLY match the redirect registered in the Dev Portal.
+DISCORD_CLIENT_ID       = 1517967002940080269
+OAUTH_REDIRECT_URI      = "https://thecigarlounge.app/join/callback"
 
 # ── Weapon lists ─────────────────────────────────────────────────────────────
 WEAPONS_2H = [

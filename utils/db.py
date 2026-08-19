@@ -179,6 +179,10 @@ _SCHEMA_STATEMENTS = [
     "id BIGSERIAL PRIMARY KEY, token TEXT NOT NULL, ign TEXT, note TEXT, "
     "status TEXT DEFAULT 'pending', invite_url TEXT, message_id TEXT, "
     "decided_by TEXT, created_at TIMESTAMP DEFAULT NOW(), decided_at TIMESTAMP)",
+    # Discord OAuth account-linking on the apply form (added after launch).
+    "ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS discord_id TEXT",
+    "ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS discord_username TEXT",
+    "ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS avatar TEXT",
     # Community bounty suggestions: /suggest_bounty posts one to the public board where
     # members upvote; mods shortlist / use / dismiss it. status: open|shortlisted|used|dismissed.
     "CREATE TABLE IF NOT EXISTS bounty_suggestions ("
@@ -638,13 +642,17 @@ async def get_lab_usage():
     return out
 
 
-async def create_join_request(token: str, ign: str, note: str) -> int:
+async def create_join_request(token: str, ign: str, note: str,
+                              discord_id=None, discord_username=None, avatar=None) -> int:
     """Insert a pending website join request; returns its id."""
     pool = _pool_check()
     async with pool.acquire() as conn:
         return int(await conn.fetchval(
-            "INSERT INTO join_requests (token, ign, note) VALUES ($1, $2, $3) RETURNING id",
-            token, (ign or '')[:80], (note or '')[:500]))
+            "INSERT INTO join_requests (token, ign, note, discord_id, discord_username, avatar) "
+            "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            token, (ign or '')[:80], (note or '')[:500],
+            (str(discord_id) if discord_id else None),
+            ((discord_username or '')[:100] or None), ((avatar or '')[:200] or None)))
 
 
 def _jr_dict(r):
@@ -652,7 +660,10 @@ def _jr_dict(r):
         return None
     return {"id": int(r["id"]), "token": r["token"], "ign": r["ign"], "note": r["note"],
             "status": r["status"], "invite_url": r["invite_url"], "message_id": r["message_id"],
-            "decided_by": r["decided_by"], "created_at": r["created_at"], "decided_at": r["decided_at"]}
+            "decided_by": r["decided_by"], "created_at": r["created_at"], "decided_at": r["decided_at"],
+            "discord_id": r.get("discord_id") if hasattr(r, "get") else r["discord_id"],
+            "discord_username": r.get("discord_username") if hasattr(r, "get") else r["discord_username"],
+            "avatar": r.get("avatar") if hasattr(r, "get") else r["avatar"]}
 
 
 async def get_join_request(req_id: int):
