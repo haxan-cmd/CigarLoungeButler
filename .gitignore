@@ -11,3 +11,13 @@ __pycache__/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Local data dumps / scratch (never commit)
+export_db.py
+*.csv
+
+# Temp image-comparison artifacts from the hero-gif optimization
+assets/half_q*.webp
+assets/q*.webp
+assets/loungecircle_q90.webp
+assets/try_opt.gif
