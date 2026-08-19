@@ -103,33 +103,40 @@ def _agg(s):
     return (k + d) if (k is not None and d is not None) else None
 
 
-def _lobbyk(s):
+def _lobby_totals(s):
+    """The two banner kill totals (own, enemy), validated against vision misreads:
+    a real Chiv match sees both teams score into the hundreds, so a tiny smaller-total
+    or a gap beyond ~3x is a misread banner (the '+881%' bug), not a real lobby. Returns
+    (None, None) for those so every lobby-derived stat drops them together."""
     a, b = _i(s, 25), _i(s, 26)
-    return (a + b) if (a is not None and b is not None) else None
+    if a is None or b is None or min(a, b) < 60:
+        return None, None
+    lo, hi = (a, b) if a <= b else (b, a)
+    if (hi - lo) / lo * 100 > 200:   # beyond 3x = misread banner
+        return None, None
+    return a, b
+
+
+def _lobbyk(s):
+    a, b = _lobby_totals(s)
+    return (a + b) if a is not None else None
 
 
 def _gap(s):
-    a, b = _i(s, 25), _i(s, 26)
-    return (a - b) if (a is not None and b is not None) else None
+    a, b = _lobby_totals(s)
+    return (a - b) if a is not None else None
 
 
 def _gap_pct(s):
-    """Lobby kill gap as a PERCENT of the smaller team — the value the difficulty
-    bands (Brutal … Training Grounds) are defined on. Positive = your team outkilled
-    them (easy); negative = you were outkilled (hard).
-
-    Guards against vision misreads of the banner totals: a real Chiv match sees both
-    teams score well into the hundreds, so a tiny smaller-total or a gap beyond ~3x is
-    a misread banner (e.g. a '+881%' where one total was read wrong), not a real lobby.
-    Returns None for those so they can't dominate the extremes/averages."""
+    """Lobby kill gap as a PERCENT of the smaller team — the value the difficulty bands
+    (Brutal … Training Grounds) are defined on. Positive = your team outkilled them
+    (easy); negative = you were outkilled (hard). Misread banners are already dropped by
+    `_lobby_totals`, so the +881% class can't reach the extremes/averages."""
+    a, b = _lobby_totals(s)
+    if a is None:
+        return None
     from utils.tilt import raw_tilt as _rt
-    a, b = _i(s, 25), _i(s, 26)
-    if a is None or b is None or min(a, b) < 60:
-        return None
-    p = _rt(a, b)
-    if p is None or abs(p) > 200:
-        return None
-    return p
+    return _rt(a, b)
 
 
 def _lead2(s):

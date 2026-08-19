@@ -76,6 +76,12 @@ canvas{display:block;width:100%;border-radius:8px}
   .cmp .row{grid-template-columns:70px 1fr;gap:6px}
   .cmp .k{font-size:11px}
   .card{padding:12px 12px}
+  .clnav{padding:10px 10px 0}
+  .mtx{gap:2px}
+  .mcell{min-width:34px;font-size:10px}
+  .chip{font-size:11px;padding:4px 9px}
+  .btn{padding:6px 10px;font-size:12px}
+  h1{font-size:16px}
 }
 .clnav{display:flex;align-items:center;gap:4px;max-width:1180px;margin:0 auto;padding:14px 20px 0;flex-wrap:wrap}
 .clnav .brand{font-weight:700;font-size:15px;color:var(--gold);margin-right:12px;letter-spacing:.3px}
@@ -134,7 +140,7 @@ const state={
   trend:{stat:'kill_share',period:'week',split:''},
   galaxy:{x:'aggression',y:'kill_share',colour:'cls',min:10},
   activity:{tz:0},
-  ranking:{stat:'tilt',min:5,order:'desc',agg:'avg'},
+  ranking:{stat:'tilt',min:5,order:'desc',agg:'avg',q:''},
   weapons:{by:'runs',order:'asc',archer:'hide'},
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||''}
@@ -200,6 +206,12 @@ function searchSelect(label,options,current,cb,width){
   box.appendChild(input); box.appendChild(list); wrap.appendChild(box);
   return wrap;
 }
+function shareUrl(){
+  const p=new URLSearchParams(); p.set('view',state.view);
+  const map={player:'player',weapon:'weapon',cls:'class',grip:'grip',faction:'faction',map:'map',side:'side',vip:'vip'};
+  for(const k in map){ if(state.filters[k]) p.set(map[k],state.filters[k]); }
+  return location.origin+location.pathname+'?'+p.toString();
+}
 function buildFilters(){
   const bar=document.getElementById('filters'); bar.innerHTML='';
   const defs=[['player','Player','name',190],['weapon','Weapon','weapon',150],['cls','Class','cls',110],
@@ -212,6 +224,12 @@ function buildFilters(){
   reset.style.alignSelf='flex-end';
   reset.addEventListener('click',()=>{for(const k in state.filters)state.filters[k]='';buildFilters();render();});
   bar.appendChild(reset);
+  const copy=document.createElement('button'); copy.className='btn'; copy.textContent='🔗 Copy link'; copy.style.alignSelf='flex-end';
+  copy.addEventListener('click',()=>{const u=shareUrl();
+    (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject())
+      .then(()=>{copy.textContent='✓ Copied';setTimeout(()=>copy.textContent='🔗 Copy link',1400);})
+      .catch(()=>{window.prompt('Copy this link:',u);});});
+  bar.appendChild(copy);
 }
 
 // ---- matrix ----
@@ -244,7 +262,8 @@ function renderMatrix(){
   chipCard.appendChild(chips); view.appendChild(chipCard);
 
   const card=document.createElement('div'); card.className='card';
-  card.innerHTML='<h3>Correlation matrix — click a cell to drill into that scatter</h3>';
+  card.innerHTML='<h3>Correlation matrix — click a cell to drill into that scatter</h3>'
+    +'<div style="color:#8b8f9a;font-size:11.5px;margin:-4px 0 10px">Each cell is the correlation (r, −1 to +1) between two stats across every run in view: teal = they rise together, red = one rises as the other falls, faint = unrelated.</div>';
   const mtx=document.createElement('div'); mtx.className='mtx';
   mtx.style.gridTemplateColumns='minmax(70px,auto) repeat('+n+',minmax(44px,1fr))';
   const tip=document.getElementById('tip');
@@ -722,6 +741,14 @@ function renderRanking(){
     ctrl.appendChild(pickSelect('Aggregate',[['avg','Average / run'],['total','Total (sum)']],state.ranking.agg,function(v){state.ranking.agg=v;renderRanking();}));
   }
   ctrl.appendChild(pickSelect('Order',[['desc','Highest first'],['asc','Lowest first']],state.ranking.order,function(v){state.ranking.order=v;renderRanking();}));
+  if(!isLobby){
+    const sw=document.createElement('div'); sw.className='f';
+    sw.innerHTML='<label>Find player</label>';
+    const si=document.createElement('input'); si.type='text'; si.placeholder='name…'; si.value=state.ranking.q||''; si.setAttribute('data-rankq','1'); si.style.minWidth='120px';
+    si.addEventListener('input',function(){state.ranking.q=si.value; renderRanking();
+      const ni=document.querySelector('#view input[data-rankq]'); if(ni){ni.focus();ni.setSelectionRange(ni.value.length,ni.value.length);}});
+    sw.appendChild(si); ctrl.appendChild(sw);
+  }
   view.appendChild(ctrl);
   // "Lobby difficulty" is its OWN entry: single-game % gap list only, no per-player graph.
   if(isLobby){
@@ -764,6 +791,7 @@ function renderRanking(){
   card.innerHTML='<h3>'+esc(head)+'</h3><div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">'+esc(sub)+'</div>';
   if(players.length<1){card.innerHTML+='<div class="loading">'+(isCareer?'No players with marks yet.':'No players at this run threshold \u2014 lower Min runs or widen filters.')+'</div>';view.appendChild(card);return;}
   players.sort(function(x,y){return state.ranking.order==='asc' ? x.value-y.value : y.value-x.value;});
+  if(state.ranking.q){const _q=state.ranking.q.toLowerCase();players=players.filter(function(p){return (p.name||'').toLowerCase().indexOf(_q)>=0;});}
   players=players.slice(0,50);
   const vals=players.map(function(p){return p.value;});
   const lo=Math.min.apply(null,vals.concat([0])), hi=Math.max.apply(null,vals.concat([0]));
