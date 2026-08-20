@@ -999,7 +999,8 @@ function _rateSection(title,emoji,rows){
 }
 function renderBoardCategory(kind){
   const view=document.getElementById('view'); view.innerHTML='';
-  const names=Object.keys(BOARDS).filter(function(n){return (BOARDS[n].kind||'weapon')===kind;}).sort();
+  const _HIDE=new Set(['Triple']);   // boards mirrored in Discord but hidden from the web tab
+  const names=Object.keys(BOARDS).filter(function(n){return (BOARDS[n].kind||'weapon')===kind && !_HIDE.has(n);}).sort();
   const TITLE={map:'Map',weapon:'Weapon',feat:'Feat board'};
   if(!names.length){ view.innerHTML='<div class="empty">No records loaded yet.</div>'; return; }
   if(!state.boards[kind] || (BOARDS[state.boards[kind]]||{}).kind!==kind) state.boards[kind]=names[0];
