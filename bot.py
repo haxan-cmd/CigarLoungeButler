@@ -238,7 +238,7 @@ async def run_healthcheck():
         import time as _t
         now = _t.time()
         _hit = _card_cache.get(p.lower())
-        if _hit and (now - _hit[1]) < 60:
+        if _hit and (now - _hit[1]) < 300:
             return web.Response(text=_hit[0], content_type="application/json")
         try:
             from utils.db import get_name_to_id_map, get_all_players

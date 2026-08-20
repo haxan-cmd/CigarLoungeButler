@@ -96,6 +96,10 @@ canvas{display:block;width:100%;border-radius:8px}
 .bspacer{display:block;width:100%;max-width:520px;margin:0 auto;opacity:.85}
 .facsec{border-left:3px solid var(--grid);padding-left:12px;margin:18px 0 2px}
 .pcard{max-width:660px}
+.playergrid{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px;max-height:230px;overflow-y:auto}
+.pchip{padding:6px 12px;background:var(--panel);border:1px solid var(--grid);border-radius:20px;font-size:13px;cursor:pointer;color:#c9ccd3;white-space:nowrap;transition:border-color .12s,color .12s,background .12s}
+.pchip:hover{border-color:var(--gold);color:var(--ink)}
+.pchip.on{background:var(--gold);color:#241c08;border-color:var(--gold);font-weight:700}
 .cardtitle{font-size:22px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .spkblock{margin:10px 0 4px;padding:10px 12px;background:var(--panel2);border:1px solid var(--grid);border-radius:10px}
 .spkhd{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
@@ -1147,13 +1151,31 @@ function paintCard(){
 }
 function renderPlayers(){
   const view=document.getElementById('view'); view.innerHTML='';
-  const players=[...new Set(DATA.map(r=>r[IDX.name]).filter(Boolean))].sort(function(a,b){return a.toLowerCase()<b.toLowerCase()?-1:1;});
+  const counts={};
+  DATA.forEach(function(r){const n=r[IDX.name]; if(n) counts[n]=(counts[n]||0)+1;});
+  const players=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a] || (a.toLowerCase()<b.toLowerCase()?-1:1);});
+  // Search box (filters the grid live).
   const ctrl=document.createElement('div'); ctrl.className='bar';
   const f=document.createElement('div'); f.className='f'; f.innerHTML='<label>Player</label>';
-  const inp=document.createElement('input'); inp.type='text'; inp.setAttribute('list','playerlist'); inp.placeholder='type a name…'; inp.value=state.playercard.name||''; inp.style.minWidth='220px';
-  const dl=document.createElement('datalist'); dl.id='playerlist'; dl.innerHTML=players.map(function(p){return '<option value="'+esc(p)+'">';}).join('');
-  inp.addEventListener('change',function(){ loadCard(inp.value.trim()); });
-  f.appendChild(inp); f.appendChild(dl); ctrl.appendChild(f); view.appendChild(ctrl);
+  const inp=document.createElement('input'); inp.type='text'; inp.placeholder='search '+players.length+' players…'; inp.style.minWidth='240px'; inp.autocomplete='off';
+  f.appendChild(inp); ctrl.appendChild(f); view.appendChild(ctrl);
+  // Clickable grid — click loads a card; hovering >150ms pre-warms the server cache.
+  const grid=document.createElement('div'); grid.className='playergrid';
+  const cur=(state.playercard.name||'').toLowerCase();
+  const chips=players.map(function(p){
+    const c=document.createElement('div'); c.className='pchip'+(p.toLowerCase()===cur?' on':'');
+    c.textContent=p; c.title=counts[p]+' game'+(counts[p]===1?'':'s');
+    c.addEventListener('click',function(){ chips.forEach(function(x){x.el.classList.remove('on');}); c.classList.add('on'); loadCard(p); });
+    c.addEventListener('mouseenter',function(){ if(c._pf)return; c._t=setTimeout(function(){ c._pf=1; fetch('/lab/card?p='+encodeURIComponent(p)).catch(function(){}); },150); });
+    c.addEventListener('mouseleave',function(){ if(c._t){clearTimeout(c._t);c._t=null;} });
+    grid.appendChild(c); return {p:p, el:c};
+  });
+  view.appendChild(grid);
+  inp.addEventListener('input',function(){
+    const q=inp.value.trim().toLowerCase();
+    chips.forEach(function(x){ x.el.style.display=(!q || x.p.toLowerCase().indexOf(q)>=0)?'':'none'; });
+  });
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ const vis=chips.filter(function(x){return x.el.style.display!=='none';}); if(vis.length) vis[0].el.click(); } });
   const holder=document.createElement('div'); holder.id='cardholder'; view.appendChild(holder);
   if(state.playercard.name && !state.playercard.data && !state.playercard.loading){ loadCard(state.playercard.name); } else { paintCard(); }
 }
