@@ -1115,7 +1115,8 @@ function _cardSparks(name,did){
   const cs=getComputedStyle(document.documentElement);
   const gold=(cs.getPropertyValue('--gold').trim())||'#e0a84c';
   const mut=(cs.getPropertyValue('--mut').trim())||'#8b8f9a';
-  const specs=[['td','Takedowns',gold,true,''],['kills','Kills',mut,false,''],['kill_share','Kill share',gold,false,'%']];
+  const specs=[['td','Takedowns',gold,true,''],['kills','Kills',mut,false,''],
+               ['kill_share','Kill share',gold,false,'%'],['warlord','Warlord',mut,false,'%']];
   let out='';
   specs.forEach(function(s){
     const idx=IDX[s[0]]; if(idx==null) return;
