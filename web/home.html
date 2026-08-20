@@ -254,17 +254,26 @@ a{color:inherit}
   const emo = s => String(s==null?'':s).replace(/<(a?):(\w+):(\d+)>/g,      // Discord emoji token -> img
     (_,a,nm,id)=>'<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.'+(a==='a'?'gif':'png')+'" alt="'+nm+'">');
 
+  // Count a number up from zero on load (respects reduced-motion).
+  const countUp=(el,to)=>{
+    if(window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches){ el.textContent=to.toLocaleString(); return; }
+    const t0=performance.now(), d=900;
+    (function tk(t){ const k=Math.min(1,(t-t0)/d);
+      el.textContent=Math.round(to*(1-Math.pow(1-k,3))).toLocaleString();
+      if(k<1) requestAnimationFrame(tk); })(t0);
+  };
+
   // Headline strip: fetch both feeds in parallel, fill all three, then reveal once —
   // so the season card never lingers on its "—" while a second request is in flight.
   Promise.all([jget('/lab/data'), jget('/hof/data')]).then(([lab,hof])=>{
     let shown=false;
     if(lab && Array.isArray(lab.rows)){
-      $('s-runs').textContent = lab.rows.length.toLocaleString(); shown=true;
+      countUp($('s-runs'), lab.rows.length); shown=true;
       const ni = Array.isArray(lab.fields) ? lab.fields.indexOf('name') : -1;
       if(ni>=0){
         const names=new Set();
         for(const row of lab.rows){ const nm=row[ni]; if(nm) names.add(String(nm).toLowerCase().trim()); }
-        if(names.size){ $('s-players').textContent=names.size.toLocaleString(); } else hide($('s-players'));
+        if(names.size){ countUp($('s-players'), names.size); } else hide($('s-players'));
       } else hide($('s-players'));
     } else { hide($('s-runs')); hide($('s-players')); }
 

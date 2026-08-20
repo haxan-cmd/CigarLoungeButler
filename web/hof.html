@@ -36,6 +36,8 @@ a{color:var(--gold)}
 .stitle h2{margin:0;font-size:18px;font-weight:700}
 .stitle .dates{color:var(--mut);font-size:11.5px}
 .badge{font-size:10px;text-transform:uppercase;letter-spacing:.5px;background:var(--gold);color:#241c08;border-radius:999px;padding:2px 9px;font-weight:700}
+.pdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;vertical-align:1px;animation:pulse 1.6s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.pdot{animation:none}}
 .champ{display:flex;align-items:center;gap:10px;margin:12px 0 4px;font-size:19px;font-weight:700}
 .champ .pts{color:var(--mut);font-size:13px;font-weight:500}
 .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
@@ -208,7 +210,7 @@ function seasonCard(s){
   }
   return `<div class="season ${live?'live':''}">`
     + `<div class="stitle"><h2>${esc(s.label)}</h2>`
-    + (live?`<span class="badge">In progress</span>`:'')
+    + (live?`<span class="badge"><span class="pdot"></span>In progress</span>`:'')
     + (dates?`<span class="dates">${esc(dates)}</span>`:'')
     + `</div>${champHtml}${body}</div>`;
 }

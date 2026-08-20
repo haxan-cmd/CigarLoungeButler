@@ -86,6 +86,8 @@ canvas{display:block;width:100%;border-radius:8px}
 .brow .rk{width:26px;text-align:right;color:var(--mut);flex:none}
 .brow .bnm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brow .bsc{font-weight:700;flex:none}
+.brow.top .rk{color:var(--gold)}
+.brow.top .pl{color:var(--gold);font-weight:700}
 .bhead{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;margin-bottom:2px}
 .bsub{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px}
 .pl{color:#c9ccd3;cursor:pointer}
@@ -982,7 +984,7 @@ function emojiImg(token){
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
 function _brow(i,nm,sc,lk,suffix){
-  return html`<div class="brow"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-card="${nm||'?'}" title="View ${nm||''}'s card">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
+  return html`<div class="brow${i===0?' top':''}"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-card="${nm||'?'}" title="View ${nm||''}'s card">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
 }
 function _rateSection(title,emoji,rows){
   if(!rows||!rows.length) return '';
