@@ -241,7 +241,8 @@ async def run_healthcheck():
         if _hit and (now - _hit[1]) < 300:
             return web.Response(text=_hit[0], content_type="application/json")
         try:
-            from utils.db import get_name_to_id_map, get_all_players
+            from utils.db import (get_name_to_id_map, get_all_players, get_all_submissions,
+                                   get_all_leaderboard_data, get_all_bounty_players, get_all_bounties)
             from cogs.registry import build_registry_messages
             n2i = await get_name_to_id_map()
             did = n2i.get(p.lower(), "")
@@ -249,8 +250,9 @@ async def run_healthcheck():
             # Known-player set from data we already have to hand. Fast-404 an unknown
             # name BEFORE the expensive registry build, so an attacker can't bust the
             # per-name cache with junk ?p= values and force a build on every request.
+            player_rows = await get_all_players()
             known = set(n2i.keys())
-            for _pr in await get_all_players():
+            for _pr in player_rows:
                 if not _pr or len(_pr) < 2:
                     continue
                 _pn = (_pr[1] or "").strip()
@@ -260,8 +262,19 @@ async def run_healthcheck():
                     name = _pn
             if p.lower() not in known:
                 return web.Response(status=404, text="no such player")
+            # Preload the big tables ONCE so build_registry_messages' ~20 helpers reuse them
+            # instead of each re-scanning submissions/leaderboard_data/etc. — this is what
+            # took a cold card build from ~5-10s down to well under a second.
+            cached = {
+                'players': player_rows,
+                'name_to_id': n2i,
+                'submissions': await get_all_submissions(),
+                'leaderboard_data': await get_all_leaderboard_data(),
+                'bounty_players': await get_all_bounty_players(),
+                'bounties': await get_all_bounties(),
+            }
             guild = bot.get_guild(config.GUILD_ID)
-            msgs = await build_registry_messages(name, did, guild=guild)
+            msgs = await build_registry_messages(name, did, cached_data=cached, guild=guild)
         except RuntimeError:
             return web.Response(status=503, text="database unavailable")
         except Exception as _e:
