@@ -97,6 +97,13 @@ canvas{display:block;width:100%;border-radius:8px}
 .facsec{border-left:3px solid var(--grid);padding-left:12px;margin:18px 0 2px}
 .pcard{max-width:660px}
 .cardtitle{font-size:22px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.spkblock{margin:10px 0 4px;padding:10px 12px;background:var(--panel2);border:1px solid var(--grid);border-radius:10px}
+.spkhd{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.spkrow{display:flex;align-items:center;gap:10px;padding:3px 0}
+.spkl{font-size:12.5px;color:#c9ccd3;width:92px;flex:none}
+.spksvg{flex:1;height:22px}
+.spkv{font-size:13px;font-weight:700;width:52px;text-align:right;flex:none;color:var(--ink)}
+@media(max-width:640px){.spkl{width:72px}.spkv{width:44px}}
 .cardsec{font-weight:700;color:var(--gold);margin:15px 0 5px;font-size:13.5px}
 .cardh2{font-size:15px;font-weight:700;color:var(--ink);margin:16px 0 6px}
 .cardbul{padding:3px 0 3px 2px;font-size:13px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;line-height:1.5}
@@ -1083,6 +1090,43 @@ function loadCard(name){
     .then(d=>{ pc.loading=false; pc.data=d; paintCard(); })
     .catch(e=>{ pc.loading=false; pc.err='Could not load this card ('+e.message+').'; paintCard(); });
 }
+function _sparkSvg(data,color,area){
+  const w=120,h=22,pad=3,mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),rng=(mx-mn)||1;
+  const pts=data.map(function(v,i){return [pad+i*(w-2*pad)/((data.length-1)||1), h-pad-((v-mn)/rng)*(h-2*pad)];});
+  const line=pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');
+  const last=pts[pts.length-1];
+  let inner='';
+  if(area) inner+='<polygon points="'+pad+','+(h-pad)+' '+line+' '+(w-pad)+','+(h-pad)+'" fill="'+color+'" opacity="0.12"/>';
+  inner+='<polyline points="'+line+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>';
+  inner+='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.3" fill="'+color+'"/>';
+  return '<svg class="spksvg" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">'+inner+'</svg>';
+}
+// Recent-form sparklines for a player, computed from the runs the Lab already holds.
+function _cardSparks(name,did){
+  if(!DATA||!DATA.length) return '';
+  const nkey=(name||'').toLowerCase().trim();
+  let rows=DATA.filter(function(r){
+    return (r[IDX.name]||'').toLowerCase().trim()===nkey || (did && r[IDX.did]===did);
+  });
+  if(rows.length<3) return '';
+  const ti=IDX.ts;
+  if(ti!=null) rows=rows.slice().sort(function(a,b){return String(a[ti]||'').localeCompare(String(b[ti]||''));});
+  rows=rows.slice(-15);
+  const cs=getComputedStyle(document.documentElement);
+  const gold=(cs.getPropertyValue('--gold').trim())||'#e0a84c';
+  const mut=(cs.getPropertyValue('--mut').trim())||'#8b8f9a';
+  const specs=[['td','Takedowns',gold,true,''],['kills','Kills',mut,false,''],['kill_share','Kill share',gold,false,'%']];
+  let out='';
+  specs.forEach(function(s){
+    const idx=IDX[s[0]]; if(idx==null) return;
+    const series=rows.map(function(r){const v=parseFloat(r[idx]); return isFinite(v)?v:null;}).filter(function(v){return v!=null;});
+    if(series.length<3) return;
+    const lastv=series[series.length-1];
+    const disp=(s[4]==='%')?(Math.round(lastv*10)/10+'%'):Math.round(lastv);
+    out+='<div class="spkrow"><span class="spkl">'+s[1]+'</span>'+_sparkSvg(series,s[2],s[3])+'<span class="spkv">'+disp+'</span></div>';
+  });
+  return out ? '<div class="spkblock"><div class="spkhd">Recent form · last '+rows.length+' games</div>'+out+'</div>' : '';
+}
 function paintCard(){
   const h=document.getElementById('cardholder'); if(!h) return;
   const pc=state.playercard;
@@ -1093,7 +1137,7 @@ function paintCard(){
   if(!d||!d.messages||!d.messages.length){ h.innerHTML=String(html`<div class="empty">No card on file for ${pc.name} yet.</div>`); return; }
   const card=document.createElement('div'); card.className='card pcard';
   const banner=raw('<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin:16px auto" onerror="this.remove()">');
-  card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()"><div class="cardtitle">🗂️ ${d.name}</div>${d.messages.map(function(m,i){
+  card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()"><div class="cardtitle">🗂️ ${d.name}</div>${raw(_cardSparks(d.name, d.did))}${d.messages.map(function(m,i){
     return html`${i?banner:''}${mdToHtml(m)}`;
   })}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:14px" onerror="this.remove()">`;
   h.innerHTML=''; h.appendChild(card);
