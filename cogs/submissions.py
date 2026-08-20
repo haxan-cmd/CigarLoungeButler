@@ -3621,24 +3621,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             player = interaction.user.display_name
             discord_id_str = str(interaction.user.id)  # bind early: mastery genexpr (~L2079) referenced it before its later assignment
 
-            # Guest -> Lounger: on ANY submission, if the member still holds Guest, promote
-            # them to the baseline Lounger role and clear Guest. Idempotent (only acts while
-            # they're a Guest), so it also catches returning players the first-submission path
-            # misses. Independent of main_channel. No-op until the role ids are set.
-            try:
-                _gid = getattr(config, 'GUEST_ROLE_ID', 0)
-                _guest = interaction.guild.get_role(int(_gid)) if _gid else None
-                if _guest:
-                    _mem = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
-                    if _mem and _guest in _mem.roles:
-                        _loung = interaction.guild.get_role(config.LOUNGER_ROLE_ID)
-                        if _loung and _loung not in _mem.roles:
-                            await _mem.add_roles(_loung, reason="Submitted a game — promoted from Guest to Lounger")
-                            print(f"[LOUNGER] Promoted {player} to Lounger")
-                        await _mem.remove_roles(_guest, reason="Promoted from Guest to Lounger")
-            except Exception as _ge:
-                nerve_log_error("Lounger promotion", _ge)
-
             if main_channel:
                 # Dry spell — first submission after 4+ hours of silence
                 if submission_state['last_submission_time'] and (now - submission_state['last_submission_time']).total_seconds() > 14400:
@@ -3657,6 +3639,21 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         fallback=f"*A new arrival. The Butler acknowledges you, {player}.*"
                     )
                     await main_channel.send(line if line.startswith('*') else f"*{line}*")
+                    # First submission only: grant the baseline Lounger role and clear Guest.
+                    # Ranks ABOVE Lounger are earned through bounties, so this never touches
+                    # established members — it fires solely on a member's very first run.
+                    try:
+                        member = interaction.guild.get_member(_user_id) or await interaction.guild.fetch_member(_user_id)
+                        lounger_role = interaction.guild.get_role(config.LOUNGER_ROLE_ID)
+                        _gid = getattr(config, 'GUEST_ROLE_ID', 0)
+                        guest_role = interaction.guild.get_role(int(_gid)) if _gid else None
+                        if member and lounger_role and lounger_role not in member.roles:
+                            await member.add_roles(lounger_role, reason="First submission — promoted to Lounger")
+                            print(f"[LOUNGER] Promoted {player} to Lounger on first submission")
+                        if member and guest_role and guest_role in member.roles:
+                            await member.remove_roles(guest_role, reason="Promoted from Guest to Lounger")
+                    except Exception as ub_e:
+                        nerve_log_error("Lounger role assign", ub_e)
 
                 # New #1 on any leaderboard — plain factual update (no Butler flavour).
                 # "#1" links to the run itself; board and player names get linkified.
