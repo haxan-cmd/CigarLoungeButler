@@ -139,7 +139,7 @@ a{color:inherit}
 <div class="wrap">
   <section class="hero">
     <div class="hero-in">
-      <img class="crest" src="/assets/loungecircle.webp" alt="The Cigar Lounge">
+      <img class="crest" src="/assets/loungecircle.gif" alt="The Cigar Lounge">
       <div>
         <h1>The Cigar Lounge</h1>
         <div class="tag">🗡️ A competitive Chivalry 2 community</div>
@@ -251,8 +251,8 @@ a{color:inherit}
   const jget = u => fetch(u,{headers:{'Accept':'application/json'}}).then(r=>r.ok?r.json():null).catch(()=>null);
   const hide = el => { if(el && el.parentElement) el.parentElement.style.display='none'; };
   const noTags = s => String(s==null?'':s).replace(/[<>]/g,'');           // strip any raw HTML tags
-  const emo = s => String(s==null?'':s).replace(/<a?:(\w+):(\d+)>/g,       // Discord emoji token -> img
-    (_,nm,id)=>'<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.png" alt="'+nm+'">');
+  const emo = s => String(s==null?'':s).replace(/<(a?):(\w+):(\d+)>/g,      // Discord emoji token -> img
+    (_,a,nm,id)=>'<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.'+(a==='a'?'gif':'png')+'" alt="'+nm+'">');
 
   // Headline strip: fetch both feeds in parallel, fill all three, then reveal once —
   // so the season card never lingers on its "—" while a second request is in flight.

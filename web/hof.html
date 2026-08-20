@@ -121,7 +121,7 @@ html{scroll-behavior:smooth}
 </div>
 <script>
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const emoImg = tok => { const m=String(tok||'').match(/<a?:(\w+):(\d+)>/); return m?`<img class="tem" src="https://cdn.discordapp.com/emojis/${m[2]}.png" alt="">`:''; };
+const emoImg = tok => { const m=String(tok||'').match(/<(a?):(\w+):(\d+)>/); return m?`<img class="tem" src="https://cdn.discordapp.com/emojis/${m[3]}.${m[1]==='a'?'gif':'png'}" alt="">`:''; };
 
 function titlesSection(titles){
   if(!titles || !titles.length) return '';

@@ -975,9 +975,9 @@ function emojiImg(token){
   if(!token) return raw('');
   const m=String(token).match(/^<(a?):(\w+):(\d+)>$/);
   if(!m) return raw(esc(token));   // a plain unicode emoji
-  // Always .png: Discord serves a static first-frame PNG for EVERY custom emoji
-  // (animated included), whereas some .gif URLs 404 and fall back to alt text.
-  return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.png" alt="" title="${m[2]}">`;
+  // Animated emojis (<a:name:id>) get the .gif; static ones stay .png (they have no gif).
+  const ext = m[1]==='a' ? 'gif' : 'png';
+  return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.${ext}" alt="" title="${m[2]}">`;
 }
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
@@ -1040,7 +1040,7 @@ function navBoard(t){
 }
 function _mdInline(s){
   s=esc(s).replace(/&lt;(a?):(\w+):(\d+)&gt;/g,function(_,a,nm,id){
-    return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.png" alt="" title="'+nm+'">';});
+    return '<img class="ce" src="https://cdn.discordapp.com/emojis/'+id+'.'+(a==='a'?'gif':'png')+'" alt="" title="'+nm+'">';});
   // progress meters `[■□□□]` / [▰▱▱] -> a real HTML bar
   s=s.replace(/`?\[([■□▰▱▮▯█░]{2,})\]`?/g,function(_,bar){
     const arr=[...bar], filled=arr.filter(c=>'■▰▮█'.indexOf(c)>=0).length, total=arr.length;
