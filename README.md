@@ -2,12 +2,15 @@
 
 > *The lounge does not run itself.*
 
-A Discord bot for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.chivalry2.com/) community. The Butler handles the full submission and tracking pipeline: players post in-game scorecards, and the bot takes it from there.
+A full-stack project for the **Cigar Lounge**, a competitive [Chivalry 2](https://www.chivalry2.com/) community: a Discord bot **and** the public web app it serves, from a single process. Players post in-game scorecards, vision AI reads them, and everything flows into live leaderboards, seasons, player cards, and a public stats site.
+
+🌐 **Live site — [thecigarlounge.app](https://thecigarlounge.app)**
 
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![discord.py](https://img.shields.io/badge/discord.py-2.x-5865F2?logo=discord&logoColor=white)
-![Railway](https://img.shields.io/badge/hosted-Railway-0B0D0E?logo=railway&logoColor=white)
+![aiohttp](https://img.shields.io/badge/web-aiohttp-2C5BB4?logo=aiohttp&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/data-PostgreSQL-336791?logo=postgresql&logoColor=white)
+![Railway](https://img.shields.io/badge/hosted-Railway-0B0D0E?logo=railway&logoColor=white)
 ![OpenAI](https://img.shields.io/badge/AI-GPT--5.6_Luna-10A37F?logo=openai&logoColor=white)
 ![Gemini](https://img.shields.io/badge/AI-Gemini_Flash-4285F4?logo=google&logoColor=white)
 
@@ -98,8 +101,22 @@ Weekly stats and all-time prestige titles posted as a Discord embed. Titles reca
 
 Weekly stats include **Lethality** (kills per takedown), **Warlord** (your share of your team's takedowns), Busiest player, Top Weapons, and Top Maps. The Lethality and Warlord ratings use a recency-weighted, volume-adjusted (Bayesian) average, so a handful of lucky games can't top the board — 3-run minimum.
 
-### 📊 Stats Lab & Exploration
-`/explore` breaks any stat down across weapons, players, or maps as a themed chart. `/correlate` opens a button-driven panel that plots any two stats against each other — a scatter with optional colour-by (weapon / class / subclass / grip / faction), a full correlation matrix, and head-to-head compare charts — all filterable by weapon, class, map, side, and season. For deeper slicing there's an interactive web **Stats Lab**: a client-side page (Activity and Rankings tabs) that filters and correlates every run in the browser, reached from the `/correlate` panel via a signed, short-lived deep link — no login, and it expires automatically. Turned on with `LAB_BASE_URL`; open-rate tracked via `/statslab_usage`.
+### 🌐 Public Website — [`thecigarlounge.app`](https://thecigarlounge.app)
+The bot **co-hosts a public, read-only web app** (aiohttp, no framework) from the same process, on a custom domain with automatic HTTPS. Every surface is drawn live from the same database the Discord boards use, so the two can never disagree.
+
+- **Stats Lab** — an interactive, client-side explorer over every run: weapon / map / feat leaderboards that mirror Discord 1:1 (Discord CDN emoji + local weapon art), **player cards** with recent-form sparklines, records, per-player rankings, and deep-dive views — correlation matrix, scatter, "galaxy" clustering, trends, and head-to-head compare — all filtered in the browser with no page reloads.
+- **Hall of Fame** — season champions, Grand-Prix standings, per-category top 5s, and the all-time title holders.
+- **Landing page** — headline stats (live count-ups), the month's active bounty, and how the community works.
+
+Built with vanilla JS + inline SVG (no build step) and an auto-escaping `` html`` `` templating helper for XSS safety. Hardened for public exposure: anonymized player IDs, per-IP and global rate limits, and baseline security headers.
+
+In-Discord, `/explore` and `/correlate` render the same analyses as themed charts for players who never leave chat.
+
+### 🎟️ Apply to Join — Discord OAuth
+A public **"Apply to join"** flow. Applicants **sign in with Discord** (OAuth2, `identify` scope) so their real account is verified on the request, fill a short form, and it posts to a mod channel with **Accept / Deny** buttons. On approval the bot mints a **single-use invite** the applicant retrieves from a status page. New arrivals get a **Guest** role, auto-promoted to **Lounger** on their first submission.
+
+### 💡 Bounty Suggestion Box
+`/suggest_bounty` posts community bounty ideas to a public board with 👍 upvotes, **auto-threaded** for discussion and ranked on a **live pinned leaderboard**. Mods shortlist / use / dismiss from the card; using one fires a Butler shout-out crediting the suggester.
 
 ### 🎯 Bounty System
 Monthly bounty cards with per-player progress tracking, a live Top Hunters board, and archival on completion. Supports per-weapon custom targets. Player commands: `/bounty_hunt`, `/my_bounty`, `/bounty_status`.
@@ -127,10 +144,14 @@ Dry, sardonic responses to pings and unprompted one-liners in the main channel e
 |---|---|
 | Language | Python 3.13 |
 | Bot framework | discord.py 2.x |
+| Web server | aiohttp (co-hosted in the bot process) |
+| Web frontend | Vanilla JS + inline SVG, no build step |
+| Auth | Discord OAuth2 (`identify`) |
 | Data | PostgreSQL (asyncpg) |
 | AI — Butler chat | OpenAI GPT-5.6 Luna |
 | AI — Scoreboard vision | Google Gemini Flash |
-| Hosting | Railway (auto-deploy on push) |
+| Hosting / TLS | Railway + custom domain (auto-HTTPS) |
+| Tests | pytest (pure-logic + integration) |
 | Version control | GitHub |
 
 ---
@@ -155,9 +176,10 @@ Environment variables (via `.env` locally, Railway variables in production):
 | `GOOGLE_AI_API_KEY` | optional | Scorecard vision (falls back to manual entry) |
 | `KOFI_TOKEN` | optional | Ko-fi webhook verification (`POST /kofi`) |
 | `EXPORT_TOKEN` | optional | Enables `GET /export/submissions`, a bearer-token, read-only cursor export of the submissions table for community mirrors. Off when unset. Also the default signing secret for the Stats Lab. |
-| `LAB_BASE_URL` | optional | Public base URL of the bot's web server (e.g. the Railway domain). Turns on the interactive web **Stats Lab** deep-link from the `/correlate` panel. |
-| `LAB_SECRET` | optional | HMAC secret signing the Lab's short-lived link tokens. Falls back to `EXPORT_TOKEN`, so the Lab turns on with just `LAB_BASE_URL` when an export token already exists. |
-| `PORT` | optional | Healthcheck server port (default 8080) |
+| `LAB_BASE_URL` | optional | Public base URL of the web app (e.g. `https://thecigarlounge.app`). Powers the absolute links the bot posts (Hall of Fame, Stats Lab, `/setup_lounge`). |
+| `DISCORD_CLIENT_ID` · `DISCORD_CLIENT_SECRET` | optional | Discord OAuth for the "Apply to join" flow. Without them the apply form still works anonymously; the secret comes from the environment and is never committed. |
+| `OAUTH_REDIRECT_URI` | optional | Must exactly match the redirect registered in the Discord Developer Portal (e.g. `https://thecigarlounge.app/join/callback`). |
+| `PORT` | optional | Web / healthcheck server port (default 8080) |
 
 All server-specific IDs (guild, channels, roles, emojis) live in `config.py`; a
 fork pointed at a different server needs those replaced. Tests are pure-logic
@@ -180,7 +202,10 @@ shapes, the hot-path query rules, and known gotchas.
 - **Player names are sanitized** (`utils.parsing.md_safe`) before going into markdown links, so a crafted display name can't inject its own hyperlink into a board or card
 - **Butler answers are grounded** — a check flags any stat he cites that isn't in the context he was given (anti-fabrication), logged for review rather than shown to players
 - **Persistent event log** (`bot_events`) survives restarts and log truncation; reviewed via `/logs` and an auto-posted weekly rollup
+- **The web app runs in the bot process** — aiohttp routes are registered before the site starts (the router freezes on boot), and the same healthcheck endpoint lets Railway restart a zombied gateway
+- **Public payloads anonymize Discord IDs** — a salted hash replaces the raw snowflake so the open web never leaks a name→account map, while the client keeps a stable key for grouping
+- **Web player cards preload shared tables once** and reuse them across ~20 registry helpers, turning a cold build's ~30 full-table scans into a handful — cards render in well under a second
 
 ---
 
-*Private repository. Contributions by invitation. If that's you, start with [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).*
+*Designed, built, and maintained solo for a live competitive community — Discord bot, database, and public web app end to end. Poking around? Start with [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).*
