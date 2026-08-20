@@ -99,9 +99,9 @@ canvas{display:block;width:100%;border-radius:8px}
 .cardtitle{font-size:22px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .spkblock{margin:10px 0 4px;padding:10px 12px;background:var(--panel2);border:1px solid var(--grid);border-radius:10px}
 .spkhd{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.spkrow{display:flex;align-items:center;gap:10px;padding:3px 0}
+.spkrow{display:flex;align-items:center;gap:12px;padding:5px 0}
 .spkl{font-size:12.5px;color:#c9ccd3;width:92px;flex:none}
-.spksvg{flex:1;height:22px}
+.spksvg{flex:1;height:26px}
 .spkv{font-size:13px;font-weight:700;width:52px;text-align:right;flex:none;color:var(--ink)}
 @media(max-width:640px){.spkl{width:72px}.spkv{width:44px}}
 .cardsec{font-weight:700;color:var(--gold);margin:15px 0 5px;font-size:13.5px}
@@ -1090,16 +1090,18 @@ function loadCard(name){
     .then(d=>{ pc.loading=false; pc.data=d; paintCard(); })
     .catch(e=>{ pc.loading=false; pc.err='Could not load this card ('+e.message+').'; paintCard(); });
 }
-function _sparkSvg(data,color,area){
-  const w=120,h=22,pad=3,mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),rng=(mx-mn)||1;
+function _sparkSvg(data,line){
+  const w=240,h=28,pad=5,mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),rng=(mx-mn)||1;
   const pts=data.map(function(v,i){return [pad+i*(w-2*pad)/((data.length-1)||1), h-pad-((v-mn)/rng)*(h-2*pad)];});
-  const line=pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');
-  const last=pts[pts.length-1];
-  let inner='';
-  if(area) inner+='<polygon points="'+pad+','+(h-pad)+' '+line+' '+(w-pad)+','+(h-pad)+'" fill="'+color+'" opacity="0.12"/>';
-  inner+='<polyline points="'+line+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>';
-  inner+='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.3" fill="'+color+'"/>';
-  return '<svg class="spksvg" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">'+inner+'</svg>';
+  let d='M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);   // Catmull-Rom -> smooth cubic bezier
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[i-1]||pts[i],p1=pts[i],p2=pts[i+1],p3=pts[i+2]||p2;
+    const c1x=p1[0]+(p2[0]-p0[0])/6,c1y=p1[1]+(p2[1]-p0[1])/6;
+    const c2x=p2[0]-(p3[0]-p1[0])/6,c2y=p2[1]-(p3[1]-p1[1])/6;
+    d+=' C'+c1x.toFixed(1)+','+c1y.toFixed(1)+' '+c2x.toFixed(1)+','+c2y.toFixed(1)+' '+p2[0].toFixed(1)+','+p2[1].toFixed(1);
+  }
+  return '<svg class="spksvg" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">'
+    +'<path d="'+d+'" fill="none" stroke="'+line+'" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>';
 }
 // Recent-form sparklines for a player, computed from the runs the Lab already holds.
 function _cardSparks(name,did){
@@ -1115,16 +1117,15 @@ function _cardSparks(name,did){
   const cs=getComputedStyle(document.documentElement);
   const gold=(cs.getPropertyValue('--gold').trim())||'#e0a84c';
   const mut=(cs.getPropertyValue('--mut').trim())||'#8b8f9a';
-  const specs=[['td','Takedowns',gold,true,''],['kills','Kills',mut,false,''],
-               ['kill_share','Kill share',gold,false,'%'],['warlord','Warlord',mut,false,'%']];
+  const specs=[['td','Takedowns',''],['kills','Kills',''],['kill_share','Kill share','%'],['warlord','Warlord','%']];
   let out='';
   specs.forEach(function(s){
     const idx=IDX[s[0]]; if(idx==null) return;
     const series=rows.map(function(r){const v=parseFloat(r[idx]); return isFinite(v)?v:null;}).filter(function(v){return v!=null;});
     if(series.length<3) return;
     const lastv=series[series.length-1];
-    const disp=(s[4]==='%')?(Math.round(lastv*10)/10+'%'):Math.round(lastv);
-    out+='<div class="spkrow"><span class="spkl">'+s[1]+'</span>'+_sparkSvg(series,s[2],s[3])+'<span class="spkv">'+disp+'</span></div>';
+    const disp=(s[2]==='%')?(Math.round(lastv*10)/10+'%'):Math.round(lastv);
+    out+='<div class="spkrow"><span class="spkl">'+s[1]+'</span>'+_sparkSvg(series,gold)+'<span class="spkv">'+disp+'</span></div>';
   });
   return out ? '<div class="spkblock"><div class="spkhd">Recent form · last '+rows.length+' games</div>'+out+'</div>' : '';
 }
