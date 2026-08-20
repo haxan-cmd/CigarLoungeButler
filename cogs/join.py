@@ -137,7 +137,7 @@ class JoinCog(commands.Cog):
         if role is None:
             return
         try:
-            await member.add_roles(role, reason="New arrival — Guest until first 100-kill game")
+            await member.add_roles(role, reason="New arrival — Guest until first submission")
         except Exception as e:
             print(f"[JOIN] guest role assign failed for {member}: {e}")
 
