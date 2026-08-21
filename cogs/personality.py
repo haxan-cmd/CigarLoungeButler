@@ -4170,6 +4170,49 @@ class PersonalityCog(commands.Cog):
 
         return player_stats_ctx
 
+    async def _bald_woman_reply(self, message):
+        """Easter egg: 'where is the bald woman?' -> a dry line + the world map with a
+        random spot ringed, flavoured by Bald Female's most recent weapon."""
+        import io as _io, os as _os, random as _random
+        weapon = None
+        try:
+            _subs = await _db.get_submissions_by_player(str(config.MANAGER_ID))
+            if _subs:
+                _latest = max(_subs, key=lambda r: (r[0] if r and len(r) > 0 else ''))
+                weapon = (_latest[3] or '').strip() if len(_latest) > 3 else None
+        except Exception:
+            weapon = None
+        _LOCS = ["Coxwell", "Baudwyn", "Darkforest", "Falmire", "Trayan Citadel", "Askandir",
+                 "Montcrux", "Bridgetown", "Wardenglade", "Rudhelm", "Lionspire", "Galencourt",
+                 "the trebuchet fields", "the siege lines", "the burning village", "the frozen pass",
+                 "the executioner's block", "the war camp", "the ballista nests", "the flooded moat"]
+        _ACTS = ["chopping heads", "laying siege to something", "farming takedowns",
+                 "routing a warband", "holding a chokepoint alone", "collecting skulls",
+                 "kicking peasants off a wall", "hunting stragglers", "terrorizing the archers",
+                 "sharpening something on someone"]
+        _CLOSERS = ["Try not to summon her unless you've made peace with your neck.",
+                    "Approach from downwind.", "Bring a shield. And a will.",
+                    "The screaming should guide you the rest of the way.",
+                    "I would not go looking, personally.",
+                    "Give it a wide berth if you value your teeth."]
+        _wclause = f", the {weapon} still in hand" if weapon else ""
+        line = (f"Last I heard, the bald woman was {_random.choice(_ACTS)} somewhere near "
+                f"{_random.choice(_LOCS)}{_wclause}. {_random.choice(_CLOSERS)}")
+        _file = None
+        _path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                              'assets', 'CHIVALRYWORLDMAP.png')
+        if _os.path.isfile(_path):
+            try:
+                from utils.charts import render_async, render_world_map_ping
+                _png = await render_async(render_world_map_ping, _path)
+                _file = discord.File(_io.BytesIO(_png), filename="baldwoman.png")
+            except Exception as _re:
+                print(f"[BALDWOMAN] render error: {_re}")
+        if _file:
+            await message.reply(line, file=_file, mention_author=False)
+        else:
+            await message.reply(line, mention_author=False)
+
     @commands.Cog.listener()
     async def on_message(self, message):
         # Counting channel FIRST — the counting bot's own messages carry the
@@ -4239,6 +4282,16 @@ class PersonalityCog(commands.Cog):
                     await _db.butler_add_reply(message.reference.message_id)
             except Exception as _fe:
                 print(f"[BUTLER] feedback reply error: {_fe}")
+
+        # Easter egg: "where is the bald woman?" -> the world map with a random spot ringed.
+        _bwt = (message.content or '').lower()
+        if (is_pinged or _butler_chat_ok) and 'where' in _bwt and (
+                'bald woman' in _bwt or 'bald female' in _bwt or 'bald lady' in _bwt):
+            try:
+                await self._bald_woman_reply(message)
+            except Exception as _bwe:
+                print(f"[BALDWOMAN] {_bwe}")
+            return
 
         # Idiot role — every now and then, curtly dismiss them. Skipped when they
         # actually ping the Butler (so a direct question still gets a real answer),

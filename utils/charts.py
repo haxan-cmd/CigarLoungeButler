@@ -150,6 +150,32 @@ async def render_async(fn, *args, **kwargs) -> bytes:
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+def render_world_map_ping(map_path) -> bytes:
+    """The world map with one random small area ringed (red halo + gold circle).
+    BLOCKING — call via render_async."""
+    import io as _io, random as _random
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    img = plt.imread(map_path)
+    h, w = img.shape[0], img.shape[1]
+    fig, ax = plt.subplots(figsize=(w / 120.0, h / 120.0), dpi=120)
+    ax.imshow(img)
+    ax.set_axis_off()
+    r = min(w, h) * 0.05
+    cx = _random.uniform(w * 0.16, w * 0.84)
+    cy = _random.uniform(h * 0.16, h * 0.84)
+    ax.add_patch(mpatches.Circle((cx, cy), r * 1.5, fill=False, edgecolor='#e0322f', linewidth=4, alpha=0.85))
+    ax.add_patch(mpatches.Circle((cx, cy), r, fill=False, edgecolor='#f4d35e', linewidth=2, alpha=0.95))
+    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    buf = _io.BytesIO()
+    fig.savefig(buf, format='png', dpi=120, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 def render_activity_dashboard(*, title, subtitle, series_labels, series_counts,
                               top_players, top_weapons, footer) -> bytes:
     """Activity over a window. BLOCKING — call via render_async."""
