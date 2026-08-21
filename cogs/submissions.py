@@ -3300,7 +3300,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 from cogs.bounty import update_bounty
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
-                    interaction.user.display_name, interaction.user.id, takedowns
+                    interaction.user.display_name, interaction.user.id, takedowns,
+                    is_vip=vip
                 )
                 print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon} (corrected from {dup_weapon})")
                 if bounty_hit:
@@ -3582,7 +3583,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             try:
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
-                    interaction.user.display_name, interaction.user.id, takedowns
+                    interaction.user.display_name, interaction.user.id, takedowns,
+                    is_vip=vip
                 )
                 print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
                 if bounty_hit:
