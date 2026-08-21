@@ -316,6 +316,67 @@ _special_weapon_ok = _ch.special_weapon_ok
 _describe_special = _ch.describe
 
 
+async def _bounty_window_start(bounty):
+    """The moment the current bounty/season opened, as a naive UTC datetime.
+
+    bounties.start_date is a DATE, so it floors to midnight and would count runs
+    submitted earlier that day, before the bounty existed. The season row opens at
+    the same moment via start_season() and is a TIMESTAMPTZ, so it gives the real
+    cutoff. Fall back to the date only if there is no season.
+    """
+    start = None
+    try:
+        _season = await _db.get_current_season()
+        _sa = _season.get('started_at') if _season else None
+        if _sa is not None:
+            start = _sa.replace(tzinfo=None) if getattr(_sa, 'tzinfo', None) else _sa
+    except Exception as _we:
+        print(f"[BOUNTY] season window lookup failed: {_we}")
+    if start is None:
+        start = _parse_ts(bounty.get('start_date'))
+    return start
+
+
+async def count_player_weapon_runs(bounty, player_id):
+    """{matched_weapon_key: qualifying_run_count} for a player's history.
+
+    A run counts toward regular bounty weapon progress when it is on a bounty
+    weapon, 100+ TD, and not a Resubmit. VIP DOES count here (weapon progress
+    includes VIP, unlike the boards' records and unlike the lethality bonus);
+    Unlisted also still counts for the bounty. This is the idempotent truth the
+    edit path reconciles against, so a misread or lagged run can be topped up
+    without the risk of double-counting an incrementing counter.
+    """
+    out = {}
+    try:
+        subs = await _db.get_submissions_by_player(str(player_id))
+    except Exception:
+        return out
+    start = await _bounty_window_start(bounty)
+    keys = {str(k).strip().lower(): k for k in (bounty.get('weapons') or {})}
+    for r in subs:
+        if len(r) < 12:
+            continue
+        feats = (r[11] or '')
+        if 'resubmit' in feats.lower():
+            continue
+        if start is not None:
+            ts = _parse_ts(r[0])
+            if ts is None or ts < start:
+                continue
+        mk = keys.get((r[3] or '').strip().lower())
+        if not mk:
+            continue
+        try:
+            td = int(r[7]) if r[7] else 0
+        except (ValueError, TypeError):
+            continue
+        if td < 100:
+            continue
+        out[mk] = out.get(mk, 0) + 1
+    return out
+
+
 async def _count_special_runs(bounty, player_id):
     """Count the player's runs INSIDE the bounty window that satisfy the challenge.
 
@@ -330,20 +391,7 @@ async def _count_special_runs(bounty, player_id):
         subs = await _db.get_submissions_by_player(str(player_id))
     except Exception:
         return 0
-    # bounties.start_date is a DATE, so it floors to midnight and would count
-    # runs submitted earlier that day, before the bounty existed. The season row
-    # opens at the same moment via start_season() and is a TIMESTAMPTZ, so it
-    # gives the real cutoff. Fall back to the date only if there is no season.
-    start = None
-    try:
-        _season = await _db.get_current_season()
-        _sa = _season.get('started_at') if _season else None
-        if _sa is not None:
-            start = _sa.replace(tzinfo=None) if getattr(_sa, 'tzinfo', None) else _sa
-    except Exception as _we:
-        print(f"[BOUNTY] season window lookup failed: {_we}")
-    if start is None:
-        start = _parse_ts(bounty.get('start_date'))
+    start = await _bounty_window_start(bounty)
     n = 0
     for r in subs:
         if len(r) < 10:

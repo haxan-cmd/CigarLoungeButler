@@ -2371,20 +2371,38 @@ async def _apply_edit(interaction, ev):
     if _stat_lines:
         new_summary += "\n\n" + "\n".join(f"*{s}*" for s in _stat_lines)
 
-    # Bounty progress line. Rebuilt here rather than carried over, so an edit that
-    # moves the run off a bounty weapon (or under the TD floor) correctly drops it.
-    # Mirrors the gate in update_bounty: bounty weapon, 100+ TD, not a resubmit.
+    # Bounty progress on edit. The finalise path credits via update_bounty, but edits
+    # never reached it — so a run that was misread, under the TD floor, or lagged and
+    # never counted could NOT be fixed by re-editing (the block only re-drew the line).
+    # Reconcile idempotently: compare the player's TRUE qualifying-run count for this
+    # weapon against what's stored, and top up the shortfall through update_bounty
+    # (which builds the card, assigns the role, and handles completion exactly as the
+    # original submission would have). If already credited, the shortfall is 0 and
+    # nothing happens, so a harmless field edit can never double-count. (Editing a run
+    # OFF a bounty weapon still just drops the line, not the banked hit — downward
+    # reconciliation is intentionally left out to avoid clawing back other valid runs.)
     try:
-        from cogs.bounty import get_active_bounty, get_player_bounty_progress
+        from cogs.bounty import (get_active_bounty, get_player_bounty_progress,
+                                 update_bounty, count_player_weapon_runs)
         _eb = await get_active_bounty()
+        _wl = (ev.weapon or '').strip().lower()
+        _mk = next((k for k in (_eb.get('weapons') or {})
+                    if str(k).strip().lower() == _wl), None) if _eb else None
         _eb_ok = (
-            _eb
+            _eb and _mk
             and 'Resubmit' not in (_feats or [])
             and (ev.takedowns or 0) >= 100
-            and any((ev.weapon or '').strip().lower() == str(k).strip().lower()
-                    for k in (_eb.get('weapons') or {}))
         )
         if _eb_ok:
+            _true = (await count_player_weapon_runs(_eb, str(ev.author.id))).get(_mk, 0)
+            _pr = await get_player_bounty_progress(_eb['title'], str(ev.author.id))
+            _raw = (_pr.get('progress') if _pr else {}).get(_mk, 0)
+            _stored = _raw['current'] if isinstance(_raw, dict) else int(_raw or 0)
+            _guild = ev.original_message.guild
+            _pname = ev.author.display_name
+            for _ in range(max(0, _true - _stored)):
+                await update_bounty(_guild, ev.weapon, _pname, ev.author.id, ev.takedowns)
+            # Re-read for the (possibly newly created) card link.
             _epbr = await get_player_bounty_progress(_eb['title'], str(ev.author.id))
             _efp = _epbr.get('forum_post_id') if _epbr else None
             if _efp:
@@ -2394,7 +2412,7 @@ async def _apply_edit(interaction, ev):
                     f"(https://discord.com/channels/{_edit_guild_id}/{_efp})"
                 )
     except Exception as _ebe:
-        print(f"[EDIT] bounty line rebuild error: {_ebe}")
+        print(f"[EDIT] bounty recount/rebuild error: {_ebe}")
 
     _is_pac = (ev.kills == 0 and ev.takedowns <= 10)
     _me = 0 if _is_pac else 1
@@ -3300,8 +3318,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 from cogs.bounty import update_bounty
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
-                    interaction.user.display_name, interaction.user.id, takedowns,
-                    is_vip=vip
+                    interaction.user.display_name, interaction.user.id, takedowns
                 )
                 print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon} (corrected from {dup_weapon})")
                 if bounty_hit:
@@ -3583,8 +3600,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             try:
                 bounty_hit = await update_bounty(
                     interaction.guild, selected_weapon,
-                    interaction.user.display_name, interaction.user.id, takedowns,
-                    is_vip=vip
+                    interaction.user.display_name, interaction.user.id, takedowns
                 )
                 print(f"[BOUNTY] bounty_hit={bounty_hit} weapon={selected_weapon} takedowns={takedowns}")
                 if bounty_hit:
