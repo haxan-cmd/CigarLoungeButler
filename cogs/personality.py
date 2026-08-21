@@ -1318,6 +1318,8 @@ class PersonalityCog(commands.Cog):
             self.daily_cycle_tasks.start()
         if not self.events_flush_loop.is_running():
             self.events_flush_loop.start()
+        if not self.traffic_digest.is_running():
+            self.traffic_digest.start()
         # Fire nerve center immediately on startup so it always posts on deploy
 
         # butlers-manual RETIRED: the player command list now lives in the information
@@ -1583,6 +1585,75 @@ class PersonalityCog(commands.Cog):
         print(f"[NERVE] task crashed: {error}")
         if not self.nerve_center_digest.is_running():
             self.nerve_center_digest.restart()
+
+    async def _run_traffic_digest(self):
+        """Post a once-a-week website traffic summary to the nerve centre. Fires from
+        a daily loop but only acts on Mondays, with a same-day dedup so a redeploy
+        can't double-post. Silent no-op when ANALYTICS is off / DB is empty."""
+        try:
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                return
+            ch = (guild.get_channel(NERVE_CENTER_CHANNEL_ID)
+                  or await guild.fetch_channel(NERVE_CENTER_CHANNEL_ID))
+            if not ch:
+                return
+            # Dedup: bail if a weekly-traffic embed already went out in the last ~20h.
+            try:
+                bot_id = guild.me.id
+                async for _m in ch.history(limit=25):
+                    if (_m.author.id == bot_id and _m.embeds
+                            and (_m.embeds[0].title or '').startswith('📈')):
+                        age = (datetime.now(timezone.utc) - _m.created_at).total_seconds()
+                        if age < 20 * 3600:
+                            return
+                        break
+            except Exception as _de:
+                print(f"[TRAFFIC] digest dedup error: {_de}")
+
+            _t7 = await _db.get_traffic(7)
+            _t14 = await _db.get_traffic(14)
+            if _t7['total'] == 0 and _t14['total'] == 0:
+                return  # nothing logged yet — don't post an empty digest
+            prior = max(0, _t14['total'] - _t7['total'])
+            if prior:
+                _pct = round((_t7['total'] - prior) / prior * 100)
+                trend = f"▲ {_pct}%" if _pct > 0 else (f"▼ {abs(_pct)}%" if _pct < 0 else "flat")
+            else:
+                trend = "first week"
+
+            def _list(rows, n=6):
+                if not rows:
+                    return "—"
+                return "\n".join(f"`{v:>4}`  {k}" for k, v in rows[:n])
+
+            embed = discord.Embed(title="📈  Weekly Traffic", color=0xd8b25a,
+                                  timestamp=datetime.now(timezone.utc))
+            embed.description = (f"**{_t7['total']:,}** views · **{_t7['visitors']:,}** visitors "
+                                 f"over the last 7 days  ({trend} vs the week before)")
+            embed.add_field(name="Top pages", value=_list(_t7['by_path']), inline=True)
+            embed.add_field(name="Sources", value=_list(_t7['by_referrer']), inline=True)
+            embed.set_footer(text="Weekly traffic digest")
+            await ch.send(embed=embed)
+            print("[TRAFFIC] weekly digest sent")
+        except Exception as e:
+            print(f"[TRAFFIC] digest error: {e}")
+
+    @tasks.loop(hours=24)
+    async def traffic_digest(self):
+        # Weekly cadence via a daily loop gated to Monday (UTC).
+        if datetime.now(timezone.utc).weekday() == 0:
+            await self._run_traffic_digest()
+
+    @traffic_digest.before_loop
+    async def before_traffic_digest(self):
+        await self.bot.wait_until_ready()
+
+    @traffic_digest.error
+    async def traffic_digest_error(self, error):
+        print(f"[TRAFFIC] digest task crashed: {error}")
+        if not self.traffic_digest.is_running():
+            self.traffic_digest.restart()
 
 
 
