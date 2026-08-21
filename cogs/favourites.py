@@ -1469,8 +1469,21 @@ def _sub_in_window(row, start_ts, end_ts=None):
 
 
 async def _windowed_subs():
-    """(subs, label) scoped to the current open season if one exists, else all-time."""
+    """(subs, label) for the RECAP window used by /wrapped and /superlatives.
+
+    These are retrospectives, so they look back at the most recently COMPLETED
+    season (the one that just ended), NOT the fresh season that opened on rollover
+    — otherwise, the moment a new bounty/season starts, every recap reads empty.
+    Falls back to the current open season if nothing has finished yet, else all-time.
+    """
     all_subs = await _db.get_all_submissions()
+    finished = await _db.get_finished_seasons()
+    if finished and finished[0].get('started_at'):
+        s = finished[0]
+        start = s['started_at'].timestamp()
+        end = s['ended_at'].timestamp() if s.get('ended_at') else None
+        return ([r for r in all_subs if _sub_in_window(r, start, end)],
+                (s.get('label') or 'last season'))
     season = await _db.get_current_season()
     if season and season.get('started_at'):
         start = season['started_at'].timestamp()
