@@ -26,6 +26,13 @@ LEGACY = {
     'weapons': {'Katars': {'current': 0, 'total': 3}},
 }
 
+# Lethality style (Dealer's Choice): kills/takedowns %, no TD floor forced.
+LETHALITY = {
+    'special_challenge': '6 high lethality games using any bounty weapon',
+    'weapons': {w: {'current': 0, 'total': 6} for w in
+                ['Halberd', 'Greatsword', 'Spear', 'Rapier']},
+}
+
 
 def test_parses_all_four_fields():
     s = parse_special(FIELD_TEST)
@@ -106,6 +113,40 @@ def test_run_qualifies_handles_dirty_values():
     assert run_qualifies(FIELD_TEST, s, 'Maul', '120', '4') is True   # strings
     assert run_qualifies(FIELD_TEST, s, 'Maul', None, None) is False
     assert run_qualifies(FIELD_TEST, s, 'Maul', 'abc', '4') is False
+
+
+def test_parses_lethality_challenge():
+    s = parse_special(LETHALITY)
+    assert s['min_lethality'] == 60      # "high lethality" defaults to the sticker's 60%
+    assert s['need'] == 6                # "6 ... games"
+    assert s['any_weapon'] is True
+    assert s['min_td'] == 0             # a lethality bounty doesn't force the 100-TD default
+
+
+def test_explicit_lethality_percent():
+    s = parse_special({'special_challenge': '5 games at 70% lethality using any bounty weapon'})
+    assert s['min_lethality'] == 70
+    assert s['need'] == 5
+
+
+def test_non_lethality_has_no_lethality_bar():
+    assert parse_special(FIELD_TEST)['min_lethality'] is None
+    assert parse_special(LEGACY)['min_lethality'] is None
+
+
+def test_lethality_run_qualifies():
+    s = parse_special(LETHALITY)
+    q = lambda td, k: run_qualifies(LETHALITY, s, 'Halberd', td, 0, '', k)  # lethality = k/td %
+    assert q(50, 30) is True     # 60% -> exactly at the bar
+    assert q(50, 29) is False    # 58% -> under
+    assert q(100, 70) is True    # 70%
+    assert q(0, 0) is False      # no takedowns -> no lethality
+    assert run_qualifies(LETHALITY, s, 'Longsword', 50, 0, '', 40) is False  # off-roster weapon
+    assert q(50, 30) is True and run_qualifies(LETHALITY, s, 'Halberd', 50, 0, 'Resubmit', 40) is False
+
+
+def test_describe_lethality():
+    assert describe(parse_special(LETHALITY)) == '60%+ lethality x6'
 
 
 def test_describe_is_compact_and_derived():

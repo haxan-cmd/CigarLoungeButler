@@ -40,13 +40,23 @@ def parse_special(bounty):
         return None
     td = re.search(r'(\d+)\s*takedown', sc)
     deaths = re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
-    count = re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or re.search(r'\bx\s*(\d+)\b', sc)
+    # Lethality (kills / takedowns, as a %). "high lethality" defaults to the same 60%
+    # bar as the in-game high-lethality sticker; "70% lethality" sets an explicit one.
+    has_leth = 'lethal' in sc
+    leth_num = re.search(r'(\d+)\s*%\s*(?:\+|or more|or higher)?\s*lethal', sc)
+    min_lethality = (int(leth_num.group(1)) if leth_num else 60) if has_leth else None
+    # How many qualifying runs. Also accept "6 high lethality games" / "6 games".
+    count = (re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or re.search(r'\bx\s*(\d+)\b', sc)
+             or (re.search(r'(\d+)\s+(?:high\s+)?lethal', sc) if has_leth else None)
+             or (re.search(r'(\d+)\s+games?\b', sc) if has_leth else None))
     return {
         'text': sc,
-        'min_td': int(td.group(1)) if td else 100,
+        # A lethality bounty needn't also clear the 100-TD default; require TD only if named.
+        'min_td': int(td.group(1)) if td else (0 if has_leth else 100),
         'max_deaths': int(deaths.group(1)) if deaths else None,
         'need': max(1, int(count.group(1))) if count else 1,
         'any_weapon': ('any bounty weapon' in sc) or ('any weapon' in sc),
+        'min_lethality': min_lethality,
     }
 
 
@@ -59,9 +69,15 @@ def describe(spec):
     """
     if not spec:
         return ''
-    bits = [f"{spec['min_td']}+ TD"]
+    bits = []
+    if spec.get('min_lethality') is not None:
+        bits.append(f"{spec['min_lethality']}%+ lethality")
+    if spec['min_td']:
+        bits.append(f"{spec['min_td']}+ TD")
     if spec['max_deaths'] is not None:
         bits.append(f"<{spec['max_deaths']} deaths")
+    if not bits:
+        bits.append(f"{spec['min_td']}+ TD")
     label = ', '.join(bits)
     if spec['need'] > 1:
         label += f" x{spec['need']}"
@@ -79,7 +95,7 @@ def special_weapon_ok(bounty, spec, weapon):
     return w in spec['text']
 
 
-def run_qualifies(bounty, spec, weapon, takedowns, deaths, feats=''):
+def run_qualifies(bounty, spec, weapon, takedowns, deaths, feats='', kills=0):
     """Does a single submission satisfy the challenge? Resubmits never count,
     matching how they are excluded from bounty progress elsewhere."""
     if 'resubmit' in (feats or '').lower():
@@ -89,10 +105,16 @@ def run_qualifies(bounty, spec, weapon, takedowns, deaths, feats=''):
     try:
         td = int(takedowns) if takedowns else 0
         dk = int(deaths) if deaths else 0
+        k = int(kills) if kills else 0
     except (ValueError, TypeError):
         return False
     if td < spec['min_td']:
         return False
     if spec['max_deaths'] is not None and dk >= spec['max_deaths']:
         return False
+    # Lethality = kills / takedowns %, same formula as the high-lethality sticker.
+    _ml = spec.get('min_lethality')
+    if _ml is not None:
+        if td <= 0 or (k / td * 100) < _ml:
+            return False
     return True

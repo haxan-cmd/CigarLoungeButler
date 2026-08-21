@@ -353,7 +353,7 @@ async def _count_special_runs(bounty, player_id):
             ts = _parse_ts(r[0])
             if ts is None or ts < start:
                 continue
-        if _ch.run_qualifies(bounty, spec, r[3] or '', r[7], r[9], feats):
+        if _ch.run_qualifies(bounty, spec, r[3] or '', r[7], r[9], feats, r[8]):
             n += 1
     return n
 
@@ -816,9 +816,15 @@ class BountyCog(commands.Cog):
         # far better to see that here than at the end of the month.
         _spec = _parse_special({'special_challenge': special_challenge})
         if _spec:
-            _bits = [f"{_spec['min_td']}+ TD"]
+            _bits = []
+            if _spec.get('min_lethality') is not None:
+                _bits.append(f"{_spec['min_lethality']}%+ lethality")
+            if _spec['min_td']:
+                _bits.append(f"{_spec['min_td']}+ TD")
             if _spec['max_deaths'] is not None:
                 _bits.append(f"under {_spec['max_deaths']} deaths")
+            if not _bits:
+                _bits.append(f"{_spec['min_td']}+ TD")
             _bits.append(f"x{_spec['need']}")
             _bits.append("any bounty weapon" if _spec['any_weapon'] else "weapon named in the text")
             msg += f"\n\n🧪 Special challenge parsed as: **{', '.join(_bits)}**"
