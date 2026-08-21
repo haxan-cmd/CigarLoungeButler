@@ -424,20 +424,19 @@ async def _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player
     await _commit_bonus(guild, bounty, player_name, player_id)
 
 
-async def update_bounty(guild, weapon, player_name, player_id, takedowns, is_vip=False):
-    """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched."""
+async def update_bounty(guild, weapon, player_name, player_id, takedowns):
+    """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched.
+
+    VIP runs DO count toward regular bounty weapon progress (a bounty is about
+    participation, not board records). They are only excluded from the special
+    challenge / bonus, gated in _count_special_runs.
+    """
     bounty = await get_active_bounty()
     if not bounty:
         print(f"[BOUNTY] No active bounty found — skipping for {player_name} weapon={weapon}")
         return False
 
     if not weapon:
-        return False
-
-    # VIP runs are excluded from the weapon leaderboards, so they don't count toward
-    # the weapon bounty or its lethality bonus either — the two stay in lockstep.
-    # (The bonus recount in _count_special_runs applies the same VIP skip.)
-    if is_vip:
         return False
 
     # Bonus/special challenge (e.g. "Katar 100 Takedowns") is evaluated first: it can
