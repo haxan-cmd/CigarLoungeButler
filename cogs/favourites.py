@@ -943,7 +943,7 @@ def _iso(dt):
         return str(dt)[:10] or None
 
 
-async def _season_hof_dict(season, all_time_stats):
+async def _season_hof_dict(season, all_time_stats, bounty_map=None):
     """One season as a JSON-able dict for the web Hall of Fame. Reuses the SAME
     season_total / category logic as build_season_embed, so the page and the bot can
     never disagree. `all_time_stats` is calculate_butler_stats() passed in once."""
@@ -961,6 +961,7 @@ async def _season_hof_dict(season, all_time_stats):
         "standings": [],
         "featured": [],
         "categories": [],
+        "bounty_finishers": (bounty_map or {}).get(label.strip().lower(), []),
     }
     if standings and gp:
         out["champion"] = {"name": standings[0][0], "points": standings[0][1]}
@@ -989,12 +990,25 @@ async def build_hof_payload():
     """The whole Hall of Fame as JSON for the public /hof page. Newest season first,
     all-time category leaders computed once. Read-only; served ungated."""
     from datetime import datetime, timezone
+    import json as _json
     seasons = await _db.get_all_seasons()
     all_time = await calculate_butler_stats()
+    # Bounty finishers by season: a season's label IS its bounty title, so map each
+    # bounty's completions ({id,name,date}) to the season by title.
+    _bmap = {}
+    try:
+        for _b in await _db.get_all_bounties():
+            _title = (_b[0] or '').strip().lower() if _b and len(_b) > 0 else ''
+            _comps = _json.loads(_b[7]) if len(_b) > 7 and _b[7] else []
+            _names = [c.get('name') for c in _comps if isinstance(c, dict) and c.get('name')]
+            if _title:
+                _bmap[_title] = _names
+    except Exception as _be:
+        print(f"[HOF] bounty completions map error: {_be}")
     out_seasons = []
     for season in seasons:
         try:
-            out_seasons.append(await _season_hof_dict(season, all_time))
+            out_seasons.append(await _season_hof_dict(season, all_time, _bmap))
         except Exception as _e:
             print(f"[HOF] season {season.get('id')} payload error: {_e}")
     return {

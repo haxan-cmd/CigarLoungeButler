@@ -67,6 +67,8 @@ a{color:var(--gold)}
 .ctempty{color:var(--mut);font-size:11.5px;font-style:italic;padding:4px 0}
 @media(max-width:680px){.cgrid{grid-template-columns:1fr}}
 .feat{font-size:12.5px;padding:4px 0;color:var(--ink)}
+.finwrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.fin{font-size:12px;background:var(--panel2);border:1px solid var(--grid);border-radius:20px;padding:3px 10px;color:#cbced6}
 .feat b{color:var(--gold)}
 .foot{color:var(--mut);font-size:11px;text-align:center;margin-top:26px}
 /* section headings + all-time titles */
@@ -195,17 +197,24 @@ function seasonCard(s){
     }).join('');
     featHtml = `<div class="block"><h3>Special Features</h3>${rows}</div>`;
   }
+  // Bounty finishers — who completed this season's bounty.
+  let finHtml = '';
+  if(s.bounty_finishers && s.bounty_finishers.length){
+    const chips = s.bounty_finishers.map(n=>`<span class="fin">${esc(n)}</span>`).join('');
+    finHtml = `<div class="block"><h3>Bounty finishers · ${s.bounty_finishers.length}</h3><div class="finwrap">${chips}</div></div>`;
+  }
   let body;
   if(live){
-    // Full-width stack: standings, then the top-5 category grid, then features.
-    body = (standHtml || catHtml || featHtml)
-      ? `${standHtml}${catHtml}${featHtml}`
+    // Full-width stack: standings, category grid, finishers, features.
+    body = (standHtml || catHtml || finHtml || featHtml)
+      ? `${standHtml}${catHtml}${finHtml}${featHtml}`
       : `<div class="emptyseason">No results recorded for this season yet.</div>`;
   }else{
     const left = standHtml || featHtml;
     const right = catHtml + (standHtml ? featHtml : '');
-    body = (left||right)
-      ? `<div class="sgrid"><div>${left}</div><div>${right}</div></div>`
+    const grid = (left||right) ? `<div class="sgrid"><div>${left}</div><div>${right}</div></div>` : '';
+    body = (grid || finHtml)
+      ? `${grid}${finHtml}`
       : `<div class="emptyseason">No results recorded for this season yet.</div>`;
   }
   return `<div class="season ${live?'live':''}">`
