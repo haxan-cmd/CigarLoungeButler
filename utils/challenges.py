@@ -45,10 +45,11 @@ def parse_special(bounty):
     has_leth = 'lethal' in sc
     leth_num = re.search(r'(\d+)\s*%\s*(?:\+|or more|or higher)?\s*lethal', sc)
     min_lethality = (int(leth_num.group(1)) if leth_num else 60) if has_leth else None
-    # How many qualifying runs. Also accept "6 high lethality games" / "6 games".
+    # How many qualifying runs. Accept the count with any qualifier words between
+    # it and "lethal"/"games": "6 high lethality games", "6 excellent lethality
+    # games" (the in-game sticker wording), "5 games at 70% lethality".
     count = (re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or re.search(r'\bx\s*(\d+)\b', sc)
-             or (re.search(r'(\d+)\s+(?:high\s+)?lethal', sc) if has_leth else None)
-             or (re.search(r'(\d+)\s+games?\b', sc) if has_leth else None))
+             or (re.search(r'(\d+)\s+(?:\w+\s+){0,3}?(?:lethal|games?)\b', sc) if has_leth else None))
     return {
         'text': sc,
         # A lethality bounty needn't also clear the 100-TD default; require TD only if named.

@@ -129,6 +129,17 @@ def test_explicit_lethality_percent():
     assert s['need'] == 5
 
 
+def test_excellent_lethality_sticker_wording():
+    """The in-game sticker reads 'Excellent Lethality'; the count sits before an
+    adjective, so a naive '(\\d+)\\s+games' misses it. Lock the sticker phrasing."""
+    s = parse_special({'special_challenge':
+                       '6 Excellent Lethality games using any bounty weapon'})
+    assert s['min_lethality'] == 60
+    assert s['need'] == 6
+    assert s['any_weapon'] is True
+    assert s['min_td'] == 0
+
+
 def test_non_lethality_has_no_lethality_bar():
     assert parse_special(FIELD_TEST)['min_lethality'] is None
     assert parse_special(LEGACY)['min_lethality'] is None
