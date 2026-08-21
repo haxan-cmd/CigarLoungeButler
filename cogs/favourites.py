@@ -1504,7 +1504,8 @@ def _faction_line(split):
 
 
 def _render_wrapped_embed(name, label, w, *, archetype=None, damage=None,
-                          nemesis=None, ally=None, ranks=None, butler_line=None):
+                          nemesis=None, ally=None, ranks=None, butler_line=None,
+                          bounty_status=None):
     e = discord.Embed(title=f"\U0001f381 {name} — {label} Wrapped", colour=_WRAP_GOLD)
     desc = (f"**{w['runs']}** runs · **{w['kills']:,}** kills · "
             f"**{w['takedowns']:,}** takedowns · **{w['deaths']:,}** deaths "
@@ -1512,6 +1513,8 @@ def _render_wrapped_embed(name, label, w, *, archetype=None, damage=None,
     if butler_line:
         desc += f"\n\n*\u201c{butler_line}\u201d*"
     e.description = desc
+    if bounty_status:
+        e.add_field(name="\U0001f3af Bounty", value=bounty_status, inline=False)
     if w['signature_weapon']:
         e.add_field(name="\U0001f5e1️ Signature weapon",
                     value=f"**{w['signature_weapon']}** — {w['signature_weapon_runs']} runs", inline=True)
@@ -1689,6 +1692,30 @@ class FavouritesCog(commands.Cog):
         except Exception as _se:
             print(f"[WRAPPED] standing error: {_se}")
 
+        # Did they finish this season's bounty? A season's label == its bounty title,
+        # so match on that. completions[7] = full bounty, bonus_completions[16] = the
+        # special challenge. Only surfaced when a matching bounty exists.
+        bounty_status = None
+        try:
+            import json as _json
+            _lab = (label or '').strip().lower()
+            for _b in await _db.get_all_bounties():
+                if not _b or (_b[0] or '').strip().lower() != _lab:
+                    continue
+                _comps = _json.loads(_b[7]) if len(_b) > 7 and _b[7] else []
+                _bonus = _json.loads(_b[16]) if len(_b) > 16 and _b[16] else []
+                _done = any(str(c.get('id')) == did for c in _comps if isinstance(c, dict))
+                _bdone = any(str(c.get('id')) == did for c in _bonus if isinstance(c, dict))
+                if _done and _bdone:
+                    bounty_status = "Completed ✅  ·  bonus cleared \U0001f31f"
+                elif _done:
+                    bounty_status = "Completed ✅"
+                else:
+                    bounty_status = "Not completed"
+                break
+        except Exception as _bce:
+            print(f"[WRAPPED] bounty status error: {_bce}")
+
         # One dry Butler line to cap it — best-effort, silently skipped if the model is down.
         butler_line = None
         try:
@@ -1712,7 +1739,8 @@ class FavouritesCog(commands.Cog):
 
         await interaction.followup.send(embed=_render_wrapped_embed(
             canonical, label, w, archetype=archetype, damage=damage,
-            nemesis=nemesis, ally=ally, ranks=ranks, butler_line=butler_line))
+            nemesis=nemesis, ally=ally, ranks=ranks, butler_line=butler_line,
+            bounty_status=bounty_status))
 
     @app_commands.command(name="superlatives", description="The season's tongue-in-cheek awards, handed out by the Butler.")
     async def superlatives_cmd(self, interaction: discord.Interaction):
