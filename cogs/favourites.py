@@ -1694,12 +1694,16 @@ class FavouritesCog(commands.Cog):
         try:
             from utils.helpers import butler_complete
             from cogs.personality import BUTLER_SYSTEM_PROMPT
+            _sw = w['signature_weapon'] or 'a mix of weapons'
+            _swr = w.get('signature_weapon_runs', 0)
             _bp = (f"Write ONE dry, in-character sentence to cap {canonical}'s {label} recap. "
                    "No preamble, no lists, no stat-dump — a single sardonic line under 30 words. "
-                   f"Their season: {w['runs']} runs, {w['kills']} kills, {w['takedowns']} takedowns, "
-                   f"K/D {w['kd']}, signature weapon {w['signature_weapon']}, "
-                   f"archetype {archetype or 'unknown'}, {w['carries']} uphill valor runs, "
-                   f"{w['night_runs']} after-midnight runs.")
+                   f"Their season: {w['runs']} runs total, {w['kills']} kills, {w['takedowns']} takedowns, "
+                   f"K/D {w['kd']}, archetype {archetype or 'unknown'}, "
+                   f"{w['carries']} uphill valor runs, {w['night_runs']} after-midnight runs. "
+                   f"Their most-used weapon was the {_sw} on {_swr} of those {w['runs']} runs — "
+                   "it is only their most frequent pick, NOT what they used every game, so do "
+                   "not say all their runs used it.")
             _line = await butler_complete(BUTLER_SYSTEM_PROMPT, _bp, 70)
             if _line and _line.strip() and _line.strip() != 'SKIP':
                 butler_line = _line.strip().strip('"').strip("\u201c\u201d").strip()
