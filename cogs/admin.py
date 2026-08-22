@@ -174,14 +174,17 @@ def build_challenge_rules_embeds():
     # 5. Feats of legend
     e = discord.Embed(
         title="💀  Feats of Legend",
-        description="Additional marks earned by completing a valid 100 TD game plus one of the following:",
+        description=("Additional marks earned on a valid 100 TD game — and they **stack**, "
+                     "so one legendary run banks a mark for every milestone it hits:"),
         colour=C("#C0392B"),
     )
     e.add_field(name="Feats", value=(
         "<a:100kill:1361412390339608686> 100 kills\n"
         "<a:triple:1365532698260668466> 150 takedowns, 100 kills, and 20,000 points **(Triple)**\n"
         "<a:200tkd:1363648828414230538> 200 takedowns\n"
-        "<a:predator:1366794896081555567> 150 takedowns without dying **(Predator)**"
+        "<a:predator:1366794896081555567> 150 takedowns without dying **(Predator)**\n"
+        "*A Triple is also a 100-kill game, so it earns the Triple mark **and** the 100 Kills mark "
+        "(plus 200 Takedowns if it clears 200).*"
     ), inline=False)
     e.add_field(name="<:hhanded:1430199468246044772>  The Hundred-Handed", value=(
         "Get a 100 with every primary weapon across all non-archer subclasses."

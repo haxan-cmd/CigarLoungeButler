@@ -51,11 +51,21 @@ def test_triple_requires_all_three_gates():
     assert is_triple_run(100, 150, None, confirmed=True) is True
 
 
-def test_triple_supersedes_100k_200td():
-    # a Triple run does NOT also get separate 100 Kills / 200 Takedowns feats
+def test_triple_stacks_100k_200td():
+    # Feats STACK: a Triple that also clears 100 kills / 200 takedowns banks a mark
+    # for each milestone, not just the Triple. (120 K, 210 TD -> all three.)
     feats = derive_stat_feats(120, 210, 3, "Longsword", FEAT_WEAPONS, triple=True)
     assert "Triple" in feats
-    assert "100 Kills" not in feats
+    assert "100 Kills" in feats
+    assert "200 Takedowns" in feats
+
+
+def test_triple_under_200td_stacks_only_100k():
+    # A Triple needs 150+ TD, not 200 — so a 150-199 TD Triple stacks 100 Kills but
+    # not 200 Takedowns.
+    feats = derive_stat_feats(110, 160, 3, "Longsword", FEAT_WEAPONS, triple=True)
+    assert "Triple" in feats
+    assert "100 Kills" in feats
     assert "200 Takedowns" not in feats
 
 

@@ -28,17 +28,18 @@ def is_triple_run(kills, takedowns, score, confirmed=False):
 
 def derive_stat_feats(kills, takedowns, deaths, weapon, feat_weapons, triple):
     """The stat-derived feats a run earns, in canonical order. `triple` is the result
-    of is_triple_run for this run (a Triple supersedes the separate 100 Kills / 200
-    Takedowns credits). `feat_weapons` is the set/collection of weapons that carry
-    their own 100-kill feat board (config.FEAT_WEAPONS)."""
+    of is_triple_run for this run. Feats STACK: a Triple also earns the 100 Kills
+    credit (it is by definition a 100-kill game) and, when it clears 200 takedowns,
+    the 200 Takedowns credit too — so a single legendary run banks a mark for each
+    milestone it hit, not just one. `feat_weapons` is the set/collection of weapons
+    that carry their own 100-kill feat board (config.FEAT_WEAPONS)."""
     feats = []
     if triple:
         feats.append("Triple")
-    else:
-        if kills >= 100:
-            feats.append("100 Kills")
-        if takedowns >= 200:
-            feats.append("200 Takedowns")
+    if kills >= 100:
+        feats.append("100 Kills")
+    if takedowns >= 200:
+        feats.append("200 Takedowns")
     if deaths == 0 and takedowns > 0 and not is_pacifist(kills, takedowns):
         feats.append("Flawless")
     if takedowns >= 150 and deaths == 0:
