@@ -67,6 +67,23 @@ def test_feats_and_carries_and_night():
     assert w['night_runs'] == 1
 
 
+def test_hours_localise_with_tz():
+    """night_runs / peak_hour follow the display timezone. Runs are stored in UTC;
+    passing a tzinfo converts before taking the hour, so 'after midnight' means the
+    community's local midnight, not UTC's (the Ascension 'never up at 2am' report)."""
+    from datetime import timezone, timedelta
+    et = timezone(timedelta(hours=-5))  # fixed offset — DST-agnostic for the test
+    subs = [row(ts="2026-07-02 02:30:00"),   # 21:30 prior day in ET
+            row(ts="2026-07-02 06:30:00"),   # 01:30 ET -> after midnight
+            row(ts="2026-07-02 06:30:00")]   # 01:30 ET -> after midnight
+    # UTC (default): only the 02:30 run is in the 0-6 window (06:30 is hour 6, excluded).
+    assert build_wrapped(subs)['night_runs'] == 1
+    # Localised to ET: the two 06:30 UTC runs become 01:30, the 02:30 becomes 21:30.
+    w = build_wrapped(subs, tz=et)
+    assert w['night_runs'] == 2
+    assert w['peak_hour'] == 1
+
+
 def test_excludes_resubmit_and_unlisted():
     subs = [row(k=40), row(feats="Resubmit", k=999), row(feats="Unlisted", k=999)]
     w = build_wrapped(subs)

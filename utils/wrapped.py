@@ -12,7 +12,7 @@ Row indices (see CLAUDE.md submissions map):
   0 submitted_at · 3 weapon · 5 map · 6 faction · 7 takedowns · 8 kills ·
   9 deaths · 10 vip · 11 feats · 12 message_link · 24 score
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.tilt import raw_tilt as _raw_tilt, band as _tilt_band
 
@@ -34,11 +34,20 @@ def _feats(row):
     return (row[11] or '') if len(row) > 11 else ''
 
 
-def _hour(ts):
+def _hour(ts, tz=None):
+    """Hour-of-day for a stored (naive UTC) timestamp. When a tzinfo is passed the
+    UTC time is converted to that zone first, so 'prime time' / 'after midnight'
+    read in the community's local clock instead of UTC. tz=None keeps UTC."""
     try:
-        return datetime.strptime(str(ts).strip(), '%Y-%m-%d %H:%M:%S').hour
+        dt = datetime.strptime(str(ts).strip(), '%Y-%m-%d %H:%M:%S')
     except Exception:
         return None
+    if tz is not None:
+        try:
+            dt = dt.replace(tzinfo=timezone.utc).astimezone(tz)
+        except Exception:
+            pass
+    return dt.hour
 
 
 def _is_excluded(row):
@@ -54,11 +63,12 @@ def _ident(row):
     return did or ('name:' + name.lower()), name
 
 
-def build_wrapped(subs):
+def build_wrapped(subs, tz=None):
     """Per-player recap from THAT player's submissions (already scoped to the window
     and to one player). Returns a flat dict of display-ready numbers. Excludes
     Resubmit/Unlisted runs. Order-independent except the flawless streak, which is
-    computed in submitted_at order."""
+    computed in submitted_at order. `tz` (a tzinfo) localises the hour-of-day stats
+    (prime time / after midnight); None keeps them in UTC."""
     subs = [r for r in subs if len(r) > 9 and not _is_excluded(r)]
     out = {
         'runs': 0, 'kills': 0, 'takedowns': 0, 'deaths': 0, 'kd': 0.0,
@@ -101,7 +111,7 @@ def build_wrapped(subs):
             out['two_hundred_td'] += 1
         if d == 0 and td > 0 and not (k == 0 and td <= 10):
             out['flawless_runs'] += 1
-        h = _hour(r[0])
+        h = _hour(r[0], tz)
         if h is not None:
             hours[h] = hours.get(h, 0) + 1
             if 0 <= h < 6:
@@ -158,7 +168,7 @@ def build_wrapped(subs):
     return out
 
 
-def compute_superlatives(subs, farm_maps=DEFAULT_FARM_MAPS, min_games=3):
+def compute_superlatives(subs, farm_maps=DEFAULT_FARM_MAPS, min_games=3, tz=None):
     """Server-wide awards over the window. Returns {award_key: {name, value, detail}}
     or omits an award with no eligible winner. Excludes Resubmit/Unlisted runs.
 
@@ -195,7 +205,7 @@ def compute_superlatives(subs, farm_maps=DEFAULT_FARM_MAPS, min_games=3):
             a['carries'] += 1
         if (r[5] or '').strip().lower() in farm:
             a['farm'] += 1
-        h = _hour(r[0])
+        h = _hour(r[0], tz)
         if h is not None and 0 <= h < 6:
             a['night'] += 1
         if k > a['best_kills']:

@@ -13,6 +13,13 @@ TOKEN    = os.getenv('DISCORD_TOKEN')
 SHEET_ID = '1aT7MbBa3qZxx9ZyaFvlgmbjvCDe2kkQMt5Qsnq_6lzY'
 GUILD_ID = 1324379304544567356
 
+# Display timezone for human-facing hour-of-day stats (Wrapped "prime time" /
+# "after midnight"). Runs are stored in UTC; this only affects how those hours are
+# SHOWN. Any IANA zone name works (DST handled automatically). LABEL is the short
+# suffix printed next to the time.
+COMMUNITY_TZ       = os.getenv('COMMUNITY_TZ', 'America/New_York')
+COMMUNITY_TZ_LABEL = os.getenv('COMMUNITY_TZ_LABEL', 'ET')
+
 DECORATION_TOP    = os.getenv('DECORATION_TOP',    'WMMR_Spacer_Top.png')
 DECORATION_BOTTOM = os.getenv('DECORATION_BOTTOM', 'WMMR_Spacer_Bottom.png')
 

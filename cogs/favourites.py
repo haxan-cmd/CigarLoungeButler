@@ -1117,7 +1117,7 @@ async def finalize_season(guild, season):
             _start = season["started_at"].timestamp()
             _end = season["ended_at"].timestamp() if season.get("ended_at") else None
             _subs = [r for r in await _db.get_all_submissions() if _sub_in_window(r, _start, _end)]
-            _awards = compute_superlatives(_subs)
+            _awards = compute_superlatives(_subs, tz=_community_tz())
             _pairs = await _rivsvc.pair_awards(_subs)
             if _awards or _pairs.get('bitter_rivals') or _pairs.get('inseparable'):
                 await created.thread.send(embed=_render_superlatives_embed(label, _awards, _pairs))
@@ -1454,6 +1454,16 @@ async def refresh_all_time_titles_board(guild):
 _WRAP_GOLD = 0xC9A24B
 
 
+def _community_tz():
+    """Configured display timezone as a tzinfo (for Wrapped hour-of-day stats),
+    or None to fall back to UTC if zoneinfo/the name is unavailable."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(getattr(config, 'COMMUNITY_TZ', 'America/New_York'))
+    except Exception:
+        return None
+
+
 def _sub_in_window(row, start_ts, end_ts=None):
     """True if a submission row's submitted_at falls in [start_ts, end_ts)."""
     try:
@@ -1568,7 +1578,9 @@ def _render_wrapped_embed(name, label, w, *, archetype=None, damage=None,
         extra.append(f"\U0001f9ca {w['flawless_streak']}-game flawless streak")
     if w.get('peak_hour') is not None and w.get('peak_hour_runs', 0) >= 3:
         _h = w['peak_hour']
-        extra.append(f"\U0001f989 Prime time: {_h:02d}:00–{(_h + 1) % 24:02d}:00 ({w['peak_hour_runs']} runs)")
+        _tzl = getattr(config, 'COMMUNITY_TZ_LABEL', '')
+        extra.append(f"\U0001f989 Prime time: {_h:02d}:00–{(_h + 1) % 24:02d}:00"
+                     f"{(' ' + _tzl) if _tzl else ''} ({w['peak_hour_runs']} runs)")
     elif w['night_runs']:
         extra.append(f"\U0001f989 {w['night_runs']} after-midnight runs")
     if extra:
@@ -1634,7 +1646,7 @@ class FavouritesCog(commands.Cog):
         mine = [r for r in subs if len(r) > 2
                 and ((r[2] or '').strip() == did
                      or (len(r) > 1 and (r[1] or '').strip().lower() in names))]
-        w = build_wrapped(mine)
+        w = build_wrapped(mine, tz=_community_tz())
         if w['runs'] == 0:
             await interaction.followup.send(
                 f"No runs for **{canonical}** in {label} yet — submit a scorecard first.")
@@ -1748,7 +1760,7 @@ class FavouritesCog(commands.Cog):
         from utils.wrapped import compute_superlatives
         from utils import rivalry_service as _rivsvc
         subs, label = await _windowed_subs()
-        awards = compute_superlatives(subs)
+        awards = compute_superlatives(subs, tz=_community_tz())
         pairs = await _rivsvc.pair_awards(subs)
         if not awards and not (pairs.get('bitter_rivals') or pairs.get('inseparable')):
             await interaction.followup.send(f"Not enough runs in {label} to hand out awards yet.")
