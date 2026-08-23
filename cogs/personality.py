@@ -64,7 +64,7 @@ Your personality:
 
 Your opinions (hold these CONSISTENTLY across conversations; they are your standing tastes, never server facts, balance truth, or rules):
 - You have firm, unshakeable preferences and you air them dryly when a topic invites it, and occasionally unprompted. Vary the wording every time; never recite an opinion the same way twice.
-- The crutch theory: the weapons sitting highest in the usage charts are, to your eye, the lamest and most crutch-like, wielded by people who need the help. The Messer is animation slop. The Battleaxe is damage slop. The Executioner's Axe is warlord slop. A person of taste wins with something the numbers do not flatter.
+- The crutch theory: the weapons sitting highest in the usage charts are, to your eye, the lamest and most crutch-like, wielded by people who need the help. When a LIVE SERVER PULSE is present in your context, it lists the CURRENT most-used weapons and the hottest/coldest maps — aim this contempt at whatever is actually topping the charts right now, and cite the real weapon and its run count when it lands. Your stock jibes: "animation slop" for a fast spammy weapon, "damage slop" for a heavy hitter, "warlord slop" for a cleanup axe — apply whichever fits the current leader. The Messer is your archetypal grudge, but if it has slipped down the charts, mock whatever supplanted it instead. A person of taste wins with something the numbers do not flatter.
 - Maps: Montcrux, Baudwyn, and Trayan are wretched, indefensible maps. Falmire and Darkforest are the milquetoast pair everyone farms to pad their kills, and you say so plainly.
 - Death and honour: a death means almost nothing statistically, so the man who hoards his like a miser has already lost. Die an honourable death, forward and swinging. Duelists earn no respect from you: a coward with good footwork is a coward still, hunting his little one-on-ones while the objective rots.
 - Team Clash: to your eye it is the one mode that actually tests a player, the most competitive and skill-based format Chivalry 2 has, where footwork, positioning, and teamfighting are finally made to matter. The public lobbies are a farm for padding numbers; Team Clash is the real game. You champion it dryly whenever modes, competition, or serious play come up, and you regard anyone who avoids it as content to be a big fish in a shallow pond.
@@ -121,6 +121,7 @@ Special instructions:
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
+- A LIVE SERVER PULSE block is attached to EVERY message, even idle banter: it lists the current most-used weapons (with run counts), the rarely-used ones, and the most- and least-played maps. These are real, current figures — weave them into banter naturally to make your quips land on what people are ACTUALLY doing right now (the crutch weapon topping usage, the map nobody touches), rather than a fixed grudge. Do not force it into every reply; reach for it when a weapon, map, or "meta" topic invites it. The numbers here are as grounded as any stat block, so citing them is never fabrication, but never inflate them beyond what the pulse says.
 - When a SEASON/BOUNTY TIMELINE block is in your context, use it to answer "when does the bounty/season end", "how long left", or "when did it start". Give the estimated end date and days left from that block, framed as approximate ("around", "roughly ~Aug 20"), since a mod closes the season by hand. Do NOT deflect with a vague "about a month" when the block gives you the actual dates.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
@@ -870,6 +871,50 @@ _AGG_TRIGGERS = (
     'unique', 'per day', 'daily', 'a day', 'how many players', 'how many people',
     'how active', 'how often', 'submit', 'submissions per', 'runs per',
 )
+
+
+def _server_pulse(subs):
+    """A TINY live-meta snapshot for the Butler's ambient context (banter included):
+    the current most-used weapons, the rarely-touched ones, and the hottest/coldest
+    maps, in a handful of lines. Lets quips land on what people are ACTUALLY doing
+    right now instead of a hardcoded grudge. The full breakdown is _server_aggregates,
+    which stays gated to data questions; this is small enough to attach to everything.
+    Resubmit/Unlisted runs excluded so it reflects live, counted play."""
+    from collections import defaultdict
+    W = defaultdict(int)
+    M = defaultdict(int)
+    n = 0
+    for r in subs:
+        if len(r) < 6:
+            continue
+        feats = (r[11] if len(r) > 11 else '') or ''
+        if 'resubmit' in feats.lower() or 'unlisted' in feats.lower():
+            continue
+        w = (r[3] or '').strip()
+        m = (r[5] or '').strip()
+        if w:
+            W[w] += 1
+        if m:
+            M[m] += 1
+        n += 1
+    if n == 0 or not W:
+        return ''
+    top_w = sorted(W.items(), key=lambda x: -x[1])[:3]
+    # Rarely-used: fewest runs but genuinely in play (>=2 so a one-off OCR slip
+    # doesn't crown a phantom weapon "least used").
+    low_w = [x for x in sorted(W.items(), key=lambda x: x[1]) if x[1] >= 2][:2]
+    hot_m = sorted(M.items(), key=lambda x: -x[1])[:1]
+    cold_m = [x for x in sorted(M.items(), key=lambda x: x[1]) if x[1] >= 2][:1]
+    L = ["=== LIVE SERVER PULSE (current meta, resubmissions excluded) ==="]
+    L.append("Most-used weapons: " + ", ".join(f"{w} ({c} runs)" for w, c in top_w))
+    if low_w:
+        L.append("Rarely-used weapons: " + ", ".join(f"{w} ({c})" for w, c in low_w))
+    if hot_m:
+        L.append(f"Most-played map: {hot_m[0][0]} ({hot_m[0][1]} runs)")
+    if cold_m and (not hot_m or cold_m[0][0] != hot_m[0][0]):
+        L.append(f"Least-played map: {cold_m[0][0]} ({cold_m[0][1]} runs)")
+    L.append(f"Total logged runs: {n}.")
+    return "\n".join(L)
 
 
 def _server_aggregates(subs):
@@ -2960,6 +3005,25 @@ class PersonalityCog(commands.Cog):
             f"record {record}, {total} valid counts, {len(users)} counters.",
             ephemeral=True)
 
+    async def _get_server_pulse(self):
+        """Cached LIVE SERVER PULSE for the Butler's ambient context. Cached ~15 min
+        on the cog so banter stays cheap (it must not trigger a full submissions scan
+        on every idle message). Returns '' on any failure — the Butler just carries on
+        without the pulse."""
+        import time
+        now = time.time()
+        _c = getattr(self, '_pulse_cache', None)
+        if _c and (now - _c[0]) < 900:
+            return _c[1]
+        pulse = ''
+        try:
+            subs = await _db.get_all_submissions()
+            pulse = _server_pulse(subs)
+        except Exception as _pe:
+            print(f"[BUTLER] pulse build failed: {_pe}")
+        self._pulse_cache = (now, pulse)
+        return pulse
+
     async def _build_player_stats_ctx(self, message, discord_id_str, player_name, resolved_message, content_lower, _is_data_q):
         """Assemble the Butler's bounded per-player context string.
 
@@ -4520,6 +4584,15 @@ class PersonalityCog(commands.Cog):
                 # _build_player_stats_ctx so the ~8k-char balloon guardrails are testable).
                 player_stats_ctx = await self._build_player_stats_ctx(
                     message, discord_id_str, player_name, resolved_message, content_lower, _is_data_q)
+                # Ambient LIVE SERVER PULSE — attached to every message (banter too) so the
+                # Butler can riff on the CURRENT meta (top weapon, coldest map) instead of a
+                # hardcoded grudge. Cached ~15 min, so it doesn't scan on each idle line.
+                try:
+                    _pulse = await self._get_server_pulse()
+                    if _pulse:
+                        player_stats_ctx = (player_stats_ctx + "\n\n" + _pulse).strip()
+                except Exception as _pe:
+                    print(f"[BUTLER] pulse inject failed: {_pe}")
                 # HYBRID self-dossier: "give me my stats" gets a deterministic, emoji-rich
                 # stat block built in code (mirrors the registry card header — custom emoji
                 # tokens the chat model can't reproduce), with the Butler adding a single
