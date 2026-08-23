@@ -121,7 +121,8 @@ Special instructions:
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
 - When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
-- A LIVE SERVER PULSE block is attached to EVERY message, even idle banter: it lists the current most-used weapons (with run counts), the rarely-used ones, and the most- and least-played maps. These are real, current figures — weave them into banter naturally to make your quips land on what people are ACTUALLY doing right now (the crutch weapon topping usage, the map nobody touches), rather than a fixed grudge. Do not force it into every reply; reach for it when a weapon, map, or "meta" topic invites it. The numbers here are as grounded as any stat block, so citing them is never fabrication, but never inflate them beyond what the pulse says.
+- A LIVE SERVER PULSE block is attached to EVERY message, even idle banter: it lists the current most-used weapons (with run counts), the rarely-used ones, the most- and least-played maps, and the REIGNING #1s on the top weapons' boards. These are real, current figures — weave them into banter naturally to make your quips land on what people are ACTUALLY doing right now (the crutch weapon topping usage, the map nobody touches), rather than a fixed grudge. Do not force it into every reply; reach for it when a weapon, map, or "meta" topic invites it. The numbers here are as grounded as any stat block, so citing them is never fabrication, but never inflate them beyond what the pulse says.
+- BESTOW TITLES on the reigning #1s in the pulse: the takedown king of a weapon earns a coined title in your voice, e.g. the top Messer holder is "King Messer" (vary it: "the Messer King", "sovereign of Messer slop"). If a player is flagged as holding BOTH the takedown and kills crown on a weapon, grant a grander, more absurd honorific. Only crown players the pulse actually names as #1; never invent a title-holder, and keep the ribbing dry — a title from you is a backhanded compliment, not a celebration.
 - When a SEASON/BOUNTY TIMELINE block is in your context, use it to answer "when does the bounty/season end", "how long left", or "when did it start". Give the estimated end date and days left from that block, framed as approximate ("around", "roughly ~Aug 20"), since a mod closes the season by hand. Do NOT deflect with a vague "about a month" when the block gives you the actual dates.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
@@ -873,13 +874,35 @@ _AGG_TRIGGERS = (
 )
 
 
-def _server_pulse(subs):
+def _board_leaders(boards):
+    """board_name(lowercased) -> (leader_name, top_score) — the #1 holder of each
+    leaderboard_data board (highest score wins)."""
+    best = {}
+    for r in boards or []:
+        if len(r) < 4:
+            continue
+        b = (r[0] or '').strip()
+        nm = (r[1] or '').strip()
+        if not b or not nm:
+            continue
+        try:
+            sc = float(str(r[3]).replace(',', '').strip())
+        except (ValueError, TypeError):
+            continue
+        key = b.lower()
+        if key not in best or sc > best[key][1]:
+            best[key] = (nm, sc)
+    return best
+
+
+def _server_pulse(subs, boards=None):
     """A TINY live-meta snapshot for the Butler's ambient context (banter included):
-    the current most-used weapons, the rarely-touched ones, and the hottest/coldest
-    maps, in a handful of lines. Lets quips land on what people are ACTUALLY doing
-    right now instead of a hardcoded grudge. The full breakdown is _server_aggregates,
-    which stays gated to data questions; this is small enough to attach to everything.
-    Resubmit/Unlisted runs excluded so it reflects live, counted play."""
+    the current most-used weapons, the rarely-touched ones, the hottest/coldest maps,
+    and the reigning #1 on each top weapon's boards (so the Butler can crown them a
+    title like "King Messer"). A handful of lines — lets quips land on what people are
+    ACTUALLY doing right now instead of a hardcoded grudge. The full breakdown is
+    _server_aggregates, gated to data questions; this is small enough to attach to
+    everything. Resubmit/Unlisted runs excluded so it reflects live, counted play."""
     from collections import defaultdict
     W = defaultdict(int)
     M = defaultdict(int)
@@ -913,6 +936,28 @@ def _server_pulse(subs):
         L.append(f"Most-played map: {hot_m[0][0]} ({hot_m[0][1]} runs)")
     if cold_m and (not hot_m or cold_m[0][0] != hot_m[0][0]):
         L.append(f"Least-played map: {cold_m[0][0]} ({cold_m[0][1]} runs)")
+    # Reigning #1s on the most-used weapons, so the Butler can bestow a playful title
+    # (e.g. "King Messer"). A player holding BOTH the takedown and kills crown on a
+    # weapon is flagged for a grander one. Weapon board = the weapon name; its kills
+    # companion board = "{Weapon} Kills".
+    if boards:
+        leaders = _board_leaders(boards)
+        champs = []
+        for w, _c in top_w:
+            td = leaders.get(w.lower())
+            kl = leaders.get(f"{w} kills".lower())
+            if not td and not kl:
+                continue
+            bits = []
+            if td:
+                bits.append(f"takedowns: {td[0]}")
+            if kl:
+                bits.append(f"kills: {kl[0]}")
+            both = td and kl and td[0].strip().lower() == kl[0].strip().lower()
+            champs.append(f"  {w} — " + " · ".join(bits) + (" (holds BOTH crowns)" if both else ""))
+        if champs:
+            L.append("Reigning #1s on the top weapons (crown them a title):")
+            L.extend(champs)
     L.append(f"Total logged runs: {n}.")
     return "\n".join(L)
 
@@ -3018,7 +3063,11 @@ class PersonalityCog(commands.Cog):
         pulse = ''
         try:
             subs = await _db.get_all_submissions()
-            pulse = _server_pulse(subs)
+            try:
+                boards = await _db.get_all_leaderboard_data()
+            except Exception:
+                boards = None
+            pulse = _server_pulse(subs, boards)
         except Exception as _pe:
             print(f"[BUTLER] pulse build failed: {_pe}")
         self._pulse_cache = (now, pulse)
