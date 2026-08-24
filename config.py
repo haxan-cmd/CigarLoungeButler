@@ -20,6 +20,15 @@ GUILD_ID = 1324379304544567356
 COMMUNITY_TZ       = os.getenv('COMMUNITY_TZ', 'America/New_York')
 COMMUNITY_TZ_LABEL = os.getenv('COMMUNITY_TZ_LABEL', 'ET')
 
+# Per-model AI pricing in USD per 1,000,000 tokens, for the /dev dashboard's cost
+# estimates. Reasoning/thinking tokens are billed at the OUTPUT rate. VERIFY these
+# against your current OpenAI + Google AI pricing pages — they change, and these are
+# starting values (the OpenAI one is derived from the account's own blended rate).
+AI_PRICES = {
+    'gpt-5.6-luna':     {'input': 0.10,  'output': 0.40},
+    'gemini-2.5-flash': {'input': 0.075, 'output': 0.30},
+}
+
 DECORATION_TOP    = os.getenv('DECORATION_TOP',    'WMMR_Spacer_Top.png')
 DECORATION_BOTTOM = os.getenv('DECORATION_BOTTOM', 'WMMR_Spacer_Bottom.png')
 

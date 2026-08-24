@@ -40,6 +40,56 @@ except Exception:
 
 BUTLER_MODEL = 'gpt-5.6-luna'
 
+# ── AI usage accounting ───────────────────────────────────────────────────────
+# Per-call token usage is buffered in-process (thread-safe: vision runs in a worker
+# thread) and flushed to Postgres in batches by the personality events loop, so
+# logging never adds DB latency to a Butler reply or a vision read. Feeds /dev.
+import threading as _threading
+_AI_USAGE_BUFFER = []
+_AI_USAGE_LOCK = _threading.Lock()
+
+
+def log_ai_usage(provider, model, purpose, prompt_tokens, completion_tokens, reasoning_tokens=0):
+    """Buffer one AI call's usage. completion_tokens should be VISIBLE output only
+    (reasoning/thinking passed separately). Never raises into the caller."""
+    try:
+        with _AI_USAGE_LOCK:
+            _AI_USAGE_BUFFER.append((
+                str(provider), str(model), str(purpose or '?'),
+                int(prompt_tokens or 0), int(completion_tokens or 0), int(reasoning_tokens or 0)))
+    except Exception:
+        pass
+
+
+async def flush_ai_usage():
+    """Drain the usage buffer into ai_usage. Called on a timer from the events loop."""
+    with _AI_USAGE_LOCK:
+        if not _AI_USAGE_BUFFER:
+            return
+        batch = _AI_USAGE_BUFFER[:]
+        _AI_USAGE_BUFFER.clear()
+    try:
+        from utils import db as _db
+        await _db.record_ai_usage(batch)
+    except Exception as e:
+        print(f"[AI_USAGE] flush failed (dropped {len(batch)} rows): {e}")
+
+
+def _log_gemini_usage(response, purpose='vision'):
+    """Record a Gemini response's usage_metadata. Thinking tokens map to reasoning;
+    visible output = candidates. Best-effort."""
+    try:
+        u = getattr(response, 'usage_metadata', None)
+        if not u:
+            return
+        log_ai_usage(
+            'gemini', 'gemini-2.5-flash', purpose,
+            getattr(u, 'prompt_token_count', 0) or 0,
+            getattr(u, 'candidates_token_count', 0) or 0,
+            getattr(u, 'thoughts_token_count', 0) or 0)
+    except Exception:
+        pass
+
 # Bot reference so low-level helpers (which have no interaction/cog) can raise
 # nerve-centre alerts. Set once from bot.py on_ready.
 _bot_ref = None
@@ -51,7 +101,7 @@ def set_bot_ref(bot):
 
 
 async def butler_complete(system: str, prompt: str, max_tokens: int,
-                          reasoning_effort: str = 'none') -> str:
+                          reasoning_effort: str = 'none', purpose: str = 'butler') -> str:
     """One Butler completion. Returns '' on any failure — callers supply their
     own fallback line.
 
@@ -77,6 +127,21 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
                     {'role': 'user', 'content': prompt},
                 ],
             )
+            # Record token usage (best-effort). completion_tokens from OpenAI INCLUDES
+            # reasoning, so subtract it back out to store VISIBLE output separately.
+            try:
+                _u = getattr(r, 'usage', None)
+                if _u:
+                    _rt = 0
+                    _ctd = getattr(_u, 'completion_tokens_details', None)
+                    if _ctd is not None:
+                        _rt = getattr(_ctd, 'reasoning_tokens', 0) or 0
+                    _ct = (getattr(_u, 'completion_tokens', 0) or 0)
+                    log_ai_usage('openai', BUTLER_MODEL, purpose,
+                                 getattr(_u, 'prompt_tokens', 0) or 0,
+                                 max(0, _ct - _rt), _rt)
+            except Exception:
+                pass
             return (r.choices[0].message.content or '').strip()
         except Exception as e:
             last_err = e
@@ -107,7 +172,7 @@ _BUTLER_SYSTEM_BRIEF = (
 async def butler_quip(prompt: str, fallback: str = '') -> str:
     """Short Butler line. Returns fallback if unavailable."""
     try:
-        return (await butler_complete(_BUTLER_SYSTEM_BRIEF, prompt, 60)) or fallback
+        return (await butler_complete(_BUTLER_SYSTEM_BRIEF, prompt, 60, purpose='quip')) or fallback
     except Exception:
         return fallback
 
@@ -223,6 +288,7 @@ def _read_half_roster(pil_img, gtypes, gemini_client):
             temperature=0, response_mime_type='application/json',
             max_output_tokens=2048,
             thinking_config=gtypes.ThinkingConfig(thinking_budget=256)))
+    _log_gemini_usage(r, 'vision_roster')
     raw = (r.text or '').strip()
     if raw.startswith('```'):
         raw = raw.split('```')[1]
@@ -355,6 +421,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
+                _log_gemini_usage(r, 'vision')
                 raw = r.text.strip()
                 break
             except Exception as _e:
@@ -426,6 +493,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                             thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                         ),
                     )
+                    _log_gemini_usage(_r2, 'vision_retry')
                     _raw2 = (_r2.text or '').strip()
                     if _raw2.startswith('```'):
                         _raw2 = _raw2.split('```')[1]
@@ -487,6 +555,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         temperature=0, response_mime_type='application/json',
                         max_output_tokens=6144,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512)))
+                _log_gemini_usage(_rr, 'vision_roster')
                 _rraw = (_rr.text or '').strip()
                 if _rraw.startswith('```'):
                     _rraw = _rraw.split('```')[1]

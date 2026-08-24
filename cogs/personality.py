@@ -673,7 +673,8 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         # a rounding error against the budget, the real cost is ~1-3s more latency.
         text = await _butler_complete(
             BUTLER_SYSTEM_PROMPT, user_prompt,
-            1200 if _is_data else 700, reasoning_effort='low')
+            1200 if _is_data else 700, reasoning_effort='low',
+            purpose='chat_data' if _is_data else 'chat_banter')
         if not text or text == 'SKIP':
             return None
         eyeball = False
@@ -1376,8 +1377,9 @@ class PersonalityCog(commands.Cog):
     @tasks.loop(seconds=90)
     async def events_flush_loop(self):
         """Drain the buffered event log into Postgres, with an occasional retention pass."""
-        from utils.helpers import flush_events
+        from utils.helpers import flush_events, flush_ai_usage
         await flush_events()
+        await flush_ai_usage()
         if random.random() < 0.01:   # ~ every few hours: drop events older than 30 days
             await _db.prune_bot_events(30)
 

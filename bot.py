@@ -501,6 +501,158 @@ async def run_healthcheck():
             out["invite"] = req["invite_url"]
         return web.json_response(out)
 
+    async def traffic_data(request):
+        # JSON feed for the /traffic dashboard. Token-gated (query ?token=), off
+        # unless ANALYTICS_TOKEN is set — same disabled-by-default model as the export.
+        token = os.environ.get("ANALYTICS_TOKEN", "")
+        if not token:
+            return web.json_response({"error": "disabled"}, status=503)
+        if not hmac.compare_digest(request.query.get("token", ""), token):
+            return web.json_response({"error": "forbidden"}, status=403)
+        try:
+            days = int(request.query.get("days", 30))
+        except ValueError:
+            days = 30
+        try:
+            from utils.db import get_traffic
+            data = await get_traffic(days)
+        except RuntimeError:
+            return web.json_response({"error": "database unavailable"}, status=503)
+        return web.json_response(data, dumps=lambda d: json.dumps(d, default=str))
+
+    async def traffic_page(request):
+        # The private traffic dashboard. Token in the URL so it opens in a browser.
+        token = os.environ.get("ANALYTICS_TOKEN", "")
+        if not token:
+            return web.Response(status=503, text="traffic dashboard disabled (set ANALYTICS_TOKEN)")
+        if not hmac.compare_digest(request.query.get("token", ""), token):
+            return web.Response(status=403, text="forbidden")
+        try:
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "traffic.html")
+            with open(_p, encoding="utf-8") as f:
+                html = f.read()
+        except Exception:
+            return web.Response(status=500, text="traffic page missing")
+        return web.Response(text=html, content_type="text/html",
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    async def dev_data(request):
+        # Consolidated developer dashboard feed: AI usage + cost, web traffic, and bot
+        # health. Token-gated (same ANALYTICS_TOKEN as /traffic), off unless set.
+        token = os.environ.get("ANALYTICS_TOKEN", "")
+        if not token:
+            return web.json_response({"error": "disabled"}, status=503)
+        if not hmac.compare_digest(request.query.get("token", ""), token):
+            return web.json_response({"error": "forbidden"}, status=403)
+        try:
+            days = int(request.query.get("days", 30))
+        except ValueError:
+            days = 30
+        out = {"days": days}
+        # AI usage + cost (prices from config.AI_PRICES; reasoning billed at output rate)
+        try:
+            from utils.db import get_ai_usage
+            ai = await get_ai_usage(days)
+            prices = getattr(config, "AI_PRICES", {}) or {}
+            def _cost(model, prompt, output):
+                pr = prices.get(model, {})
+                return (prompt / 1e6) * pr.get("input", 0) + (output / 1e6) * pr.get("output", 0)
+            total_cost = 0.0
+            _prov_cost = {}
+            for m in ai["by_model"]:
+                m["output"] = m["completion"] + m["reasoning"]
+                m["cost"] = round(_cost(m["model"], m["prompt"], m["output"]), 4)
+                total_cost += m["cost"]
+                _prov_cost[m["provider"]] = _prov_cost.get(m["provider"], 0.0) + m["cost"]
+            for p in ai["by_provider"]:
+                p["output"] = p["completion"] + p["reasoning"]
+                p["cost"] = round(_prov_cost.get(p.get("provider"), 0.0), 4)
+            ai["total_cost"] = round(total_cost, 4)
+            out["ai"] = ai
+        except Exception as e:
+            out["ai_error"] = str(e)
+        # Web traffic
+        try:
+            from utils.db import get_traffic
+            out["traffic"] = await get_traffic(days)
+        except Exception as e:
+            out["traffic_error"] = str(e)
+        # Bot health
+        try:
+            from utils.db import get_bot_events, get_submissions_since
+            ev = await get_bot_events(hours=days * 24, limit=200)
+            cat = {}
+            for e in ev:
+                cat[e["category"]] = cat.get(e["category"], 0) + 1
+            out["health"] = {
+                "events_recent": [{"ts": str(e["ts"]), "category": e["category"],
+                                   "level": e["level"], "message": (e["message"] or "")[:300]}
+                                  for e in ev[:25]],
+                "events_by_category": sorted(cat.items(), key=lambda kv: -kv[1]),
+                "subs_24h": len(await get_submissions_since(60 * 24)),
+                "subs_7d": len(await get_submissions_since(60 * 24 * 7)),
+            }
+        except Exception as e:
+            out["health_error"] = str(e)
+        try:
+            import utils.db as _dbmod
+            _pool = _dbmod._pool
+            out["db_pool"] = {"size": _pool.get_size(), "max": _pool.get_max_size(),
+                              "idle": _pool.get_idle_size()}
+        except Exception:
+            out["db_pool"] = None
+        return web.json_response(out, dumps=lambda d: json.dumps(d, default=str))
+
+    async def dev_page(request):
+        token = os.environ.get("ANALYTICS_TOKEN", "")
+        if not token:
+            return web.Response(status=503, text="dev dashboard disabled (set ANALYTICS_TOKEN)")
+        if not hmac.compare_digest(request.query.get("token", ""), token):
+            return web.Response(status=403, text="forbidden")
+        try:
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "dev.html")
+            with open(_p, encoding="utf-8") as f:
+                html = f.read()
+        except Exception:
+            return web.Response(status=500, text="dev page missing")
+        return web.Response(text=html, content_type="text/html",
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    # Human-facing pages to count. Data/asset/API/OAuth routes are deliberately
+    # excluded so the numbers reflect real visits, not the pages' own fetches.
+    _ANALYTICS_PAGES = {"/", "/lab", "/hof", "/join", "/join/status"}
+
+    @web.middleware
+    async def _traffic_logger(request, handler):
+        # Privacy-first page-view counter. Only logs a GET to a human page that
+        # actually rendered HTML (status 200 + the browser asked for text/html) —
+        # which naturally skips Railway's healthcheck probe on "/" (it doesn't send
+        # Accept: text/html) and every JSON/asset fetch. 'visitor' is a salted,
+        # daily-rotating hash of ip+ua: enough to collapse same-day repeat loads,
+        # impossible to trace to a person or link across days. Fire-and-forget so it
+        # never adds latency to the page.
+        resp = await handler(request)
+        try:
+            if (request.method == "GET"
+                    and request.path in _ANALYTICS_PAGES
+                    and getattr(resp, "status", 200) == 200
+                    and "text/html" in (request.headers.get("Accept") or "")):
+                from datetime import datetime, timezone
+                ip = (request.headers.get("X-Forwarded-For", "")
+                      or request.remote or "").split(",")[0].strip()
+                ua = request.headers.get("User-Agent", "") or ""
+                ref = request.headers.get("Referer", "") or ""
+                salt = (os.environ.get("ANALYTICS_SALT")
+                        or os.environ.get("LAB_ID_SALT") or "cigar-lounge")
+                day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                visitor = hashlib.sha256(
+                    f"{ip}|{ua}|{day}|{salt}".encode()).hexdigest()[:16]
+                from utils.db import record_page_view
+                asyncio.create_task(record_page_view(request.path, ref, ua, visitor))
+        except Exception as _te:
+            print(f"[TRAFFIC] log skipped: {_te}")
+        return resp
+
     @web.middleware
     async def _security_headers(request, handler):
         # Baseline hardening on every response. (No CSP: the pages use inline scripts,
@@ -513,7 +665,12 @@ async def run_healthcheck():
 
     app = _web_app
     app.middlewares.append(_security_headers)
+    app.middlewares.append(_traffic_logger)
     app.router.add_get("/", handle)
+    app.router.add_get("/traffic", traffic_page)
+    app.router.add_get("/traffic/data", traffic_data)
+    app.router.add_get("/dev", dev_page)
+    app.router.add_get("/dev/data", dev_data)
     app.router.add_post("/kofi", kofi_webhook)
     app.router.add_get("/export/submissions", export_submissions)
     app.router.add_get("/lab", lab_page)

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Cigar Lounge — Dev</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0e0f12; --panel:#16181d; --panel2:#1b1e24; --line:#2a2e36;
+    --ink:#e7e3d8; --dim:#9a968b; --gold:#d8b25a; --gold2:#f0d488;
+    --openai:#10a37f; --gemini:#7fa6c9; --red:#c96f6f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:28px 20px 70px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:22px;letter-spacing:.5px;margin:0 0 2px;color:var(--gold2)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .controls{display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .controls button{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+    padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  .controls button:hover{color:var(--ink)}
+  .controls button.on{background:var(--gold);color:#1a1400;border-color:var(--gold);font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:8px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+  .tile .n{font-size:24px;font-weight:700;color:var(--gold2);line-height:1.15}
+  .tile .l{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:right;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;
+    letter-spacing:.5px;padding:4px 6px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:6px 6px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  td.v{text-align:right;color:var(--gold2)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600}
+  .tag.openai{background:rgba(16,163,127,.16);color:#3fd4ab}
+  .tag.gemini{background:rgba(127,166,201,.16);color:#9cc2e0}
+  .muted{color:var(--dim)}
+  .evrow{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .evrow:last-child{border-bottom:none}
+  .evts{color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .evcat{color:var(--gold);white-space:nowrap;min-width:74px}
+  .evmsg{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lvl-err .evcat,.lvl-error .evcat{color:var(--red)}
+  .err{background:#2a1414;border:1px solid #6a2a2a;color:#e8b0b0;padding:12px 14px;border-radius:10px;margin-bottom:10px}
+  canvas{max-height:240px}
+  @media(max-width:720px){.tiles{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cigar Lounge — Developer Dashboard</h1>
+  <div class="sub">AI usage &amp; cost · web traffic · bot health. Private, token-gated.</div>
+  <div class="controls" id="ctl">
+    <button data-d="1">24h</button>
+    <button data-d="7">7 days</button>
+    <button data-d="30" class="on">30 days</button>
+    <button data-d="90">90 days</button>
+  </div>
+  <div id="body"><div class="muted">Loading…</div></div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+let chart = null;
+const PROV_COLOR = {openai:"#10a37f", gemini:"#7fa6c9"};
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmt(n){return Number(n||0).toLocaleString();}
+function usd(n){const v=Number(n||0); return "$"+(v<1?v.toFixed(4):v.toFixed(2));}
+function provTag(p){const c=(p||"").toLowerCase(); return `<span class="tag ${c==='openai'?'openai':c==='gemini'?'gemini':''}">${esc(p||'?')}</span>`;}
+
+async function load(days){
+  const b=document.getElementById("body");
+  try{
+    const r=await fetch(`/dev/data?days=${days}&token=${encodeURIComponent(TOKEN)}`);
+    if(!r.ok){ b.innerHTML=`<div class="err">Can't load (${r.status}). Check the token in the URL / set ANALYTICS_TOKEN.</div>`; return; }
+    render(await r.json());
+  }catch(e){ b.innerHTML=`<div class="err">${esc(e.message||e)}</div>`; }
+}
+
+function render(d){
+  const b=document.getElementById("body");
+  let h="";
+
+  // ── AI USAGE ─────────────────────────────────────────────
+  h+=`<h2>AI usage &amp; cost · ${d.days}d</h2>`;
+  if(d.ai_error){ h+=`<div class="err">AI: ${esc(d.ai_error)}</div>`; }
+  else if(d.ai){
+    const a=d.ai, tot=a.prompt+a.completion+a.reasoning;
+    h+=`<div class="tiles">
+      <div class="tile"><div class="n">${usd(a.total_cost)}</div><div class="l">Est. cost</div></div>
+      <div class="tile"><div class="n">${fmt(tot)}</div><div class="l">Total tokens</div></div>
+      <div class="tile"><div class="n">${fmt(a.requests)}</div><div class="l">Requests</div></div>
+      <div class="tile"><div class="n">${fmt(a.reasoning)}</div><div class="l">Reasoning tokens</div></div>
+    </div>`;
+    h+=`<div class="panel"><canvas id="chart"></canvas></div>`;
+    h+=`<div class="grid2">`;
+    // by model
+    h+=`<div class="panel"><table><thead><tr><th>Model</th><th>Reqs</th><th>Input</th><th>Output</th><th>Cost</th></tr></thead><tbody>`;
+    if(!a.by_model.length) h+=`<tr><td colspan="5" class="muted">No AI calls logged yet.</td></tr>`;
+    for(const m of a.by_model){
+      h+=`<tr><td>${provTag(m.provider)} ${esc(m.model)}</td><td class="v">${fmt(m.requests)}</td>`+
+         `<td class="v">${fmt(m.prompt)}</td><td class="v">${fmt(m.output)}</td><td class="v">${usd(m.cost)}</td></tr>`;
+    }
+    h+=`</tbody></table></div>`;
+    // by purpose
+    h+=`<div class="panel"><table><thead><tr><th>Purpose</th><th>Reqs</th><th>Tokens</th></tr></thead><tbody>`;
+    if(!a.by_purpose.length) h+=`<tr><td colspan="3" class="muted">—</td></tr>`;
+    for(const p of a.by_purpose){
+      h+=`<tr><td>${esc(p.purpose)}</td><td class="v">${fmt(p.requests)}</td><td class="v">${fmt(p.tokens)}</td></tr>`;
+    }
+    h+=`</tbody></table></div></div>`;
+  }
+
+  // ── TRAFFIC ──────────────────────────────────────────────
+  h+=`<h2>Web traffic · ${d.days}d</h2>`;
+  if(d.traffic_error){ h+=`<div class="err">Traffic: ${esc(d.traffic_error)}</div>`; }
+  else if(d.traffic){
+    const t=d.traffic;
+    h+=`<div class="tiles">
+      <div class="tile"><div class="n">${fmt(t.total)}</div><div class="l">Views</div></div>
+      <div class="tile"><div class="n">${fmt(t.visitors)}</div><div class="l">Visitors</div></div>
+      <div class="tile"><div class="n">${fmt(t.last7)}</div><div class="l">Views 7d</div></div>
+      <div class="tile"><div class="n">${fmt(t.last24h)}</div><div class="l">Views 24h</div></div>
+    </div>`;
+    const rows=(list)=> list&&list.length ? '<table><tbody>'+list.slice(0,8).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="v">${fmt(v)}</td></tr>`).join('')+'</tbody></table>' : '<div class="muted">No data yet.</div>';
+    h+=`<div class="grid2"><div class="panel"><h2 style="margin-top:0;border:none">Top pages</h2>${rows(t.by_path)}</div>`+
+       `<div class="panel"><h2 style="margin-top:0;border:none">Sources</h2>${rows(t.by_referrer)}</div></div>`;
+  }
+
+  // ── HEALTH ───────────────────────────────────────────────
+  h+=`<h2>Bot health</h2>`;
+  if(d.health_error){ h+=`<div class="err">Health: ${esc(d.health_error)}</div>`; }
+  else if(d.health){
+    const hl=d.health, pool=d.db_pool;
+    h+=`<div class="tiles">
+      <div class="tile"><div class="n">${fmt(hl.subs_24h)}</div><div class="l">Submissions 24h</div></div>
+      <div class="tile"><div class="n">${fmt(hl.subs_7d)}</div><div class="l">Submissions 7d</div></div>
+      <div class="tile"><div class="n">${pool?pool.size+"/"+pool.max:"—"}</div><div class="l">DB pool</div></div>
+      <div class="tile"><div class="n">${fmt((hl.events_by_category.find(c=>c[0]==='error')||[,0])[1])}</div><div class="l">Errors · ${d.days}d</div></div>
+    </div>`;
+    h+=`<div class="grid2">`;
+    h+=`<div class="panel"><h2 style="margin-top:0;border:none">Events by category</h2><table><tbody>`;
+    if(!hl.events_by_category.length) h+=`<tr><td class="muted">No events.</td></tr>`;
+    for(const [c,n] of hl.events_by_category) h+=`<tr><td>${esc(c)}</td><td class="v">${fmt(n)}</td></tr>`;
+    h+=`</tbody></table></div>`;
+    h+=`<div class="panel"><h2 style="margin-top:0;border:none">Recent events</h2>`;
+    if(!hl.events_recent.length) h+=`<div class="muted">Nothing recent.</div>`;
+    for(const e of hl.events_recent){
+      const ts=(e.ts||"").slice(5,16).replace("T"," ");
+      h+=`<div class="evrow lvl-${esc(e.level||'')}"><span class="evts">${esc(ts)}</span><span class="evcat">${esc(e.category)}</span><span class="evmsg">${esc(e.message)}</span></div>`;
+    }
+    h+=`</div></div>`;
+  }
+
+  b.innerHTML=h;
+
+  // AI tokens/day chart (stacked by provider)
+  if(d.ai && d.ai.by_day && d.ai.by_day.length){
+    const days=[...new Set(d.ai.by_day.map(x=>x.day))];
+    const provs=[...new Set(d.ai.by_day.map(x=>x.provider))];
+    const ds=provs.map(p=>({
+      label:p, stack:"t",
+      backgroundColor:(PROV_COLOR[p]||"#888")+"cc",
+      data:days.map(day=>{const m=d.ai.by_day.find(x=>x.day===day&&x.provider===p); return m?m.tokens:0;})
+    }));
+    if(chart) chart.destroy();
+    chart=new Chart(document.getElementById("chart"),{
+      type:"bar",
+      data:{labels:days, datasets:ds},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{labels:{color:"#9a968b",boxWidth:12}}},
+        scales:{x:{stacked:true,ticks:{color:"#6f6b62",maxRotation:0,autoSkip:true,maxTicksLimit:8},grid:{display:false}},
+                y:{stacked:true,beginAtZero:true,ticks:{color:"#6f6b62"},grid:{color:"#20242b"}}}}
+    });
+  }
+}
+
+document.getElementById("ctl").addEventListener("click",e=>{
+  const btn=e.target.closest("button"); if(!btn) return;
+  [...document.querySelectorAll("#ctl button")].forEach(x=>x.classList.remove("on"));
+  btn.classList.add("on"); load(btn.dataset.d);
+});
+load(30);
+</script>
+</body>
+</html>

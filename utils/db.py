@@ -84,6 +84,8 @@ _INDEXES = [
     ("idx_bounty_suggestions_stat","bounty_suggestions", "(status)"),
     ("idx_page_views_time",        "page_views",         "(viewed_at)"),
     ("idx_page_views_path",        "page_views",         "(path)"),
+    ("idx_ai_usage_time",          "ai_usage",           "(ts)"),
+    ("idx_ai_usage_provider",      "ai_usage",           "(provider, model)"),
 ]
 
 
@@ -203,6 +205,15 @@ _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS page_views ("
     "id BIGSERIAL PRIMARY KEY, viewed_at TIMESTAMP DEFAULT NOW(), "
     "path TEXT, referrer TEXT, ua TEXT, visitor TEXT)",
+    # Per-call AI token usage, buffered in-process and flushed in batches (like
+    # bot_events), for the /dev dashboard. provider = openai | gemini; purpose = a
+    # short tag (chat / quip / vision …). completion = VISIBLE output tokens only;
+    # reasoning/thinking tokens are stored separately but billed at the output rate.
+    "CREATE TABLE IF NOT EXISTS ai_usage ("
+    "id BIGSERIAL PRIMARY KEY, ts TIMESTAMP DEFAULT NOW(), "
+    "provider TEXT, model TEXT, purpose TEXT, "
+    "prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0, "
+    "reasoning_tokens INTEGER DEFAULT 0)",
 ]
 
 
@@ -755,6 +766,70 @@ async def get_traffic(days: int = 30):
     for r in _ref:
         _rc[_referrer_label(r['referrer'])] = _rc.get(_referrer_label(r['referrer']), 0) + 1
     out['by_referrer'] = sorted(_rc.items(), key=lambda kv: kv[1], reverse=True)[:15]
+    return out
+
+
+async def record_ai_usage(batch):
+    """Bulk-insert buffered AI usage rows. `batch` = list of
+    (provider, model, purpose, prompt_tokens, completion_tokens, reasoning_tokens)."""
+    if not batch:
+        return
+    try:
+        pool = _pool_check()
+    except Exception:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.executemany(
+                "INSERT INTO ai_usage "
+                "(provider, model, purpose, prompt_tokens, completion_tokens, reasoning_tokens) "
+                "VALUES ($1, $2, $3, $4, $5, $6)", batch)
+    except Exception as e:
+        print(f"[AI_USAGE] insert failed: {e}")
+
+
+async def get_ai_usage(days: int = 30):
+    """AI token usage over the last `days`: totals, per-provider, per-model, per-day,
+    per-purpose. completion excludes reasoning; reasoning is billed at the output
+    rate by the dashboard."""
+    pool = _pool_check()
+    days = max(1, min(int(days or 30), 365))
+    win = f"NOW() - INTERVAL '{days} days'"
+    out = {'days': days, 'requests': 0, 'prompt': 0, 'completion': 0, 'reasoning': 0,
+           'by_provider': [], 'by_model': [], 'by_day': [], 'by_purpose': []}
+    async with pool.acquire() as conn:
+        _t = await conn.fetchrow(
+            f"SELECT COUNT(*) n, COALESCE(SUM(prompt_tokens),0) p, "
+            f"COALESCE(SUM(completion_tokens),0) c, COALESCE(SUM(reasoning_tokens),0) r "
+            f"FROM ai_usage WHERE ts >= {win}")
+        if _t:
+            out['requests'], out['prompt'], out['completion'], out['reasoning'] = (
+                int(_t['n']), int(_t['p']), int(_t['c']), int(_t['r']))
+        _prov = await conn.fetch(
+            f"SELECT provider, COUNT(*) n, COALESCE(SUM(prompt_tokens),0) p, "
+            f"COALESCE(SUM(completion_tokens),0) c, COALESCE(SUM(reasoning_tokens),0) r "
+            f"FROM ai_usage WHERE ts >= {win} GROUP BY provider ORDER BY p DESC")
+        out['by_provider'] = [dict(provider=x['provider'], requests=int(x['n']),
+                                   prompt=int(x['p']), completion=int(x['c']),
+                                   reasoning=int(x['r'])) for x in _prov]
+        _mod = await conn.fetch(
+            f"SELECT provider, model, COUNT(*) n, COALESCE(SUM(prompt_tokens),0) p, "
+            f"COALESCE(SUM(completion_tokens),0) c, COALESCE(SUM(reasoning_tokens),0) r "
+            f"FROM ai_usage WHERE ts >= {win} GROUP BY provider, model ORDER BY (p+c+r) DESC")
+        out['by_model'] = [dict(provider=x['provider'], model=x['model'], requests=int(x['n']),
+                                prompt=int(x['p']), completion=int(x['c']),
+                                reasoning=int(x['r'])) for x in _mod]
+        _day = await conn.fetch(
+            f"SELECT to_char(date_trunc('day', ts),'YYYY-MM-DD') d, provider, "
+            f"COALESCE(SUM(prompt_tokens+completion_tokens+reasoning_tokens),0) t "
+            f"FROM ai_usage WHERE ts >= {win} GROUP BY 1,2 ORDER BY 1")
+        out['by_day'] = [dict(day=x['d'], provider=x['provider'], tokens=int(x['t'])) for x in _day]
+        _pur = await conn.fetch(
+            f"SELECT purpose, COUNT(*) n, "
+            f"COALESCE(SUM(prompt_tokens+completion_tokens+reasoning_tokens),0) t "
+            f"FROM ai_usage WHERE ts >= {win} GROUP BY purpose ORDER BY t DESC LIMIT 15")
+        out['by_purpose'] = [dict(purpose=(x['purpose'] or '?'), requests=int(x['n']),
+                                  tokens=int(x['t'])) for x in _pur]
     return out
 
 

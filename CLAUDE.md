@@ -192,6 +192,11 @@ most features need it) · `OPENAI_API_KEY` (Butler chat, GPT-5.6 Luna; optional,
 quips fall back) · `GOOGLE_AI_API_KEY` (vision; optional, manual entry fallback) ·
 `KOFI_TOKEN` (webhook verification; optional) · `EXPORT_TOKEN` (bearer token for
 the read-only `GET /export/submissions` cursor export; endpoint off when unset) ·
+`ANALYTICS_TOKEN` (URL token gating the private `/traffic` dashboard AND the consolidated
+`/dev` developer dashboard — AI usage/cost, traffic, bot health — plus their `/data`
+endpoints; all off when unset. The `_traffic_logger` middleware still counts page views
+into `page_views` and AI calls are still logged into `ai_usage` regardless) · `ANALYTICS_SALT`
+(optional; salts the daily-rotating visitor hash, falls back to `LAB_ID_SALT` then a constant) ·
 `LETHALITY_STASH_CHANNEL_ID` (channel that hosts the blurb lethality thumbnails;
 falls back to a hardcoded default) · `PORT` (healthcheck, default 8080) ·
 `LAB_BASE_URL` (public base URL of the bot's web server, e.g. the Railway domain;
