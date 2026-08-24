@@ -3201,9 +3201,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         if 'Resubmit' not in feats and _wc >= 1:
             _best_td, _best_k = await _db.get_player_weapon_bests(interaction.user.id, selected_weapon)
             if isinstance(takedowns, int) and takedowns > _best_td:
-                _pb_bits.append(f"{takedowns} TD (prev {_best_td})")
+                _pb_bits.append(f"{takedowns} TD (Prev. {_best_td})")
             if isinstance(kills, int) and kills > _best_k:
-                _pb_bits.append(f"{kills} K (prev {_best_k})")
+                _pb_bits.append(f"{kills} K (Prev. {_best_k})")
     except Exception as _pbe:
         print(f"[BLURB] PB check failed: {_pbe}")
     summary = (
@@ -3216,7 +3216,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     if feats_str:
         summary += f"\n│ {feats_str}"
     if _pb_bits:
-        summary += "\n│ \U0001f525 personal best: " + " · ".join(_pb_bits)
+        summary += f"\n│ {selected_weapon} PB: " + " · ".join(_pb_bits)
     if caption:
         summary += f"\n│ *{caption}*"
     if lobby_line:
