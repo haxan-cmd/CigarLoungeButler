@@ -4127,7 +4127,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _lines.append(f"🎪 Fought {_rel} `{_mm['player_name']}`{_tag}")
             if _lines:
                 _lm_desc = await blurb_read()
-                blurb_write(_lm_desc + "\n" + "\n".join(f"*{l}*" for l in _lines))
+                # Blank line before the rivalry block so it isn't smushed against the marks.
+                blurb_write(_lm_desc + "\n\n" + "\n".join(f"*{l}*" for l in _lines))
         except Exception as _lme:
             print(f"[LOBBYMATE] blurb update error: {_lme}")
         await blurb_commit()
