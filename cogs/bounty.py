@@ -248,6 +248,57 @@ async def update_progress_board(bounty, bounty_channel):
         print(f"[PROGRESS_BOARD] Update error: {e}")
 
 
+async def refresh_bounty_boards(guild, bounty):
+    """Re-render the bounty channel's completions, bonus, and progress boards from
+    the CURRENT bounty state. Used after a manual data edit (e.g. correcting a
+    completion date via SQL) so the boards reflect it immediately instead of waiting
+    for the next completion event. Best-effort per board; returns the list refreshed."""
+    ch = guild.get_channel(bounty['channel_id'])
+    if not ch and bounty.get('channel_id'):
+        try:
+            ch = await guild.fetch_channel(bounty['channel_id'])
+        except Exception:
+            ch = None
+    if not ch:
+        return []
+    done = []
+    if bounty.get('completions_msg_id'):
+        try:
+            _comps = bounty['completions']
+            _em = bounty['theme_emoji']
+            if _comps:
+                _lines = ["```", "╭──────────────────────────────╮",
+                          f"  {_em} COMPLETIONS {_em}",
+                          "╰──────────────────────────────╯"]
+                for _idx, _c in enumerate(_comps, 1):
+                    _lines.append(f"{_idx}. {_c['name']}  {_c['date']}")
+                _lines.append("```")
+                _comp_text = "\n".join(_lines)
+            else:
+                _comp_text = ("```\n╭──────────────────────────────╮\n"
+                              f"  {_em} COMPLETIONS {_em}\n"
+                              "╰──────────────────────────────╯\n"
+                              "No completions yet.\n```")
+            _cm = await ch.fetch_message(bounty['completions_msg_id'])
+            await _cm.edit(content=_comp_text)
+            done.append("completions")
+        except Exception as _ce:
+            print(f"[REFRESH] completions board: {_ce}")
+    if bounty.get('bonus_msg_id'):
+        try:
+            _bm = await ch.fetch_message(bounty['bonus_msg_id'])
+            await _bm.edit(content=_build_bonus_board_text(bounty))
+            done.append("bonus")
+        except Exception as _be:
+            print(f"[REFRESH] bonus board: {_be}")
+    try:
+        await update_progress_board(bounty, ch)
+        done.append("progress")
+    except Exception as _pe:
+        print(f"[REFRESH] progress board: {_pe}")
+    return done
+
+
 async def get_player_bounty_progress(bounty_title, discord_id):
     """Get a player's bounty progress from DB, or None."""
     rows = await _db.get_all_bounty_players()
@@ -1062,6 +1113,23 @@ class BountyCog(commands.Cog):
 
             await _db.update_bounty_field(bounty['id'], 'progress_msg_id', str(msg.id))
             await interaction.followup.send("Done.", ephemeral=True)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(f"Something went wrong: {e}", ephemeral=True)
+
+    @app_commands.command(name="bounty_refresh_boards", description="Re-render the bounty channel boards (completions/bonus/progress) from current data (admin only).")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def bounty_refresh_boards(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            bounty = await get_active_bounty()
+            if not bounty:
+                await interaction.followup.send("No bounty is running.", ephemeral=True)
+                return
+            done = await refresh_bounty_boards(interaction.guild, bounty)
+            await interaction.followup.send(
+                f"Refreshed: {', '.join(done) if done else 'nothing (boards missing?)'}.", ephemeral=True)
         except Exception as e:
             import traceback
             traceback.print_exc()
