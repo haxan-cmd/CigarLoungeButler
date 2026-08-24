@@ -82,6 +82,8 @@ _INDEXES = [
     ("idx_join_requests_token",    "join_requests",      "(token)"),
     ("idx_bounty_suggestions_msg", "bounty_suggestions", "(message_id)"),
     ("idx_bounty_suggestions_stat","bounty_suggestions", "(status)"),
+    ("idx_page_views_time",        "page_views",         "(viewed_at)"),
+    ("idx_page_views_path",        "page_views",         "(path)"),
 ]
 
 
@@ -192,6 +194,15 @@ _SCHEMA_STATEMENTS = [
     # Pointer (single row id=1) to the pinned "Top Suggestions" leaderboard message.
     "CREATE TABLE IF NOT EXISTS suggestion_board ("
     "id INTEGER PRIMARY KEY DEFAULT 1, channel_id TEXT, message_id TEXT)",
+    # Privacy-first website traffic: one row per human page view (home / lab / hof /
+    # join). No IP, no cookies — 'visitor' is a salted, DAILY-ROTATING sha256 of
+    # ip+ua so same-day repeat views collapse to one visitor but nothing is stored
+    # that can be traced back to a person or linked across days. Referrer + UA kept
+    # (truncated) for source/browser breakdowns. Viewed via the token-gated /traffic
+    # dashboard.
+    "CREATE TABLE IF NOT EXISTS page_views ("
+    "id BIGSERIAL PRIMARY KEY, viewed_at TIMESTAMP DEFAULT NOW(), "
+    "path TEXT, referrer TEXT, ua TEXT, visitor TEXT)",
 ]
 
 
@@ -501,6 +512,38 @@ async def get_submissions_by_player(discord_id, limit: int | None = None) -> lis
     return [_row_to_submission(r) for r in rows]
 
 
+async def get_player_weapon_class_counts(discord_id, weapon, subclass) -> tuple[int, int]:
+    """Lifetime run totals for this player on a given weapon AND a given subclass
+    (case-insensitive), Resubmit re-uploads excluded so re-posts don't inflate the
+    tally. Returns (weapon_total, class_total). Powers the blurb's totals beside the
+    weapon and class. One round-trip via the discord_id index."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT "
+            "  COUNT(*) FILTER (WHERE LOWER(TRIM(weapon))   = LOWER(TRIM($2))) AS w, "
+            "  COUNT(*) FILTER (WHERE LOWER(TRIM(subclass)) = LOWER(TRIM($3))) AS c "
+            "FROM submissions "
+            "WHERE discord_id = $1 AND COALESCE(feats, '') NOT ILIKE '%resubmit%'",
+            str(discord_id), str(weapon), str(subclass))
+    return (int(r['w'] or 0), int(r['c'] or 0)) if r else (0, 0)
+
+
+async def get_player_weapon_bests(discord_id, weapon) -> tuple[int, int]:
+    """Player's best single-run takedowns and kills on a weapon SO FAR (Resubmit
+    excluded). On the fresh-submission path the new run isn't inserted yet, so this
+    is the prior best to beat — used to flag a new personal best on the blurb.
+    Returns (best_td, best_kills)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT COALESCE(MAX(takedowns), 0) AS td, COALESCE(MAX(kills), 0) AS k "
+            "FROM submissions WHERE discord_id = $1 AND LOWER(TRIM(weapon)) = LOWER(TRIM($2)) "
+            "AND COALESCE(feats, '') NOT ILIKE '%resubmit%'",
+            str(discord_id), str(weapon))
+    return (int(r['td'] or 0), int(r['k'] or 0)) if r else (0, 0)
+
+
 async def get_submission_record_maxes() -> tuple[int, int]:
     """Highest single-game kills and takedowns across all submissions, via SQL MAX
     instead of loading every row into Python. Returns (max_kills, max_takedowns),
@@ -639,6 +682,79 @@ async def get_lab_usage():
         _rec = await conn.fetch(
             "SELECT name, opened_at FROM lab_opens ORDER BY opened_at DESC LIMIT 10")
         out['recent'] = [((r['name'] or 'unknown'), r['opened_at']) for r in _rec]
+    return out
+
+
+async def record_page_view(path, referrer, ua, visitor):
+    """Log one website page view. Best-effort — never raises into the web handler."""
+    try:
+        pool = _pool_check()
+    except Exception:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO page_views (path, referrer, ua, visitor) "
+                "VALUES ($1, $2, $3, $4)",
+                (path or '')[:200], (referrer or '')[:300],
+                (ua or '')[:300], (visitor or '')[:32])
+    except Exception as e:
+        print(f"[TRAFFIC] view-log failed: {e}")
+
+
+def _referrer_label(ref):
+    """Bare host of a referrer URL, or 'direct' when there is none. Own-domain
+    referrers (internal navigation) collapse to 'internal' so the source list
+    reflects real inbound traffic, not clicks between our own pages."""
+    if not ref:
+        return 'direct'
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(ref).hostname or '').lower()
+    except Exception:
+        host = ''
+    if not host:
+        return 'direct'
+    if host.startswith('www.'):
+        host = host[4:]
+    if 'thecigarlounge.app' in host:
+        return 'internal'
+    return host
+
+
+async def get_traffic(days: int = 30):
+    """Website traffic summary over the last `days`: totals, approx unique visitors,
+    per-day counts, top pages, and top referring sources."""
+    pool = _pool_check()
+    days = max(1, min(int(days or 30), 365))
+    out = {'days': days, 'total': 0, 'last24h': 0, 'last7': 0, 'visitors': 0,
+           'by_day': [], 'by_path': [], 'by_referrer': []}
+    _win = f"NOW() - INTERVAL '{days} days'"
+    async with pool.acquire() as conn:
+        out['total'] = int(await conn.fetchval(
+            f"SELECT COUNT(*) FROM page_views WHERE viewed_at >= {_win}") or 0)
+        out['last24h'] = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM page_views WHERE viewed_at >= NOW() - INTERVAL '1 day'") or 0)
+        out['last7'] = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM page_views WHERE viewed_at >= NOW() - INTERVAL '7 days'") or 0)
+        out['visitors'] = int(await conn.fetchval(
+            f"SELECT COUNT(DISTINCT visitor) FROM page_views WHERE viewed_at >= {_win}") or 0)
+        _day = await conn.fetch(
+            f"SELECT to_char(date_trunc('day', viewed_at), 'YYYY-MM-DD') AS d, "
+            f"COUNT(*) AS n, COUNT(DISTINCT visitor) AS v "
+            f"FROM page_views WHERE viewed_at >= {_win} GROUP BY 1 ORDER BY 1")
+        out['by_day'] = [(r['d'], int(r['n']), int(r['v'])) for r in _day]
+        _path = await conn.fetch(
+            f"SELECT path, COUNT(*) AS n FROM page_views WHERE viewed_at >= {_win} "
+            f"GROUP BY path ORDER BY n DESC LIMIT 20")
+        out['by_path'] = [((r['path'] or '/'), int(r['n'])) for r in _path]
+        _ref = await conn.fetch(
+            f"SELECT referrer FROM page_views WHERE viewed_at >= {_win}")
+    # Referrer hosts are bucketed in Python so URLs collapse to bare domains.
+    _rc = {}
+    for r in _ref:
+        _rc[_referrer_label(r['referrer'])] = _rc.get(_referrer_label(r['referrer']), 0) + 1
+    out['by_referrer'] = sorted(_rc.items(), key=lambda kv: kv[1], reverse=True)[:15]
     return out
 
 

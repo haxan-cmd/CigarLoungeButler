@@ -2328,9 +2328,22 @@ async def _apply_edit(interaction, ev):
     _ec = _faction_crest(interaction.client, ev.faction)
     _edit_crest_pre = f"{_ec} " if _ec else ""
     # "(edited)" lives in the embed title, not the description
+    # Lifetime totals beside weapon and class (matches the fresh blurb). The edit
+    # already persisted via update_submission_fields above, so the counts INCLUDE
+    # this run — no +1.
+    _wpn_disp2, _cls_disp2 = _wpn_disp, ev.cls
+    try:
+        _wpn_ct, _cls_ct = await _db.get_player_weapon_class_counts(ev.author.id, ev.weapon, ev.cls)
+        if 'Resubmit' not in (_feats or []):
+            if _wpn_ct > 0:
+                _wpn_disp2 = f"{_wpn_disp} ({_wpn_ct})"
+            if _cls_ct > 0:
+                _cls_disp2 = f"{ev.cls} ({_cls_ct})"
+    except Exception as _ewe:
+        print(f"[EDIT] run-total tally failed: {_ewe}")
     new_summary = (
         f"│ {_edit_name}\n"
-        f"│ {_wpn_disp} • {ev.cls}\n"
+        f"│ {_wpn_disp2} • {_cls_disp2}\n"
         f"│ {_edit_crest_pre}{_mapfac}\n"
         f"│ {ev.takedowns} TD / {ev.kills} K / {ev.deaths} D\n"
         f"│ VIP: {'Yes' if ev.vip else 'No'}"
@@ -3158,15 +3171,44 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # "Run Submitted" header lives in the embed TITLE now, not the description
     _crest = _faction_crest(interaction.client, faction)
     _crest_pre = f"{_crest} " if _crest else ""
+    # Lifetime run totals shown beside BOTH the weapon and the class (consistent
+    # format), so a player who likes to count their submissions sees the tally
+    # automatically. Counted PRE-insert, so +1 for this run; a Resubmit re-upload
+    # adds nothing and shows the plain names.
+    _wpn_lbl, _cls_lbl = selected_weapon, selected_class
+    _wc = _cc = 0
+    try:
+        _wc, _cc = await _db.get_player_weapon_class_counts(
+            interaction.user.id, selected_weapon, selected_class)
+        if 'Resubmit' not in feats:
+            _wpn_lbl = f"{selected_weapon} ({_wc + 1})"
+            _cls_lbl = f"{selected_class} ({_cc + 1})"
+    except Exception as _wne:
+        print(f"[BLURB] run-total tally failed: {_wne}")
+    # Personal-best flags: does this run beat the player's prior best TD / kills on
+    # this weapon? Only when they already have runs on it (a first run isn't a "PB")
+    # and it isn't a resubmit. Best-effort.
+    _pb_bits = []
+    try:
+        if 'Resubmit' not in feats and _wc >= 1:
+            _best_td, _best_k = await _db.get_player_weapon_bests(interaction.user.id, selected_weapon)
+            if isinstance(takedowns, int) and takedowns > _best_td:
+                _pb_bits.append(f"{takedowns} TD (prev {_best_td})")
+            if isinstance(kills, int) and kills > _best_k:
+                _pb_bits.append(f"{kills} K (prev {_best_k})")
+    except Exception as _pbe:
+        print(f"[BLURB] PB check failed: {_pbe}")
     summary = (
         f"│ {_name_display}\n"
-        f"│ {selected_weapon} • {selected_class}\n"
+        f"│ {_wpn_lbl} • {_cls_lbl}\n"
         f"│ {_crest_pre}{selected_map} / {faction}\n"
         f"│ {takedowns} TD / {kills} K / {deaths} D{_score_suffix}\n"
         f"│ VIP: {vip_str}"
     )
     if feats_str:
         summary += f"\n│ {feats_str}"
+    if _pb_bits:
+        summary += "\n│ \U0001f525 personal best: " + " · ".join(_pb_bits)
     if caption:
         summary += f"\n│ *{caption}*"
     if lobby_line:
@@ -3459,8 +3501,25 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         any_updated = False
         placements = []
         newly_completed = False
+        _old_ranks = {}
         if not is_ranged:
             try:
+                # Capture the player's CURRENT rank on the weapon + map boards, BEFORE
+                # this run re-ranks them, so the blurb can show movement (#6 -> #4).
+                try:
+                    _rank_did = str(interaction.user.id)
+                    _rank_nm = (interaction.user.display_name or '').strip().lower()
+                    for _bd in (selected_weapon, f"{selected_map} - {faction}"):
+                        _rws = await _db.get_leaderboard_by_board(_bd)
+                        _pos = None
+                        for _i, _rw in enumerate(_rws, 1):
+                            if ((len(_rw) > 2 and str(_rw[2]) == _rank_did)
+                                    or (len(_rw) > 1 and (_rw[1] or '').strip().lower() == _rank_nm)):
+                                _pos = _i
+                                break
+                        _old_ranks[_bd] = _pos
+                except Exception as _ore:
+                    print(f"[RANK] pre-rank capture failed: {_ore}")
                 async with _BOARD_LOCK:
                     any_updated, placements = await update_leaderboards(
                         interaction, selected_weapon, selected_map, faction,
@@ -3740,6 +3799,29 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             from cogs.personality import _linkify_reply as _lky2
                             await main_channel.send(await _lky2(
                                 f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {_new} marks. The Butler tips his hat. [The run.]({message_link})", _guild))
+                        # Next-milestone nudge \u2014 reuse the marks just computed (no extra
+                        # query). Rank-up / mastery tracks only (Hundred-Handed needs a
+                        # separate combo query and lives on /next). Appended to the blurb;
+                        # the placement edit below reads-and-preserves it.
+                        try:
+                            from utils.goals import next_goals as _next_goals
+                            _flat_marks = {}
+                            for _mk, _mv in (_marks or {}).items():
+                                _mw = _mk[0] if isinstance(_mk, tuple) else _mk
+                                if _mw and _mw not in ('Other', 'Multiple Weapons', 'Hybrid'):
+                                    _flat_marks[_mw] = _flat_marks.get(_mw, 0) + _mv
+                            _goals = _next_goals(
+                                _flat_marks, None,
+                                mastery_threshold=config.MASTERY_THRESHOLD,
+                                virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
+                                rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
+                                hh_total=0)
+                            if _goals.get('nearest'):
+                                _cur_blurb = await blurb_read()
+                                if '*Next: ' not in _cur_blurb:  # don't double-add on re-runs
+                                    blurb_write(_cur_blurb + f"\n\U0001f3af *Next: {_goals['nearest']['label']}*")
+                        except Exception as _nge:
+                            print(f"[NUDGE] error: {_nge}")
                     except Exception as _me:
                         print(f"[MASTERY] announce error: {_me}")
 
@@ -3792,17 +3874,29 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 _lb_thread_map = {r['Leaderboard Name']: _bjp(r) for r in _lb_rows_for_links if r.get('Thread ID')}
             except Exception as _tme:
                 print(f"[LINK] thread map error: {_tme}")
+            def _rank_move(lb, pos):
+                # Suffix showing board movement for weapon/map boards. 'skip' = we
+                # didn't capture a pre-rank for this board (feat boards etc.), so add
+                # nothing; None = they weren't on the board before (new entry).
+                _old = _old_ranks.get(lb, 'skip')
+                if _old == 'skip':
+                    return ""
+                if _old is None:
+                    return "  ⤴ new"
+                if _old > pos:
+                    return f"  ▲ from #{_old}"
+                return ""
             def _placement_line(lb, pos):
                 _tid = _lb_thread_map.get(lb)
                 _name = f"[{lb}](https://discord.com/channels/{_guild_id}/{_tid})" if _tid else lb
                 if ' - ' in lb:                       # map board
-                    return f"🏆 {_name} — #{pos}"
+                    return f"🏆 {_name} — #{pos}{_rank_move(lb, pos)}"
                 if lb == "TUFF":                      # TUFF shows emoji only, no name
                     return f"{_FEAT_EMOJI['TUFF']} — #{pos}"
                 if lb in _FEAT_EMOJI:                 # feat boards: own logo + rank
                     return f"{_FEAT_EMOJI[lb]} {lb} — #{pos}"
                 # actual weapon board — the only place weapon_hs belongs
-                return f"<:weapon_hs:1350656128635375698> {_name} — #{pos}"
+                return f"<:weapon_hs:1350656128635375698> {_name} — #{pos}{_rank_move(lb, pos)}"
             # Feat boards (100 Kills, 200 Takedowns, Triple, TUFF, Flawless…) are already
             # named in the run's feats line above — don't repeat them in the trailer.
             _shown = [(lb, pos) for lb, pos in placements if lb not in _FEAT_EMOJI]
@@ -3836,9 +3930,12 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         f"<a:200tkd:1363648828414230538> +1 — {_tr}*", 1)
                 if selected_weapon in placed_boards:
                     weapon_link = _link_weapon(selected_weapon, _guild_id, _lb_thread_map)
+                    # Header now carries lifetime-count labels (_wpn_lbl / _cls_lbl);
+                    # linkify the weapon NAME inside the label so the count is kept.
+                    _wpn_lbl_linked = _wpn_lbl.replace(selected_weapon, weapon_link, 1)
                     new_content = new_content.replace(
-                        f"│ {selected_weapon} • {selected_class}",
-                        f"│ {weapon_link} • {selected_class}",
+                        f"│ {_wpn_lbl} • {_cls_lbl}",
+                        f"│ {_wpn_lbl_linked} • {_cls_lbl}",
                         1,
                     )
                 if map_lb_name in placed_boards:
