@@ -666,7 +666,14 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         user_prompt += lore_note
         user_prompt += french_note
         # Data questions get headroom for a short list; banter stays terse
-        text = await _butler_complete(BUTLER_SYSTEM_PROMPT, user_prompt, 350 if _is_data else 150)
+        # Main chat opts UP to 'low' reasoning on BOTH banter and data. The token
+        # ceilings are raised well above the old 150/350 because reasoning tokens are
+        # drawn from this same budget before the visible reply (a smaller ceiling would
+        # let reasoning eat it and return blank). You only pay for what's used; usage is
+        # a rounding error against the budget, the real cost is ~1-3s more latency.
+        text = await _butler_complete(
+            BUTLER_SYSTEM_PROMPT, user_prompt,
+            1200 if _is_data else 700, reasoning_effort='low')
         if not text or text == 'SKIP':
             return None
         eyeball = False

@@ -50,13 +50,17 @@ def set_bot_ref(bot):
     _bot_ref = bot
 
 
-async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
+async def butler_complete(system: str, prompt: str, max_tokens: int,
+                          reasoning_effort: str = 'none') -> str:
     """One Butler completion. Returns '' on any failure — callers supply their
     own fallback line.
 
-    reasoning_effort='none' is REQUIRED, not a tuning knob: GPT-5.6 is a
-    reasoning model, and with budgets this small (50-350) reasoning tokens
-    would consume the entire allowance and return empty content."""
+    reasoning_effort defaults to 'none': GPT-5.6 is a reasoning model, and with
+    the tiny budgets most callers use (50-70), reasoning tokens would consume the
+    whole allowance and return empty content. The main chat path opts UP to 'low'
+    AND passes a much larger max_tokens (reasoning tokens are drawn from the same
+    budget BEFORE the visible answer, so the ceiling must cover both). Never raise
+    reasoning without also raising max_tokens, or replies come back blank."""
     if not _openai_client:
         return ''
     # One retry: a transient refusal (or a blip) otherwise costs the player a
@@ -67,7 +71,7 @@ async def butler_complete(system: str, prompt: str, max_tokens: int) -> str:
             r = await _openai_client.chat.completions.create(
                 model=BUTLER_MODEL,
                 max_completion_tokens=max_tokens,
-                reasoning_effort='none',
+                reasoning_effort=reasoning_effort,
                 messages=[
                     {'role': 'system', 'content': system},
                     {'role': 'user', 'content': prompt},
