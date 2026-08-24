@@ -4365,15 +4365,60 @@ class SubmissionsCog(commands.Cog):
             return
         if message.channel.id != SUBMISSIONS_CHANNEL_ID:
             return
+        # Receipt log: proves whether the bot even RECEIVED a given person's message
+        # (and how many attachments it carried). If a stuck user's post never shows up
+        # here, the gateway isn't delivering it — an AutoMod/permission/screening issue
+        # on Discord's side, not a bot bug.
+        print(f"[SUBMIT-RX] {message.author} ({message.author.id}) "
+              f"attachments={len(message.attachments)} "
+              f"forward={bool(getattr(message, 'message_snapshots', None))} "
+              f"content={(message.content or '')[:40]!r}")
         if message.id in self._prompted_messages:
             return
-        # Only trigger on image attachments
-        has_image = any(
-            (att.content_type and att.content_type.startswith('image/'))
-            or (not att.content_type and att.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')))
-            for att in message.attachments
-        )
+        # Only trigger on image attachments. Broader extension set, and we also peek
+        # inside a FORWARDED message's snapshot — a forward carries its image THERE,
+        # not in .attachments, which is the #1 reason one specific person's submission
+        # silently does nothing while everyone else's (who upload directly) works.
+        _IMG_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.jfif', '.bmp')
+        def _has_img(atts):
+            return any(
+                (a.content_type and a.content_type.startswith('image/'))
+                or (a.filename and a.filename.lower().endswith(_IMG_EXT))
+                for a in (atts or []))
+        has_image = _has_img(message.attachments)
+        _forwarded = False
         if not has_image:
+            for _snap in (getattr(message, 'message_snapshots', None) or []):
+                if _has_img(getattr(_snap, 'attachments', None)):
+                    _forwarded = True
+                    break
+        if _forwarded:
+            # The image is in a forward snapshot, which the vision path can't reach via
+            # message.attachments — tell them to upload directly instead of failing deep
+            # in the pipeline. Log it so a stuck user's case is diagnosable.
+            print(f"[SUBMIT] forwarded scorecard from {message.author} ({message.author.id}) "
+                  f"— image in snapshot, not attachments")
+            try:
+                await message.reply(
+                    "That's a **forwarded** message, so I can't read the scorecard. Drag the "
+                    "screenshot into this channel as an actual file (not a forward or link) and "
+                    "I'll catch it.", mention_author=False)
+            except Exception:
+                pass
+            return
+        if not has_image:
+            # Posted something attachment-shaped (a file, a link preview) but nothing
+            # readable. Log the shape and nudge; plain text chatter stays silent.
+            if message.attachments:
+                print(f"[SUBMIT] unusable image from {message.author} ({message.author.id}) — "
+                      f"attachments={[(a.filename, a.content_type) for a in message.attachments]}")
+                try:
+                    await message.reply(
+                        "I can't read a scorecard on that. If it came through as a **link or "
+                        "image preview**, drag it in as an actual file (PNG or JPG).",
+                        mention_author=False)
+                except Exception:
+                    pass
             return
 
         self._prompted_messages.add(message.id)
