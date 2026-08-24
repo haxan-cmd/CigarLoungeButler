@@ -3799,29 +3799,6 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             from cogs.personality import _linkify_reply as _lky2
                             await main_channel.send(await _lky2(
                                 f"\U0001f451 **{player}** has **mastered** the {selected_weapon} \u2014 {_new} marks. The Butler tips his hat. [The run.]({message_link})", _guild))
-                        # Next-milestone nudge \u2014 reuse the marks just computed (no extra
-                        # query). Rank-up / mastery tracks only (Hundred-Handed needs a
-                        # separate combo query and lives on /next). Appended to the blurb;
-                        # the placement edit below reads-and-preserves it.
-                        try:
-                            from utils.goals import next_goals as _next_goals
-                            _flat_marks = {}
-                            for _mk, _mv in (_marks or {}).items():
-                                _mw = _mk[0] if isinstance(_mk, tuple) else _mk
-                                if _mw and _mw not in ('Other', 'Multiple Weapons', 'Hybrid'):
-                                    _flat_marks[_mw] = _flat_marks.get(_mw, 0) + _mv
-                            _goals = _next_goals(
-                                _flat_marks, None,
-                                mastery_threshold=config.MASTERY_THRESHOLD,
-                                virtuoso_threshold=config.VIRTUOSO_THRESHOLD,
-                                rank_thresholds=config.WEAPON_RANK_THRESHOLDS,
-                                hh_total=0)
-                            if _goals.get('nearest'):
-                                _cur_blurb = await blurb_read()
-                                if '*Next: ' not in _cur_blurb:  # don't double-add on re-runs
-                                    blurb_write(_cur_blurb + f"\n\U0001f3af *Next: {_goals['nearest']['label']}*")
-                        except Exception as _nge:
-                            print(f"[NUDGE] error: {_nge}")
                     except Exception as _me:
                         print(f"[MASTERY] announce error: {_me}")
 
