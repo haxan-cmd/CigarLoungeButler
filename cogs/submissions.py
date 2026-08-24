@@ -2420,9 +2420,17 @@ async def _apply_edit(interaction, ev):
             _efp = _epbr.get('forum_post_id') if _epbr else None
             if _efp:
                 _eemoji = _eb.get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK
+                # Weapon progress (matches the fresh blurb) — reuse the ground-truth
+                # count already computed above.
+                _etw = _eb['weapons'][_mk]
+                _etot = _etw['total'] if isinstance(_etw, dict) else int(_etw)
+                _ecur = min(_true, _etot)
+                _eprog = (f" — **{_mk} {_ecur}/{_etot} done** ✅"
+                          if _ecur >= _etot else f" — {_mk} {_ecur}/{_etot}")
                 new_summary += (
                     f"\n\n{_eemoji} [+1 {_eb['title']}]"
                     f"(https://discord.com/channels/{_edit_guild_id}/{_efp})"
+                    f"{_eprog}"
                 )
     except Exception as _ebe:
         print(f"[EDIT] bounty recount/rebuild error: {_ebe}")
@@ -3677,9 +3685,27 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                             _fp = _pbr.get('forum_post_id') if _pbr else None
                             if _fp:
                                 _bemoji = _bounty.get('theme_emoji') or _BOUNTY_EMOJI_FALLBACK
+                                # Weapon progress toward the bounty on the blurb, from
+                                # ground-truth run counts (cache-safe): "Halberd 2/3", and
+                                # "Halberd 3/3 done ✅" on the run that completes the weapon.
+                                _prog_txt = ""
+                                try:
+                                    from cogs.bounty import count_player_weapon_runs
+                                    _wpns = _bounty.get('weapons') or {}
+                                    _mk = next((k for k in _wpns
+                                                if str(k).strip().lower() == (selected_weapon or '').strip().lower()), None)
+                                    if _mk:
+                                        _tot = _wpns[_mk]['total'] if isinstance(_wpns[_mk], dict) else int(_wpns[_mk])
+                                        _counts = await count_player_weapon_runs(_bounty, str(interaction.user.id))
+                                        _cur = min(_counts.get(_mk, 0), _tot)
+                                        _prog_txt = (f" — **{_mk} {_cur}/{_tot} done** ✅"
+                                                     if _cur >= _tot else f" — {_mk} {_cur}/{_tot}")
+                                except Exception as _pe:
+                                    print(f"[BOUNTY] progress text error: {_pe}")
                                 bounty_line = (
                                     f"{_bemoji} [+1 {_bounty['title']}]"
                                     f"(https://discord.com/channels/{interaction.guild.id}/{_fp})"
+                                    f"{_prog_txt}"
                                 )
                         except Exception as _blerr:
                             print(f"[BOUNTY] link build error: {_blerr}")
