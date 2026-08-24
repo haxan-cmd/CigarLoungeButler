@@ -2084,6 +2084,12 @@ async def build_boards_payload():
     ld = await _db.get_all_leaderboard_data()
     subs = await _db.get_all_submissions()
     ov = getattr(config, 'LEADERBOARD_NAME_OVERRIDES', {}) or {}
+    # message_link -> was that run VIP? Lets the web boards flag/filter VIP entries
+    # (feat + map boards include VIP; weapon boards never do, so they stay all-false).
+    _link_vip = {}
+    for _s in subs:
+        if len(_s) > 12 and _s[12]:
+            _link_vip[(_s[12] or '').strip()] = (len(_s) > 10 and str(_s[10]).strip().lower() == 'yes')
     grouped = {}
     for r in ld:
         if len(r) < 4:
@@ -2096,9 +2102,10 @@ async def build_boards_payload():
         except (ValueError, TypeError):
             continue
         did = (r[2] or '').strip() if len(r) > 2 else ''
+        _lnk = (r[4] or '').strip() if len(r) > 4 else ''
         grouped.setdefault(bn, []).append({
             'name': ov.get(did) or ((r[1] or '').strip()), 'did': did, 'score': sc,
-            'link': (r[4] or '').strip() if len(r) > 4 else ''})
+            'link': _lnk, 'vip': _link_vip.get(_lnk, False)})
     for bn in grouped:
         grouped[bn].sort(key=lambda x: -x['score'])
     names = set(grouped.keys())

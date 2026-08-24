@@ -994,8 +994,15 @@ function emojiImg(token){
 }
 const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
-function _brow(i,nm,sc,lk,suffix){
-  return html`<div class="brow${i===0?' top':''}"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-card="${nm||'?'}" title="View ${nm||''}'s card">${nm||'?'}</span></span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
+function _brow(i,nm,sc,lk,suffix,vip){
+  const _v=vip?raw(' <span style="font-size:9px;font-weight:700;color:#e0b64a;border:1px solid #6a5a2a;border-radius:6px;padding:0 4px;margin-left:5px;vertical-align:middle">VIP</span>'):'';
+  return html`<div class="brow${i===0?' top':''}"><span class="rk">${i+1}.</span><span class="bnm"><span class="pl" data-card="${nm||'?'}" title="View ${nm||''}'s card">${nm||'?'}</span>${_v}</span><span class="bsc">${sc}${suffix||''}</span>${lk?html` <a href="${lk}" target="_blank" rel="noopener" title="Open the submission" style="color:var(--blue);flex:none">↗</a>`:''}</div>`;
+}
+function _vipFilter(list){
+  const m=(state.vipFilter||'all');
+  if(m==='vip') return (list||[]).filter(function(e){return e&&e.vip;});
+  if(m==='novip') return (list||[]).filter(function(e){return e&&!e.vip;});
+  return list||[];
 }
 function _rateSection(title,emoji,rows){
   if(!rows||!rows.length) return '';
@@ -1013,7 +1020,16 @@ function renderBoardCategory(kind){
   const sel=document.createElement('select'); sel.style.minWidth='240px';
   sel.innerHTML=names.map(function(n){return '<option value="'+esc(n)+'"'+(n===state.boards[kind]?' selected':'')+'>'+esc(n)+'</option>';}).join('');
   sel.addEventListener('change',function(){state.boards[kind]=sel.value;renderBoardCategory(kind);});
-  f.appendChild(sel); ctrl.appendChild(f); view.appendChild(ctrl);
+  f.appendChild(sel); ctrl.appendChild(f);
+  // VIP filter — feat + map boards include VIP runs; hide or isolate them here.
+  // (Weapon boards never carry VIP, so 'VIP only' will read empty there.)
+  const fv=document.createElement('div'); fv.className='f'; fv.innerHTML='<label>VIP</label>';
+  const vsel=document.createElement('select');
+  vsel.innerHTML=[['all','All runs'],['novip','Hide VIP'],['vip','VIP only']].map(function(o){
+    return '<option value="'+o[0]+'"'+(((state.vipFilter||'all')===o[0])?' selected':'')+'>'+o[1]+'</option>';}).join('');
+  vsel.addEventListener('change',function(){state.vipFilter=vsel.value;renderBoardCategory(kind);});
+  fv.appendChild(vsel); ctrl.appendChild(fv);
+  view.appendChild(ctrl);
   const name=state.boards[kind], B=BOARDS[name]||{};
   const lethE=(EMOJI.titles&&EMOJI.titles.Lethality)?emojiImg(EMOJI.titles.Lethality):'🧪';
   const warE=(EMOJI.titles&&EMOJI.titles.Warlord)?emojiImg(EMOJI.titles.Warlord):'🛡️';
@@ -1023,16 +1039,16 @@ function renderBoardCategory(kind){
     body=html`<div class="bhead">🗺️ ${B.map||name}</div>${(B.factions||[]).map(function(fs){
       const col=FACTION_THEME[fs.faction]||'#8b8f9a';
       const crest=(EMOJI.factions&&EMOJI.factions[fs.faction])?emojiImg(EMOJI.factions[fs.faction]):'';
-      return html`<div class="facsec" style="border-left-color:${col}"><div class="bhead" style="font-size:15px;color:${col}">${crest} ${fs.faction}</div><div class="bsub">Takedowns</div>${(fs.entries||[]).slice(0,10).map((e,i)=>_brow(i,e.name,e.score,e.link,''))}${_rateSection('Warlord',warE,fs.warlord)}${(fs.kills&&fs.kills.length)?html`<div class="bsub">Kills</div>${fs.kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Kill Share',lethE,fs.kill_share)}</div>`;
+      return html`<div class="facsec" style="border-left-color:${col}"><div class="bhead" style="font-size:15px;color:${col}">${crest} ${fs.faction}</div><div class="bsub">Takedowns</div>${_vipFilter(fs.entries).slice(0,10).map((e,i)=>_brow(i,e.name,e.score,e.link,'',e.vip))}${_rateSection('Warlord',warE,fs.warlord)}${(fs.kills&&fs.kills.length)?html`<div class="bsub">Kills</div>${fs.kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Kill Share',lethE,fs.kill_share)}</div>`;
     })}`;
   } else {
     const wkey=name.toLowerCase().replace(/[^a-z0-9]/g,'');
-    const entries=B.entries||[], kills=(B.kills&&B.kills.length)?B.kills:null;
+    const entries=_vipFilter(B.entries||[]), kills=(B.kills&&B.kills.length)?B.kills:null;
     const noData=!entries.length && !kills;
     body=html`<div class="bhead">${kind==='weapon'?html`<img class="wimg" src="/assets/weapons/${wkey}.webp" alt="" onerror="this.remove()">`:''}${name}</div>`
       +html`<div style="font-size:11.5px;color:var(--mut);margin:2px 0 4px">${kind==='feat'?'Feat board':'Weapon board'}</div>`
       +(noData?html`<div class="empty">No entries yet.</div>`
-        :html`${kind==='feat'?'':html`<div class="bsub">Takedowns</div>`}${(kind==='feat'?entries:entries.slice(0,10)).map((e,i)=>_brow(i,e.name,e.score,e.link,''))}${_rateSection('Warlord',warE,B.warlord)}${kills?html`<div class="bsub">Kills</div>${kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Lethality',lethE,B.lethality)}`);
+        :html`${kind==='feat'?'':html`<div class="bsub">Takedowns</div>`}${(kind==='feat'?entries:entries.slice(0,10)).map((e,i)=>_brow(i,e.name,e.score,e.link,'',e.vip))}${_rateSection('Warlord',warE,B.warlord)}${kills?html`<div class="bsub">Kills</div>${kills.map((k,i)=>_brow(i,k.name,k.kills,k.link,''))}`:''}${_rateSection('Lethality',lethE,B.lethality)}`);
   }
   card.innerHTML=html`<img class="bspacer" src="/assets/WMMR_Spacer_Top.png" alt="" onerror="this.remove()">${raw(String(body))}<img class="bspacer" src="/assets/WMMR_Spacer_Bottom.png" alt="" style="margin-top:12px" onerror="this.remove()">`;
   view.appendChild(card);
