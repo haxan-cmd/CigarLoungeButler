@@ -116,6 +116,18 @@ async def ensure_bounty_boards(guild, bounty):
     return made
 
 
+def _community_now():
+    """Current time in the community display timezone (config.COMMUNITY_TZ). Used for
+    user-facing dates like bounty completions so an evening finish isn't stamped with
+    tomorrow's UTC date (an 8:30pm ET completion was landing on the next day). Falls
+    back to UTC if the zone is unavailable."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(getattr(config, 'COMMUNITY_TZ', 'America/New_York')))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
 def build_bounty_card(title, theme_emoji, weapons, special_challenge, special_done, completions):
     """
     Completions list only — used to be the full community card (weapon progress
@@ -587,7 +599,7 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     completions = bounty['completions']
     newly_completed = await check_bounty_completion(guild, bounty, player_name, player_id)
     if newly_completed:
-        date_str = datetime.now(timezone.utc).strftime('%b %d')
+        date_str = _community_now().strftime('%b %d')
         completions.append({"id": str(player_id), "name": player_name, "date": date_str})
         # Season championship GP: completion is a RACE. First to finish gets the
         # full bonus, second 4, third 3, everyone after 2 — placement is this
@@ -952,7 +964,7 @@ class BountyCog(commands.Cog):
                     print(f"[HOF] index re-refresh error: {_ie}")
         except Exception as _se:
             print(f"[SEASON] finalize error: {_se}")
-        closed_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        closed_date = _community_now().strftime('%Y-%m-%d')
         completed_ids = {str(c['id']) for c in bounty['completions']}
 
         # ── STAMP FORUM CARD THREADS AS CLOSED ───────────────────────────────
@@ -1403,9 +1415,8 @@ class BountyCog(commands.Cog):
             already = any((isinstance(e, dict) and str(e.get('id')) == player_id) or str(e) == player_id
                           for e in completions)
             if not already:
-                import datetime as _dt
                 completions.append({"id": player_id, "name": player_name,
-                                    "date": _dt.datetime.now(_dt.timezone.utc).strftime('%b %d')})
+                                    "date": _community_now().strftime('%b %d')})
                 await save_bounty_state(brow[15], weapons, brow[6] == '1', completions)
 
         # Retroactive credit — a legacy-bounties record shows on the card directly,
