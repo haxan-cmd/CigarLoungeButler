@@ -3741,6 +3741,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                     _first_msg = f"**{player}** took [#1]({message_link}) on {boards}."
                     await main_channel.send(await _lky(_first_msg, _guild))
 
+                # Map KILLS #1 — the map's kills ranking is a LIVE section inside the map
+                # embed, NOT a stored board, so it never appears in `placements` and used
+                # to go unannounced (a #1 kills record on a map wasn't posted in main).
+                # Announce it when THIS run is the map's top-kills entry, unless the same
+                # map already got a TD #1 shout above.
+                if not is_ranged:
+                    try:
+                        from cogs.leaderboards import _map_kills_ranking as _mkr
+                        _mk_board = f"{selected_map} - {faction}"
+                        _mk_rows = _mkr(_mk_board, await _db.get_all_submissions())
+                        if (_mk_rows and (_mk_rows[0][2] or '').strip() == (message_link or '').strip()
+                                and _mk_board not in new_firsts):
+                            from cogs.personality import _linkify_reply as _lky_mk
+                            _mk_msg = f"**{player}** took [#1 kills]({message_link}) on **{_mk_board}**."
+                            await main_channel.send(await _lky_mk(_mk_msg, _guild))
+                    except Exception as _mke:
+                        print(f"[KILLS#1] map-kills announce error: {_mke}")
+
                 # Bounty completion. The season GP is awarded by update_bounty
                 # (cogs/bounty.py), which knows the player's FINISH POSITION and pays
                 # the race accordingly: 5/4/3, then 2 for everyone after. A second
@@ -4407,16 +4425,24 @@ class SubmissionsCog(commands.Cog):
                 pass
             return
         if not has_image:
-            # Posted something attachment-shaped (a file, a link preview) but nothing
-            # readable. Log the shape and nudge; plain text chatter stays silent.
-            if message.attachments:
+            # Two failure shapes get a nudge (plain text chatter stays silent):
+            #  - an attachment we can't read (odd format), or
+            #  - an image LINK pasted as text (a Discord CDN url or a bare image url),
+            #    which renders as a preview but is NOT an attachment — the exact thing
+            #    that made one player's "pasted" scorecards silently do nothing.
+            _c = message.content or ''
+            _img_link = bool(
+                re.search(r'https?://(?:cdn|media)\.disc(?:ord)?app\.(?:com|net)/\S+', _c, re.I)
+                or re.search(r'https?://\S+\.(?:png|jpg|jpeg|webp|gif)\b', _c, re.I))
+            if message.attachments or _img_link:
                 print(f"[SUBMIT] unusable image from {message.author} ({message.author.id}) — "
-                      f"attachments={[(a.filename, a.content_type) for a in message.attachments]}")
+                      f"attachments={[(a.filename, a.content_type) for a in message.attachments]} "
+                      f"img_link={_img_link}")
                 try:
                     await message.reply(
-                        "I can't read a scorecard on that. If it came through as a **link or "
-                        "image preview**, drag it in as an actual file (PNG or JPG).",
-                        mention_author=False)
+                        "That came through as an image **link**, not a file, so I can't read the "
+                        "scorecard. Drag the actual screenshot **file** into the channel (save it "
+                        "first if you copied a link), and I'll pick it up.", mention_author=False)
                 except Exception:
                     pass
             return
