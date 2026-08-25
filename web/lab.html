@@ -50,6 +50,7 @@ select:focus,input:focus{outline:1px solid var(--gold)}
 .tab:hover{color:var(--ink);border-color:var(--gold)}
 .tab.on{background:var(--gold);color:#241c08;font-weight:700;border-color:var(--gold)}
 .tablabel{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--mut);font-weight:700;min-width:104px;flex:none;align-self:center}
+.tabdesc{color:var(--mut);font-size:12.5px;padding:9px 4px 2px;min-height:18px;transition:color .12s}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -195,27 +196,28 @@ select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 
   <div class="tabs" id="tabs">
     <div class="tabrow">
       <span class="tablabel">Profiles</span>
-      <button class="tab" data-v="players">🪪 Member Profiles</button>
+      <button class="tab" data-v="players" title="Every player's card — click a name for their full profile.">🪪 Member Profiles</button>
     </div>
     <div class="tabrow">
       <span class="tablabel">Record Boards</span>
-      <button class="tab" data-v="maps">🗺️ Map Records</button>
-      <button class="tab" data-v="weaponboards">⚔️ Weapon Records</button>
-      <button class="tab" data-v="feats">🏛️ Feats of War</button>
-      <button class="tab" data-v="records">🏆 Records</button>
+      <button class="tab" data-v="maps" title="Top takedown games per map and faction.">🗺️ Map Records</button>
+      <button class="tab" data-v="weaponboards" title="Top takedown games per weapon.">⚔️ Weapon Records</button>
+      <button class="tab" data-v="feats" title="Feat boards: 100 Kills, Triples, Flawless and more.">🏛️ Feats of War</button>
+      <button class="tab" data-v="records" title="The single best game on record for each stat.">🏆 Records</button>
     </div>
     <div class="tabrow adv">
       <span class="tablabel">Advanced Stats</span>
-      <button class="tab" data-v="weapons">📊 Weapon Activity</button>
-      <button class="tab" data-v="ranking">🏅 Rankings</button>
-      <button class="tab" data-v="matrix">🔲 Matrix</button>
-      <button class="tab" data-v="scatter">🔵 Scatter</button>
-      <button class="tab" data-v="compare">🆚 Compare</button>
-      <button class="tab" data-v="trends">📈 Trends</button>
-      <button class="tab" data-v="galaxy">🌌 Galaxy</button>
-      <button class="tab" data-v="activity">🕒 Activity</button>
+      <button class="tab" data-v="weapons" title="How much each weapon is used, and by whom.">📊 Weapon Activity</button>
+      <button class="tab" data-v="ranking" title="Rank players or groups by any stat — group by weapon, map, class, or difficulty.">🏅 Rankings</button>
+      <button class="tab" data-v="matrix" title="Which stats move together (correlation grid).">🔲 Correlations</button>
+      <button class="tab" data-v="scatter" title="Plot any stat against another.">🔵 Scatter</button>
+      <button class="tab" data-v="compare" title="Side-by-side averages across groups: 1H vs 2H, faction, difficulty…">🆚 Compare</button>
+      <button class="tab" data-v="trends" title="How stats shift over time.">📈 Trends</button>
+      <button class="tab" data-v="galaxy" title="Every player mapped by playstyle.">🌌 Player Map</button>
+      <button class="tab" data-v="activity" title="When the lounge is busiest.">🕒 Activity</button>
     </div>
   </div>
+  <div class="tabdesc" id="tabdesc"></div>
 
   <div id="view"><div class="loading">Fetching the vault…</div></div>
   <div class="foot" id="foot"></div>
@@ -1196,8 +1198,28 @@ function renderPlayers(){
   const holder=document.createElement('div'); holder.id='cardholder'; view.appendChild(holder);
   if(state.playercard.name && !state.playercard.data && !state.playercard.loading){ loadCard(state.playercard.name); } else { paintCard(); }
 }
+// One-line "what this shows" per view — keeps the tab names minimal while making
+// each one self-explaining. Shown under the tabs for the active view, and previewed
+// on hover.
+const VIEW_DESC={
+  players:"Every player's card — click a name for their full profile.",
+  maps:"Top takedown games per map and faction.",
+  weaponboards:"Top takedown games per weapon.",
+  feats:"Feat boards: 100 Kills, Triples, Flawless and more.",
+  records:"The single best game on record for each stat.",
+  weapons:"How much each weapon is used, and by whom.",
+  ranking:"Rank players or groups by any stat — group by weapon, map, class, or difficulty.",
+  matrix:"Which stats move together (correlation grid).",
+  scatter:"Plot any stat against another.",
+  compare:"Side-by-side averages across groups: 1H vs 2H, faction, difficulty…",
+  trends:"How stats shift over time.",
+  galaxy:"Every player mapped by playstyle.",
+  activity:"When the lounge is busiest."
+};
+function setTabDesc(v){const el=document.getElementById('tabdesc'); if(el) el.textContent=VIEW_DESC[v]||'';}
 function setView(v){state.view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===v));
+  setTabDesc(v);
   render();}
 // ---- weapon activity (submissions + unique players per weapon; find the neglected ones for bounties) ----
 function renderWeapons(){
@@ -1268,7 +1290,11 @@ function render(){
 }
 
 // ---- boot ----
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setView(t.dataset.v)));
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>setView(t.dataset.v));
+  t.addEventListener('mouseenter',()=>setTabDesc(t.dataset.v));   // preview on hover
+  t.addEventListener('mouseleave',()=>setTabDesc(state.view));    // restore active
+});
 document.getElementById('copybtn').addEventListener('click',function(){doCopy(this);});
 fetch('/lab/data?t='+encodeURIComponent(TOKEN))
   .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
@@ -1292,6 +1318,7 @@ fetch('/lab/data?t='+encodeURIComponent(TOKEN))
       if(el){ e.preventDefault(); state.filters.player=el.getAttribute('data-player')||''; buildFilters(); render(); }
     });
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.v===state.view));
+    setTabDesc(state.view);
     render();
   })
   .catch(e=>{document.getElementById('view').innerHTML='<div class="loading">Could not load data ('+e.message+'). Try reloading the page.</div>';});
