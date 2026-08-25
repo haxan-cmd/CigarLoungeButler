@@ -31,6 +31,17 @@ a{color:var(--gold)}
 .head .sub{color:var(--mut);font-size:12.5px}
 .rule{height:1px;background:linear-gradient(90deg,var(--gold),transparent);margin:10px 0 14px;opacity:.6}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+/* Filter strip sticks just under the top nav so you can re-slice a long list
+   without scrolling back up. Opaque bg so rows pass cleanly underneath. */
+#filters{position:sticky;top:52px;z-index:40;background:var(--bg);padding:8px 0;margin-bottom:8px}
+.filterhead{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fbtn{background:var(--panel2);border:1px solid var(--grid);border-radius:8px;color:var(--mut);padding:6px 13px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:color .1s}
+.fbtn:hover{color:var(--ink)}
+.fpill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--grid);border-radius:999px;padding:4px 5px 4px 12px;font-size:12px;color:var(--ink)}
+.fpill .fpk{color:var(--mut)}
+.fpill .fpx{cursor:pointer;color:var(--mut);padding:0 5px;font-weight:700;line-height:1}
+.fpill .fpx:hover{color:var(--coral)}
+.filterpanel{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px}
 .f{display:flex;flex-direction:column;gap:3px}
 .f label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;padding-left:2px}
 select,input{background:var(--panel);color:var(--ink);border:1px solid var(--grid);border-radius:8px;padding:6px 9px;font-size:12.5px;font-family:inherit;min-width:96px}
@@ -43,7 +54,7 @@ select:focus,input:focus{outline:1px solid var(--gold)}
 .cbitem.sel{color:var(--gold)}
 .btn{background:var(--panel);border:1px solid var(--grid);border-radius:8px;color:var(--mut);padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:inherit}
 .btn:hover{color:var(--ink)}
-.tabs{display:flex;flex-direction:column;margin-bottom:16px;background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:0 8px}
+.tabs{display:flex;flex-direction:column;margin-bottom:12px}
 .tabrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 2px;border-bottom:1px solid var(--grid)}
 .tabrow:last-child{border-bottom:none}
 .tab{padding:8px 15px;font-size:13px;cursor:pointer;color:var(--mut);background:var(--panel2);border:1px solid var(--grid);border-radius:9px;font-family:inherit}
@@ -51,6 +62,13 @@ select:focus,input:focus{outline:1px solid var(--gold)}
 .tab.on{background:var(--gold);color:#241c08;font-weight:700;border-color:var(--gold)}
 .tablabel{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--mut);font-weight:700;min-width:104px;flex:none;align-self:center}
 .tabdesc{color:var(--mut);font-size:12.5px;padding:10px 4px 0;margin-bottom:16px;min-height:18px;transition:color .12s}
+.rkrow{display:flex;align-items:center;gap:8px;margin:1px 0;padding:3px 6px;border-radius:6px;transition:background .1s}
+.rkrow:hover{background:var(--panel2)}
+.rk{width:22px;text-align:right;color:var(--mut);font-size:12px;flex:none;font-variant-numeric:tabular-nums}
+.rknm{width:120px;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.rkval{width:56px;text-align:right;font-size:12px;flex:none;font-variant-numeric:tabular-nums}
+.rkrow.top .rknm{color:var(--gold);font-weight:600}
+.rkrow.top .rk{color:var(--gold)}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -191,7 +209,7 @@ select:focus,input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 
   </div>
   <div class="rule"></div>
 
-  <div class="bar" id="filters"></div>
+  <div id="filters"></div>
 
   <div class="tabs" id="tabs">
     <div class="tabrow">
@@ -251,6 +269,7 @@ const state={
   weapons:{by:'runs',order:'asc',archer:'hide'},
   boards:{map:'',weapon:'',feat:''},
   playercard:{name:'',loading:false,data:null,err:''},
+  filtersOpen:false,
   filters:{player:qp.get('player')||'',weapon:qp.get('weapon')||'',cls:qp.get('class')||'',
            grip:qp.get('grip')||'',faction:qp.get('faction')||'',map:qp.get('map')||'',side:qp.get('side')||'',vip:qp.get('vip')||'',diff:qp.get('diff')||''}
 };
@@ -344,16 +363,36 @@ function buildFilters(){
   const bar=document.getElementById('filters'); bar.innerHTML='';
   const defs=[['player','Player','name',190],['weapon','Weapon','weapon',150],['cls','Class','cls',110],
     ['grip','Weapon Type','grip',130],['faction','Faction','faction',120],['map','Map','map',140],['side','Side','side',110],['vip','VIP','vip',100],['diff','Difficulty','difficulty',150]];
-  for(const [fk,lab,uk,w] of defs){
-    bar.appendChild(searchSelect(lab, uniques(uk), state.filters[fk]||'',
-      v=>{state.filters[fk]=v;render();}, w));
+  // Minimalist: a compact "Filters" toggle + a removable pill per ACTIVE filter, so the
+  // default state is a single quiet line instead of nine always-on dropdowns. The full
+  // grid of searchable dropdowns lives behind the toggle.
+  const active=defs.filter(d=>state.filters[d[0]]);
+  const head=document.createElement('div'); head.className='filterhead';
+  const tog=document.createElement('button'); tog.className='fbtn';
+  tog.textContent=(state.filtersOpen?'▾ ':'▸ ')+'Filters'+(active.length?' · '+active.length:'');
+  tog.addEventListener('click',()=>{state.filtersOpen=!state.filtersOpen;buildFilters();});
+  head.appendChild(tog);
+  active.forEach(([fk,lab])=>{
+    const pill=document.createElement('span'); pill.className='fpill';
+    pill.innerHTML='<span class="fpk">'+esc(lab)+':</span> '+esc(state.filters[fk])+' <span class="fpx" title="Remove">×</span>';
+    pill.querySelector('.fpx').addEventListener('click',()=>{state.filters[fk]='';buildFilters();render();});
+    head.appendChild(pill);
+  });
+  if(active.length){
+    const clr=document.createElement('button'); clr.className='fbtn'; clr.textContent='Clear all';
+    clr.addEventListener('click',()=>{for(const k in state.filters)state.filters[k]='';buildFilters();render();});
+    head.appendChild(clr);
   }
-  const reset=document.createElement('button'); reset.className='btn'; reset.textContent='Reset';
-  reset.style.alignSelf='flex-end';
-  reset.addEventListener('click',()=>{for(const k in state.filters)state.filters[k]='';buildFilters();render();});
-  bar.appendChild(reset);
-  // (Copy-link lives in the header now, so it's available on every view — not just
-  // the filtered ones where this bar is shown.)
+  bar.appendChild(head);
+  if(state.filtersOpen){
+    const panel=document.createElement('div'); panel.className='filterpanel';
+    for(const [fk,lab,uk,w] of defs){
+      panel.appendChild(searchSelect(lab, uniques(uk), state.filters[fk]||'',
+        v=>{state.filters[fk]=v; buildFilters(); render();}, w));
+    }
+    bar.appendChild(panel);
+  }
+  // (Copy-link lives in the header now, so it's available on every view.)
 }
 // Shared copy-link: writes the current view+filters URL to the clipboard with inline
 // confirmation, falling back to a prompt where the clipboard API is blocked.
@@ -944,11 +983,12 @@ function renderRanking(){
       bar='<span style="flex:1;background:#2a2c33;border-radius:5px;overflow:hidden;height:14px"><span style="display:block;height:100%;width:'+w+'%;background:'+col+'"></span></span>';
     }
     const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
-    row.innerHTML='<span style="width:22px;text-align:right;color:#8b8f9a;font-size:12px;flex:none">'+(i+1)+'.</span>'
-      +'<span class="pl" data-card="'+esc(p.name)+'" style="width:120px;font-size:12px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" title="View card">'+esc(p.name)+'</span>'
+    row.className='rkrow'+(i===0?' top':'');
+    const _dv=Math.round(p.value*10)/10;   // one-decimal max — consistent right edge
+    row.innerHTML='<span class="rk">'+(i+1)+'.</span>'
+      +'<span class="pl rknm" data-card="'+esc(p.name)+'" title="View card">'+esc(p.name)+'</span>'
       + bar
-      +'<span style="width:56px;text-align:right;color:'+col+';font-size:12px;flex:none">'+fmt(p.value)+'</span>';
+      +'<span class="rkval" style="color:'+col+'">'+_dv+'</span>';
     card.appendChild(row);
   });
   view.appendChild(card);
