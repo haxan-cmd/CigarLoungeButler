@@ -141,6 +141,20 @@ def _gap_pct(s):
     return _rt(a, b)
 
 
+def _difficulty(s):
+    """Lobby-difficulty BAND name (Training Grounds … Brutal) for a run, from its kill
+    gap — the categorical version of the `tilt` number, so the web Lab can COUNT and
+    FILTER runs per difficulty. '' when the banner totals weren't read."""
+    g = _gap_pct(s)
+    if g is None:
+        return ''
+    try:
+        from utils.tilt import band as _band
+        return _band(g).get('name', '') or ''
+    except Exception:
+        return ''
+
+
 def _lead2(s):
     # Takedowns minus the best TEAMMATE's takedowns (col 22 = second_place_td, the
     # value TUFF uses). Positive = you topped your side's scoreboard; the margin by
@@ -348,7 +362,7 @@ def find_insights(rows, stat_keys=None, min_n=8):
 # Fields the web Stats Lab receives per run: categoricals for filtering + every
 # numeric stat (from STAT_EXTRACTORS). Ordered so it can be sent as compact arrays.
 RECORD_CATEGORICALS = ['name', 'did', 'weapon', 'subclass', 'cls', 'grip',
-                       'faction', 'map', 'side', 'vip', 'ts', 'link']
+                       'faction', 'map', 'side', 'vip', 'difficulty', 'ts', 'link']
 RECORD_STATS = list(STAT_EXTRACTORS.keys())
 RECORD_FIELDS = RECORD_CATEGORICALS + RECORD_STATS
 
@@ -370,6 +384,7 @@ def run_record(row):
         'map': _mp,
         'side': _orientation(_mp, _fac) or '',
         'vip': ('VIP' if (len(row) > 10 and _is_vip(row[10])) else 'Non-VIP'),
+        'difficulty': _difficulty(row),
         'ts': str(row[0]) if len(row) > 0 and row[0] else '',
         'link': (row[12] or '').strip() if len(row) > 12 else '',   # jump-to-message URL
     }
