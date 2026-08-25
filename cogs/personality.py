@@ -3492,14 +3492,15 @@ class PersonalityCog(commands.Cog):
                         standings = []
                         for _pos, _lbn, _emj, _gap in _bp_all:
                             _g = f" (+{_gap})" if _gap is not None else ""
-                            standings.append(f"{_emj} {_lbn} — #{_pos}{_g}")
+                            standings.append(f"{_lbn} — #{_pos}{_g}")   # NO emoji: the model mangles custom emoji tokens
                         if standings:
                             _shown = standings[:20]
                             _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
                             player_stats_ctx += (
                                 "\nLeaderboard placements (on " + str(len(standings)) + " boards, showing top 20; "
-                                "when listing placements, present them in THIS exact style: keep each board's emoji, "
-                                "write the rank as '#N', one per line): " + " | ".join(_shown) + _more)
+                                "when listing placements, write one per line as 'Board — #N (+gap)'. Do NOT add any "
+                                "emoji — you cannot reproduce the server's custom emoji and will corrupt them): "
+                                + " | ".join(_shown) + _more)
                         else:
                             player_stats_ctx += "\nLeaderboard standings: none recorded"
                         # Exact complement for "what boards am I NOT on" — computed by
