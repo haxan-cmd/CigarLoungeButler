@@ -6,6 +6,22 @@ from datetime import datetime, timezone
 import config
 
 
+def is_mod(interaction):
+    """True if the user may run mod commands: holds the configured mod role, OR is a
+    guild administrator, OR is the configured manager. The role-only checks scattered
+    across the cogs were locking the owner (admin but no mod role) out of their own
+    tooling — route every inline mod check through this so admin always works."""
+    u = getattr(interaction, 'user', None)
+    if u is None:
+        return False
+    if any(getattr(r, 'id', 0) == config.MOD_ROLE_ID for r in (getattr(u, 'roles', []) or [])):
+        return True
+    _p = getattr(u, 'guild_permissions', None)
+    if _p is not None and getattr(_p, 'administrator', False):
+        return True
+    return u.id == getattr(config, 'MANAGER_ID', 0)
+
+
 def swallow(exc, context=""):
     """Log a caught-and-continued exception instead of silently dropping it.
 

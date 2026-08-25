@@ -18,7 +18,7 @@ from config import (
 import utils.db as _db
 import utils.tilt as _tiltmod
 from utils.feats import run_marks as _run_marks
-from utils.helpers import format_weapon_marks, nerve_log_error
+from utils.helpers import format_weapon_marks, nerve_log_error, is_mod
 from utils.archetype import derive_archetype, derive_damage_style
 
 
@@ -2609,7 +2609,7 @@ class RegistryCog(commands.Cog):
             # Targeting another player is mod-only; refreshing your own is open.
             target = player or interaction.user
             if player is not None and player.id != interaction.user.id:
-                if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+                if not is_mod(interaction):
                     await interaction.followup.send("Only mods can refresh another player's card.", ephemeral=True)
                     return
 

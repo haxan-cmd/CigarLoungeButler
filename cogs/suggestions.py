@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import db as _db
+from utils.helpers import is_mod
 
 MOD_ROLE_ID = config.MOD_ROLE_ID
 _UPVOTE = "\U0001f44d"  # 👍
@@ -20,8 +21,7 @@ class SuggestionView(discord.ui.View):
         self.bot = bot
 
     async def _guard(self, interaction):
-        roles = getattr(interaction.user, "roles", [])
-        if not any(getattr(r, "id", 0) == MOD_ROLE_ID for r in roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Mods only — but you can 👍 to upvote it.", ephemeral=True)
             return False
         return True
@@ -178,7 +178,7 @@ class SuggestionsCog(commands.Cog):
 
     @app_commands.command(name="setup_suggestion_board", description="Post & pin the Top Suggestions leaderboard (mod only).")
     async def setup_suggestion_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -264,7 +264,7 @@ class SuggestionsCog(commands.Cog):
 
     @app_commands.command(name="suggestions", description="List open bounty suggestions ranked by upvotes (mod only).")
     async def suggestions(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)

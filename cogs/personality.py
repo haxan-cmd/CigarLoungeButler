@@ -183,7 +183,7 @@ _COUNTING_INSULT_FALLBACKS = [
 ]
 
 import os as _os
-from utils.helpers import butler_complete as _butler_complete, _openai_client as _ai_client
+from utils.helpers import butler_complete as _butler_complete, _openai_client as _ai_client, is_mod
 from utils import stats_engine as _SE
 if not _ai_client:
     print("Butler AI unavailable: no OPENAI_API_KEY / openai package")
@@ -1860,7 +1860,7 @@ class PersonalityCog(commands.Cog):
     @app_commands.command(name="dedupe_aliases", description="Clean up misspelt/duplicate in-game names (mod only).")
     @app_commands.describe(apply="Leave off to preview; set True to actually remove duplicates.")
     async def dedupe_aliases(self, interaction: discord.Interaction, apply: bool = False):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -1898,7 +1898,7 @@ class PersonalityCog(commands.Cog):
     ])
     async def logs(self, interaction: discord.Interaction,
                    category: app_commands.Choice[str] = None, hours: int = 168):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Mods only.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -2753,7 +2753,7 @@ class PersonalityCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="refresh_manual", description="Repost/refresh the butlers-manual command list (mod only).")
     async def refresh_manual(self, interaction: discord.Interaction):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -2777,7 +2777,7 @@ class PersonalityCog(commands.Cog):
 
     @app_commands.command(name="health", description="Run the bot's self-check and show any data problems (mod only).")
     async def health(self, interaction: discord.Interaction):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3021,7 +3021,7 @@ class PersonalityCog(commands.Cog):
               app_commands.Choice(name="Banter", value="banter")])
     async def butler_report(self, interaction: discord.Interaction, sort: str = "best",
                             kind: str = None, limit: int = 10):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3073,7 +3073,7 @@ class PersonalityCog(commands.Cog):
 
     # (slash command 'counting_backfill' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def counting_backfill(self, interaction: discord.Interaction):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         if not COUNTING_CHANNEL_ID:

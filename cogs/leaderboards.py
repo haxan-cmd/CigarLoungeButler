@@ -12,7 +12,7 @@ from discord.ext import commands, tasks
 
 import config
 import utils.db as _db
-from utils.helpers import nerve_log_error
+from utils.helpers import nerve_log_error, is_mod
 from utils.parsing import md_safe, is_vip
 
 
@@ -3310,7 +3310,7 @@ class LeaderboardsCog(commands.Cog):
         type="Type: weapon, feat, or map"
     )
     async def setup_leaderboard(self, interaction: discord.Interaction, name: str, type: str):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -3389,7 +3389,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.describe(name="Optional: exact leaderboard name. Leave blank to auto-detect from this channel.")
     @app_commands.autocomplete(name=_rank_name_ac)
     async def refresh_leaderboard(self, interaction: discord.Interaction, name: str = None):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -3444,7 +3444,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="refresh_all", description="Reframe drifted leaderboard threads; force:True reframes ALL (mod only).")
     @app_commands.describe(force="Reframe EVERY thread, not just drifted ones — fixes floating decorations / nav.")
     async def refresh_all_leaderboards(self, interaction: discord.Interaction, force: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -3592,7 +3592,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="create_missing_boards", description="Create leaderboard threads for all primary weapons without a board (admin only).")
     async def create_missing_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -3657,7 +3657,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="refresh_entrance", description="Refresh just the ledger entrance channel links (mod only).")
     async def refresh_entrance(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3670,7 +3670,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="ledger_refresh", description="Rebuild the ledger entrance channel and all forum indexes (mod only).")
     async def ledger_refresh(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -3691,7 +3691,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="repair_marks", description="Backfill missing High Score marks from leaderboard entries (mod only)")
     async def repair_marks(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3795,7 +3795,7 @@ class LeaderboardsCog(commands.Cog):
         message to look "untracked" while scanning board B's thread, false-flagging
         legitimate Attack/Defense pairs as duplicates. Fixed 2026-06-30.
         """
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3894,7 +3894,7 @@ class LeaderboardsCog(commands.Cog):
         Single-board (non-map) threads only; map boards share a thread with their
         Attack/Defense counterpart and aren't supported here.
         """
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -3965,7 +3965,7 @@ class LeaderboardsCog(commands.Cog):
         in that same thread (i.e. a duplicate of a real header, not just any
         message with text in it).
         """
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4043,7 +4043,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="cleanup_boards", description="Remove junk board entries with missing map/weapon names (mod only).")
     async def cleanup_boards_cmd(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4056,7 +4056,7 @@ class LeaderboardsCog(commands.Cog):
                            full="Repaint EVERY board even if unchanged (slower). Use after a render-logic change.")
     @app_commands.autocomplete(name=_rank_name_ac)
     async def rebuild_boards_cmd(self, interaction: discord.Interaction, name: str = None, full: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4100,7 +4100,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.describe(name="Optional: only this board (exact name). Blank = every weapon + map board.")
     @app_commands.autocomplete(name=_rank_name_ac)
     async def board_audit_cmd(self, interaction: discord.Interaction, name: str = None):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4176,7 +4176,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="board_card_audit", description="List board players with no registry card, split into fixable vs legacy (mod only).")
     async def board_card_audit_cmd(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4289,7 +4289,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.autocomplete(board=_rank_name_ac)
     async def add_board_score_cmd(self, interaction: discord.Interaction, board: str,
                                   player: str, score: int, link: str = None):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4374,7 +4374,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="setup_healing_banner_board", description="Create the Healing Banner board thread in the feats forum (mod only).")
     async def setup_healing_banner_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4403,7 +4403,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="setup_hybrid_board", description="Create the Hybrid (weapon-swap) board thread in the feats forum (mod only).")
     async def setup_hybrid_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4433,7 +4433,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="setup_score_board", description="Create the Score (highest match points) board thread in the feats forum (mod only).")
     async def setup_score_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4462,7 +4462,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="setup_peasant_board", description="Post the Peasant highscore board in THIS channel or thread (mod only).")
     async def setup_peasant_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4498,7 +4498,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="setup_kills_boards", description="Create a Highest Kills board under every weapon TD board and backfill from history (mod only).")
     async def setup_kills_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4608,7 +4608,7 @@ class LeaderboardsCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="remove_map_kills_boards", description="Remove the old SEPARATE map Kills boards (kills now render inside the map embed) (mod only).")
     async def remove_map_kills_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4651,7 +4651,7 @@ class LeaderboardsCog(commands.Cog):
                            confirm="Leave false to PREVIEW. Set true to actually delete the board + thread.")
     @app_commands.autocomplete(board=_rank_name_ac)
     async def delete_board_cmd(self, interaction: discord.Interaction, board: str, confirm: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4690,7 +4690,7 @@ class LeaderboardsCog(commands.Cog):
                            message_link="Optional: link to a specific run to remove only that one entry (for stacked boards like TUFF)")
     @app_commands.autocomplete(board=_rank_name_ac)
     async def remove_board_score_cmd(self, interaction: discord.Interaction, board: str, player: str, message_link: str = None):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4747,7 +4747,7 @@ class LeaderboardsCog(commands.Cog):
                            confirm="Leave false to PREVIEW; set true to actually remove them.")
     @app_commands.autocomplete(board=_rank_name_ac)
     async def purge_vip_scores(self, interaction: discord.Interaction, board: str = "TUFF", confirm: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4799,7 +4799,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="backfill_feat_boards", description="Backfill feat boards from submissions: 100K, 200TD, Triple, Flawless, TUFF, Pacifist (mod only).")
     async def backfill_feat_boards(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4929,7 +4929,7 @@ class LeaderboardsCog(commands.Cog):
     # (slash command 'backfill_legacy_ids' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.describe(confirm="Leave false to PREVIEW. Set true to actually stamp the ids.")
     async def backfill_legacy_ids(self, interaction: discord.Interaction, confirm: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -4990,7 +4990,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.describe(legacy_name="The exact legacy name as it shows on the board, e.g. Steezy",
                            player="The registered player it belongs to")
     async def link_legacy_name(self, interaction: discord.Interaction, legacy_name: str, player: discord.Member):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -5014,7 +5014,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="map_stats", description="All-time submission counts per map + faction, as a bar breakdown (mod only).")
     async def map_stats(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer()
@@ -5055,7 +5055,7 @@ class LeaderboardsCog(commands.Cog):
         app_commands.Choice(name="Warlord", value="warlord"),
     ])
     async def weapon_stats(self, interaction: discord.Interaction, metric: app_commands.Choice[str] = None):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer()
@@ -5150,7 +5150,7 @@ class LeaderboardsCog(commands.Cog):
     @app_commands.command(name="dedupe_board", description="Remove exact duplicate entries from an unlimited board (mod only).")
     @app_commands.describe(name="Leaderboard name e.g. '100 Kills'")
     async def dedupe_board(self, interaction: discord.Interaction, name: str):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -5171,7 +5171,7 @@ class LeaderboardsCog(commands.Cog):
 
     @app_commands.command(name="refresh_hundred_handed", description="Redraw the Hundred Handed board only — no data or role changes (mod only).")
     async def refresh_hundred_handed(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -5184,7 +5184,7 @@ class LeaderboardsCog(commands.Cog):
 
     # (slash command 'backfill_hundred_handed' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def backfill_hundred_handed(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -5268,7 +5268,7 @@ class LeaderboardsCog(commands.Cog):
     # (slash command 'consolidate_hundred_handed' unregistered to stay under Discord's 100-command guild cap; code kept below)
     @app_commands.describe(confirm="Apply the merge. Leave off for a dry-run preview.")
     async def consolidate_hundred_handed(self, interaction: discord.Interaction, confirm: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)

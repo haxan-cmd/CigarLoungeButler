@@ -3,6 +3,7 @@ from discord.ext import commands
 
 import config
 from utils import db as _db
+from utils.helpers import is_mod
 
 MOD_ROLE_ID = config.MOD_ROLE_ID
 
@@ -44,8 +45,7 @@ class JoinRequestView(discord.ui.View):
         self.bot = bot
 
     async def _guard(self, interaction):
-        roles = getattr(interaction.user, "roles", [])
-        if not any(getattr(r, "id", 0) == MOD_ROLE_ID for r in roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("Mods only.", ephemeral=True)
             return False
         return True

@@ -9,6 +9,7 @@ from discord.ext import commands
 import config
 import utils.db as _db
 from utils.parsing import is_vip
+from utils.helpers import is_mod
 
 MOD_ROLE_ID                = config.MOD_ROLE_ID
 MAIN_CHANNEL_ID            = config.MAIN_CHANNEL_ID
@@ -1771,7 +1772,7 @@ class FavouritesCog(commands.Cog):
     @app_commands.command(name="season_start", description="Open a season now for the current bounty (mod only).")
     @app_commands.describe(label="Season name — e.g. the bounty title")
     async def season_start(self, interaction: discord.Interaction, label: str):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -1783,7 +1784,7 @@ class FavouritesCog(commands.Cog):
     @app_commands.command(name="roll_features", description="Roll this season's Special Features (mod only).")
     @app_commands.describe(force="Re-roll even if features are already set — changes the live challenges.")
     async def roll_features(self, interaction: discord.Interaction, force: bool = False):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -1806,7 +1807,7 @@ class FavouritesCog(commands.Cog):
     @app_commands.command(name="season_set_start", description="Backdate the current season's start date (mod only).")
     @app_commands.describe(date="Start date YYYY-MM-DD — e.g. the day the bounty began")
     async def season_set_start(self, interaction: discord.Interaction, date: str):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         from datetime import datetime, timezone
@@ -2020,7 +2021,7 @@ class FavouritesCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="setup_titles_board", description="Post the combined All-Time Titles board in THIS thread (mod only).")
     async def setup_titles_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -2040,7 +2041,7 @@ class FavouritesCog(commands.Cog):
 
     @app_commands.command(name="refresh_titles_board", description="Rebuild the All-Time Titles board now (mod only).")
     async def refresh_titles_board(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -2050,7 +2051,7 @@ class FavouritesCog(commands.Cog):
     # [UNREGISTERED — under Discord's 100-command cap; uncomment to re-enable]
     # @app_commands.command(name="force_finalize_season", description="Post/refresh the current season's Hall of Fame entry (mod only).")
     async def force_finalize_season(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -2067,7 +2068,7 @@ class FavouritesCog(commands.Cog):
 
     @app_commands.command(name="setup_lounge", description="Pin the Cigar Lounge web links — Hall of Fame + Stats Lab (mod only).")
     async def setup_lounge(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         import os as _os
@@ -2104,7 +2105,7 @@ class FavouritesCog(commands.Cog):
 
     @app_commands.command(name="lounge_graphs", description="Post the macro graphs: power creep, contested boards, Hundred-Handed histogram (mod only).")
     async def lounge_graphs(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer()
@@ -2128,7 +2129,7 @@ class FavouritesCog(commands.Cog):
 
     @app_commands.command(name="refresh_report", description="Rebuild the pinned Butler Monthly report now (mod only).")
     async def refresh_report(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)

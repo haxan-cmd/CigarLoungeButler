@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 import config
 import utils.db as _db
 from utils.parsing import is_vip
+from utils.helpers import is_mod
 
 
 def _all_weapons():
@@ -490,7 +491,7 @@ class AdminCog(commands.Cog):
 
     @app_commands.command(name="backup_now", description="Force an immediate DB backup to the nerve centre (mod only).")
     async def backup_now(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -966,7 +967,7 @@ class AdminCog(commands.Cog):
         ratings, but keep their marks and bounty progress (those paths ignore the tag).
         For runs that were technically real but outside the spirit of the challenge
         (lopsided lobbies, farm games, etc.)."""
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -1114,7 +1115,7 @@ class AdminCog(commands.Cog):
         app_commands.Choice(name="Triple", value="Triple"),
     ])
     async def set_feat_count(self, interaction: discord.Interaction, player: discord.Member, feat: str, count: int):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -1154,7 +1155,7 @@ class AdminCog(commands.Cog):
     )
     @app_commands.autocomplete(weapon=_weapon_ac, subclass=_subclass_ac)
     async def award_marks(self, interaction: discord.Interaction, player: discord.Member, weapon: str, subclass: str, marks: int):
-        if not any(r.id == config.MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That\'s not for you.", ephemeral=True)
             return
         if marks < 1:
@@ -1220,7 +1221,7 @@ class AdminCog(commands.Cog):
 
     @app_commands.command(name="refresh_titles", description="Recalculate Butler Monthly title holders and reassign roles (mod only).")
     async def refresh_titles(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not is_mod(interaction):
             await interaction.response.send_message("That’s not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
