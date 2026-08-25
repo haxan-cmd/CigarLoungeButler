@@ -117,6 +117,19 @@ async def ensure_bounty_boards(guild, bounty):
     return made
 
 
+def _is_mod(interaction):
+    """True if the user may run mod bounty tooling: holds the mod role, OR is a guild
+    administrator, OR is the configured manager. Role-only gates were locking the owner
+    (admin but no mod role) out of their own commands like /bounty_credit."""
+    u = interaction.user
+    if any(r.id == MOD_ROLE_ID for r in getattr(u, 'roles', []) or []):
+        return True
+    _perms = getattr(u, 'guild_permissions', None)
+    if _perms is not None and _perms.administrator:
+        return True
+    return u.id == getattr(config, 'MANAGER_ID', 0)
+
+
 def _community_now():
     """Current time in the community display timezone (config.COMMUNITY_TZ). Used for
     user-facing dates like bounty completions so an evening finish isn't stamped with
@@ -832,7 +845,7 @@ class BountyCog(commands.Cog):
         weapon8: str = None,
         image: discord.Attachment = None,
     ):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not _is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -973,7 +986,7 @@ class BountyCog(commands.Cog):
 
     @app_commands.command(name="bounty_end", description="End the active bounty with a 24hr grace period (mod only)")
     async def bounty_end(self, interaction: discord.Interaction):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not _is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -1262,7 +1275,7 @@ class BountyCog(commands.Cog):
     @app_commands.command(name="bounty_set_bonus", description="Mark a player's bounty special challenge as complete (mod only).")
     @app_commands.describe(member="The player to mark bonus complete for")
     async def bounty_set_bonus(self, interaction: discord.Interaction, member: discord.Member):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not _is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -1347,7 +1360,7 @@ class BountyCog(commands.Cog):
     @app_commands.describe(member="The player", weapon="The bounty weapon",
                            amount="How many hits to add — use a NEGATIVE number to remove (default +1).")
     async def bounty_credit(self, interaction: discord.Interaction, member: discord.Member, weapon: str, amount: int = 1):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not _is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
 
@@ -1446,7 +1459,7 @@ class BountyCog(commands.Cog):
     @app_commands.describe(member="The player", bounty="Bounty title (past or present)")
     @app_commands.autocomplete(bounty=_bounty_title_ac)
     async def bounty_complete(self, interaction: discord.Interaction, member: discord.Member, bounty: str):
-        if not any(r.id == MOD_ROLE_ID for r in interaction.user.roles):
+        if not _is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
