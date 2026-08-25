@@ -8,6 +8,7 @@ from discord.ext import commands
 
 import config
 import utils.db as _db
+from utils.parsing import is_vip
 
 MOD_ROLE_ID                = config.MOD_ROLE_ID
 MAIN_CHANNEL_ID            = config.MAIN_CHANNEL_ID
@@ -123,7 +124,7 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
         # VIP runs count as activity above, but are excluded from every CONVERSION rating
         # below (Lethality, Kill Share, Warlord, kill efficiency, team shares): a VIP run's
         # inflated kills would skew the season rate-titles, matching the board ratings.
-        _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
+        _vip = is_vip(row[10]) if len(row) > 10 else False
         if _vip:
             continue
         # Lethality: kill rate (kills/td)
@@ -1202,7 +1203,7 @@ def _macro_collect(subs):
         pkey = (r[2] or '').strip() or (r[1] or '').strip().lower()
         boards = []
         weapon = (r[3] or '').strip()
-        vip = (r[10] or '').strip().lower() == 'yes'
+        vip = is_vip(r[10])
         if weapon and not vip:
             boards.append(weapon)
         mp = (r[5] or '').strip(); fc = (r[6] or '').strip()

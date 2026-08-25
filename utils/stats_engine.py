@@ -16,6 +16,7 @@ Row indices (see CLAUDE.md submissions map):
   21 team_td_share · 24 score · 25 team_total_kills · 26 enemy_total_kills
 """
 import config
+from utils.parsing import is_vip as _is_vip
 
 
 def _i(s, idx):
@@ -33,9 +34,10 @@ def _fl(s, idx):
 
 
 def is_excluded(row):
-    """Resubmit (old run re-uploaded) and Unlisted (mod-hidden) never count."""
-    f = (row[11] or '') if len(row) > 11 else ''
-    return 'Resubmit' in f or 'Unlisted' in f
+    """Resubmit (old run re-uploaded) and Unlisted (mod-hidden) never count.
+    Single-sourced in feats.is_excluded; this keeps the row-based signature callers use."""
+    from utils.feats import is_excluded as _fx
+    return _fx((row[11] or '') if len(row) > 11 else '')
 
 
 # ── per-run stat extractors ──────────────────────────────────────────────
@@ -156,26 +158,20 @@ def _marks(s):
     td, k = _i(s, 7), _i(s, 8)
     if td is None or k is None:
         return None
-    if k == 0 and td <= 10:
-        return 0
     w = (s[3] or '').strip() if len(s) > 3 else ''
-    if not w or w in ('Other', 'Multiple Weapons', 'Hybrid'):
-        return 0
     _fs = (s[11] or '') if len(s) > 11 else ''
     feats = [x.strip() for x in _fs.split(',')] if _fs and _fs != 'None' else []
-    m = 1
-    for _feat in ('200 Takedowns', '100 Kills', 'Triple', 'High Score', 'Score'):
-        if _feat in feats:
-            m += 1
+    _valor = 0
     try:
         from utils.tilt import tag_marks as _tm
         for _tag, _mv in sorted(_tm().items(), key=lambda kv: -kv[1]):
             if _tag in feats:
-                m += _mv
+                _valor = _mv
                 break
     except Exception:
         pass
-    return m
+    from utils.feats import run_marks as _rm
+    return _rm(w, k, td, feats, _valor)
 
 
 # key -> (extractor, human label). Shared by scatter, matrix, and compare.
@@ -373,8 +369,7 @@ def run_record(row):
         'faction': _fac,
         'map': _mp,
         'side': _orientation(_mp, _fac) or '',
-        'vip': ('VIP' if ((row[10] or '').strip().lower() in ('yes', 'true', '1', 'y')
-                          if len(row) > 10 else False) else 'Non-VIP'),
+        'vip': ('VIP' if (len(row) > 10 and _is_vip(row[10])) else 'Non-VIP'),
         'ts': str(row[0]) if len(row) > 0 and row[0] else '',
         'link': (row[12] or '').strip() if len(row) > 12 else '',   # jump-to-message URL
     }

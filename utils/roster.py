@@ -104,8 +104,8 @@ def ident(r):
 
 
 def _excluded(r):
-    f = (r[11] if len(r) > 11 else '') or ''
-    return 'Resubmit' in f or 'Unlisted' in f
+    from utils.feats import is_excluded as _fx
+    return _fx((r[11] if len(r) > 11 else '') or '')
 
 
 def _sub_id(r):

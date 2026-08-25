@@ -1,6 +1,42 @@
 """Tests for utils.feats — the shared feat-derivation logic used by both the
 submission finalise path and the edit path."""
-from utils.feats import is_pacifist, is_triple_run, derive_stat_feats, tilt_mark
+from utils.feats import (is_pacifist, is_triple_run, derive_stat_feats, tilt_mark,
+                         run_marks, is_excluded)
+
+
+def test_run_marks_base_and_stacks():
+    # Base submission mark, then +1 per stacking feat tag.
+    assert run_marks("Messer", 40, 120, []) == 1
+    assert run_marks("Messer", 120, 210, ["200 Takedowns", "100 Kills"]) == 3
+    assert run_marks("Messer", 120, 210, ["Triple", "100 Kills", "200 Takedowns"]) == 4
+
+
+def test_run_marks_score_and_high_score_distinct():
+    # 'Score' is a token, NOT a substring of 'High Score' — both count.
+    assert run_marks("Messer", 40, 120, ["High Score"]) == 2
+    assert run_marks("Messer", 40, 120, ["Score"]) == 2
+    assert run_marks("Messer", 40, 120, ["High Score", "Score"]) == 3
+
+
+def test_run_marks_hybrid_and_pacifist_earn_nothing():
+    assert run_marks("Hybrid", 120, 200, ["Triple"]) == 0     # Hybrid never earns marks
+    assert run_marks("Messer", 0, 5, []) == 0                 # pacifist (0 K, <=10 TD)
+    assert run_marks("Other", 120, 200, []) == 0
+
+
+def test_run_marks_valor_added_and_string_feats_ok():
+    assert run_marks("Messer", 40, 160, ["Outmatched"], valor_marks=2) == 3   # 1 + valor 2
+    # feats may arrive as a comma string too (blurb passes a string sometimes).
+    assert run_marks("Messer", 120, 210, "200 Takedowns, 100 Kills") == 3
+
+
+def test_is_excluded():
+    assert is_excluded("Resubmit") is True
+    assert is_excluded("Triple, Unlisted") is True
+    assert is_excluded(["Resubmit"]) is True
+    assert is_excluded("Triple, Flawless") is False
+    assert is_excluded("") is False
+    assert is_excluded([]) is False
 
 # (low_gap, name, emoji, marks, tag) — hardest first, mirrors config.TILT_BANDS shape
 _BANDS = [

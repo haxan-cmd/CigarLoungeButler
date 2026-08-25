@@ -9,6 +9,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta
 
 import config
+from utils.parsing import is_vip
 import utils.db as _db
 import utils.challenges as _ch
 
@@ -460,7 +461,7 @@ async def _count_special_runs(bounty, player_id):
         if len(r) < 10:
             continue
         # VIP runs never hit the weapon boards, so keep them out of the bonus too.
-        if len(r) > 10 and str(r[10]).strip().lower() == 'yes':
+        if len(r) > 10 and is_vip(r[10]):
             continue
         feats = (r[11] or '') if len(r) > 11 else ''
         if start is not None:

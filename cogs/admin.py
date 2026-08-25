@@ -11,6 +11,7 @@ from discord.ext import commands, tasks
 
 import config
 import utils.db as _db
+from utils.parsing import is_vip
 
 
 def _all_weapons():
@@ -985,7 +986,7 @@ class AdminCog(commands.Cog):
         weapon      = (sub[3] or '').strip()
         map_name    = (sub[5] or '').strip()
         faction     = (sub[6] or '').strip()
-        vip         = (sub[10] or '').strip().lower() == 'yes'
+        vip         = is_vip(sub[10])
         feats_str   = (sub[11] or '').strip()
         feats = [f.strip() for f in feats_str.split(',') if f.strip() and f.strip() != 'None']
         currently_unlisted = 'Unlisted' in feats

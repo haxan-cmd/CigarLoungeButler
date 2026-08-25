@@ -2436,8 +2436,9 @@ async def _apply_edit(interaction, ev):
         print(f"[EDIT] bounty recount/rebuild error: {_ebe}")
 
     _is_pac = (ev.kills == 0 and ev.takedowns <= 10)
-    _me = 0 if _is_pac else 1
-    _ml = [] if _is_pac else ["<:cigar:1444893851427803298> *+1 Submission*"]
+    _is_hyb = (str(ev.weapon).strip() == "Hybrid")   # match the finalise path (was missing → edit credited a Hybrid a mark)
+    _me = 0 if (_is_pac or _is_hyb) else 1
+    _ml = [] if (_is_pac or _is_hyb) else ["<:cigar:1444893851427803298> *+1 Submission*"]
     if '200 Takedowns' in _feats:
         _me += 1
         _tp = next((p for lb, p in _edit_placements if lb == "200 Takedowns"), None)
@@ -2452,7 +2453,10 @@ async def _apply_edit(interaction, ev):
         _me += _tm; _ml.append(f"*{_tem} +{_tm} {_tnm} lobby*")
     if 'High Score' in _feats: _me += 1; _ml.append("<a:highscore:1360312918545269057> +1 High Score")
     if 'Score' in _feats: _me += 1; _ml.append("🏆 +1 Score")
-    if _is_pac:
+    if _is_hyb:
+        new_summary += ("\n\n🔀 **Hybrid run** — a weapon-swap game. No weapon marks, "
+                        "but it lands on the **Hybrid** board (ranked by takedowns).")
+    elif _is_pac:
         new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
     else:
         new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
@@ -4014,16 +4018,22 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             except Exception as e:
                 print(f"[IGN] Save error: {e}")
 
-        # Pre-fetch once so downstream calls share the same data
+        # Pre-fetch once and thread it through the card so its nested helpers (marks /
+        # shares / placements) reuse the SAME lists instead of each re-fetching from
+        # the cache and re-scanning — the card is the heaviest bg step.
+        _card_cache = None
         try:
-            await _db.get_all_submissions()
-            await _db.get_all_players()
+            _card_cache = {
+                'submissions': await _db.get_all_submissions(),
+                'players': await _db.get_all_players(),
+                'leaderboard_data': await _db.get_all_leaderboard_data(),
+            }
         except Exception as _e:
             swallow(_e, "bg pre-fetch")
 
         # Update registry card
         try:
-            await create_or_update_registry_card(_guild, _user_id, _user_name)
+            await create_or_update_registry_card(_guild, _user_id, _user_name, cached_data=_card_cache)
         except Exception as e:
             print(f"Registry card update error: {e}")
         # First-time submitters: the card thread didn't exist when the blurb posted, so

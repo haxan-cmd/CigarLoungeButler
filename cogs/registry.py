@@ -17,6 +17,7 @@ from config import (
 )
 import utils.db as _db
 import utils.tilt as _tiltmod
+from utils.feats import run_marks as _run_marks
 from utils.helpers import format_weapon_marks, nerve_log_error
 from utils.archetype import derive_archetype, derive_damage_style
 
@@ -90,26 +91,14 @@ async def calculate_weapon_marks_for_player(discord_id, cached_data=None):
             _pm_k = int(row[8]) if len(row) > 8 and row[8] else 0
         except (ValueError, TypeError):
             _pm_td = _pm_k = 0
-        if _pm_k == 0 and _pm_td <= 10:
-            marks = 0
-        else:
-            marks = 1
-            if '200 Takedowns' in feats:
-                marks += 1
-            if '100 Kills' in feats:
-                marks += 1
-            if 'Triple' in feats:
-                marks += 1
-            if 'High Score' in feats:
-                marks += 1
-            if 'Score' in feats:
-                marks += 1
-            # Difficulty valor: Slightly Uphill +1, Outmatched +2, Brutal +3
-            # (orientation-adjusted band, tagged at submission time). One tag max.
-            for _dtag, _dm in _tiltmod.tag_marks().items():
-                if _dtag in feats:
-                    marks += _dm
-                    break
+        # Valor bonus from the run's tilt tag (tilt.py single-sources the amount);
+        # the full base+feat+valor tally is now single-sourced in feats.run_marks.
+        _valor = 0
+        for _dtag, _dm in _tiltmod.tag_marks().items():
+            if _dtag in feats:
+                _valor = _dm
+                break
+        marks = _run_marks(weapon, _pm_k, _pm_td, feats, _valor)
 
         # Use submitted subclass to disambiguate shared weapons (e.g. Messer in Raider vs Crusader)
         # Key: (weapon, subclass) if subclass known, else plain weapon name

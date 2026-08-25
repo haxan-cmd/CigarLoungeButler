@@ -58,3 +58,41 @@ def tilt_mark(feats, tilt_bands):
         if tag and tag in feats:
             return marks, emoji, name
     return 0, None, None
+
+
+# The stacking feat bonuses a run's marks can carry, in canonical order. Each present
+# tag adds one mark. 'High Score' and 'Score' are DISTINCT (token-exact list membership),
+# so a run tagged both earns +2.
+_FEAT_MARK_TAGS = ('200 Takedowns', '100 Kills', 'Triple', 'High Score', 'Score')
+
+
+def run_marks(weapon, kills, takedowns, feats, valor_marks=0):
+    """Integer marks a SINGLE run earns — the one source of truth for the mark tally,
+    shared by the registry mark-of-record, both blurb paths, and the web stats engine
+    (which used to hand-maintain four copies of this and drift, e.g. the edit blurb
+    crediting a Hybrid run the fresh submission zeroed).
+
+    Base 1 submission mark + one per stacking feat tag + `valor_marks` (the caller
+    derives the valor bonus from the run's tilt tag via tilt.py, still the single
+    source for THAT). Hybrid and pacifist runs earn NO marks."""
+    _w = str(weapon or '').strip()
+    if not _w or _w in ('Other', 'Multiple Weapons', 'Hybrid'):
+        return 0
+    if is_pacifist(kills, takedowns):
+        return 0
+    fl = feats if isinstance(feats, (list, tuple)) else [
+        f.strip() for f in str(feats or '').split(',') if f.strip()]
+    m = 1
+    for _tag in _FEAT_MARK_TAGS:
+        if _tag in fl:
+            m += 1
+    return m + max(0, int(valor_marks or 0))
+
+
+def is_excluded(feats):
+    """A run excluded from boards / records / weekly stats: a Resubmit (old run
+    re-uploaded) or an Unlisted (mod-hidden) run. Single source — this predicate was
+    copy-pasted across the pure aggregation modules (rivalries, roster, wrapped,
+    stats_engine, aggregates)."""
+    f = feats if isinstance(feats, str) else ", ".join(feats or [])
+    return 'Resubmit' in f or 'Unlisted' in f

@@ -13,7 +13,7 @@ from discord.ext import commands, tasks
 import config
 import utils.db as _db
 from utils.helpers import nerve_log_error
-from utils.parsing import md_safe
+from utils.parsing import md_safe, is_vip
 
 
 async def _rank_name_ac(interaction: discord.Interaction, current: str):
@@ -1536,13 +1536,13 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
             if kind == 'weapon':
                 if s[3] != nm:
                     continue
-                if (s[10] or '').strip().lower() == 'yes':  # VIP excluded from weapon boards
+                if is_vip(s[10]):  # VIP excluded from weapon boards
                     continue
                 score = td
             elif kind == 'weapon_kills':
                 if s[3] != nm[:-6]:  # strip " Kills" to get the weapon name
                     continue
-                if (s[10] or '').strip().lower() == 'yes':  # VIP excluded, same as TD boards
+                if is_vip(s[10]):  # VIP excluded, same as TD boards
                     continue
                 try:
                     score = int(s[8]) if s[8] else 0
@@ -1978,7 +1978,7 @@ async def compute_board_ratings(lb_name, is_map=False, all_subs=None, map_totals
         # VIP is excluded from ALL ratings — weapon AND map — even though VIP still counts
         # on the map TAKEDOWN board itself. (Weapon-only exclusion left the map Kill Share
         # and Warlord ratings skewed.)
-        _vip = str(row[10]).strip().upper() in ('TRUE', '1', 'YES') if len(row) > 10 and row[10] else False
+        _vip = is_vip(row[10]) if len(row) > 10 else False
         if _vip:
             continue
         if is_map:
@@ -2089,7 +2089,7 @@ async def build_boards_payload():
     _link_vip = {}
     for _s in subs:
         if len(_s) > 12 and _s[12]:
-            _link_vip[(_s[12] or '').strip()] = (len(_s) > 10 and str(_s[10]).strip().lower() == 'yes')
+            _link_vip[(_s[12] or '').strip()] = (len(_s) > 10 and is_vip(_s[10]))
     grouped = {}
     for r in ld:
         if len(r) < 4:
@@ -4129,13 +4129,13 @@ class LeaderboardsCog(commands.Cog):
                 if kind == "weapon":
                     if s[3] != nm:
                         continue
-                    if (s[10] or "").strip().lower() == "yes":
+                    if is_vip(s[10]):
                         continue
                     score = td
                 elif kind == "weapon_kills":
                     if s[3] != nm[:-6]:
                         continue
-                    if (s[10] or "").strip().lower() == "yes":
+                    if is_vip(s[10]):
                         continue
                     score = _safe_int(s[8])
                 else:
@@ -4763,7 +4763,7 @@ class LeaderboardsCog(commands.Cog):
         _link_vip = {}
         for s in subs:
             if len(s) > 12 and s[12]:
-                _link_vip[(s[12] or '').strip()] = (s[10] or '').strip().lower() == 'yes'
+                _link_vip[(s[12] or '').strip()] = is_vip(s[10])
         _vip_rows = []
         for r in rows:
             _link = (r[4] if len(r) > 4 else '').strip()
@@ -4870,7 +4870,7 @@ class LeaderboardsCog(commands.Cog):
                 # ranked by margin. Same rules as the live add: VIP excluded (inflated kills
                 # skew it), resubmits skipped (they'd double-count the same run). The best
                 # teammate TD is stored on the submission as second_place_td (col 22).
-                if ((row[10] or '').strip().lower() != 'yes' and 'Resubmit' not in feats_str
+                if (not is_vip(row[10]) and 'Resubmit' not in feats_str
                         and kills > 0 and ("TUFF", link) not in existing):
                     try:
                         _sptd = int(row[22]) if len(row) > 22 and row[22] else None

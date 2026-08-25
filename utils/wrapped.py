@@ -51,9 +51,10 @@ def _hour(ts, tz=None):
 
 
 def _is_excluded(row):
-    """Resubmit (old run re-uploaded) and Unlisted (mod-hidden) runs don't count."""
-    f = _feats(row)
-    return 'Resubmit' in f or 'Unlisted' in f
+    """Resubmit (old run re-uploaded) and Unlisted (mod-hidden) runs don't count.
+    Predicate single-sourced in feats.is_excluded."""
+    from utils.feats import is_excluded as _fx
+    return _fx(_feats(row))
 
 
 def _ident(row):

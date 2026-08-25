@@ -96,7 +96,8 @@ def gather_tier_inputs(subs, ld, players):
         name_by.setdefault(k, (s[1] or '').strip() or k)
         if any(t in feats for t in _VALOR_TAGS):
             a['valor'] += 1
-        vip = (s[10] or '').strip().lower() == 'yes' if len(s) > 10 else False
+        from utils.parsing import is_vip
+        vip = is_vip(s[10]) if len(s) > 10 else False
         if vip:
             continue
         ts = s[0] or ''

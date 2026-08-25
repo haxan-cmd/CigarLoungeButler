@@ -17,6 +17,20 @@ def _whole_match(text_lower: str, alias: str) -> bool:
     return re.search(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', text_lower) is not None
 
 
+# All truthy forms a submission's VIP cell can carry. The column is BOOLEAN now but
+# was text ('Yes'/'No') in the Sheets era, and the list-of-strings conversion renders
+# a bool as 'True'/'False' — so different write paths leave 'yes' / 'true' / '1'. Some
+# boards checked only 'yes' and silently treated a 'True'-era VIP run as NON-vip; route
+# EVERY vip check through this so the classification can't split.
+_VIP_TRUE = ('yes', 'true', '1')
+
+
+def is_vip(cell) -> bool:
+    """True if a submission's VIP cell (e.g. row[10]) marks a VIP run — accepts the
+    full superset of truthy forms so VIP is classified identically everywhere."""
+    return str(cell if cell is not None else '').strip().lower() in _VIP_TRUE
+
+
 def parse_submission_text(text):
     text_lower = (text or '').lower().strip()
     words = text_lower.split()
