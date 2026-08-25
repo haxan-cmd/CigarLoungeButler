@@ -3444,7 +3444,10 @@ class RegistryCog(commands.Cog):
             map_ = row[5].strip() if len(row) > 5 else '?'
             kills = row[8].strip() if len(row) > 8 else '?'
             deaths = row[9].strip() if len(row) > 9 else '?'
-            return f"**{weapon}** \u2014 {tds} TD / {kills} K / {deaths} D on {map_}"
+            # Jump-link to the game that set the PB (row col 12 = message_link).
+            _lk = (row[12] or '').strip() if len(row) > 12 else ''
+            _jump = f" [\u2197]({_lk})" if _lk else ''
+            return f"**{weapon}** \u2014 {tds} TD / {kills} K / {deaths} D on {map_}{_jump}"
 
         # Biggest lead — largest gap between this player's 1st place score and 2nd place on any board
         biggest_lead_str = ''
@@ -3532,6 +3535,7 @@ class RegistryCog(commands.Cog):
             stats_placements = []
         # ── Lethality ────────────────────────────────────────────────────
         best_lethality = 0.0
+        best_lethality_link = ''
         for r in player_subs:
             try:
                 rk = int(r[8]); rtd = int(r[7])
@@ -3539,6 +3543,7 @@ class RegistryCog(commands.Cog):
                     leth = round(rk / rtd * 100, 1)
                     if leth > best_lethality:
                         best_lethality = leth
+                        best_lethality_link = (r[12] or '').strip() if len(r) > 12 else ''
             except (ValueError, IndexError):
                 continue
         # Held titles are derived from the SAME holders computed for the standings
@@ -3639,7 +3644,8 @@ class RegistryCog(commands.Cog):
             pb_lines.append(f"│ 🏆 {biggest_lead_str}")
         if best_lethality > 0:
             lethal_emoji = "<a:mostlethal:1520490418817601658>" if best_lethality >= 5.0 else "🧪"
-            pb_lines.append(f"│ {lethal_emoji} {best_lethality}% peak lethality")
+            _lethj = f" [↗]({best_lethality_link})" if best_lethality_link else ''
+            pb_lines.append(f"│ {lethal_emoji} {best_lethality}% peak lethality{_lethj}")
         if pb_lines:
             _field("Personal Bests", pb_lines)
 
