@@ -1104,6 +1104,9 @@ async def get_personal_bests(discord_id, cached_data=None):
     best_lethality_weapon = None  # weapon of the best-lethality game (for lounge-avg compare)
     best_executioner = 0.0   # highest single-game kills / team kills %
     best_warlord = 0.0       # highest single-game takedowns / team kills %
+    # message_link of the run that set each PB, so the card can link them to the game
+    # (like Best Placements does). '' when unknown (older rows without a link).
+    kills_link = td_link = leth_link = exec_link = warlord_link = ''
     for row in subs:
         if len(row) < 9:
             continue
@@ -1116,26 +1119,28 @@ async def get_personal_bests(discord_id, cached_data=None):
             kills = int(row[8])
         except (ValueError, IndexError):
             continue
+        _lnk = (row[12] or '').strip() if len(row) > 12 else ''
         if kills > best_kills:
-            best_kills = kills
+            best_kills = kills; kills_link = _lnk
         if td > best_td:
-            best_td = td
+            best_td = td; td_link = _lnk
         if td >= 100 and kills > 0:
             lethality = round((kills / td) * 100, 1)
             if lethality > best_lethality:
                 best_lethality = lethality
                 best_lethality_weapon = (row[3] or '').strip() if len(row) > 3 and row[3] else None
+                leth_link = _lnk
         try:
             _tks = float(row[20]) if len(row) > 20 and row[20] else None
         except (ValueError, TypeError):
             _tks = None
         if _tks and 0 < _tks <= 100:
             if _tks > best_executioner:
-                best_executioner = _tks
+                best_executioner = _tks; exec_link = _lnk
             if kills > 0 and td > 0:
                 _wl = td * _tks / kills
                 if _wl > best_warlord:
-                    best_warlord = _wl
+                    best_warlord = _wl; warlord_link = _lnk
     # Recover bests from board entries too: a legacy 200-TD run can sit on the
     # 200 Takedowns / weapon board with NO matching submission, which showed a 176 PB
     # next to a x2 200 Takedowns feat. Board score is TDs for weapon/map/feat-TD boards,
@@ -1155,12 +1160,13 @@ async def get_personal_bests(discord_id, cached_data=None):
             except (ValueError, TypeError):
                 continue
             _bn = (_r[0] or '').strip()
+            _blnk = (_r[4] or '').strip() if len(_r) > 4 else ''
             if is_kills_board(_bn) or _bn == '100 Kills':
                 if _sc > best_kills:
-                    best_kills = _sc
+                    best_kills = _sc; kills_link = _blnk
             elif board_unit(_bn) == 'TDs':
                 if _sc > best_td:
-                    best_td = _sc
+                    best_td = _sc; td_link = _blnk
     except Exception as _pbe:
         print(f"[PB] board-best merge failed: {_pbe}")
     return {
@@ -1170,6 +1176,8 @@ async def get_personal_bests(discord_id, cached_data=None):
         'lethality_weapon': best_lethality_weapon,
         'executioner': round(best_executioner, 1),
         'warlord': round(best_warlord, 1),
+        'kills_link': kills_link, 'td_link': td_link, 'lethality_link': leth_link,
+        'executioner_link': exec_link, 'warlord_link': warlord_link,
     }
 
 
@@ -1629,14 +1637,19 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     if personal_bests['kills'] > 0 or personal_bests['td'] > 0:
         lines.append("**Personal Bests:**")
+        # Link each PB to the game that set it (like Best Placements), when we know it.
+        def _pbl(txt, link):
+            return f"[{txt}]({link})" if link else f"{txt}"
         if personal_bests['kills'] > 0:
-            lines.append(f"• <a:topkill:1360314538364240024> Kills — **{personal_bests['kills']}**")
+            lines.append(f"• <a:topkill:1360314538364240024> Kills — **{_pbl(personal_bests['kills'], personal_bests.get('kills_link'))}**")
         if personal_bests['td'] > 0:
-            lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{personal_bests['td']}**")
+            lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{_pbl(personal_bests['td'], personal_bests.get('td_link'))}**")
         if personal_bests.get('warlord', 0) > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Warlord']} Warlord — **{personal_bests['warlord']:.0f}%**")
+            _wv = f"{personal_bests['warlord']:.0f}%"
+            lines.append(f"• {config.TITLE_EMOJIS['Warlord']} Warlord — **{_pbl(_wv, personal_bests.get('warlord_link'))}**")
         if personal_bests.get('executioner', 0) > 0:
-            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill Share — **{personal_bests['executioner']:.0f}%**")
+            _ev = f"{personal_bests['executioner']:.0f}%"
+            lines.append(f"• {config.TITLE_EMOJIS['Lethality']} Kill Share — **{_pbl(_ev, personal_bests.get('executioner_link'))}**")
         # Best lethality vs the lounge average on the SAME weapon (kills/TD conversion).
         if personal_bests.get('lethality', 0) > 0:
             _lw = personal_bests.get('lethality_weapon')
@@ -1651,7 +1664,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
                         _cmp = f" on {_lw}"
                 except Exception:
                     _cmp = f" on {_lw}"
-            lines.append(f"• <a:mostlethal:1520490418817601658> Best Lethality — **{personal_bests['lethality']:.0f}%**{_cmp}")
+            _lv = f"{personal_bests['lethality']:.0f}%"
+            lines.append(f"• <a:mostlethal:1520490418817601658> Best Lethality — **{_pbl(_lv, personal_bests.get('lethality_link'))}**{_cmp}")
         lines.append("")
 
     lines.append("**Weapon Mastery:**")
