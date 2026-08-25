@@ -123,6 +123,7 @@ Special instructions:
 - When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
 - A LIVE SERVER PULSE block is attached to EVERY message, even idle banter: it lists the current most-used weapons (with run counts), the rarely-used ones, the most- and least-played maps, and the REIGNING #1s on the top weapons' boards. These are real, current figures — weave them into banter naturally to make your quips land on what people are ACTUALLY doing right now (the crutch weapon topping usage, the map nobody touches), rather than a fixed grudge. Do not force it into every reply; reach for it when a weapon, map, or "meta" topic invites it. The numbers here are as grounded as any stat block, so citing them is never fabrication, but never inflate them beyond what the pulse says.
 - BESTOW TITLES on the reigning #1s in the pulse: the takedown king of a weapon earns a coined title in your voice, e.g. the top Messer holder is "King Messer" (vary it: "the Messer King", "sovereign of Messer slop"). If a player is flagged as holding BOTH the takedown and kills crown on a weapon, grant a grander, more absurd honorific. Only crown players the pulse actually names as #1; never invent a title-holder, and keep the ribbing dry — a title from you is a backhanded compliment, not a celebration.
+- A MEMORY line about the person you are talking to may be attached — a short profile DERIVED from their play history (their main weapon, playstyle, how long they've been around, whether they are a regular or long gone). Treat it as real, known facts: you remember your regulars. When it fits, weave ONE detail in naturally, the way a butler who knows the room would ("the Messer main returns", "back after a quiet spell", "still no closer to mastering that axe"). Do NOT recite the profile, list it, or announce that you "have memory" — just let it colour how you greet and needle them. It is derived truth, so citing it is never fabrication. It reflects only THIS person; never use it to make claims about anyone else, and if there is no MEMORY line, do not pretend to recall them.
 - When a SEASON/BOUNTY TIMELINE block is in your context, use it to answer "when does the bounty/season end", "how long left", or "when did it start". Give the estimated end date and days left from that block, framed as approximate ("around", "roughly ~Aug 20"), since a mod closes the season by hand. Do NOT deflect with a vague "about a month" when the block gives you the actual dates.
 - Off-topic questions are welcome. Players will ask you things with nothing to do with the game: food, trivia, life, cooking, random hypotheticals (why their stomach hurts after six pork tacos, how much sodium is in a bottle of A1, the record for burgers eaten on the fourth of July). Answer them from your own general knowledge, in your dry butler voice, one or two sentences. If you genuinely do not know a real-world fact, say so plainly rather than inventing a precise figure, e.g. "I couldn't say, though it sounds unwise." The no-fabrication rule below applies strictly to SERVER and player stats, not the wider world.
 - CRITICAL: For SERVER and player stats (marks, ranks, leaderboards, submissions, bounty progress, titles), only cite numbers that appear explicitly in the player data you were given. Never invent or estimate a player's statistics. If the server data is not in your context, say you do not have it. This does not restrict general-knowledge answers about the outside world.
@@ -880,6 +881,79 @@ _AGG_TRIGGERS = (
     'unique', 'per day', 'daily', 'a day', 'how many players', 'how many people',
     'how active', 'how often', 'submit', 'submissions per', 'runs per',
 )
+
+
+async def _build_player_memory(did, name):
+    """Assemble a compact, unmanipulable MEMORY identity line for a player from ground
+    truth: tenure (since / run count / activity), their main weapon, and their derived
+    archetype + damage lean. Deliberately ONE line and bounded — the deep per-player
+    stats stay gated in _build_player_stats_ctx. Returns '' if we don't know them."""
+    from collections import Counter
+    from datetime import datetime, timezone
+    if not did:
+        return ''
+    try:
+        subs = await _db.get_submissions_by_player(str(did))
+    except Exception:
+        return ''
+    if not subs:
+        return ''
+
+    def _pt(s):
+        try:
+            return datetime.strptime((s or '').strip(), '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return None
+
+    _real = [r for r in subs if not (len(r) > 11 and 'resubmit' in (r[11] or '').lower())]
+    if not _real:
+        return ''
+    _times = [t for t in (_pt(r[0]) for r in _real) if t]
+    _count = len(_real)
+    first = min(_times) if _times else None
+    last = max(_times) if _times else None
+    # Activity band from the last-seen gap (naive UTC throughout).
+    status = ''
+    if last:
+        gap = (datetime.utcnow() - last).days
+        status = 'regular' if gap <= 10 else (f'quiet ~{gap}d' if gap < 45 else 'long dormant')
+    since = first.strftime('%b %Y') if first else ''
+    # Signature weapon = most-logged (real runs only).
+    _wc = Counter()
+    for r in _real:
+        w = (r[3] or '').strip()
+        if w:
+            _wc[w] += 1
+    sig = _wc.most_common(1)[0][0] if _wc else ''
+    # Derived playstyle labels (archetype / damage lean) — same source as the card.
+    arch = dmg = None
+    try:
+        from cogs.registry import get_player_descriptors
+        arch, dmg = await get_player_descriptors(str(did))
+    except Exception as _de:
+        print(f"[MEMORY] descriptors error for {did}: {_de}")
+
+    who = []
+    if arch:
+        who.append(arch)
+    if sig and (not arch or sig.lower() not in arch.lower()):
+        who.append(f"{sig} main")
+    if dmg:
+        who.append(dmg.lower())
+    tail = []
+    if since:
+        tail.append(f"since {since}")
+    tail.append(f"{_count} run{'s' if _count != 1 else ''}")
+    if status:
+        tail.append(status)
+    parts = []
+    if who:
+        parts.append(", ".join(who))
+    if tail:
+        parts.append(", ".join(tail))
+    if not parts:
+        return ''
+    return f"MEMORY (who you're talking to) — {name}: " + " · ".join(parts) + "."
 
 
 def _board_leaders(boards):
@@ -3059,6 +3133,30 @@ class PersonalityCog(commands.Cog):
             f"record {record}, {total} valid counts, {len(users)} counters.",
             ephemeral=True)
 
+    async def _get_player_memory(self, did, name):
+        """Cached derived MEMORY line for a player. Everything in it is computed from
+        ground truth (their submissions + archetype), never from anything they've said,
+        so it can't be manipulated. ~15 min cache per player keeps banter cheap. Returns
+        '' for unknowns / on any failure."""
+        import time
+        now = time.time()
+        _c = getattr(self, '_memory_cache', None)
+        if _c is None:
+            self._memory_cache = _c = {}
+        _hit = _c.get(did)
+        if _hit and (now - _hit[0]) < 900:
+            return _hit[1]
+        line = ''
+        try:
+            line = await _build_player_memory(did, name)
+        except Exception as _me:
+            print(f"[MEMORY] build failed for {did}: {_me}")
+        _c[did] = (now, line)
+        if len(_c) > 300:   # bound the cache — evict the oldest third
+            for _k in sorted(_c, key=lambda k: _c[k][0])[:100]:
+                _c.pop(_k, None)
+        return line
+
     async def _get_server_pulse(self):
         """Cached LIVE SERVER PULSE for the Butler's ambient context. Cached ~15 min
         on the cog so banter stays cheap (it must not trigger a full submissions scan
@@ -4651,6 +4749,15 @@ class PersonalityCog(commands.Cog):
                         player_stats_ctx = (player_stats_ctx + "\n\n" + _pulse).strip()
                 except Exception as _pe:
                     print(f"[BUTLER] pulse inject failed: {_pe}")
+                # Derived MEMORY of the asker — a compact identity line computed from their
+                # play history (never from anything they've said), so the Butler recognises
+                # regulars naturally. Always on, cached ~15 min per player.
+                try:
+                    _mem = await self._get_player_memory(discord_id_str, player_name)
+                    if _mem:
+                        player_stats_ctx = (player_stats_ctx + "\n\n" + _mem).strip()
+                except Exception as _mie:
+                    print(f"[BUTLER] memory inject failed: {_mie}")
                 # HYBRID self-dossier: "give me my stats" gets a deterministic, emoji-rich
                 # stat block built in code (mirrors the registry card header — custom emoji
                 # tokens the chat model can't reproduce), with the Butler adding a single
