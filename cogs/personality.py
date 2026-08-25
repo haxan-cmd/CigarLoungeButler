@@ -4842,14 +4842,8 @@ class PersonalityCog(commands.Cog):
                     # 'stats if player_stats_ctx' test marked every joke as a stats answer.
                     # (_is_data_q computed once up top, before the context build.)
                     _ctx_kind = 'data' if _is_data_q else 'banter'
-                    # Seed a one-click verdict on data answers only: correctness is what
-                    # needs grading, and a ✅/❌ prompt under banter kills the joke.
-                    if _is_data_q and not _is_rules_q:
-                        for _fb_emoji in ('✅', '❌'):
-                            try:
-                                await sent_msg.add_reaction(_fb_emoji)
-                            except Exception:
-                                pass
+                    # (Seeded ✅/❌ verdict reactions removed per request — organic
+                    # reactions people add are still tracked for feedback below.)
                     print(f"[BUTLER] player={player_name} | ctx={_ctx_kind} | q={message.content!r}")
                     try:
                         from utils.helpers import record_event
