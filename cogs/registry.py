@@ -1104,6 +1104,8 @@ async def get_personal_bests(discord_id, cached_data=None):
     best_lethality_weapon = None  # weapon of the best-lethality game (for lounge-avg compare)
     best_executioner = 0.0   # highest single-game kills / team kills %
     best_warlord = 0.0       # highest single-game takedowns / team kills %
+    hundos = 0               # career count of 100+ kill games ("hundos dropped")
+    total_subs = 0           # total genuine submissions (resubmit re-uploads excluded)
     # message_link of the run that set each PB, so the card can link them to the game
     # (like Best Placements does). '' when unknown (older rows without a link).
     kills_link = td_link = leth_link = exec_link = warlord_link = ''
@@ -1114,12 +1116,18 @@ async def get_personal_bests(discord_id, cached_data=None):
         _rn0 = row[1].strip().lower() if row[1] else ''
         if not (_rid0 == discord_id_str or (_rid0 == '' and _rn0 in _my_names)):
             continue
+        if 'Resubmit' not in ((row[11] or '') if len(row) > 11 else ''):
+            total_subs += 1
         try:
             td = int(row[7])
             kills = int(row[8])
         except (ValueError, IndexError):
             continue
         _lnk = (row[12] or '').strip() if len(row) > 12 else ''
+        # Career hundos: every 100+ kill game, counted ONCE (resubmits are re-uploads
+        # of the same game, so they'd double-count).
+        if kills >= 100 and 'Resubmit' not in ((row[11] or '') if len(row) > 11 else ''):
+            hundos += 1
         if kills > best_kills:
             best_kills = kills; kills_link = _lnk
         if td > best_td:
@@ -1176,6 +1184,8 @@ async def get_personal_bests(discord_id, cached_data=None):
         'lethality_weapon': best_lethality_weapon,
         'executioner': round(best_executioner, 1),
         'warlord': round(best_warlord, 1),
+        'hundos': hundos,
+        'total_subs': total_subs,
         'kills_link': kills_link, 'td_link': td_link, 'lethality_link': leth_link,
         'executioner_link': exec_link, 'warlord_link': warlord_link,
     }
@@ -1570,7 +1580,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     # --- Message 1: Header card ---
     lines = []
-    lines.append(f"*{player_title}*")
+    # Italic subtitle at the very top: their all-time submission count (a quiet vanity
+    # line). Discord markdown can't right-align, so it rides the title line.
+    _tsub = personal_bests.get('total_subs', 0)
+    _tsub_tag = f" · {_tsub} total submissions" if _tsub else ""
+    lines.append(f"*{player_title}{_tsub_tag}*")
     # Archetype is its own labelled section (like Titles) so it reads as the
     # Archetype system rather than floating loose above the badges.
     _arch = archetype_label(class_stats, weapon_marks)
@@ -1642,6 +1656,8 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
             return f"[{txt}]({link})" if link else f"{txt}"
         if personal_bests['kills'] > 0:
             lines.append(f"• <a:topkill:1360314538364240024> Kills — **{_pbl(personal_bests['kills'], personal_bests.get('kills_link'))}**")
+        if personal_bests.get('hundos', 0) > 0:
+            lines.append(f"• <a:100kill:1361412390339608686> Hundos dropped — **{personal_bests['hundos']}** (career 100+ kill games)")
         if personal_bests['td'] > 0:
             lines.append(f"• <a:200tkd:1363648828414230538> Takedowns — **{_pbl(personal_bests['td'], personal_bests.get('td_link'))}**")
         if personal_bests.get('warlord', 0) > 0:
@@ -3536,9 +3552,12 @@ class RegistryCog(commands.Cog):
         # ── Lethality ────────────────────────────────────────────────────
         best_lethality = 0.0
         best_lethality_link = ''
+        dossier_hundos = 0
         for r in player_subs:
             try:
                 rk = int(r[8]); rtd = int(r[7])
+                if rk >= 100 and 'Resubmit' not in ((r[11] or '') if len(r) > 11 else ''):
+                    dossier_hundos += 1
                 if rtd > 0:
                     leth = round(rk / rtd * 100, 1)
                     if leth > best_lethality:
@@ -3640,6 +3659,8 @@ class RegistryCog(commands.Cog):
             pb_lines.append(f"│ <a:toptkd:1360312666475728958> {pb_td_str}")
         if pb_kills_str:
             pb_lines.append(f"│ <a:topkill:1360314538364240024> {pb_kills_str}")
+        if dossier_hundos > 0:
+            pb_lines.append(f"│ <a:100kill:1361412390339608686> {dossier_hundos} hundos dropped (100+ kill games)")
         if biggest_lead_str:
             pb_lines.append(f"│ 🏆 {biggest_lead_str}")
         if best_lethality > 0:
