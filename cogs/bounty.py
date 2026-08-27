@@ -549,6 +549,96 @@ async def _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player
     await _commit_bonus(guild, bounty, player_name, player_id)
 
 
+async def reconcile_bounty_progress(guild, bounty, player_id, player_name=None):
+    """Idempotently TOP UP one player's stored bounty progress to match ground truth
+    (their own submissions), with NO side effects. Built for the startup reconcile so a
+    submission whose background bounty-credit was killed by a mid-flight deploy is
+    healed on the next boot — the run row is already in the DB (it is written before
+    the blurb posts), only the derived credit was lost.
+
+    Safety contract — this function must never make things worse:
+      * TOP-UP ONLY. For each weapon it takes max(stored, recount) and never lowers a
+        stored count. count_player_weapon_runs() returns {} on a transient DB error, so
+        a failed read simply tops nothing up; a value already correct is left untouched.
+      * The community participation counter (weapons[k]['current']) moves ONLY by the
+        positive delta actually applied to the player, so it stays in step and can never
+        be driven down.
+      * NO completions, GP awards, role grants, pings, reactions, bonus commits, or
+        community-board edits. It re-renders only THIS player's own forum card, in place,
+        and only if that card already exists — it never creates a new thread.
+      * Completed players are skipped entirely; their progress is final.
+    Completion ceremony (GP + ping) is deliberately left to the player's next real
+    submission or a mod: the reconcile fixes DATA, it does not spend GP or ping a channel.
+
+    Returns True if it changed anything, else False.
+    """
+    if not bounty or not player_id:
+        return False
+    pid = str(player_id)
+    if any(str(c.get('id')) == pid for c in bounty.get('completions', []) or []):
+        return False
+
+    try:
+        recount = await count_player_weapon_runs(bounty, pid)
+    except Exception as _ce:
+        print(f"[RECONCILE] weapon recount failed for {pid}: {_ce}")
+        return False
+
+    row = await get_player_bounty_progress(bounty['title'], pid)
+    progress = dict(row['progress']) if row and row.get('progress') else {}
+    forum_post_id = row['forum_post_id'] if row else None
+    name = player_name or (row.get('player_name') if row else '') or ''
+
+    weapons = bounty.get('weapons') or {}
+    changed = False
+
+    for wk, truth in recount.items():
+        if wk not in weapons:
+            continue
+        raw = progress.get(wk, 0)
+        stored = raw['current'] if isinstance(raw, dict) else int(raw or 0)
+        if truth > stored:                       # TOP-UP ONLY — never reduce
+            delta = truth - stored
+            progress[wk] = truth
+            wd = weapons[wk]
+            if isinstance(wd, dict):
+                wd['current'] = max(0, int(wd.get('current', 0)) + delta)
+                weapons[wk] = wd
+            changed = True
+
+    # Special-challenge display progress: top-up only, display-only (no bonus fired here).
+    try:
+        truth_special = await _count_special_runs(bounty, pid)
+        stored_special = int(progress.get('__special__', 0) or 0)
+        if truth_special > stored_special:
+            progress['__special__'] = truth_special
+            changed = True
+    except Exception as _se:
+        print(f"[RECONCILE] special recount failed for {pid}: {_se}")
+
+    if not changed:
+        return False
+
+    await save_player_bounty_progress(bounty['title'], pid, name, forum_post_id, progress)
+    await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
+
+    # Re-render only THIS player's forum card, in place, and only if it already exists.
+    if forum_post_id:
+        try:
+            forum_channel_id = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+            forum_channel = guild.get_channel(forum_channel_id) if guild else None
+            if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+                thread = forum_channel.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+                bot_msgs = [m async for m in thread.history(limit=5, oldest_first=True) if m.author.bot]
+                if bot_msgs:
+                    await bot_msgs[-1].edit(content=build_player_bounty_card(bounty, progress))
+        except Exception as _fe:
+            print(f"[RECONCILE] forum card re-render failed for {pid}: {_fe}")
+
+    print(f"[RECONCILE] topped up bounty progress for {name or pid}")
+    return True
+
+
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched.
 

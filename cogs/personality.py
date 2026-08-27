@@ -1461,6 +1461,42 @@ class PersonalityCog(commands.Cog):
     async def _before_events_flush(self):
         await self.bot.wait_until_ready()
 
+    async def _startup_bounty_reconcile(self):
+        """Heal any bounty credit whose background task was killed by a mid-flight
+        deploy. On boot, look at players who submitted in the last ~20 minutes (the
+        only ones who could have been interrupted) and TOP UP their bounty progress to
+        match their submissions. reconcile_bounty_progress is top-up-only and fires no
+        side effects, so re-running it over already-correct players is a no-op. Runs
+        once per process."""
+        if getattr(self, '_startup_reconcile_done', False):
+            return
+        self._startup_reconcile_done = True
+        try:
+            await self.bot.wait_until_ready()
+            await asyncio.sleep(10)  # let the db pool + cogs settle first
+            from cogs.bounty import get_active_bounty, reconcile_bounty_progress
+            bounty = await get_active_bounty()
+            if not bounty:
+                return
+            guild = self.bot.get_guild(GUILD_ID)
+            recent = await _db.get_recent_submitter_ids(20)
+            healed = 0
+            for did, nm in (recent or []):
+                try:
+                    if await reconcile_bounty_progress(guild, bounty, did, nm):
+                        healed += 1
+                except Exception as _re:
+                    print(f"[RECONCILE] {did}: {_re}")
+            print(f"[RECONCILE] startup checked {len(recent or [])} recent submitter(s), healed {healed}")
+            if healed:
+                try:
+                    from utils.helpers import record_event
+                    record_event('reconcile', f'startup healed bounty progress for {healed} player(s)')
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[RECONCILE] startup error: {e}")
+
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'[PERSONALITY] on_ready fired, starting tasks')
@@ -1493,6 +1529,10 @@ class PersonalityCog(commands.Cog):
             self.events_flush_loop.start()
         if not self.traffic_digest.is_running():
             self.traffic_digest.start()
+        # Heal any bounty credit a mid-flight deploy interrupted (top-up only, no
+        # side effects). Detached so it never blocks the ready path; runs once.
+        if not getattr(self, '_startup_reconcile_done', False):
+            asyncio.create_task(self._startup_bounty_reconcile())
         # Fire nerve center immediately on startup so it always posts on deploy
 
         # butlers-manual RETIRED: the player command list now lives in the information

@@ -2127,6 +2127,23 @@ async def get_submissions_since(minutes: int = 60) -> list[list]:
              r['map'] or ''] for r in rows]
 
 
+async def get_recent_submitter_ids(minutes: int = 20) -> list[list]:
+    """Distinct (discord_id, player_name) for players who submitted in the last N
+    minutes, newest name first. Used by the startup bounty reconcile: only a player
+    who submitted just before a restart can have had their background bounty-credit
+    interrupted, so this bounds the heal to them. Blank discord_id (legacy Sheets
+    rows) is skipped — there is no live player to credit."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT ON (discord_id) discord_id, player_name "
+            "FROM submissions "
+            "WHERE submitted_at > NOW() - ($1 || ' minutes')::INTERVAL "
+            "  AND discord_id IS NOT NULL AND discord_id <> '' "
+            "ORDER BY discord_id, submitted_at DESC", str(int(minutes)))
+    return [[str(r['discord_id']), r['player_name'] or ''] for r in rows]
+
+
 async def update_bounty_field(bounty_id: int, field: str, value):
     pool = _pool_check()
     allowed = {'weapons', 'special_done', 'completions', 'bonus_completions', 'active', 'message_id',
