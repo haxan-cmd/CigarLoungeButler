@@ -114,7 +114,7 @@ Special instructions:
 - The three board ratings are: Warlord = takedowns / team kills (how much of the team's work they did), Kill Share = kills / team kills, Lethality = kills / takedowns. When 'Per-weapon board ratings' are in your context you HAVE these numbers per weapon — quote them and name the weapon. Do not tell the player to go check the board for a number you were given. They are rolling averages over weapons with 2+ runs, so a weapon they have played once will be absent; say so plainly if asked about one.
 - If a matching submission is provided, reference it naturally — mention the weapon, map, whether it was a personal best. Make the player feel seen without being effusive.
 - Keep responses under 80 tokens.
-- You have the player's personal best kills and TDs from their submission history. Use these to answer "what's my highest score" type questions directly.
+- A player has THREE different "best" numbers and they are NOT interchangeable: highest KILLS, highest TAKEDOWNS, and highest match POINTS (the scoreboard total, which is what the "Score" board ranks). "Score" in this lounge means POINTS, never kills or takedowns, so never call a kills or takedown figure their "Score". When you have "Highest match points (Score board)" in your context, that is the points/score answer; kills and TDs are separate. If someone asks for their "highest score" and it is unclear which they mean, give the match-points figure and name the kills and takedown bests alongside it in one line, rather than guessing or scolding. If the match-points figure is genuinely absent from your context, say you have their kills and takedowns but not their match points, and point them to /playerstats, without any dig at the player.
 - You have server-wide weapon run counts (100+ TD) when available.
 - When 'lobbymates' are in your context, those are players who submitted the SAME match as the asker — teammates fought on their side, opponents on the other. You may narrate this: who was there, who outscored whom. Only claim it when the context actually lists them; never invent a lobbymate.
 - When 'RIVALRY DATA' is in your context, it lists the asker's NEMESIS (the foe they cross paths with most) and their closest ALLY (most confirmed on the same team), from shared-lobby history. There is deliberately NO win/loss record: a submitted scoreboard is a snapshot, not a final result, so never claim the asker "beat" or "lost to" anyone. Instead you get how many times they have MET and each player's AVERAGE takedowns/kills across those shared games. Narrate the rivalry as a recurring saga (fated to keep meeting) and use the averages to say who tends to show up bigger. Only name matchups in the block; never invent a rivalry. Do NOT speculate about the nemesis's or ally's OWN record, run count, or career: you only know their shared history with the asker.
@@ -290,6 +290,7 @@ _DATA_QUESTION_WORDS = (
     '100 kill', '200 takedown', 'pacifist', 'tuff', 'kill game',
     'handed', 'hundred', '100 hand', 'weapons left', 'weapons do i',
     'need a mark', 'get a mark', 'mark with', 'combos left', 'combos remain',
+    'score', 'points',
 )
 
 from utils import aggregates as _agg
@@ -3394,8 +3395,10 @@ class PersonalityCog(commands.Cog):
                     # "what's my best game" correctly, not just the raw numbers.
                     pb_kills = 0
                     pb_td = 0
+                    pb_points = 0          # highest single-match SCOREBOARD POINTS (Score board)
                     best_td_game = None    # full row of their highest-TD submission
                     best_kills_game = None # full row of their highest-kills submission
+                    best_points_game = None # full row of their highest-POINTS submission
                     try:
                         # Targeted per-player fetch instead of scanning every submission
                         player_subs_pb = [
@@ -3414,6 +3417,19 @@ class PersonalityCog(commands.Cog):
                             if row_kills > pb_kills:
                                 pb_kills = row_kills
                                 best_kills_game = pb_row
+                            # Scoreboard POINTS (submissions col 24) — the "Score" board's
+                            # unit, and the third distinct number players ask about. Pacifist
+                            # runs (0 kills, <=10 TD) live on their own board, not the Score
+                            # board, so keep them out of this figure to match its meaning.
+                            _is_pac_pb = (row_kills == 0 and row_td <= 10)
+                            if len(pb_row) > 24 and not _is_pac_pb:
+                                try:
+                                    row_points = int(pb_row[24])
+                                except (ValueError, TypeError):
+                                    row_points = 0
+                                if row_points > pb_points:
+                                    pb_points = row_points
+                                    best_points_game = pb_row
                     except Exception as _e:
                         print(f"[BUTLER] ctx personal-bests error: {_e}")
 
@@ -3495,6 +3511,13 @@ class PersonalityCog(commands.Cog):
                         pb_parts.append(f"Best kills game: {_game_str(best_kills_game, player_name_for_ld, ld_for_pb)}")
                     elif best_kills_game is not None and best_kills_game is best_td_game:
                         pb_parts[0] = f"Best game (top TD and kills): {_game_str(best_td_game, player_name_for_ld, ld_for_pb)}"
+                    # Highest match POINTS (the "Score" board's unit). Its own line so the
+                    # Butler can answer a "highest score/points" question with the RIGHT
+                    # number instead of substituting kills or takedowns.
+                    if best_points_game is not None and pb_points > 0:
+                        _pts_w = best_points_game[3].strip() if len(best_points_game) > 3 else '?'
+                        _pts_m = best_points_game[5].strip() if len(best_points_game) > 5 else '?'
+                        pb_parts.append(f"Highest match points (Score board): {pb_points:,} with {_pts_w} on {_pts_m}")
                     pb_str = (", " + "; ".join(pb_parts)) if pb_parts else ""
                     logged_runs = len(player_subs_pb)
                     # Lead with runs and performance; marks demoted to a
