@@ -61,7 +61,8 @@ _ARCHER_PSEUDO = frozenset({"Archer", "Hybrid", "Peasant Run", "Marksman",
                             "Longbowman", "Crossbowman", "Skirmisher"})
 
 
-def reconcile_weapon_subclass(weapon, subclass, class_weapon_map, pseudo_subclasses=_ARCHER_PSEUDO):
+def reconcile_weapon_subclass(weapon, subclass, class_weapon_map, pseudo_subclasses=_ARCHER_PSEUDO,
+                              subclass_parent=None):
     """A weapon can only be wielded by the subclasses that actually list it, so an
     impossible pair (e.g. Warhammer — which only Guardian carries — tagged as Officer,
     from a free-text caption like "warhammer officer") is bad data.
@@ -69,7 +70,11 @@ def reconcile_weapon_subclass(weapon, subclass, class_weapon_map, pseudo_subclas
     Returns (subclass_out, corrected_from):
       - pair is valid, or inputs incomplete, or weapon unknown to us -> (subclass, None).
       - weapon owned by exactly ONE real subclass -> (that subclass, old_subclass).
-      - weapon owned by several -> (subclass, None): we can't tell which, so don't guess.
+      - weapon owned by several, but the typed subclass's CLASS matches exactly one of
+        them (given subclass_parent) -> that owner: respect the class the user meant
+        (e.g. "Messer Guardian": Guardian is a Knight, the Messer's Knight owner is
+        Crusader, so correct to Crusader rather than the Vanguard/Raider option).
+      - weapon owned by several with no class tiebreak -> (subclass, None): don't guess.
 
     The synthetic/collapsed classes (Archer, Hybrid, Peasant Run, and the underlying
     Longbowman/Crossbowman/Skirmisher we store as 'Archer') are never touched — we
@@ -84,6 +89,12 @@ def reconcile_weapon_subclass(weapon, subclass, class_weapon_map, pseudo_subclas
     real_owners = [c for c in owners if c not in pseudo_subclasses]
     if len(real_owners) == 1:
         return real_owners[0], subclass
+    if subclass_parent and len(real_owners) > 1:
+        _typed_class = subclass_parent.get(subclass)
+        if _typed_class:
+            _same = [c for c in real_owners if subclass_parent.get(c) == _typed_class]
+            if len(_same) == 1:
+                return _same[0], subclass
     return subclass, None
 
 

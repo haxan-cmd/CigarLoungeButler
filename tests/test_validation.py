@@ -98,9 +98,25 @@ def test_valid_pair_untouched():
 
 
 def test_ambiguous_weapon_left_alone():
-    # Messer is on multiple subclasses; a wrong tag can't be uniquely corrected.
+    # Messer is on multiple subclasses; without the class map, a wrong tag can't be
+    # uniquely corrected.
     out, was = reconcile_weapon_subclass("Messer", "Officer", config.CLASS_WEAPON_MAP)
     assert out == "Officer" and was is None
+
+
+def test_ambiguous_weapon_corrected_by_typed_class():
+    # With the subclass->class map, a wrong tag whose CLASS matches exactly one owner is
+    # corrected to that owner. Messer belongs to Crusader (Knight) + Raider (Vanguard).
+    # "Messer Guardian" (Guardian is a Knight) -> Crusader, not the Vanguard option.
+    out, was = reconcile_weapon_subclass("Messer", "Guardian", config.CLASS_WEAPON_MAP,
+                                         subclass_parent=config.SUBCLASS_PARENT)
+    assert out == "Crusader" and was == "Guardian"
+    # A Vanguard-typed miss resolves the other way.
+    out2, was2 = reconcile_weapon_subclass("Messer", "Devastator", config.CLASS_WEAPON_MAP,
+                                           subclass_parent=config.SUBCLASS_PARENT)
+    assert out2 == "Raider" and was2 == "Devastator"
+    # Without the map, still left alone (backward compatible).
+    assert reconcile_weapon_subclass("Messer", "Guardian", config.CLASS_WEAPON_MAP) == ("Guardian", None)
 
 
 def test_pseudo_class_never_touched():

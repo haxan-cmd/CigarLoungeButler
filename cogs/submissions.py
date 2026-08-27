@@ -2651,7 +2651,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # weapon's sole owning subclass so class marks and the registry card stay honest.
     try:
         from utils.validation import reconcile_weapon_subclass as _recon_ws
-        _fixed_cls, _was_cls = _recon_ws(selected_weapon, selected_class, CLASS_WEAPON_MAP)
+        _fixed_cls, _was_cls = _recon_ws(selected_weapon, selected_class, CLASS_WEAPON_MAP,
+                                         subclass_parent=getattr(config, 'SUBCLASS_PARENT', None))
         if _was_cls:
             print(f"[FINALISE] Corrected impossible pair {selected_weapon}/{_was_cls} -> {_fixed_cls}")
             selected_class = _fixed_cls
