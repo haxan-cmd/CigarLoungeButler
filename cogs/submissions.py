@@ -2394,12 +2394,18 @@ async def _apply_edit(interaction, ev):
     # weapon against what's stored, and top up the shortfall through update_bounty
     # (which builds the card, assigns the role, and handles completion exactly as the
     # original submission would have). If already credited, the shortfall is 0 and
-    # nothing happens, so a harmless field edit can never double-count. (Editing a run
-    # OFF a bounty weapon still just drops the line, not the banked hit — downward
-    # reconciliation is intentionally left out to avoid clawing back other valid runs.)
+    # nothing happens, so a harmless field edit can never double-count.
+    #
+    # The DOWNWARD case is now handled too (correct_player_bounty_overcount below):
+    # editing a run OFF a bounty weapon (e.g. "Spear" -> "Poleaxe") used to leave the
+    # old weapon over-counted (Spear stuck at 2/3 when only 1 real Spear run remained),
+    # because we only ever topped up. Recounting from submissions gives the EXACT real
+    # count, so lowering the old weapon to it removes only the phantom hit the moved run
+    # left behind — it never claws back other valid runs.
     try:
         from cogs.bounty import (get_active_bounty, get_player_bounty_progress,
-                                 update_bounty, count_player_weapon_runs)
+                                 update_bounty, count_player_weapon_runs,
+                                 correct_player_bounty_overcount)
         _eb = await get_active_bounty()
         _wl = (ev.weapon or '').strip().lower()
         _mk = next((k for k in (_eb.get('weapons') or {})
@@ -2435,6 +2441,13 @@ async def _apply_edit(interaction, ev):
                     f"(https://discord.com/channels/{_edit_guild_id}/{_efp})"
                     f"{_eprog}"
                 )
+        # Downward correction — runs whenever a bounty is active, even if the NEW weapon
+        # doesn't qualify (a run edited from a bounty weapon to a non-bounty one, or below
+        # the TD floor, must still drop the OLD weapon's phantom hit). Fetches its own
+        # fresh bounty, so it can't clobber the counter the top-up above just saved.
+        if _eb:
+            await correct_player_bounty_overcount(
+                ev.original_message.guild, ev.author.id, ev.author.display_name)
     except Exception as _ebe:
         print(f"[EDIT] bounty recount/rebuild error: {_ebe}")
 

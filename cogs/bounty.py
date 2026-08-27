@@ -639,6 +639,92 @@ async def reconcile_bounty_progress(guild, bounty, player_id, player_name=None):
     return True
 
 
+async def correct_player_bounty_overcount(guild, player_id, player_name=None):
+    """After an EDIT, lower any stored bounty weapon/special progress that now EXCEEDS the
+    player's true qualifying-run count. The edit path's update_bounty top-up handles the
+    UPWARD case (a weapon that gained a run); this is its mirror for the DOWNWARD case — a
+    run edited OFF a bounty weapon (e.g. "Spear" corrected to "Poleaxe") leaves the old
+    weapon over-counted (Spear stuck at 2/3 when only 1 real Spear run remains).
+
+    An edit is authoritative: recounting from submissions gives the EXACT number of real
+    qualifying runs, so setting a weapon DOWN to it never claws back other valid runs — it
+    just removes the phantom hit the moved run left behind. Adjusts the community counter by
+    the negative delta. Fires NO side effects (no completion reversal, GP, roles, pings); it
+    re-renders only this player's own forum card in place. Never touches a COMPLETED player
+    (their progress is frozen — an edit shouldn't un-complete a finished bounty).
+
+    Fetches its own fresh bounty so it can't overwrite a counter the top-up just saved.
+    Returns True if it lowered anything.
+    """
+    if not player_id:
+        return False
+    pid = str(player_id)
+    bounty = await get_active_bounty()
+    if not bounty:
+        return False
+    if any(str(c.get('id')) == pid for c in bounty.get('completions', []) or []):
+        return False
+    try:
+        recount = await count_player_weapon_runs(bounty, pid)
+    except Exception as _ce:
+        print(f"[EDIT] bounty down-correct recount failed for {pid}: {_ce}")
+        return False
+    row = await get_player_bounty_progress(bounty['title'], pid)
+    if not row or not row.get('progress'):
+        return False
+    progress = dict(row['progress'])
+    forum_post_id = row.get('forum_post_id')
+    name = player_name or row.get('player_name') or ''
+    weapons = bounty.get('weapons') or {}
+    changed = False
+
+    for wk in list(progress.keys()):
+        if wk == '__special__' or wk not in weapons:
+            continue
+        raw = progress.get(wk, 0)
+        stored = raw['current'] if isinstance(raw, dict) else int(raw or 0)
+        truth = recount.get(wk, 0)
+        if truth < stored:                        # LOWER to the real count (edit is authoritative)
+            delta = stored - truth
+            progress[wk] = truth
+            wd = weapons[wk]
+            if isinstance(wd, dict):
+                wd['current'] = max(0, int(wd.get('current', 0)) - delta)
+                weapons[wk] = wd
+            changed = True
+
+    # Special challenge: correct downward too if a run left the qualifying set.
+    try:
+        truth_special = await _count_special_runs(bounty, pid)
+        stored_special = int(progress.get('__special__', 0) or 0)
+        if truth_special < stored_special:
+            progress['__special__'] = truth_special
+            changed = True
+    except Exception as _se:
+        print(f"[EDIT] bounty down-correct special recount failed for {pid}: {_se}")
+
+    if not changed:
+        return False
+
+    await save_player_bounty_progress(bounty['title'], pid, name, forum_post_id, progress)
+    await save_bounty_state(bounty['id'], weapons, bounty['special_done'], bounty['completions'])
+
+    if forum_post_id:
+        try:
+            fcid = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+            fch = guild.get_channel(fcid) if guild else None
+            if fch and isinstance(fch, discord.ForumChannel):
+                th = fch.get_thread(forum_post_id) or await guild.fetch_channel(forum_post_id)
+                bmsgs = [m async for m in th.history(limit=5, oldest_first=True) if m.author.bot]
+                if bmsgs:
+                    await bmsgs[-1].edit(content=build_player_bounty_card(bounty, progress))
+        except Exception as _fe:
+            print(f"[EDIT] bounty down-correct card re-render failed for {pid}: {_fe}")
+
+    print(f"[EDIT] corrected bounty over-count for {name or pid}")
+    return True
+
+
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched.
 
