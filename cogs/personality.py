@@ -1497,6 +1497,75 @@ class PersonalityCog(commands.Cog):
         except Exception as e:
             print(f"[RECONCILE] startup error: {e}")
 
+    async def _startup_board_reconcile(self):
+        """Heal board placement a mid-flight deploy interrupted. On boot, look at the
+        boards the last ~20 minutes of submissions should touch and rebuild ONLY those,
+        plus re-seed the unlimited feat boards for those runs. Both underlying calls are
+        interaction-free, additive, idempotent, legacy-safe, and fire no announcements:
+          * rebuild_score_boards() (the /rebuild_boards engine) recomputes each named
+            weapon/map/kills board from submissions with a keep-higher merge, so legacy
+            entries survive and an already-correct board is skipped, never lowered.
+          * reseed_feat_boards_for_run() adds only MISSING feat rows, keyed by the run's
+            message link, so it can't duplicate. Runs once per process, under the board
+            lock so it serialises with live submissions."""
+        if getattr(self, '_startup_board_reconcile_done', False):
+            return
+        self._startup_board_reconcile_done = True
+        try:
+            await self.bot.wait_until_ready()
+            await asyncio.sleep(14)  # after the bounty reconcile; let the pool settle
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                return
+            recent = await _db.get_recent_submissions(20)
+            if not recent:
+                return
+            from cogs.leaderboards import (rebuild_score_boards, reseed_feat_boards_for_run,
+                                           _board_lock)
+            touched = set()
+            for r in recent:
+                if len(r) < 13:
+                    continue
+                wpn = (r[3] or '').strip()
+                mp = (r[5] or '').strip()
+                fac = (r[6] or '').strip()
+                if wpn and wpn.lower() not in ('none', 'hybrid'):
+                    touched.add(wpn)
+                    touched.add(f"{wpn} Kills")
+                if mp and fac and mp.lower() != 'none':
+                    touched.add(f"{mp} - {fac}")
+            healed_feats = []
+            async with _board_lock():
+                if touched:
+                    try:
+                        summary = await rebuild_score_boards(guild, board_names=list(touched))
+                        print(f"[RECONCILE] boards: rebuilt {summary.get('boards',0)}, "
+                              f"added {summary.get('added',0)}, updated {summary.get('updated',0)}")
+                    except Exception as _be:
+                        print(f"[RECONCILE] board rebuild error: {_be}")
+                for r in recent:
+                    if len(r) < 13:
+                        continue
+                    try:
+                        added = await reseed_feat_boards_for_run(
+                            guild, (r[1] or '').strip(), (r[2] or '').strip(),
+                            (r[12] or '').strip(),
+                            int(r[8]) if r[8] else 0, int(r[7]) if r[7] else 0,
+                            (r[3] or '').strip(), r[11] or '')
+                        if added:
+                            healed_feats.extend(added)
+                    except Exception as _fe:
+                        print(f"[RECONCILE] feat reseed error: {_fe}")
+            if healed_feats:
+                print(f"[RECONCILE] feat boards re-seeded: {healed_feats}")
+                try:
+                    from utils.helpers import record_event
+                    record_event('reconcile', f'startup re-seeded feat rows: {", ".join(sorted(set(healed_feats)))}')
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[RECONCILE] startup board error: {e}")
+
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'[PERSONALITY] on_ready fired, starting tasks')
@@ -1529,10 +1598,13 @@ class PersonalityCog(commands.Cog):
             self.events_flush_loop.start()
         if not self.traffic_digest.is_running():
             self.traffic_digest.start()
-        # Heal any bounty credit a mid-flight deploy interrupted (top-up only, no
-        # side effects). Detached so it never blocks the ready path; runs once.
+        # Heal anything a mid-flight deploy interrupted (bounty credit + board
+        # placement). Both are top-up/additive only with no side effects. Detached so
+        # they never block the ready path; each runs once.
         if not getattr(self, '_startup_reconcile_done', False):
             asyncio.create_task(self._startup_bounty_reconcile())
+        if not getattr(self, '_startup_board_reconcile_done', False):
+            asyncio.create_task(self._startup_board_reconcile())
         # Fire nerve center immediately on startup so it always posts on deploy
 
         # butlers-manual RETIRED: the player command list now lives in the information

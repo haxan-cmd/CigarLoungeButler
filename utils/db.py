@@ -2144,6 +2144,20 @@ async def get_recent_submitter_ids(minutes: int = 20) -> list[list]:
     return [[str(r['discord_id']), r['player_name'] or ''] for r in rows]
 
 
+async def get_recent_submissions(minutes: int = 20) -> list[list]:
+    """Full submission rows (same shape as get_all_submissions) logged in the last N
+    minutes, newest first. Used by the startup board reconcile to find which boards a
+    just-interrupted run should touch. Uncached: it must see the very latest rows on
+    boot, and it's called once per process."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM submissions "
+            "WHERE submitted_at > NOW() - ($1 || ' minutes')::INTERVAL "
+            "ORDER BY submitted_at DESC", str(int(minutes)))
+    return [_row_to_submission(r) for r in rows]
+
+
 async def update_bounty_field(bounty_id: int, field: str, value):
     pool = _pool_check()
     allowed = {'weapons', 'special_done', 'completions', 'bonus_completions', 'active', 'message_id',
