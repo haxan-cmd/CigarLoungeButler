@@ -52,6 +52,36 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
    then a detached `_bg_tasks` (120s cap): board updates (under `_BOARD_LOCK`), Hundred-Handed tracking, bounty progress, butler personality hooks, registry card refresh, archive row, milestones, season board + title roles.
 4. Edits (`_apply_edit`) rewrite the DB row, wipe and rebuild the affected boards, refresh the card, and rebuild the blurb.
 
+## Startup reconcile (self-heal after an interrupted deploy)
+
+The DB insert (`log_submission`) happens BEFORE the blurb posts, and the derived
+work (bounty credit, board placement) runs AFTER it in a detached `_bg_tasks`. So a
+deploy/restart that lands mid-submission leaves the run ROW saved but its derived
+credit half-done. On every boot, `personality.on_ready` fires two one-shot,
+detached reconcilers (guarded by `_startup_reconcile_done` / `_startup_board_reconcile_done`)
+that heal exactly that window over the last ~20 minutes of submissions:
+
+- `bounty.reconcile_bounty_progress(guild, bounty, did, name)` — TOP-UP ONLY. Recounts
+  weapon + special progress from submissions (`count_player_weapon_runs`) and raises the
+  stored value to match; it never lowers a count, so a transient empty read changes
+  nothing. Bumps the community participation counter by only the applied delta. Fires NO
+  side effects (no completions, GP, roles, pings, reactions, bonus, or community-board
+  edits); re-renders only that player's own forum card, in place, and only if it exists.
+  Skips already-completed players. Completion ceremony is deliberately left to the
+  player's next run or a mod.
+- `_startup_board_reconcile` — reruns the interaction-free, additive `rebuild_score_boards`
+  (the `/rebuild_boards` engine, keep-higher merge so legacy entries survive and correct
+  boards are skipped) on ONLY the boards recent runs touched, then `reseed_feat_boards_for_run`
+  (dedup by message link) for the unlimited feat boards. Held under `_board_lock()`. Covers
+  weapon / map / weapon-kills + 100 Kills / 200 Takedowns / Triple / Flawless. Does NOT
+  cover the niche boards (Score, TUFF, Hybrid, Pacifist, Mallet, Knife, Healing) — a
+  resubmit or manual `/rebuild_boards` still heals those.
+
+Both are top-up/additive only and idempotent: re-running over already-correct data is a
+no-op, so they can never overwrite or double-count. Real heals log a `reconcile` event
+(visible in `/logs`) and print `[RECONCILE] ...` lines. Recent-row fetches:
+`db.get_recent_submitter_ids` / `db.get_recent_submissions`.
+
 ## Row shapes (legacy Sheets format, lists of strings)
 
 `utils/db.py` returns rows as lists of strings (a holdover from the Google

@@ -30,6 +30,7 @@ Symptom to fix, grouped by area. Full command list: [ADMIN_COMMANDS.md](../ADMIN
 | Symptom | Fix |
 |---|---|
 | Player's bounty card wrong | `/bounty_refresh_card` |
+| A run right before a deploy didn't credit bounty/boards | Usually self-heals: the startup reconcile tops up bounty progress and re-places boards for the last ~20 min of submissions on the next boot (look for `[RECONCILE]` in logs / a `reconcile` event in `/logs`). If it's older than that window, use `/bounty_credit` + `/rebuild_boards name:<board>`. |
 | Progress miscounted | `/bounty_credit` (add or remove hits) |
 | Bonus not registering | `/bounty_set_bonus` |
 | Completion missed | `/bounty_complete` |
