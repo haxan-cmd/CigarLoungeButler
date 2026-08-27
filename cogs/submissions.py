@@ -1798,7 +1798,10 @@ class EditSubmissionView(discord.ui.View):
     def __init__(self, original_message, author, submission_row,
                  weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link,
                  second_place_td=None, score=None):
-        super().__init__(timeout=300)
+        # 24h edit window (was 5 min, which was far too short to catch a mis-picked
+        # class/weapon). The button still dies on a bot restart — a persistent view is
+        # the full fix if this stays a pain point.
+        super().__init__(timeout=86400)
         self.original_message = original_message
         self.author = author
         self.submission_row = submission_row
