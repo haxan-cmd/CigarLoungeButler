@@ -30,7 +30,7 @@ from utils.helpers import (
     parse_submission_text, format_weapon_marks,
     detect_weapon_milestones, build_milestone_message,
     nerve_log_submission, nerve_log_error, nerve_log_milestone,
-    submission_state, butler_quip, vision_parse_scorecard,
+    submission_state, butler_quip, vision_parse_scorecard, vision_parse_scorecard_smart,
     submission_start, submission_end, swallow,
 )
 from utils.parsing import md_safe
@@ -491,13 +491,13 @@ class SubmitView(discord.ui.View):
                 vision_other_names = []
             for att in self.original_message.attachments:
                 if att.content_type and att.content_type.startswith('image/'):
-                    parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint, vision_other_names)
+                    parsed = await asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names)
                     print(f"[VISION] Raw parsed result: {parsed}")
                     break
                 elif not att.content_type:
                     # content_type can be None — fall back to filename extension check
                     if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        parsed = await asyncio.to_thread(vision_parse_scorecard, att.url, vision_name_hint, vision_other_names)
+                        parsed = await asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names)
                         print(f"[VISION] Raw parsed result (ext check): {parsed}")
                         break
     

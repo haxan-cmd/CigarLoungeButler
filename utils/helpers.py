@@ -91,15 +91,16 @@ async def flush_ai_usage():
         print(f"[AI_USAGE] flush failed (dropped {len(batch)} rows): {e}")
 
 
-def _log_gemini_usage(response, purpose='vision'):
+def _log_gemini_usage(response, purpose='vision', model='gemini-2.5-flash'):
     """Record a Gemini response's usage_metadata. Thinking tokens map to reasoning;
-    visible output = candidates. Best-effort."""
+    visible output = candidates. `model` lets an escalated pro read log separately on
+    /dev instead of masquerading as flash. Best-effort."""
     try:
         u = getattr(response, 'usage_metadata', None)
         if not u:
             return
         log_ai_usage(
-            'gemini', 'gemini-2.5-flash', purpose,
+            'gemini', model, purpose,
             getattr(u, 'prompt_token_count', 0) or 0,
             getattr(u, 'candidates_token_count', 0) or 0,
             getattr(u, 'thoughts_token_count', 0) or 0)
@@ -442,10 +443,13 @@ def _read_half_roster(pil_img, gtypes, gemini_client):
     return _ints(d.get('scores')), _ints(d.get('kills'))
 
 
-def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None) -> dict:
+def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None,
+                           model: str = 'gemini-2.5-flash') -> dict:
     """
     Pass a Discord image URL to Gemini vision and extract scorecard fields.
     player_name: Discord display name of the submitting player - used as a hint to find their row.
+    model: the Gemini model for the PRIMARY read (roster-recovery passes stay on flash);
+    `vision_parse_scorecard_smart` escalates a weak flash read to gemini-2.5-pro.
     Returns a dict with keys: weapon, subclass, map, faction, takedowns, kills, deaths, other_scores.
     Any field that couldn't be read confidently is None.
     """
@@ -545,7 +549,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         for _attempt in range(3):
             try:
                 r = _gemini_client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model=model,
                     contents=[prompt, image_part],
                     config=_gtypes.GenerateContentConfig(
                         temperature=0,
@@ -560,7 +564,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
-                _log_gemini_usage(r, 'vision')
+                _log_gemini_usage(r, 'vision', model=model)
                 raw = r.text.strip()
                 break
             except Exception as _e:
@@ -815,6 +819,57 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         else:
             print(f"[VISION] Error: {e}")
         return empty
+
+
+def _vision_read_weak(d) -> bool:
+    """True when a scorecard read looks unreliable and is worth a stronger second look:
+    a core stat missing (weapon / takedowns / kills), the submitter's row name unread, or
+    an impossible map/faction pair. Deliberately NARROW — a clean read never escalates, so
+    the pricier model is spent only on the hard scorecards."""
+    if not d:
+        return True
+    if d.get('weapon') in (None, '') or d.get('takedowns') is None or d.get('kills') is None:
+        return True
+    if not (str(d.get('name') or '').strip()):
+        return True
+    try:
+        import config as _cfg
+        from utils.validation import impossible_submission_reason
+        if impossible_submission_reason(d.get('map'), d.get('faction'),
+                                        getattr(_cfg, 'MAP_FACTIONS', {})):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def vision_parse_scorecard_smart(image_url: str, player_name: str = None, other_names=None) -> dict:
+    """Cost-aware scorecard vision: read with the cheap model first, and re-read ONLY a WEAK
+    result (missing core stats / unread name / impossible map+faction) with the stronger
+    gemini-2.5-pro. Most boards read clean on the first pass, so pro is spent only on the
+    hard ones — fewer misreads (and less manual fixing) without paying more on every run.
+    Sync so existing `asyncio.to_thread(...)` call sites just swap the function name."""
+    flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
+    if not _vision_read_weak(flash):
+        return flash
+    print("[VISION] weak first read — escalating to gemini-2.5-pro")
+    try:
+        pro = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-pro')
+    except Exception as e:
+        print(f"[VISION] pro escalation failed, keeping flash read: {e}")
+        return flash
+    if _vision_read_weak(pro):
+        # pro didn't nail the core fields either: keep flash, backfill any blanks from pro.
+        merged = dict(flash or {})
+        for k, v in (pro or {}).items():
+            if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
+                merged[k] = v
+        return merged
+    # pro read is solid: prefer it, but keep flash's roster arrays where pro's came back empty.
+    for _rk in ('team_names', 'enemy_names', 'team_scores', 'enemy_scores', 'team_kills', 'enemy_kills'):
+        if not pro.get(_rk) and flash.get(_rk):
+            pro[_rk] = flash[_rk]
+    return pro
 
 
 def build_favourites_explainer_embed():
