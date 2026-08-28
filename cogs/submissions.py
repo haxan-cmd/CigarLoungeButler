@@ -200,6 +200,20 @@ def get_all_weapons_for_class(selected_class):
     class_weapons = CLASS_WEAPON_MAP.get(selected_class, [])
     return sorted(class_weapons)
 
+
+_ARCHER_SUBCLASSES = ("Longbowman", "Crossbowman", "Skirmisher")
+
+def _sole_subclass_for_weapon(weapon):
+    """The ONE subclass that can wield this weapon, or None if it's shared / unknown.
+    A single-owner weapon (e.g. Rapier is Man-at-Arms only) needs no 'which class?'
+    prompt — we can fill it and move on. Archer pseudo-subclasses are excluded so a real
+    melee weapon isn't auto-assigned into the collapsed Archer bucket."""
+    if not weapon:
+        return None
+    owners = [c for c, weps in CLASS_WEAPON_MAP.items()
+              if weapon in (weps or []) and c not in _ARCHER_SUBCLASSES]
+    return owners[0] if len(owners) == 1 else None
+
 async def upsert_player(discord_id, discord_name):
     """Returns True if this is a new player."""
     try:
@@ -586,6 +600,15 @@ class SubmitView(discord.ui.View):
                     parsed['subclass'] = _cap_subclass
                     print(f"[CAPTION] subclass prefilled from caption: {_cap_subclass}")
 
+            # If the weapon has exactly ONE owning subclass (e.g. Rapier -> Man-at-Arms),
+            # there's nothing to ask — fill it so the flow never prompts for a class that
+            # couldn't be anything else.
+            if parsed and parsed.get('subclass') is None and parsed.get('weapon'):
+                _sole = _sole_subclass_for_weapon(parsed['weapon'])
+                if _sole:
+                    parsed['subclass'] = _sole
+                    print(f"[WEAPON] subclass auto-filled from sole owner: {parsed['weapon']} -> {_sole}")
+
             vision_useful = parsed and any(
                 parsed.get(f) is not None
                 for f in ('weapon', 'subclass', 'takedowns', 'kills', 'deaths')
@@ -717,6 +740,12 @@ class VisionConfirmView(discord.ui.View):
         # A Hybrid run has no single weapon: fill it so the weapon step is skipped.
         if str(p.get('subclass') or '').strip() == 'Hybrid' and not p.get('weapon'):
             p['weapon'] = 'Hybrid'
+        # A single-owner weapon (Rapier -> Man-at-Arms) needs no prompt — resolve it here
+        # too, so every route into _proceed skips the pointless class question.
+        if not p.get('subclass') and p.get('weapon'):
+            _sole = _sole_subclass_for_weapon(p['weapon'])
+            if _sole:
+                p['subclass'] = _sole
         # Work through missing fields in order: subclass → weapon → map → faction → stats
         if not p.get('subclass'):
             all_classes = sorted([c for c in CLASS_WEAPON_MAP.keys()])
