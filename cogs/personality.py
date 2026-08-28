@@ -693,8 +693,11 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                     "fetch it. Guidance: 'X on tenosian/agathian/mason maps' = query_runs filtered by "
                     "faction (Tenosia/Agatha/Mason); 'best/highest X on <map>' or 'with <weapon>' = "
                     "query_runs filtered by map/weapon; 'who has the most <career/feat> X' = rank_leaders; "
-                    "'my/X's stats' = get_player_card. When the player says my/me/I/mine they mean "
-                    f"themselves: pass \"{player_name}\". Keep your normal dry Butler voice and length; "
+                    "'my/X's stats' = get_player_card. If a tool returns empty results or an error, "
+                    "READ its note and try again before giving up — loosen filters, set min_games=1, "
+                    "switch to mode=top_games, fix a filter value, or try a different tool. When the "
+                    f"player says my/me/I/mine they mean themselves: pass \"{player_name}\". Keep your "
+                    "normal dry Butler voice and length; "
                     "do not dump raw tool output. If this is genuine feedback or a complaint needing "
                     "the Manager, start with EYEBALL on its own line.]" + lore_note + french_note)
                 text = await _butler_answer_with_tools(

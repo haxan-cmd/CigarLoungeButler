@@ -131,17 +131,28 @@ async def _query_runs(metric=None, filters=None, mode='top_games', agg='avg',
                 continue
             rows.append((disp, _num((s / n) if agg == 'avg' else s), n))
         rows.sort(key=lambda x: x[1], reverse=not ascending)
-        return {'metric': metric, 'label': _se.stat_label(metric), 'mode': 'rank_players',
-                'agg': agg, 'min_games': min_games, 'filters': filters,
-                'results': [{'player': d, 'value': v, 'games': n} for d, v, n in rows[:limit]]}
+        res = [{'player': d, 'value': v, 'games': n} for d, v, n in rows[:limit]]
+        out = {'metric': metric, 'label': _se.stat_label(metric), 'mode': 'rank_players',
+               'agg': agg, 'min_games': min_games, 'filters': filters, 'results': res}
+        if not res:
+            out['note'] = (f"No players had at least {min_games} qualifying games under these "
+                           f"filters ({len(grp)} player(s) had any). Retry with min_games=1, or use "
+                           f"mode=top_games for the single best game. Also check filter values: "
+                           f"faction must be one of Tenosia/Agatha/Mason, map an exact map name.")
+        return out
     # top_games (default): best single games
     vals = [r for r in fr if r.get(metric) is not None]
     vals.sort(key=lambda r: r[metric], reverse=not ascending)
     out = [{'player': ident.resolve(r.get('name', ''), r.get('did', ''))[1],
             'value': _num(r[metric]), 'weapon': r.get('weapon'), 'map': r.get('map'),
             'vip': r.get('vip'), 'link': r.get('link')} for r in vals[:limit]]
-    return {'metric': metric, 'label': _se.stat_label(metric), 'mode': 'top_games',
-            'filters': filters, 'matched_runs': len(fr), 'results': out}
+    res = {'metric': metric, 'label': _se.stat_label(metric), 'mode': 'top_games',
+           'filters': filters, 'matched_runs': len(fr), 'results': out}
+    if not out:
+        res['note'] = (f"No runs matched these filters (matched {len(fr)} run(s) before the metric "
+                       f"filter). Check filter VALUES — faction must be Tenosia/Agatha/Mason, map an "
+                       f"exact map name (e.g. Falmire), weapon an exact weapon name — or loosen them.")
+    return res
 
 
 _AGG_IDS = {s.id for s in _agg.SPECS}

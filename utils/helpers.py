@@ -251,6 +251,21 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
             except Exception:
                 _args = {}
             result = await _bt.dispatch(tc.function.name, _args)
+            # Diagnostic: log what the model called and roughly what came back, so a
+            # deflection or empty answer can be traced (visible in Railway logs).
+            try:
+                if isinstance(result, dict) and result.get('error'):
+                    _rs = 'ERROR: ' + str(result.get('error'))[:120]
+                elif isinstance(result, dict):
+                    _rows = result.get('results') or result.get('entries') or result.get('leaders')
+                    _rs = (f"{len(_rows)} rows" if isinstance(_rows, list) else 'ok')
+                    if isinstance(result.get('note'), str):
+                        _rs += ' | note'
+                else:
+                    _rs = 'ok'
+                print(f"[BUTLER-TOOL] {tc.function.name}({_json.dumps(_args, default=str)[:200]}) -> {_rs}")
+            except Exception:
+                pass
             messages.append({
                 'role': 'tool', 'tool_call_id': tc.id,
                 'content': _json.dumps(result, default=str)[:6000],
