@@ -844,32 +844,36 @@ def _vision_read_weak(d) -> bool:
 
 
 def vision_parse_scorecard_smart(image_url: str, player_name: str = None, other_names=None) -> dict:
-    """Cost-aware scorecard vision: read with the cheap model first, and re-read ONLY a WEAK
-    result (missing core stats / unread name / impossible map+faction) with the stronger
-    gemini-2.5-pro. Most boards read clean on the first pass, so pro is spent only on the
-    hard ones — fewer misreads (and less manual fixing) without paying more on every run.
-    Sync so existing `asyncio.to_thread(...)` call sites just swap the function name."""
-    flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
-    if not _vision_read_weak(flash):
-        return flash
-    print("[VISION] weak first read — escalating to gemini-2.5-pro")
+    """Read every scorecard on the stronger gemini-2.5-pro for the best digit accuracy (a 3
+    misread as an 8 is a pro-vs-flash-class error, so pro is the primary reader now). Flash
+    is kept ONLY as a resilience fallback: if the pro read errors or comes back weak (missing
+    core stats / unread name / impossible map+faction), we cross-check flash so a pro outage
+    or hiccup can never block a submission. Sync so `asyncio.to_thread(...)` call sites just
+    swap the function name."""
+    pro = None
     try:
         pro = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-pro')
     except Exception as e:
-        print(f"[VISION] pro escalation failed, keeping flash read: {e}")
-        return flash
-    if _vision_read_weak(pro):
-        # pro didn't nail the core fields either: keep flash, backfill any blanks from pro.
-        merged = dict(flash or {})
-        for k, v in (pro or {}).items():
-            if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
-                merged[k] = v
-        return merged
-    # pro read is solid: prefer it, but keep flash's roster arrays where pro's came back empty.
-    for _rk in ('team_names', 'enemy_names', 'team_scores', 'enemy_scores', 'team_kills', 'enemy_kills'):
-        if not pro.get(_rk) and flash.get(_rk):
-            pro[_rk] = flash[_rk]
-    return pro
+        print(f"[VISION] pro read errored, falling back to flash: {e}")
+    if pro and not _vision_read_weak(pro):
+        return pro
+    # Pro errored or came back weak — get a flash read to fall back on.
+    print("[VISION] pro read weak/failed — cross-checking with gemini-2.5-flash")
+    try:
+        flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
+    except Exception as e:
+        print(f"[VISION] flash fallback also failed: {e}")
+        return pro or {}
+    if pro is None:
+        return flash                       # pro unavailable: flash is all we have
+    if not _vision_read_weak(flash):
+        return flash                       # flash gave a clean read where pro didn't
+    # Both weak: prefer pro, backfill any blanks from flash.
+    merged = dict(pro)
+    for k, v in (flash or {}).items():
+        if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
+            merged[k] = v
+    return merged
 
 
 def build_favourites_explainer_embed():
