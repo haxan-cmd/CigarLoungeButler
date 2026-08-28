@@ -1940,9 +1940,16 @@ class EditStatsModal(discord.ui.Modal, title="Edit Stats"):
         self.td = discord.ui.TextInput(label="Takedowns", default=str(edit_view.takedowns), required=True)
         self.k = discord.ui.TextInput(label="Kills", default=str(edit_view.kills), required=True)
         self.d = discord.ui.TextInput(label="Deaths", default=str(edit_view.deaths), required=True)
+        # Scoreboard POINTS — the Pacifist and Score boards rank on it, and vision
+        # sometimes misses it, so let the player set/correct it here. Optional: blank
+        # leaves the stored score untouched.
+        _sc_default = str(edit_view.score) if isinstance(getattr(edit_view, 'score', None), int) else ""
+        self.sc = discord.ui.TextInput(label="Score (points)", default=_sc_default,
+                                       required=False, placeholder="scoreboard points, e.g. 13156")
         self.add_item(self.td)
         self.add_item(self.k)
         self.add_item(self.d)
+        self.add_item(self.sc)
     async def on_submit(self, interaction: discord.Interaction):
         ev = self.edit_view
         try:
@@ -1952,6 +1959,16 @@ class EditStatsModal(discord.ui.Modal, title="Edit Stats"):
         except ValueError:
             await interaction.response.send_message("Invalid numbers.", ephemeral=True)
             return
+        # Score is optional: a blank field leaves the existing value alone; a filled one
+        # (digits, commas/plus tolerated) updates it. A non-numeric entry is rejected so a
+        # typo can't wipe a real score to nothing.
+        _sc_raw = str(self.sc.value or '').replace(',', '').replace('+', '').strip()
+        if _sc_raw:
+            try:
+                ev.score = int(_sc_raw)
+            except ValueError:
+                await interaction.response.send_message("Invalid score.", ephemeral=True)
+                return
         await _apply_edit(interaction, ev)
 
 class EditVIPView(discord.ui.View):
@@ -2164,6 +2181,7 @@ async def _apply_edit(interaction, ev):
                 ev.weapon, ev.cls, ev.map_name, ev.faction,
                 ev.takedowns, ev.kills, ev.deaths, ev.vip, feats_str,
                 team_kill_share=_new_tks,
+                score=ev.score if isinstance(ev.score, int) else None,
             )
     except Exception as e:
         print(f"Edit DB update error: {e}")
@@ -2473,7 +2491,12 @@ async def _apply_edit(interaction, ev):
         new_summary += ("\n\n🔀 **Hybrid run** — a weapon-swap game. No weapon marks, "
                         "but it lands on the **Hybrid** board (ranked by takedowns).")
     elif _is_pac:
-        new_summary += f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}."
+        if isinstance(ev.score, int) and ev.score > 0:
+            new_summary += (f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon} — "
+                            f"lands on the **Pacifist board** with **{ev.score:,}** points.")
+        else:
+            new_summary += (f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}. "
+                            f"Add a **Score** (hit Edit) to rank it on the Pacifist board.")
     else:
         new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
     if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
@@ -3277,7 +3300,20 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                          "but it lands on the **Hybrid** board (ranked by takedowns).")
     elif _is_pacifist and marks_earned == 0:
         _pb = f"[Pacifist board]({_pac_board_link})" if _pac_board_link else "Pacifist board"
-        marks_summary = f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — **+1** feat of legend (no weapon marks), and it lands on the {_pb}."
+        if isinstance(_score, int) and _score > 0:
+            # Score present -> it actually ranks. Show the points so the placement is
+            # visible (the Pacifist board ranks on score, which is otherwise invisible).
+            marks_summary = (f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — "
+                             f"**+1** feat of legend (no weapon marks), and it lands on the {_pb} "
+                             f"with **{_score:,}** points.")
+        else:
+            # No score read. The Pacifist board ranks ONLY on scoreboard points, so this
+            # run can't place until a score is supplied. Tell the truth and point to the
+            # fix (the Edit modal now has a Score field) instead of claiming it landed.
+            marks_summary = (f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {selected_weapon} — "
+                             f"**+1** feat of legend (no weapon marks). The {_pb} ranks by scoreboard "
+                             f"points and I couldn't read a score on this one, so it can't rank yet — "
+                             f"hit **Edit** and add the score to place it.")
     else:
         marks_summary = f"\n\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
     # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
