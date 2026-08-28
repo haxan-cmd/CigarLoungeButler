@@ -183,7 +183,9 @@ _COUNTING_INSULT_FALLBACKS = [
 ]
 
 import os as _os
-from utils.helpers import butler_complete as _butler_complete, _openai_client as _ai_client, is_mod
+from utils.helpers import (butler_complete as _butler_complete,
+                           butler_answer_with_tools as _butler_answer_with_tools,
+                           _openai_client as _ai_client, is_mod)
 from utils import stats_engine as _SE
 if not _ai_client:
     print("Butler AI unavailable: no OPENAI_API_KEY / openai package")
@@ -673,10 +675,33 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         # drawn from this same budget before the visible reply (a smaller ceiling would
         # let reasoning eat it and return blank). You only pay for what's used; usage is
         # a rounding error against the budget, the real cost is ~1-3s more latency.
-        text = await _butler_complete(
-            BUTLER_SYSTEM_PROMPT, user_prompt,
-            1200 if _is_data else 700, reasoning_effort='low',
-            purpose='chat_data' if _is_data else 'chat_banter')
+        text = ''
+        # Data questions FIRST try the TOOL path: the Butler CALLS read-only stat tools
+        # to fetch exact numbers (the way the website queries the DB), instead of leaning
+        # on a pre-stuffed context blob that can only answer what we pre-guessed. If tools
+        # return nothing (import/API blip), it falls straight through to the classic
+        # context completion below — so this can never do worse than before.
+        if _is_data and not is_rules:
+            try:
+                _tool_prompt = (
+                    f"{context_str}{channel_note}Player asking: {player_name}{idiot_note}"
+                    f"{chaos_note}{list_note}{style_note}\nTheir message: {truncated_msg}\n\n"
+                    "[Answer with EXACT numbers. CALL the stat tools to fetch data — never guess a "
+                    "stat or a ranking. When the player says my/me/I/mine, they mean themselves: pass "
+                    f"\"{player_name}\" as the player argument. Keep your normal dry Butler voice and "
+                    "length; do not dump raw tool output. If this is genuine feedback or a complaint "
+                    "needing the Manager, start with EYEBALL on its own line.]" + lore_note + french_note)
+                text = await _butler_answer_with_tools(
+                    BUTLER_SYSTEM_PROMPT, _tool_prompt, 1400,
+                    reasoning_effort='low', purpose='chat_data_tools')
+            except Exception as _te:
+                print(f"[BUTLER] tool path failed, falling back to context: {_te}")
+                text = ''
+        if not text:
+            text = await _butler_complete(
+                BUTLER_SYSTEM_PROMPT, user_prompt,
+                1200 if _is_data else 700, reasoning_effort='low',
+                purpose='chat_data' if _is_data else 'chat_banter')
         if not text or text == 'SKIP':
             return None
         eyeball = False

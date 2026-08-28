@@ -171,6 +171,102 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
             pass
     return ''
 
+async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
+                                   reasoning_effort: str = 'low',
+                                   purpose: str = 'butler_tools', max_rounds: int = 5) -> str:
+    """Answer a stats question by letting the model CALL read-only data tools
+    (utils.butler_tools) to fetch exactly what it needs — the way the website queries
+    the DB — instead of relying on a pre-stuffed context blob. Returns '' on failure so
+    the caller can fall back to the classic context path.
+
+    The loop: send the question + tool schemas -> if the model asks for tool calls,
+    run them and feed the JSON results back -> repeat until it produces a final answer
+    or max_rounds is hit. Tools are read-only and bounded; results are truncated. Usage
+    is logged per round (purpose distinguishes it from plain butler calls on /dev)."""
+    if not _openai_client:
+        return ''
+    import json as _json
+    try:
+        from utils import butler_tools as _bt
+    except Exception as _ie:
+        print(f"[BUTLER] tools import failed: {_ie}")
+        return ''
+    messages = [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': prompt},
+    ]
+
+    def _log_usage(r):
+        try:
+            _u = getattr(r, 'usage', None)
+            if not _u:
+                return
+            _rt = 0
+            _ctd = getattr(_u, 'completion_tokens_details', None)
+            if _ctd is not None:
+                _rt = getattr(_ctd, 'reasoning_tokens', 0) or 0
+            _ct = getattr(_u, 'completion_tokens', 0) or 0
+            log_ai_usage('openai', BUTLER_MODEL, purpose,
+                         getattr(_u, 'prompt_tokens', 0) or 0, max(0, _ct - _rt), _rt)
+        except Exception:
+            pass
+
+    last_err = None
+    for _round in range(max_rounds):
+        try:
+            r = await _openai_client.chat.completions.create(
+                model=BUTLER_MODEL,
+                max_completion_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
+                tools=_bt.TOOL_SCHEMAS,
+                tool_choice='auto',
+                messages=messages,
+            )
+        except Exception as e:
+            last_err = e
+            if _round == 0:
+                await asyncio.sleep(1.5)
+                continue
+            break
+        _log_usage(r)
+        msg = r.choices[0].message
+        tool_calls = getattr(msg, 'tool_calls', None)
+        if not tool_calls:
+            return (msg.content or '').strip()
+        # Record the assistant turn that requested the tools, then run each one.
+        messages.append({
+            'role': 'assistant', 'content': msg.content,
+            'tool_calls': [
+                {'id': tc.id, 'type': 'function',
+                 'function': {'name': tc.function.name, 'arguments': tc.function.arguments}}
+                for tc in tool_calls],
+        })
+        for tc in tool_calls:
+            try:
+                _args = _json.loads(tc.function.arguments or '{}')
+            except Exception:
+                _args = {}
+            result = await _bt.dispatch(tc.function.name, _args)
+            messages.append({
+                'role': 'tool', 'tool_call_id': tc.id,
+                'content': _json.dumps(result, default=str)[:6000],
+            })
+    # Out of rounds (or a transient error): force a final answer from what we have.
+    if last_err is not None:
+        print(f"[BUTLER] tools loop error (model={BUTLER_MODEL}): {last_err}")
+    try:
+        r2 = await _openai_client.chat.completions.create(
+            model=BUTLER_MODEL, max_completion_tokens=max_tokens, reasoning_effort='none',
+            messages=messages + [{'role': 'user',
+                'content': 'Answer now from the tool results above. If they lacked the data, say so briefly and in character.'}],
+        )
+        _log_usage(r2)
+        return (r2.choices[0].message.content or '').strip()
+    except Exception as e:
+        print(f"[BUTLER] tools final completion failed: {e}")
+        return ''
+
+
 # Gemini client for vision (scorecard parsing)
 _gemini_client = None
 try:
