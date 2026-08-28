@@ -23,6 +23,7 @@ titles, and a sardonic AI personality. Hosted on Railway, auto-deploys from
 | `utils/boards.py` | Pure board classification — THE single source of truth for which boards are feat/weapon/map/kills, which count toward the board titles (`non_weapon_feat_boards()`), and each board's score unit (`board_unit()`). Route new board-name checks through here, not hand-typed sets. Unit-tested. |
 | `utils/goals.py` | Pure "what's next" goal picker across next weapon rank / mastery / Hundred-Handed. Feeds `/next` and the Butler's in-passing goal nudge. Unit-tested. |
 | `utils/aggregates.py` | Pure server-wide RANKING engine — THE home for any Butler "who has the most / highest / best X" question. One canonical-identity resolver (`Identity`: IGN variants collapse to one player, displayed under the registry name) + a registry of `AggSpec` records (metric over submissions/players/boards → grouped → ranked → formatted line). Adding a new answerable ranking = ONE `AggSpec` entry; its keywords are exported by `gate_keywords()` and auto-unlock the Butler's data-question gate, so a metric can never be answerable-but-gated (the bug that made "most 100 kill games" deflect). `personality._build_player_stats_ctx` calls `context_block()` once — do NOT add new per-metric injection blocks there; add a spec here. Unit-tested. |
+| `utils/butler_tools.py` | The Butler's read-only STATS TOOLSET for function-calling — the Butler CALLS these to fetch exact numbers per question (like the website querying the DB) instead of leaning on the pre-stuffed `player_stats_ctx` blob. Nine tools, each a thin wrapper over already-vetted logic: `query_runs` (the Stats Lab engine `stats_engine`, any metric filtered/grouped/sorted), `rank_leaders` (`aggregates` career/feat leaderboards), `get_player_card` / `get_board` / `list_boards` / `server_overview` (`personality._server_aggregates`), `get_rivalries` / `head_to_head` (`rivalry_service`), `whats_next` (`goals`). `dispatch(name, args)` NEVER raises (returns `{'error':...}`); results are bounded (`_RESULT_CAP=25`, tool payloads truncated). Because every tool calls the existing modules, all domain rules (VIP/resubmit/unlisted exclusion, canonical `Identity`, Score=points, archer/kills-companion board rules) are inherited — do NOT re-implement them here, and do NOT add raw SQL. Imports ONLY utils/config at module top; cog imports are function-local (no circular import). Adding a capability = one tool fn + one `TOOL_SCHEMAS` entry. |
 | `utils/archetype.py` | Pure descriptive-playstyle labels from a player's marks distribution: `derive_archetype` (class/weapon → "Knight Main", "Generalist", "Messer Specialist") and `derive_damage_style` (damage type via `config.WEAPON_DAMAGE_TYPES` → "Blunt specialist", "Chop-leaning", "Mixed damage"). Neutral tone. Shown on the registry card (`registry.archetype_label` / `damage_style_label`) and injected into the Butler on data questions (`registry.get_player_descriptors`). Unit-tested. |
 | `utils/rivalries.py` | Pure shared-lobby aggregation via a time-window FINGERPRINT (same map + tight time + matching banner totals). NOW THE FALLBACK for legacy rows with no stored roster; the roster engine below is preferred. nemesis/ally, `head_to_head`, pair awards. NO per-game win/loss. Unit-tested. |
 | `utils/roster.py` | Pure ROSTER-based rivalry engine — the accurate successor. Every scoreboard lists everyone in the lobby; the vision parser now keeps those NAMES per side. Matches them to registered players (`normalize_name` + OCR-confusable-fold + fuzzy, unregistered = anonymous), then derives nemesis (enemy side) / ally (team side) / `head_to_head` / pair awards from ground-truth membership — one screenshot, no time window, and a rival shows up even if they never submit. Unit-tested. |
@@ -214,6 +215,20 @@ Sheets era). Cogs index into them positionally. Key maps:
   relevant question (per-weapon TDs → TD questions; per-weapon ratings → rating
   questions). Match a player's board rows on EITHER discord_id OR name (a stale
   non-blank id or a name variant will otherwise miss their own boards).
+- Butler stats answers now run on TWO paths, tool-first with a context fallback.
+  A data question (`_looks_like_data_question`) first tries `helpers.butler_answer_with_tools`,
+  which hands the model the `utils/butler_tools.py` toolset and lets it CALL tools to
+  fetch exact numbers (the fix for the endless "add another context block and hope the
+  model reads it" churn — e.g. missing match-points, only-the-#1-map). If the tool path
+  returns '' (import/API blip) it falls straight through to the classic
+  `_build_player_stats_ctx` + `butler_complete` path, so it can never do worse than the
+  old behaviour. To make a new kind of question answerable, ADD A TOOL in
+  `utils/butler_tools.py` (fn + `TOOL_SCHEMAS` entry) — do NOT go back to hand-adding
+  per-metric injection blocks in `_build_player_stats_ctx`. The tool path logs usage under
+  `purpose='chat_data_tools'` on the `/dev` dashboard; the loop is bounded
+  (`max_rounds`, `_RESULT_CAP`, truncated payloads) and every tool is read-only. The old
+  context path is kept as the fallback for now; retire parts of it only once the tool path
+  is proven in production.
 
 ## Environment variables
 
