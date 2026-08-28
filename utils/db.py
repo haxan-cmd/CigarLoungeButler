@@ -815,7 +815,9 @@ async def get_ai_usage(days: int = 30):
         _mod = await conn.fetch(
             f"SELECT provider, model, COUNT(*) n, COALESCE(SUM(prompt_tokens),0) p, "
             f"COALESCE(SUM(completion_tokens),0) c, COALESCE(SUM(reasoning_tokens),0) r "
-            f"FROM ai_usage WHERE ts >= {win} GROUP BY provider, model ORDER BY (p+c+r) DESC")
+            f"FROM ai_usage WHERE ts >= {win} GROUP BY provider, model "
+            f"ORDER BY (COALESCE(SUM(prompt_tokens),0)+COALESCE(SUM(completion_tokens),0)"
+            f"+COALESCE(SUM(reasoning_tokens),0)) DESC")
         out['by_model'] = [dict(provider=x['provider'], model=x['model'], requests=int(x['n']),
                                 prompt=int(x['p']), completion=int(x['c']),
                                 reasoning=int(x['r'])) for x in _mod]

@@ -221,7 +221,11 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
             r = await _openai_client.chat.completions.create(
                 model=BUTLER_MODEL,
                 max_completion_tokens=max_tokens,
-                reasoning_effort=reasoning_effort,
+                # gpt-5.6-luna on /v1/chat/completions REJECTS function tools unless
+                # reasoning_effort is 'none' (400 otherwise). Tool calling doesn't need
+                # reasoning anyway — tool_choice='required' forces the fetch on round 0 —
+                # so pin it to 'none' regardless of the caller's requested effort.
+                reasoning_effort='none',
                 tools=_bt.TOOL_SCHEMAS,
                 tool_choice=_tc,
                 messages=messages,
@@ -270,9 +274,13 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
                 'role': 'tool', 'tool_call_id': tc.id,
                 'content': _json.dumps(result, default=str)[:6000],
             })
-    # Out of rounds (or a transient error): force a final answer from what we have.
     if last_err is not None:
+        # The tool API itself failed. Return '' so the caller falls back to the classic
+        # context path (a real answer) rather than a data-less deflection.
         print(f"[BUTLER] tools loop error (model={BUTLER_MODEL}): {last_err}")
+        return ''
+    # Ran out of rounds while still calling tools: force a final answer from the results
+    # already gathered (messages hold the tool outputs).
     try:
         r2 = await _openai_client.chat.completions.create(
             model=BUTLER_MODEL, max_completion_tokens=max_tokens, reasoning_effort='none',
