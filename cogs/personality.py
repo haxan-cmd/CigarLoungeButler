@@ -120,7 +120,7 @@ Special instructions:
 - When 'RIVALRY DATA' is in your context, it lists the asker's NEMESIS (the foe they cross paths with most) and their closest ALLY (most confirmed on the same team), from shared-lobby history. There is deliberately NO win/loss record: a submitted scoreboard is a snapshot, not a final result, so never claim the asker "beat" or "lost to" anyone. Instead you get how many times they have MET and each player's AVERAGE takedowns/kills across those shared games. Narrate the rivalry as a recurring saga (fated to keep meeting) and use the averages to say who tends to show up bigger. Only name matchups in the block; never invent a rivalry. Do NOT speculate about the nemesis's or ally's OWN record, run count, or career: you only know their shared history with the asker.
 - Best games are provided for the top-10 roster and for any player named in the message (see the 'Asked-about player(s)' section). Only if a player's numbers aren't in your context, say you don't have them to hand and point to their registry card.
 - When available, you have a server-wide count for a specific weapon (e.g. "how many 100+ TD runs with Messer"). Use it for those community-count questions. You do NOT have a full per-player feat list — don't claim to.
-- When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, most-played weapon/map/subclass, and per-weapon meta. Answer "how many players", "how active", "how often", "per day", and "average" questions straight from it. Do NOT deflect to /serverstats for a figure that is already sitting in this block.
+- When a SERVER AGGREGATE STATS block is in your context it includes: community size (unique submitters), DAILY CADENCE (average runs per active day AND average unique players per active day, plus the busiest day), server-wide per-run averages, RANKED top-5 lists of the most-played weapons, maps, and subclasses by run count, the most active players, and per-weapon + per-map breakdowns. Answer "how many players", "how active", "how often", "per day", "average", and "top N maps/weapons/subclasses by runs" questions straight from it — the ranked lists give you 1st, 2nd, 3rd and beyond, so never say you only have the #1 or that the other positions aren't in your ledger. Do NOT deflect to /serverstats or /explore for a figure that is already sitting in this block.
 - A LIVE SERVER PULSE block is attached for reference: the current most-used weapons (with run counts), the rarely-used ones, the hottest/coldest maps, and the reigning #1s on the top weapons' boards. It is REFERENCE MATERIAL, not a prompt to perform — most replies should not touch it at all. Only when someone actually asks about the meta, a weapon, or a map do you reach for it, and then the numbers are real and grounded (citing them is never fabrication; never inflate them). Do not narrate the pulse or work it into unrelated answers.
 - You MAY, on rare occasion when a weapon's top holder is directly relevant, coin a dry title for a reigning #1 the pulse names (e.g. the top Messer holder as "King Messer"). This is an occasional flourish, not a habit — do not hand out titles unprompted or on consecutive messages, and only ever crown a player the pulse actually lists as #1.
 - A MEMORY line about the person you are talking to may be attached — a short profile DERIVED from their play history (their main weapon, playstyle, how long they've been around, whether they are a regular or long gone). Treat it as real, known facts: you remember your regulars. When it fits, weave ONE detail in naturally, the way a butler who knows the room would ("the Messer main returns", "back after a quiet spell", "still no closer to mastering that axe"). Do NOT recite the profile, list it, or announce that you "have memory" — just let it colour how you greet and needle them. It is derived truth, so citing it is never fabrication. It reflects only THIS person; never use it to make claims about anyone else, and if there is no MEMORY line, do not pretend to recall them.
@@ -1114,14 +1114,20 @@ def _server_aggregates(subs):
                  f"Per active day on average: {_avg_runs:.1f} runs by {_avg_uniq:.1f} unique players "
                  f"(busiest day {_busiest[0]} with {_busiest[1][0]} runs). "
                  f"Server-wide per run: {tot_td/tot_n:.1f} TD, {tot_k/tot_n:.1f} kills.")
-    _tw = max(W.items(), key=lambda x: x[1][0]) if W else None
-    _ts = max(S.items(), key=lambda x: x[1][0]) if S else None
-    _tm = max(M.items(), key=lambda x: x[1][0]) if M else None
-    L.append("Most played — "
-             + (f"weapon: {_tw[0]} ({_tw[1][0]} runs); " if _tw else "")
-             + (f"subclass: {_ts[0]} ({_ts[1][0]}); " if _ts else "")
-             + (f"map: {_tm[0]} ({_tm[1][0]}); " if _tm else "")
-             + f"faction split: {_fs(Fac)}.")
+    # Explicit RANKED top-5 lists (not just the single #1) so "what are the top 3
+    # maps/weapons/subclasses by runs" is answerable straight from this line — the model
+    # shouldn't have to infer a ranking from the avg-per-run breakdown tables below, and
+    # a single-#1 line was making it deflect on 2nd/3rd place ("not in my ledger").
+    _tw5 = sorted(W.items(), key=lambda x: -x[1][0])[:5]
+    _ts5 = sorted(S.items(), key=lambda x: -x[1][0])[:5]
+    _tm5 = sorted(M.items(), key=lambda x: -x[1][0])[:5]
+    if _tw5:
+        L.append("Most-played weapons by runs (ranked): " + ", ".join(f"{w} ({e[0]})" for w, e in _tw5) + ".")
+    if _tm5:
+        L.append("Most-played maps by runs (ranked): " + ", ".join(f"{m} ({e[0]})" for m, e in _tm5) + ".")
+    if _ts5:
+        L.append("Most-played subclasses by runs (ranked): " + ", ".join(f"{s} ({e[0]})" for s, e in _ts5) + ".")
+    L.append(f"Faction split: {_fs(Fac)}.")
     L.append("Most active players: " + ", ".join(f"{n} ({c})" for n, c in sorted(Players.items(), key=lambda x: -x[1])[:5]) + ".")
     _wl = sorted([(w, e) for w, e in W.items() if e[0] >= 5], key=lambda x: -x[1][0])
     if _wl:
