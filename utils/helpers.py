@@ -213,13 +213,17 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
 
     last_err = None
     for _round in range(max_rounds):
+        # FORCE a tool call on the first round: a stats question must FETCH before it may
+        # answer, so the model can't just deflect ("I don't have that ranking") without
+        # trying. After round 0 it's 'auto' so it can finalise once it has the data.
+        _tc = 'required' if _round == 0 else 'auto'
         try:
             r = await _openai_client.chat.completions.create(
                 model=BUTLER_MODEL,
                 max_completion_tokens=max_tokens,
                 reasoning_effort=reasoning_effort,
                 tools=_bt.TOOL_SCHEMAS,
-                tool_choice='auto',
+                tool_choice=_tc,
                 messages=messages,
             )
         except Exception as e:

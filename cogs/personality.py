@@ -686,11 +686,17 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                 _tool_prompt = (
                     f"{context_str}{channel_note}Player asking: {player_name}{idiot_note}"
                     f"{chaos_note}{list_note}{style_note}\nTheir message: {truncated_msg}\n\n"
-                    "[Answer with EXACT numbers. CALL the stat tools to fetch data — never guess a "
-                    "stat or a ranking. When the player says my/me/I/mine, they mean themselves: pass "
-                    f"\"{player_name}\" as the player argument. Keep your normal dry Butler voice and "
-                    "length; do not dump raw tool output. If this is genuine feedback or a complaint "
-                    "needing the Manager, start with EYEBALL on its own line.]" + lore_note + french_note)
+                    "[You have LIVE data tools — you are NOT limited to any pre-loaded context. "
+                    "For ANY question about stats, rankings, records, players, weapons, maps or the "
+                    "meta, you MUST call a tool to fetch the real numbers FIRST, then answer from what "
+                    "it returns. NEVER say you 'don't have' a stat or ranking without calling a tool — "
+                    "fetch it. Guidance: 'X on tenosian/agathian/mason maps' = query_runs filtered by "
+                    "faction (Tenosia/Agatha/Mason); 'best/highest X on <map>' or 'with <weapon>' = "
+                    "query_runs filtered by map/weapon; 'who has the most <career/feat> X' = rank_leaders; "
+                    "'my/X's stats' = get_player_card. When the player says my/me/I/mine they mean "
+                    f"themselves: pass \"{player_name}\". Keep your normal dry Butler voice and length; "
+                    "do not dump raw tool output. If this is genuine feedback or a complaint needing "
+                    "the Manager, start with EYEBALL on its own line.]" + lore_note + french_note)
                 text = await _butler_answer_with_tools(
                     BUTLER_SYSTEM_PROMPT, _tool_prompt, 1400,
                     reasoning_effort='low', purpose='chat_data_tools')
