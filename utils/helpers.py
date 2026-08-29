@@ -412,18 +412,20 @@ Also read match_result: the huge VICTORY or DEFEAT text in the center of the scr
 
 _HALF_ROSTER_PROMPT = """This image is ONE team's half of a Chivalry 2 end-of-round
 scoreboard (the columns RANK | NAME | SCORE | T | K | D | PING). Read EVERY row, top to
-bottom, skipping none. For each row return its T (takedowns) and K (kills) integers.
-T is the takedowns column (typically 10-400), K is kills (<= T), both far smaller than
-the SCORE column. Ignore RANK, SCORE, D, PING, and any Discord/voice overlay cards on
-the screen edges. Return ONLY this JSON: {"scores":[T,T,...],"kills":[K,K,...]} with one
-entry per row in top-to-bottom order. Start with { and end with }."""
+bottom, skipping none. For each row return its NAME (the NAME column text), its T
+(takedowns) and its K (kills). T is the takedowns column (typically 10-400), K is kills
+(<= T), both far smaller than the SCORE column. Read the NAME EXACTLY as printed (keep
+clan tags and symbols); do not translate or invent. Ignore RANK, SCORE, D, PING, and any
+Discord/voice overlay cards on the screen edges. Return ONLY this JSON:
+{"names":[NAME,...],"scores":[T,...],"kills":[K,...]} with one entry per row, the three
+arrays in the SAME top-to-bottom order and the SAME length. Start with { and end with }."""
 
 
 def _read_half_roster(pil_img, gtypes, gemini_client):
-    """Read one cropped team-column's T/K values. Returns (scores, kills) lists.
-    Cropping to a single team doubles the effective text size and removes the other
-    half, which is what lets vision read every row on a dense 60-player board that it
-    skips when shown the whole thing at once."""
+    """Read one cropped team-column's NAME/T/K per row. Returns (names, scores, kills),
+    the three lists ROW-ALIGNED (one entry per readable row). Cropping to a single team
+    doubles the effective text size and removes the other half, which is what lets vision
+    read every row — names included — on a dense 60-player board that it skips whole."""
     import io as _io, json as _json
     buf = _io.BytesIO()
     pil_img.save(buf, format='JPEG', quality=95)
@@ -443,11 +445,53 @@ def _read_half_roster(pil_img, gtypes, gemini_client):
             raw = raw[4:].strip()
     s = raw.find('{')
     if s == -1:
-        return [], []
+        return [], [], []
     d, _ = _json.JSONDecoder().raw_decode(raw[s:])
-    def _ints(x):
-        return [v for v in (x or []) if isinstance(v, int) and 0 < v <= 600]
-    return _ints(d.get('scores')), _ints(d.get('kills'))
+    _names = d.get('names') or []
+    _scores = d.get('scores') or []
+    _kills = d.get('kills') or []
+    # Keep rows ROW-ALIGNED: one output entry per row that has a valid takedown score, so
+    # names line up with scores/kills (needed to attribute the roster to the right player).
+    out_n, out_s, out_k = [], [], []
+    for _i in range(max(len(_scores), len(_kills), len(_names))):
+        _sc = _scores[_i] if _i < len(_scores) and isinstance(_scores[_i], int) and 0 < _scores[_i] <= 600 else None
+        if _sc is None:
+            continue
+        _kl = _kills[_i] if _i < len(_kills) and isinstance(_kills[_i], int) and 0 <= _kills[_i] <= 600 else 0
+        _nm = str(_names[_i]).strip() if _i < len(_names) and _names[_i] is not None else ''
+        out_n.append(_nm); out_s.append(_sc); out_k.append(_kl)
+    return out_n, out_s, out_k
+
+
+def _salvage_scalars(raw, empty):
+    """Regex-extract the SCALAR scorecard fields from a raw JSON string when json.loads
+    fails. Dense 64-player boards with exotic names sometimes truncate mid-`\\uXXXX`
+    escape, producing invalid JSON — but the fields we most need (player stats, map,
+    faction) come FIRST in the response, well before the huge roster arrays where the
+    break happens, so a regex pull recovers them. The roster is left empty and refilled
+    by the half-crop recovery pass. Returns a dict seeded from `empty`."""
+    import re as _re
+    out = dict(empty)
+    for _f, _pat in (('takedowns', r'"takedowns"\s*:\s*(\d+)'),
+                     ('kills', r'"kills"\s*:\s*(\d+)'),
+                     ('deaths', r'"deaths"\s*:\s*(\d+)'),
+                     ('score', r'"score"\s*:\s*(\d+)'),
+                     ('team_total_kills', r'"team_total_kills"\s*:\s*(\d+)'),
+                     ('enemy_total_kills', r'"enemy_total_kills"\s*:\s*(\d+)'),
+                     ('best_teammate_takedown', r'"best_teammate_takedown"\s*:\s*(\d+)')):
+        _m = _re.search(_pat, raw)
+        if _m:
+            out[_f] = int(_m.group(1))
+    for _f, _pat in (('map', r'"map"\s*:\s*"([^"]*)"'),
+                     ('faction', r'"faction"\s*:\s*"([^"]*)"'),
+                     ('name', r'"name"\s*:\s*"([^"]*)"'),
+                     ('weapon', r'"weapon"\s*:\s*"([^"]*)"'),
+                     ('subclass', r'"subclass"\s*:\s*"([^"]*)"'),
+                     ('match_result', r'"match_result"\s*:\s*"([^"]*)"')):
+        _m = _re.search(_pat, raw)
+        if _m and _m.group(1) and _m.group(1).lower() != 'null':
+            out[_f] = _m.group(1)
+    return out
 
 
 def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=None,
@@ -567,7 +611,7 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                         # ~1k tokens, and the 512-token thinking budget also draws from
                         # this pool — 2048 risked truncating the roster on big lobbies,
                         # so 4096 gives real headroom without inviting a runaway.
-                        max_output_tokens=6144,
+                        max_output_tokens=8192,
                         thinking_config=_gtypes.ThinkingConfig(thinking_budget=512),
                     )
                 )
@@ -606,8 +650,17 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
             try:
                 data, _ = _json.JSONDecoder().raw_decode(raw[_start:])
             except _json.JSONDecodeError as _je:
-                print(f"[VISION] JSON parse failed after extract: {_je}")
-                return empty
+                # A dense 64-player roster with exotic names can truncate mid-\uXXXX escape,
+                # breaking the JSON. Don't throw the whole read away — regex-salvage the
+                # scalar fields (which come before the roster), and let the half-crop pass
+                # rebuild the roster. Only give up if even the player stats are unreadable.
+                print(f"[VISION] JSON parse failed ({_je}) — salvaging scalar fields via regex")
+                data = _salvage_scalars(raw, empty)
+                if data.get('takedowns') is None and data.get('kills') is None:
+                    print("[VISION] Salvage found no player stats — giving up")
+                    return empty
+                print(f"[VISION] Salvaged: TD={data.get('takedowns')} K={data.get('kills')} "
+                      f"map={data.get('map')} faction={data.get('faction')} name={data.get('name')}")
         # --- Safety net: make sure the model read the SUBMITTER's row, not a
         # party member's. Gemini sometimes locks onto a green-highlighted friend
         # row. If the name it returned doesn't match the submitter's known name(s),
@@ -748,33 +801,35 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
                 _ov = int(_pw * 0.04)  # slight overlap so a centre gutter can't clip edge digits
                 _left = _pp_img.crop((0, 0, _mid + _ov, _ph))
                 _right = _pp_img.crop((max(0, _mid - _ov), 0, _pw, _ph))
-                _ls, _lk = _read_half_roster(_left, _gtypes, _gemini_client)
-                _rs, _rk = _read_half_roster(_right, _gtypes, _gemini_client)
+                _ln, _ls, _lk = _read_half_roster(_left, _gtypes, _gemini_client)
+                _rn, _rs, _rk = _read_half_roster(_right, _gtypes, _gemini_client)
                 print(f"[VISION] Half-crop rosters: left {len(_ls)} rows, right {len(_rs)} rows")
                 _std, _sk = data.get('takedowns'), data.get('kills')
 
-                def _strip_self(scores, kills):
+                def _strip_self(names, scores, kills):
                     # drop one instance of the submitter's own row from their team half
                     if isinstance(_std, int) and _std in scores:
                         i = scores.index(_std)
+                        names = names[:i] + names[i + 1:]
                         scores = scores[:i] + scores[i + 1:]
                         if i < len(kills):
                             kills = kills[:i] + kills[i + 1:]
-                    return scores, kills
+                    return names, scores, kills
 
-                _ts = _tk = _es = _ek = None
+                _tn = _ts = _tk = _en = _es = _ek = None
                 if isinstance(_std, int) and _std in _ls:
-                    _ts, _tk = _strip_self(_ls, _lk); _es, _ek = _rs, _rk
+                    _tn, _ts, _tk = _strip_self(_ln, _ls, _lk); _en, _es, _ek = _rn, _rs, _rk
                 elif isinstance(_std, int) and _std in _rs:
-                    _ts, _tk = _strip_self(_rs, _rk); _es, _ek = _ls, _lk
+                    _tn, _ts, _tk = _strip_self(_rn, _rs, _rk); _en, _es, _ek = _ln, _ls, _lk
                 else:
                     print("[VISION] Half-crop: submitter's own row not found in either half; skipping")
 
-                _merged = {'team_scores': _ts or [], 'team_kills': _tk or [],
-                           'enemy_scores': _es or [], 'enemy_kills': _ek or []}
+                _merged = {'team_scores': _ts or [], 'team_kills': _tk or [], 'team_names': _tn or [],
+                           'enemy_scores': _es or [], 'enemy_kills': _ek or [], 'enemy_names': _en or []}
                 if _ts and _roster_len(_merged) > _roster_len(data):
                     data.update(_merged)
-                    print(f"[VISION] Half-crop recovered roster: team {len(_ts)} / enemy {len(_es or [])}")
+                    print(f"[VISION] Half-crop recovered roster: team {len(_ts)} / enemy {len(_es or [])} "
+                          f"(names: {sum(1 for n in (_tn or []) + (_en or []) if n)})")
             except Exception as _hce:
                 print(f"[VISION] Half-crop pass error: {_hce}")
 
