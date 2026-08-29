@@ -823,12 +823,14 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
 
 def _vision_read_weak(d) -> bool:
     """True when a scorecard read looks unreliable and is worth a stronger second look:
-    a core stat missing (weapon / takedowns / kills), the submitter's row name unread, or
-    an impossible map/faction pair. Deliberately NARROW — a clean read never escalates, so
-    the pricier model is spent only on the hard scorecards."""
+    a core STAT missing (takedowns / kills), the submitter's row name unread, or an
+    impossible map/faction pair. IMPORTANT: weapon & subclass are NOT printed on the
+    scoreboard — they come from the caption later — so their absence is NORMAL and must
+    never count as weak. (Checking weapon here made EVERY read look weak, forcing the
+    fallback/merge path on every submission and intermittently dropping stat lines.)"""
     if not d:
         return True
-    if d.get('weapon') in (None, '') or d.get('takedowns') is None or d.get('kills') is None:
+    if d.get('takedowns') is None or d.get('kills') is None:
         return True
     if not (str(d.get('name') or '').strip()):
         return True
@@ -843,37 +845,41 @@ def _vision_read_weak(d) -> bool:
     return False
 
 
+# The stronger model used ONLY to re-read a weak scorecard. gemini-2.5-pro returned 404
+# ("no longer available to new users"); this is the replacement Google points to. Only
+# ever called on a weak read, and always covered by the flash result if it fails — so a
+# bad/unavailable value here degrades to plain flash, never a broken submission.
+_VISION_ESCALATION_MODEL = 'gemini-3.1-pro-preview'
+
+
 def vision_parse_scorecard_smart(image_url: str, player_name: str = None, other_names=None) -> dict:
-    """Read every scorecard on the stronger gemini-2.5-pro for the best digit accuracy (a 3
-    misread as an 8 is a pro-vs-flash-class error, so pro is the primary reader now). Flash
-    is kept ONLY as a resilience fallback: if the pro read errors or comes back weak (missing
-    core stats / unread name / impossible map+faction), we cross-check flash so a pro outage
-    or hiccup can never block a submission. Sync so `asyncio.to_thread(...)` call sites just
-    swap the function name."""
-    pro = None
-    try:
-        pro = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-pro')
-    except Exception as e:
-        print(f"[VISION] pro read errored, falling back to flash: {e}")
-    if pro and not _vision_read_weak(pro):
-        return pro
-    # Pro errored or came back weak — get a flash read to fall back on.
-    print("[VISION] pro read weak/failed — cross-checking with gemini-2.5-flash")
-    try:
-        flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
-    except Exception as e:
-        print(f"[VISION] flash fallback also failed: {e}")
-        return pro or {}
-    if pro is None:
-        return flash                       # pro unavailable: flash is all we have
+    """Read every scorecard on the cheap gemini-2.5-flash and return it AS-IS when the read
+    is clean (stats + name read, legal map/faction) — that's the common path: one fast read,
+    no extra latency, no dependence on the pro model. Only a genuinely WEAK read is re-read on
+    the stronger model, and pro's result is used only if it's actually better; if pro errors
+    or isn't available, the flash read stands. Sync so `asyncio.to_thread(...)` call sites
+    just swap the function name."""
+    flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
     if not _vision_read_weak(flash):
-        return flash                       # flash gave a clean read where pro didn't
-    # Both weak: prefer pro, backfill any blanks from flash.
-    merged = dict(pro)
-    for k, v in (flash or {}).items():
-        if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
-            merged[k] = v
-    return merged
+        return flash
+    print(f"[VISION] weak first read — escalating to {_VISION_ESCALATION_MODEL}")
+    try:
+        pro = vision_parse_scorecard(image_url, player_name, other_names, model=_VISION_ESCALATION_MODEL)
+    except Exception as e:
+        print(f"[VISION] pro escalation failed, keeping flash read: {e}")
+        return flash
+    if not pro or _vision_read_weak(pro):
+        # pro no better: keep flash, backfill only blanks from pro.
+        merged = dict(flash or {})
+        for k, v in (pro or {}).items():
+            if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
+                merged[k] = v
+        return merged
+    # pro read is solid: prefer it, but keep flash's roster arrays where pro's came back empty.
+    for _rk in ('team_names', 'enemy_names', 'team_scores', 'enemy_scores', 'team_kills', 'enemy_kills'):
+        if not pro.get(_rk) and flash.get(_rk):
+            pro[_rk] = flash[_rk]
+    return pro
 
 
 def build_favourites_explainer_embed():
