@@ -4635,7 +4635,8 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
     return {'ok': True, 'player': pname, 'weapon': weapon, 'map': _map, 'faction': fac,
             'old': old, 'new': f"{td}/{k}/{d}", 'score': score,
             'feats': feats_str if feats_str != 'None' else '',
-            'kill_share': _tks, 'roster': bool(_rost)}
+            'kill_share': _tks, 'roster': bool(_rost),
+            'warlord': round(td / _tt_kills * 100, 1) if (_tt_kills and _tt_kills > 0) else None}
 
 
 class SubmissionsCog(commands.Cog):
@@ -4669,6 +4670,7 @@ class SubmissionsCog(commands.Cog):
                + (f" · feats: {res['feats']}" if res.get('feats') else "")
                + "\nBoards and registry card updated."
                + (f"\nRatings restored — Kill Share {res['kill_share']}%"
+                  + (f", Warlord {res['warlord']}%" if res.get('warlord') is not None else "")
                   + (", roster stored" if res.get('roster') else "")
                   if res.get('kill_share') is not None
                   else "\n⚠️ Couldn't read the team totals off this board, so Warlord/Kill Share may still be blank."))
