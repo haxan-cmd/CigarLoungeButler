@@ -396,6 +396,13 @@ Example 3 (highlighted row is near bottom):
 
 The T column (takedowns) is always a small integer, typically 10–400. The SCORE column is always a large number (thousands). Never confuse them.
 
+FINAL VERIFICATION (do this silently before you output — it catches most misreads):
+Re-read the highlighted player's T, K and D one more time, digit by digit, against the actual pixels. Then apply these HARD checks, each of which exposes a misread:
+1. KILLS ≤ TAKEDOWNS, ALWAYS. A takedown is a kill or an assist, so kills can never exceed takedowns. If your kills came out higher than your takedowns, you misread a digit in one of them — re-read both and correct until K ≤ T. (This single rule catches the common 3↔8 / 5↔6 slip.)
+2. RANGE: for a listed player takedowns are almost always 0–400 and deaths 0–60. A value far outside that means you grabbed the wrong column (SCORE or RANK) or flipped a digit — go back to that exact row and re-read it.
+3. ORDER: within the row, SCORE (thousands) > T ≥ K, and D is its own small number. If that ordering is broken, you crossed a column boundary — fix it.
+Only output the JSON once all three checks pass for the highlighted row.
+
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
 Also read match_result: the huge VICTORY or DEFEAT text in the center of the screen (often faint behind the scoreboard). This is the SUBMITTER's result. "victory", "defeat", or null if not visible.
