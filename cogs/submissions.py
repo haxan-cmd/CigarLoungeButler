@@ -4490,10 +4490,150 @@ class RejectedSubmissionView(discord.ui.View):
 # concurrent submissions to the same board can't lose an update / dup.
 _BOARD_LOCK = asyncio.Lock()
 
+
+async def _reparse_submission_by_link(guild, message_link: str) -> dict:
+    """Re-read a submission's ORIGINAL scorecard image and repair its stats plus everything
+    derived from them (boards, marks, registry card). Built for runs whose stats vision
+    missed the first time. Keeps the run's weapon/subclass (they come from the caption, not
+    the board) and its map/faction when already present; takes takedowns/kills/deaths/score
+    from the fresh read. Board placement is redone with the same additive engine the edit and
+    startup-reconcile paths use. Returns a result dict for the caller to report."""
+    def _si(x, dflt=0):
+        try:
+            return int(str(x).replace(',', '').strip())
+        except (ValueError, TypeError, AttributeError):
+            return dflt
+
+    row = await _db.get_full_submission_by_link(message_link)
+    if not row:
+        return {'error': 'No submission found with that message link.'}
+    try:
+        _id = int(row[23])
+    except (ValueError, TypeError, IndexError):
+        return {'error': 'That submission row has no id — cannot update it safely.'}
+    did = (row[2] or '').strip()
+    pname = (row[1] or '').strip()
+    old = f"{_si(row[7])}/{_si(row[8])}/{_si(row[9])}"
+
+    # Fetch the original scorecard image from the message the link points to.
+    try:
+        _parts = message_link.rstrip('/').split('/')
+        _ch_id, _msg_id = int(_parts[-2]), int(_parts[-1])
+    except Exception:
+        return {'error': 'Malformed message link.'}
+    try:
+        _ch = guild.get_channel(_ch_id) or await guild.fetch_channel(_ch_id)
+        _msg = await _ch.fetch_message(_msg_id)
+    except Exception as e:
+        return {'error': f'Could not fetch the original message ({e}). The scorecard may be deleted — use manual correction.'}
+    _att = next((a for a in _msg.attachments
+                 if (a.content_type or '').startswith('image/')
+                 or a.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))), None)
+    if not _att:
+        return {'error': 'No image attached to that message — use manual correction instead.'}
+
+    # Re-read the scorecard (flash).
+    try:
+        _igns = await _db.get_player_igns(did) or []
+    except Exception:
+        _igns = []
+    _hint = ', '.join(_igns + [pname]) if _igns else pname
+    try:
+        _n2i = await _db.get_name_to_id_map()
+        _other = [nm for nm, i in _n2i.items() if str(i) != str(did)]
+    except Exception:
+        _other = []
+    parsed = await asyncio.to_thread(vision_parse_scorecard_smart, _att.url, _hint, _other)
+    if not parsed or parsed.get('takedowns') is None or parsed.get('kills') is None:
+        return {'error': 'Vision still could not read the stats off that scorecard. Try manual correction.'}
+
+    # Corrected values: keep caption-derived weapon/subclass + existing map/faction.
+    weapon = (row[3] or '').strip() or None
+    cls = (row[4] or '').strip() or None
+    _map = (row[5] or '').strip() or (parsed.get('map') or '').strip() or None
+    if _map and _map not in config.MAP_FACTIONS:
+        _map = config.MAP_ALIASES.get(_map.lower(), _map)
+    fac = (row[6] or '').strip() or (parsed.get('faction') or '').strip() or None
+    td = int(parsed['takedowns']); k = int(parsed['kills']); d = int(parsed.get('deaths') or 0)
+    vip = str(row[10]).strip().lower() in ('yes', 'true', '1')
+    score = parsed.get('score') if isinstance(parsed.get('score'), int) else (_si(row[24]) or None)
+
+    # Recompute feats from the corrected stats (preserve mod/lobby KEEP tags).
+    _old_f = [f.strip() for f in (row[11] or '').split(',') if f.strip() and f.strip() != 'None']
+    _KEEP = {'Resubmit', 'Unlisted', 'High Score', 'Brutal', 'Outmatched', 'Uphill'}
+    _nf = [f for f in _old_f if f in _KEEP]
+    _is_triple = is_triple_run(k, td, score, confirmed=('Triple' in _old_f))
+    _nf.extend(derive_stat_feats(k, td, d, weapon, FEAT_WEAPONS, _is_triple))
+    feats_str = ', '.join(_nf) if _nf else 'None'
+
+    await _db.update_submission_fields(
+        _id, weapon, cls, _map, fac, td, k, d, vip, feats_str,
+        score=score if isinstance(score, int) else None)
+
+    # Re-place boards + refresh the card (same additive engine as the edit path).
+    from cogs.leaderboards import rebuild_score_boards, reseed_feat_boards_for_run
+    from cogs.registry import create_or_update_registry_card
+    async with _BOARD_LOCK:
+        try:
+            await _db.delete_leaderboard_entries_by_link(message_link)
+        except Exception as _de:
+            print(f"[REPARSE] board clear error: {_de}")
+        _boards = set()
+        if weapon and not vip and weapon.lower() not in ('none', 'hybrid'):
+            _boards.add(weapon); _boards.add(f"{weapon} Kills")
+        if _map and fac:
+            _boards.add(f"{_map} - {fac}")
+        if _boards:
+            try:
+                await rebuild_score_boards(guild, board_names=list(_boards), only_player=str(did))
+            except Exception as _rbe:
+                print(f"[REPARSE] board rebuild error: {_rbe}")
+        try:
+            await reseed_feat_boards_for_run(guild, pname, str(did), message_link, k, td, weapon, _nf)
+        except Exception as _fre:
+            print(f"[REPARSE] feat reseed error: {_fre}")
+    try:
+        if did.isdigit():
+            await create_or_update_registry_card(guild, int(did), pname)
+    except Exception as _cre:
+        print(f"[REPARSE] card refresh error: {_cre}")
+
+    return {'ok': True, 'player': pname, 'weapon': weapon, 'map': _map, 'faction': fac,
+            'old': old, 'new': f"{td}/{k}/{d}", 'score': score,
+            'feats': feats_str if feats_str != 'None' else ''}
+
+
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._prompted_messages: set[int] = set()
+
+    @app_commands.command(name="reparse_submission",
+                          description="Re-read a submission's scorecard image to repair missing stats (mod only).")
+    @app_commands.describe(message_link="Link to the player's ORIGINAL scorecard message (the image, not the bot's reply).")
+    async def reparse_submission(self, interaction: discord.Interaction, message_link: str):
+        from utils.helpers import is_mod
+        if not is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            res = await _reparse_submission_by_link(interaction.guild, message_link.strip())
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(f"❌ Reparse failed: {e}", ephemeral=True)
+            return
+        if res.get('error'):
+            await interaction.followup.send(f"⚠️ {res['error']}", ephemeral=True)
+            return
+        msg = (f"✅ Reparsed **{res['player']}** — {res.get('weapon') or '?'} on "
+               f"{res.get('map') or '?'} / {res.get('faction') or '?'}\n"
+               f"Stats: `{res['old']}` → **`{res['new']}`** TD/K/D"
+               + (f" · score {res['score']:,}" if isinstance(res.get('score'), int) else "")
+               + (f" · feats: {res['feats']}" if res.get('feats') else "")
+               + "\nBoards and registry card updated.")
+        await interaction.followup.send(msg, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message):

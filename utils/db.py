@@ -986,6 +986,16 @@ async def get_submission_by_link(message_link: str):
             r['kills'], float(r['team_kill_share']) if r['team_kill_share'] is not None else None)
 
 
+async def get_full_submission_by_link(message_link: str):
+    """The FULL submission row (list-of-strings, standard column indices) for one
+    message_link, or None. Used by the reparse tool, which needs the id + discord_id +
+    every field, unlike the reduced get_submission_by_link."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT * FROM submissions WHERE message_link=$1 LIMIT 1", message_link)
+    return _row_to_submission(r) if r else None
+
+
 async def get_lobbymates(discord_id: str, message_link: str, window_min: int = 45) -> list[dict]:
     """Find OTHER players who submitted the SAME match as this run.
 
