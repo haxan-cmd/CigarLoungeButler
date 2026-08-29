@@ -4570,6 +4570,40 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
         _id, weapon, cls, _map, fac, td, k, d, vip, feats_str,
         score=score if isinstance(score, int) else None)
 
+    # Restore the WHOLE-LOBBY fields that drive Kill Share / Warlord / TUFF / difficulty —
+    # the ratings manual entry can't produce. Same formulas as finalise.
+    _TDMAX = 600
+    _team_td = [s for s in (parsed.get('team_scores') or []) if isinstance(s, int) and 0 < s <= _TDMAX]
+    _team_k = [s for s in (parsed.get('team_kills') or []) if isinstance(s, int) and 0 <= s <= _TDMAX]
+    _enemy_k = [s for s in (parsed.get('enemy_kills') or []) if isinstance(s, int) and 0 <= s <= _TDMAX]
+    _tt_kills = parsed.get('team_total_kills') if isinstance(parsed.get('team_total_kills'), int) else None
+    _et_kills = parsed.get('enemy_total_kills') if isinstance(parsed.get('enemy_total_kills'), int) else None
+    if not _tt_kills and _team_k:
+        _tt_kills = k + sum(_team_k)
+    _tks = round(k / _tt_kills * 100, 1) if (_tt_kills and k and _tt_kills >= k) else None
+    _ttd_total = td + sum(_team_td)
+    _ttds = round(td / _ttd_total * 100, 1) if _ttd_total > 0 else None
+    _tlk = (k + sum(_team_k) + sum(_enemy_k)) or None
+    _bt = list(_team_td)
+    _btv = parsed.get('best_teammate_takedown')
+    if isinstance(_btv, int) and 0 < _btv <= _TDMAX and _btv != td:
+        _bt.append(_btv)
+    _sptd = max(_bt) if _bt else None
+    try:
+        await _db.update_submission_lobby(
+            _id, team_kill_share=_tks, team_td_share=_ttds, second_place_td=_sptd,
+            total_lobby_kills=_tlk, team_total_kills=_tt_kills, enemy_total_kills=_et_kills)
+    except Exception as _lbe:
+        print(f"[REPARSE] lobby-field update error: {_lbe}")
+    # Roster (feeds rivalries / nemesis-ally).
+    _rost = []
+    try:
+        _rost = _roster_from_vision(parsed)
+        if _rost:
+            await _db.save_submission_roster(_id, _rost)
+    except Exception as _rse:
+        print(f"[REPARSE] roster save error: {_rse}")
+
     # Re-place boards + refresh the card (same additive engine as the edit path).
     from cogs.leaderboards import rebuild_score_boards, reseed_feat_boards_for_run
     from cogs.registry import create_or_update_registry_card
@@ -4600,7 +4634,8 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
 
     return {'ok': True, 'player': pname, 'weapon': weapon, 'map': _map, 'faction': fac,
             'old': old, 'new': f"{td}/{k}/{d}", 'score': score,
-            'feats': feats_str if feats_str != 'None' else ''}
+            'feats': feats_str if feats_str != 'None' else '',
+            'kill_share': _tks, 'roster': bool(_rost)}
 
 
 class SubmissionsCog(commands.Cog):
@@ -4632,7 +4667,11 @@ class SubmissionsCog(commands.Cog):
                f"Stats: `{res['old']}` → **`{res['new']}`** TD/K/D"
                + (f" · score {res['score']:,}" if isinstance(res.get('score'), int) else "")
                + (f" · feats: {res['feats']}" if res.get('feats') else "")
-               + "\nBoards and registry card updated.")
+               + "\nBoards and registry card updated."
+               + (f"\nRatings restored — Kill Share {res['kill_share']}%"
+                  + (", roster stored" if res.get('roster') else "")
+                  if res.get('kill_share') is not None
+                  else "\n⚠️ Couldn't read the team totals off this board, so Warlord/Kill Share may still be blank."))
         await interaction.followup.send(msg, ephemeral=True)
 
     @commands.Cog.listener()

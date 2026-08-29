@@ -2147,6 +2147,29 @@ async def get_submissions_since(minutes: int = 60) -> list[list]:
              r['map'] or ''] for r in rows]
 
 
+async def update_submission_lobby(submission_id: int, team_kill_share=None, team_td_share=None,
+                                  second_place_td=None, total_lobby_kills=None,
+                                  team_total_kills=None, enemy_total_kills=None):
+    """Write the whole-lobby / rating columns onto a submission — the fields that only a
+    full scoreboard read produces (Kill Share, Warlord, TUFF, lobby difficulty). Used by
+    the reparse tool to restore ratings that manual entry never captured. Only non-None
+    values are written, so a partial re-read never wipes a good stored value."""
+    _sets, _vals = [], []
+    for _col, _v in (('team_kill_share', team_kill_share), ('team_td_share', team_td_share),
+                     ('second_place_td', second_place_td), ('total_lobby_kills', total_lobby_kills),
+                     ('team_total_kills', team_total_kills), ('enemy_total_kills', enemy_total_kills)):
+        if _v is not None:
+            _vals.append(_v)
+            _sets.append(f"{_col}=${len(_vals)}")
+    if not _sets:
+        return
+    _cache_invalidate('submissions')
+    pool = _pool_check()
+    _vals.append(int(submission_id))
+    async with pool.acquire() as conn:
+        await conn.execute(f"UPDATE submissions SET {', '.join(_sets)} WHERE id=${len(_vals)}", *_vals)
+
+
 async def get_recent_submitter_ids(minutes: int = 20) -> list[list]:
     """Distinct (discord_id, player_name) for players who submitted in the last N
     minutes, newest name first. Used by the startup bounty reconcile: only a player
