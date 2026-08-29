@@ -2237,8 +2237,12 @@ async def _apply_edit(interaction, ev):
             # can miss if the row's link differs, so ALSO clear this player's entries on the
             # pre-edit weapon/map boards explicitly, keyed by discord_id.
             _extra_old = set()
-            _old_kills = f"{_old_weapon} Kills" if (_old_weapon and not ev.vip) else None
-            for _ob in ((None if ev.vip else _old_weapon), _old_kills, _old_map_board):
+            # Clear the OLD weapon/kills board rows regardless of the NEW vip flag: a
+            # non-VIP -> VIP edit must still remove the stale non-VIP weapon-board entry
+            # (guarding on ev.vip skipped exactly that case). Idempotent — a no-op when
+            # there's no entry, so it's safe for a run that was already VIP.
+            _old_kills = f"{_old_weapon} Kills" if _old_weapon else None
+            for _ob in (_old_weapon, _old_kills, _old_map_board):
                 if _ob:
                     try:
                         await _db.delete_leaderboard_entries_by_board_and_discord(_ob, str(ev.author.id))
@@ -3321,6 +3325,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         marks_earned += 1
         marks_lines.append(f"*<a:triple:1365532698260668466> +1 Triple*")
     _tm, _tem, _tnm = tilt_mark(feats, config.TILT_BANDS)
+    _valor_mark = _tm or 0  # snapshot: _tm is REUSED for the TUFF margin later (line ~3356)
     if _tm:
         marks_earned += _tm
         marks_lines.append(f"*{_tem} +{_tm} {_tnm} lobby*")
@@ -3451,16 +3456,21 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         weapon_changed = bool(dup_weapon) and dup_weapon.strip().lower() != (selected_weapon or '').strip().lower()
         if not is_ranged and weapon_changed:
             try:
-                from cogs.bounty import update_bounty
-                bounty_hit = await update_bounty(
-                    interaction.guild, selected_weapon,
-                    interaction.user.display_name, interaction.user.id, takedowns
-                )
-                print(f"[BOUNTY/DEDUP] bounty_hit={bounty_hit} weapon={selected_weapon} (corrected from {dup_weapon})")
-                if bounty_hit:
-                    await original_message.add_reaction(await _bounty_emoji())
+                # RECONCILE to truth instead of a blind +1. The corrected run was NOT
+                # inserted (submission_row is None) and the original row still carries the
+                # OLD weapon, so an unconditional update_bounty(+1) on the new weapon was a
+                # PHANTOM credit with no backing submission — it inflated progress and could
+                # even trip a false completion + season GP. Top-up-to-truth credits only what
+                # the submissions actually support. (To move credit to the corrected weapon,
+                # a mod/player edits the original run, which reconciles both weapons.)
+                from cogs.bounty import get_active_bounty, reconcile_bounty_progress
+                _b = await get_active_bounty()
+                if _b:
+                    await reconcile_bounty_progress(
+                        interaction.guild, _b, interaction.user.id, interaction.user.display_name)
+                print(f"[BOUNTY/DEDUP] reconciled to truth (resubmit corrected {dup_weapon} -> {selected_weapon})")
             except Exception as e:
-                nerve_log_error("Bounty check", e)
+                nerve_log_error("Bounty dedup reconcile", e)
         print(f"[DEDUP] Duplicate submission fully skipped for {interaction.user.display_name}")
         return
 
@@ -3920,6 +3930,8 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         _rm = 1 + (1 if takedowns >= 200 else 0) + (1 if kills >= 100 else 0)
                         if "Triple" in _fstr: _rm += 1
                         if "High Score" in _fstr: _rm += 1
+                        if "Score" in _fstr: _rm += 1          # Score-board mark (was omitted)
+                        _rm += _valor_mark                     # valor/tilt marks (snapshot; _tm is clobbered by TUFF)
                         _old = _new - _rm
                         if _old < config.VIRTUOSO_THRESHOLD <= _new:
                             from cogs.personality import _linkify_reply as _lky2
@@ -4574,6 +4586,12 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
     # the ratings manual entry can't produce. Same formulas as finalise.
     _TDMAX = 600
     _team_td = [s for s in (parsed.get('team_scores') or []) if isinstance(s, int) and 0 < s <= _TDMAX]
+    # Vision sometimes folds the submitter's OWN row into team_scores. Drop one instance of
+    # the player's own takedowns (as finalise and the half-crop both do) so team_td_share
+    # isn't double-counted and second_place_td can't become the player's own TD (which would
+    # silently kill a legit TUFF: kills - own_TD <= 0).
+    if isinstance(td, int) and td in _team_td:
+        _team_td.remove(td)
     _team_k = [s for s in (parsed.get('team_kills') or []) if isinstance(s, int) and 0 <= s <= _TDMAX]
     _enemy_k = [s for s in (parsed.get('enemy_kills') or []) if isinstance(s, int) and 0 <= s <= _TDMAX]
     _tt_kills = parsed.get('team_total_kills') if isinstance(parsed.get('team_total_kills'), int) else None

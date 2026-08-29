@@ -1101,7 +1101,10 @@ def _server_aggregates(subs):
         if len(r) < 10:
             continue
         feats = (r[11] if len(r) > 11 else '') or ''
-        if 'resubmit' in feats.lower():
+        _fl = feats.lower()
+        # Exclude BOTH resubmits and mod-hidden (Unlisted) runs — an unlisted run must
+        # not count toward server records/meta (it was hand-rolled to skip only resubmit).
+        if 'resubmit' in _fl or 'unlisted' in _fl:
             continue
         td = _i(r[7]); k = _i(r[8])
         if td is None or k is None:

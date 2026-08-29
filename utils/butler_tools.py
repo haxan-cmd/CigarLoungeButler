@@ -82,7 +82,7 @@ async def _resolve_player(query):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _query_runs(metric=None, filters=None, mode='top_games', agg='avg',
-                      min_games=5, limit=10, ascending=False, **_):
+                      min_games=None, limit=10, ascending=False, **_):
     """Per-run records via the Stats Lab engine. mode='top_games' -> best single games;
     mode='rank_players' -> per-player average/total of the metric. Filters are exact
     matches on categoricals. Resubmit/Unlisted already excluded; VIP included (tagged)."""
@@ -97,15 +97,26 @@ async def _query_runs(metric=None, filters=None, mode='top_games', agg='avg',
     ident = _identity(players, n2i)
     filters = {k: v for k, v in (filters or {}).items() if v not in (None, '')}
     valid_cats = set(_se.RECORD_CATEGORICALS)
+    # Normalize filter keys: alias the human words the model tends to use to the real
+    # categorical, then REJECT anything still unknown instead of silently keeping every row
+    # (a no-op filter would return ALL runs labeled as filtered — a confidently-wrong stat).
+    # 'class' is the classic trap: the field is 'cls'.
+    _alias = {'class': 'cls', 'team': 'faction', 'weapon_type': 'grip', 'hand': 'grip'}
+    filters = {_alias.get(str(k).lower(), str(k).lower()): v for k, v in filters.items()}
+    _unknown = [k for k in filters if k != 'player' and k not in valid_cats]
+    if _unknown:
+        return {'error': f"unknown filter key(s): {_unknown}",
+                'valid_filters': sorted(valid_cats | {'player'})}
+    # Resolve a player filter to its canonical identity so ALL of the target's IGN variants
+    # match, not just rows literally submitted under the passed name.
+    _player_key = ident.resolve(str(filters['player']).strip())[0] if 'player' in filters else None
 
     def _keep(rec):
-        for k, v in filters.items():
-            kk = str(k).lower()
+        for kk, v in filters.items():
             vv = str(v).strip().lower()
             if kk == 'player':
-                key, disp = ident.resolve(rec.get('name', ''), rec.get('did', ''))
-                if vv not in (str(rec.get('name', '')).lower(), str(rec.get('did', '')).lower(),
-                              str(disp).lower(), str(key).lower()):
+                key, _disp = ident.resolve(rec.get('name', ''), rec.get('did', ''))
+                if key != _player_key:
                     return False
             elif kk in valid_cats:
                 rv = rec.get(kk)
@@ -124,7 +135,9 @@ async def _query_runs(metric=None, filters=None, mode='top_games', agg='avg',
                 continue
             key, disp = ident.resolve(r.get('name', ''), r.get('did', ''))
             g = grp[key]; g[0] += v; g[1] += 1; g[2] = disp
-        min_games = max(1, _safe_int(min_games, 5))
+        # A "total" ranking shouldn't hide a genuine leader with few games; only averages
+        # need a sample floor. So default the minimum to 1 for total, 5 for avg.
+        min_games = max(1, _safe_int(min_games, 1 if agg == 'total' else 5))
         rows = []
         for _k, (s, n, disp) in grp.items():
             if n < min_games:
@@ -244,7 +257,14 @@ async def _server_overview(**_):
     except Exception as e:
         return {'error': f'server overview unavailable: {e}'}
     subs = await _db.get_all_submissions()
-    return {'overview': _server_aggregates(subs)}
+    # Bound the payload so it survives the tool-result truncation (~6000 chars) intact —
+    # a mid-string cut would hand the model invalid JSON and it would deflect. The ranked
+    # lists + records + cadence live near the top; the long per-weapon/per-map tables are
+    # what would overflow, so keep the head.
+    _ov = _server_aggregates(subs)
+    if len(_ov) > 5200:
+        _ov = _ov[:5200] + "\n…(breakdown truncated; ask about a specific weapon/map for detail)"
+    return {'overview': _ov}
 
 
 async def _get_player_card(player=None, **_):

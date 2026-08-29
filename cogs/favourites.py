@@ -83,7 +83,13 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
                 pass
         subs = filtered
     else:
-        subs = all_subs
+        # All-time: still exclude resubmits + unlisted runs (only the time-windowing
+        # differs). The all-time branch previously skipped this filter, letting old
+        # re-uploads and mod-hidden runs contaminate the all-time ratio/PB columns.
+        def _excl(_row):
+            _f = _row[11].strip() if len(_row) > 11 and _row[11] else ""
+            return "Resubmit" in _f or "Unlisted" in _f
+        subs = [row for row in all_subs if row and (row[0] or '').strip() and not _excl(row)]
 
     # Submission stats
     player_counts = {}

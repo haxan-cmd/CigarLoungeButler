@@ -375,7 +375,8 @@ SPECS = [
     AggSpec('feat_flawless', ('flawless',),
             'board', 'Most Flawless games', _c_board('Flawless'), reduce='count', unit=' games'),
     AggSpec('feat_triple', ('triple',),
-            'board', 'Most Triple games', _c_board('Triple'), reduce='count', unit=' games'),
+            'board', 'Most Triple games', _c_board('Triple'), reduce='count', unit=' games',
+            override_idx=10),  # players[10] = manual Triple-count override, like 100k(8)/200td(9)
     # Pacifist STACKS per game but its board keeps one row per player, so count runs
     # from submissions (via the shared is_pacifist predicate), not board rows.
     AggSpec('most_pacifist', ('pacifist',),

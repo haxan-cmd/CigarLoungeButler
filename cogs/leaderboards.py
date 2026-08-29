@@ -965,7 +965,12 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
             if existing_entry:
                 if score > existing_score:
                     await _db.upsert_leaderboard_entry(lb_name, player_name, discord_id, score, message_link, selected_weapon)
-                    board_scores = [s for s in (int(r[3]) for r in board_values if len(r) > 3 and r[3]) if s != existing_score]
+                    # Rank the new score against everyone ELSE. Exclude only the player's OWN
+                    # old row (by discord_id) — the previous code dropped EVERY row equal to
+                    # their old score, so a rival tied at that value was wrongly removed and
+                    # the reported placement came out one (or more) too good.
+                    board_scores = [int(r[3]) for r in board_values
+                                    if len(r) > 3 and r[3] and str(r[2] or '') != str(discord_id)]
                     board_scores.append(score)
                     board_scores.sort(reverse=True)
                     pos = board_scores.index(score) + 1
@@ -1533,10 +1538,21 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 td = int(s[7]) if s[7] else 0
             except (ValueError, TypeError):
                 td = 0
+            try:
+                _k = int(s[8]) if s[8] else 0
+            except (ValueError, TypeError):
+                _k = 0
+            # Pacifist run (0 kills, <=10 TD) — the live path keeps these OFF weapon/map
+            # boards (they own the Pacifist board). rebuild_score_boards lacked this guard,
+            # so a rebuild/reconcile could add one to a sparse board. (weapon_kills is 0
+            # kills -> score 0, already dropped by the score<=0 check below.)
+            _is_pac = (_k == 0 and td <= 10)
             if kind == 'weapon':
                 if s[3] != nm:
                     continue
                 if is_vip(s[10]):  # VIP excluded from weapon boards
+                    continue
+                if _is_pac:
                     continue
                 score = td
             elif kind == 'weapon_kills':
@@ -1550,6 +1566,8 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                     score = 0
             else:  # map board: "{map} - {faction}"
                 if f"{s[5]} - {s[6]}" != nm:
+                    continue
+                if _is_pac:  # pacifist runs stay off map boards too
                     continue
                 score = td
             if score <= 0 or not key:

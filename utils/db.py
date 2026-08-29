@@ -317,7 +317,7 @@ def _as_int(v, default=0):
     if isinstance(v, int):
         return v
     try:
-        return int(float(str(v).strip()))
+        return int(float(str(v).replace(',', '').strip()))
     except (ValueError, TypeError, AttributeError):
         return default
 
@@ -1109,12 +1109,15 @@ async def get_submission_feats(submission_id: int) -> str:
 
 
 async def update_submission_feats(submission_id: int, feats: str):
-    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE submissions SET feats=$1 WHERE id=$2", feats, submission_id
         )
+    # Invalidate AFTER the write commits: clearing the cache before the await lets a
+    # concurrent reader re-cache the pre-write rows for the full TTL (and poison the
+    # un-TTL'd season/titles memo). Matches add_submission's post-commit invalidation.
+    _cache_invalidate('submissions')
 
 
 async def update_submission_fields(submission_id: int, weapon: str, cls: str,
@@ -1128,7 +1131,6 @@ async def update_submission_fields(submission_id: int, weapon: str, cls: str,
     Pacifist and Score boards rank on it, and vision sometimes misses it entirely,
     so it must be editable). Only written when not None, so a stats-only edit that
     doesn't touch score leaves the stored value alone."""
-    _cache_invalidate('submissions')
     pool = _pool_check()
     vip_bool = vip if isinstance(vip, bool) else str(vip).upper() in ('YES', 'TRUE', '1')
     async with pool.acquire() as conn:
@@ -1146,6 +1148,9 @@ async def update_submission_fields(submission_id: int, weapon: str, cls: str,
             await conn.execute(
                 "UPDATE submissions SET score=$1 WHERE id=$2",
                 int(score), submission_id)
+    # Invalidate AFTER commit (see update_submission_feats) so a concurrent reader can't
+    # re-cache the pre-edit row during the write window.
+    _cache_invalidate('submissions')
 
 
 async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int,
@@ -1173,12 +1178,12 @@ async def check_duplicate_submission(discord_id: str, takedowns: int, kills: int
 
 
 async def delete_submission_by_link(message_link: str):
-    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
             "DELETE FROM submissions WHERE message_link=$1", message_link
         )
+    _cache_invalidate('submissions')  # after commit (see update_submission_feats)
 
 
 # ── Players ───────────────────────────────────────────────────────────────────
@@ -2163,11 +2168,11 @@ async def update_submission_lobby(submission_id: int, team_kill_share=None, team
             _sets.append(f"{_col}=${len(_vals)}")
     if not _sets:
         return
-    _cache_invalidate('submissions')
     pool = _pool_check()
     _vals.append(int(submission_id))
     async with pool.acquire() as conn:
         await conn.execute(f"UPDATE submissions SET {', '.join(_sets)} WHERE id=${len(_vals)}", *_vals)
+    _cache_invalidate('submissions')  # after commit (see update_submission_feats)
 
 
 async def get_recent_submitter_ids(minutes: int = 20) -> list[list]:
@@ -2527,12 +2532,12 @@ async def delete_leaderboard_entries_by_link(message_link: str) -> list[str]:
 
 async def update_submission_feats_by_link(message_link: str, feats: str):
     """Update feats string for a submission identified by message_link."""
-    _cache_invalidate('submissions')
     pool = _pool_check()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE submissions SET feats=$1 WHERE message_link=$2", feats, message_link
         )
+    _cache_invalidate('submissions')  # after commit (see update_submission_feats)
 
 
 # ── Players extras ────────────────────────────────────────────────────────────

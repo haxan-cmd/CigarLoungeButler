@@ -242,6 +242,10 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
         tool_calls = getattr(msg, 'tool_calls', None)
         if not tool_calls:
             return (msg.content or '').strip()
+        # Cap tool calls per round (each re-fetches the DB); truncate BEFORE building the
+        # assistant turn so every listed call gets a matching tool result (the API requires
+        # one response per tool_call, so we can't list more than we answer).
+        tool_calls = list(tool_calls)[:getattr(_bt, '_MAX_TOOL_CALLS', 6)]
         # Record the assistant turn that requested the tools, then run each one.
         messages.append({
             'role': 'assistant', 'content': msg.content,
