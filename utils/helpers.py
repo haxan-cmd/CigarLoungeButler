@@ -401,7 +401,7 @@ Re-read the highlighted player's T, K and D one more time, digit by digit, again
 1. KILLS ≤ TAKEDOWNS, ALWAYS. A takedown is a kill or an assist, so kills can never exceed takedowns. If your kills came out higher than your takedowns, you misread a digit in one of them — re-read both and correct until K ≤ T. (This single rule catches the common 3↔8 / 5↔6 slip.)
 2. RANGE: for a listed player takedowns are almost always 0–400 and deaths 0–60. A value far outside that means you grabbed the wrong column (SCORE or RANK) or flipped a digit — go back to that exact row and re-read it.
 3. ORDER: within the row, SCORE (thousands) > T ≥ K, and D is its own small number. If that ordering is broken, you crossed a column boundary — fix it.
-Only output the JSON once all three checks pass for the highlighted row.
+If a check fails, re-read that value and correct it, then continue. ALWAYS output the JSON object with your single best reading for every field you can see — never withhold the JSON, never blank out a field just because a check is hard to satisfy. A best-effort number is far better than null.
 
 Your response must be ONLY the JSON object below - no explanation, no preamble, no markdown fences. Start your response with `{` and end with `}`. Use null for any field you cannot confidently read.
 
@@ -860,33 +860,12 @@ _VISION_ESCALATION_MODEL = 'gemini-3.1-pro-preview'
 
 
 def vision_parse_scorecard_smart(image_url: str, player_name: str = None, other_names=None) -> dict:
-    """Read every scorecard on the cheap gemini-2.5-flash and return it AS-IS when the read
-    is clean (stats + name read, legal map/faction) — that's the common path: one fast read,
-    no extra latency, no dependence on the pro model. Only a genuinely WEAK read is re-read on
-    the stronger model, and pro's result is used only if it's actually better; if pro errors
-    or isn't available, the flash read stands. Sync so `asyncio.to_thread(...)` call sites
-    just swap the function name."""
-    flash = vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
-    if not _vision_read_weak(flash):
-        return flash
-    print(f"[VISION] weak first read — escalating to {_VISION_ESCALATION_MODEL}")
-    try:
-        pro = vision_parse_scorecard(image_url, player_name, other_names, model=_VISION_ESCALATION_MODEL)
-    except Exception as e:
-        print(f"[VISION] pro escalation failed, keeping flash read: {e}")
-        return flash
-    if not pro or _vision_read_weak(pro):
-        # pro no better: keep flash, backfill only blanks from pro.
-        merged = dict(flash or {})
-        for k, v in (pro or {}).items():
-            if merged.get(k) in (None, '', [], {}) and v not in (None, '', [], {}):
-                merged[k] = v
-        return merged
-    # pro read is solid: prefer it, but keep flash's roster arrays where pro's came back empty.
-    for _rk in ('team_names', 'enemy_names', 'team_scores', 'enemy_scores', 'team_kills', 'enemy_kills'):
-        if not pro.get(_rk) and flash.get(_rk):
-            pro[_rk] = flash[_rk]
-    return pro
+    """Single gemini-2.5-flash read — the known-good path from before the pro experiment.
+    The pro escalation is DISABLED: gemini-2.5-pro returned 404 on this account and
+    gemini-3.1-pro-preview is unverified, and the two-read/merge path was implicated in
+    stat-drops, so we keep it to one clean flash read. This wrapper stays the caller's
+    entry point so a verified pro model can be re-enabled in ONE place later."""
+    return vision_parse_scorecard(image_url, player_name, other_names, model='gemini-2.5-flash')
 
 
 def build_favourites_explainer_embed():
