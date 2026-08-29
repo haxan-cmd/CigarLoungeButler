@@ -257,7 +257,6 @@ async def _get_player_card(player=None, **_):
                                get_player_descriptors)
     prow = await _db.get_player(did)
     total_marks = _safe_int(prow[3]) if prow and len(prow) > 3 else None
-    sub_count = _safe_int(prow[4]) if prow and len(prow) > 4 else None
     pb = {}
     try:
         pb = await get_personal_bests(did) or {}
@@ -266,7 +265,16 @@ async def _get_player_card(player=None, **_):
     # Best kills / TD / points games WITH weapon+map, from submissions.
     best_k = best_td = best_pts = None
     try:
-        for s in await _db.get_submissions_by_player(did):
+        _subs = await _db.get_submissions_by_player(did)
+    except Exception:
+        _subs = []
+    # Count ACTUAL logged runs, not the players-table submission_count column, which can
+    # drift stale (Boltzed showed 25 marks + 0 runs because that stored counter had gone
+    # to 0 while 18 real submissions existed). Fall back to the counter only if we somehow
+    # read no rows.
+    sub_count = len(_subs) if _subs else (_safe_int(prow[4]) if prow and len(prow) > 4 else None)
+    try:
+        for s in _subs:
             if len(s) < 9:
                 continue
             k = _safe_int(s[8]); t = _safe_int(s[7]); pts = _safe_int(s[24]) if len(s) > 24 else 0
