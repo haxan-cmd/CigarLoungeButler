@@ -736,7 +736,12 @@ def vision_parse_scorecard(image_url: str, player_name: str = None, other_names=
         # COLUMN (half the width) so the text roughly doubles and vision faces one team
         # at a time, then assign the half that contains the submitter's own T/K as their
         # team. This is what finally reads TUFF-eligible rosters on packed lobbies.
-        if _roster_len(data) < 4 and _has_totals and _pp_img is not None:
+        # Gated on a valid PLAYER read (takedowns present), NOT on the banner totals: a
+        # 64-player board that missed BOTH the totals and the roster (Farmer's Falmire
+        # run) used to skip recovery entirely and lose Warlord/Kill Share/TUFF/lobbymates.
+        # Recovering the roster also lets team_total_kills be derived from the roster sum,
+        # so the ratings come back even when the banners themselves were unreadable.
+        if _roster_len(data) < 4 and data.get('takedowns') is not None and _pp_img is not None:
             try:
                 _pw, _ph = _pp_img.size
                 _mid = _pw // 2
