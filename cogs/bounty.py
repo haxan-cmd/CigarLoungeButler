@@ -725,6 +725,46 @@ async def correct_player_bounty_overcount(guild, player_id, player_name=None):
     return True
 
 
+async def _refresh_special_progress(guild, bounty, player_id, player_name=None):
+    """Keep a player's special-challenge (bonus) X/N counter on their forum card in sync
+    with their qualifying runs — REGARDLESS of the 100-TD weapon gate or whether they've
+    already completed the main bounty. update_bounty only updated this counter AFTER both of
+    those gates, so a completed player's special run (the bonus is earnable in either order)
+    or a sub-100-TD Excellent-Lethality run never ticked the display. Recounts from
+    submissions (the truth), so it can only bring the counter into agreement. Display-only:
+    the bonus AWARD itself is handled by _try_award_bonus."""
+    spec = _parse_special(bounty)
+    if not spec:
+        return
+    try:
+        truth = await _count_special_runs(bounty, str(player_id))
+    except Exception as _e:
+        print(f"[BONUS] special recount failed for {player_id}: {_e}")
+        return
+    row = await get_player_bounty_progress(bounty['title'], str(player_id))
+    if not row:
+        return
+    progress = dict(row.get('progress') or {})
+    if int(progress.get('__special__', 0) or 0) == truth:
+        return  # already in sync
+    progress['__special__'] = truth
+    name = player_name or row.get('player_name') or ''
+    _fp = row.get('forum_post_id')
+    await save_player_bounty_progress(bounty['title'], str(player_id), name, _fp, progress)
+    if _fp:
+        try:
+            fcid = bounty.get('forum_channel_id') or BOUNTY_FORUM_CHANNEL_ID
+            fch = guild.get_channel(fcid) if guild else None
+            if fch and isinstance(fch, discord.ForumChannel):
+                th = fch.get_thread(_fp) or await guild.fetch_channel(_fp)
+                bmsgs = [m async for m in th.history(limit=5, oldest_first=True) if m.author.bot]
+                if bmsgs:
+                    await bmsgs[-1].edit(content=build_player_bounty_card(bounty, progress))
+        except Exception as _fe:
+            print(f"[BONUS] special-progress card re-render failed for {player_id}: {_fe}")
+    print(f"[BONUS] special progress -> {truth}/{spec['need']} for {name or player_id}")
+
+
 async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     """Called from finalise_submission. Updates bounty progress if weapon qualifies. Returns True if weapon matched.
 
@@ -745,6 +785,11 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
     # weapon. Strict order: _try_award_bonus only credits players who have ALREADY
     # completed the main bounty; a bonus run done beforehand is not retro-credited.
     await _try_award_bonus(guild, bounty, weapon, takedowns, player_name, player_id)
+
+    # Keep the special-challenge X/N display in sync BEFORE the gates below: a completed
+    # player (bonus is earnable either order) or a sub-100-TD Excellent-Lethality run would
+    # otherwise return before the __special__ update further down and never tick the counter.
+    await _refresh_special_progress(guild, bounty, player_id, player_name)
 
     # Main-bounty progress requires a 100-TD run.
     if takedowns < 100:
