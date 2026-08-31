@@ -838,37 +838,119 @@ def _chunk_message(text, limit=1990):
 
 _POLL_STATS_CATEGORIES = ("map", "weapon", "faction", "subclass")
 
+# Poll prompt text per category. Kept as a registry (not inline) so the answer-capture
+# path can recognise a reply to one of these — matching on the exact prompt text means it
+# survives restarts with no stored state. The Butler genuinely "keeps a list" now: a reply
+# to one of these stores the player's validated favourite (see _capture_poll_answer).
+_POLL_PROMPTS = {
+    "map": [
+        "Which map is your favourite? I'll feign interest.",
+        "Favourite map. Go on. Not that the rotation will bend to suit you.",
+        "What's the best map? Wrong answers are, statistically, most of them.",
+    ],
+    "weapon": [
+        "Which weapon do you actually enjoy? Be honest, the leaderboard already knows.",
+        "Favourite weapon. Choose carefully; I am keeping a list.",
+        "What's your weapon of choice? Mine is silence, but you go ahead.",
+    ],
+    "faction": [
+        "Agatha or Mason? Pick a side to be disappointed by.",
+        "Which faction do you run with, and why is it the wrong one?",
+        "Agatha or Mason? There are no good answers, only loud ones.",
+    ],
+    "subclass": [
+        "What's your subclass of choice? The lounge is morbidly curious.",
+        "Favourite subclass. I'll pretend the answer surprises me.",
+        "Which subclass do you main? Confession is good for the soul, apparently.",
+    ],
+}
+# Flat lookup: stripped prompt text -> category, for recognising a reply to a poll.
+_POLL_PROMPT_TO_CATEGORY = {p.strip('* ').strip(): c for c, ps in _POLL_PROMPTS.items() for p in ps}
+
+
+def _poll_category_from_prompt(text: str):
+    """If `text` is one of the Butler's known poll prompts, return its category
+    (map/weapon/faction/subclass), else None. Used to recognise a reply to a poll."""
+    return _POLL_PROMPT_TO_CATEGORY.get((text or '').strip('* ').strip())
+
 
 def _build_stats_question():
     """Return one dry, plain-text question about the server's tastes (map /
     weapon / faction / subclass). No poll, no options — just a question posed
     to the room for people to answer in chat, in the Butler's flat register."""
     category = random.choice(_POLL_STATS_CATEGORIES)
-    if category == "map":
-        pool = [
-            "Which map is your favourite? I'll feign interest.",
-            "Favourite map. Go on. Not that the rotation will bend to suit you.",
-            "What's the best map? Wrong answers are, statistically, most of them.",
-        ]
-    elif category == "weapon":
-        pool = [
-            "Which weapon do you actually enjoy? Be honest, the leaderboard already knows.",
-            "Favourite weapon. Choose carefully; I am keeping a list.",
-            "What's your weapon of choice? Mine is silence, but you go ahead.",
-        ]
-    elif category == "faction":
-        pool = [
-            "Agatha or Mason? Pick a side to be disappointed by.",
-            "Which faction do you run with, and why is it the wrong one?",
-            "Agatha or Mason? There are no good answers, only loud ones.",
-        ]
-    else:
-        pool = [
-            "What's your subclass of choice? The lounge is morbidly curious.",
-            "Favourite subclass. I'll pretend the answer surprises me.",
-            "Which subclass do you main? Confession is good for the soul, apparently.",
-        ]
-    return random.choice(pool)
+    return random.choice(_POLL_PROMPTS[category])
+
+
+def _all_weapon_names():
+    _w = set()
+    for _ws in (config.CLASS_WEAPON_MAP or {}).values():
+        _w.update(_ws or [])
+    return _w
+
+
+def _extract_poll_answer(category, text):
+    """Extract + VALIDATE a poll answer from a player's reply, or None. Returns only a value
+    that matches a config enum (a real weapon/map/faction/subclass), never free text — this
+    is the whole safety model: nothing arbitrary can be stored for the Butler to parrot.
+    Longest-name-first so 'Battle Axe' wins over 'Axe' and 'Greatsword' over 'Sword'."""
+    tl = (text or '').lower()
+    if not tl:
+        return None
+    if category == 'weapon':
+        for _w in sorted(_all_weapon_names(), key=len, reverse=True):
+            if _w.lower() in tl:
+                return _w
+        return None
+    if category == 'map':
+        for _m in sorted((config.MAP_FACTIONS or {}).keys(), key=len, reverse=True):
+            if _m.lower() in tl:
+                return _m
+        for _al, _m in (getattr(config, 'MAP_ALIASES', {}) or {}).items():
+            if _al and _al.lower() in tl:
+                return _m
+        return None
+    if category == 'faction':
+        for _f in ('Agatha', 'Mason', 'Tenosia'):
+            if _f.lower() in tl:
+                return _f
+        return None
+    if category == 'subclass':
+        for _s in sorted((config.CLASS_WEAPON_MAP or {}).keys(), key=len, reverse=True):
+            if _s.lower() in tl:
+                return _s
+        return None
+    return None
+
+
+async def _capture_poll_answer(message):
+    """If `message` is a REPLY to one of the Butler's poll prompts, store the replying
+    player's validated favourite. Returns (category, value) if captured, else None. Stateless:
+    recognises the poll by the referenced message's text, so it survives restarts."""
+    ref = getattr(message, 'reference', None)
+    if not ref or not getattr(ref, 'message_id', None):
+        return None
+    _refmsg = getattr(ref, 'resolved', None)
+    if _refmsg is None:
+        try:
+            _refmsg = await message.channel.fetch_message(ref.message_id)
+        except Exception:
+            return None
+    if not _refmsg or not getattr(_refmsg.author, 'bot', False):
+        return None
+    _cat = _poll_category_from_prompt(getattr(_refmsg, 'content', '') or '')
+    if not _cat:
+        return None
+    _val = _extract_poll_answer(_cat, message.content)
+    if not _val:
+        return None
+    try:
+        await _db.set_player_pref(str(message.author.id), f"favourite_{_cat}", _val)
+        print(f"[PREFS] {getattr(message.author, 'display_name', '?')} favourite_{_cat} = {_val}")
+        return (_cat, _val)
+    except Exception as _pe:
+        print(f"[PREFS] store failed: {_pe}")
+        return None
 
 
 _ABSURD_QUESTION_FALLBACKS = [
@@ -4636,6 +4718,18 @@ class PersonalityCog(commands.Cog):
                     player_stats_ctx += (
                         "\nMost-played maps: " + ", ".join(f"{m} ({n})" for m, n in _tm) +
                         " (background colour you may weave in, NOT their archetype).")
+                # Declared favourites from the Butler's polls — the player's OWN stated
+                # tastes ("I am keeping a list"). Safe to quote back ("your professed
+                # favourite X"); NOT the same as their actual most-played/best.
+                try:
+                    _prefs = await _db.get_player_prefs(discord_id_str)
+                    if _prefs:
+                        _pl = ", ".join(f"{k.replace('favourite_', '')}: {v}" for k, v in _prefs.items())
+                        player_stats_ctx += (
+                            f"\nDeclared favourites (from the Butler's polls, their own words): {_pl}. "
+                            "You MAY reference these dryly; do not present them as their actual best/most-played.")
+                except Exception as _pfe:
+                    print(f"[PREFS] ctx inject error: {_pfe}")
             except Exception as _ae:
                 print(f"[BUTLER] archetype ctx error: {_ae}")
 
@@ -4753,6 +4847,16 @@ class PersonalityCog(commands.Cog):
                     await _db.butler_add_reply(message.reference.message_id)
             except Exception as _fe:
                 print(f"[BUTLER] feedback reply error: {_fe}")
+            # If this is a reply to one of the Butler's polls, actually "keep the list":
+            # store the player's validated favourite. Fire-and-forget; never blocks.
+            try:
+                if await _capture_poll_answer(message):
+                    try:
+                        await message.add_reaction('📝')  # noted, for real this time
+                    except Exception:
+                        pass
+            except Exception as _pce:
+                print(f"[PREFS] capture error: {_pce}")
 
         # Easter egg: "where is the bald woman?" -> the world map with a random spot ringed.
         _bwt = (message.content or '').lower()

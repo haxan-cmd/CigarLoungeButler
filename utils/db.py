@@ -214,6 +214,13 @@ _SCHEMA_STATEMENTS = [
     "provider TEXT, model TEXT, purpose TEXT, "
     "prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0, "
     "reasoning_tokens INTEGER DEFAULT 0)",
+    # Structured, VALIDATED player preferences declared in the Butler's polls (favourite
+    # weapon/map/faction/subclass). One row per (player, key); the value is always a
+    # config-validated enum, never free text — the safe alternative to the free-form memory
+    # that got abused. Lets the Butler reference "your professed favourite".
+    "CREATE TABLE IF NOT EXISTS butler_prefs ("
+    "discord_id TEXT NOT NULL, pref_key TEXT NOT NULL, pref_value TEXT NOT NULL, "
+    "updated_at TIMESTAMP DEFAULT NOW(), PRIMARY KEY (discord_id, pref_key))",
 ]
 
 
@@ -1198,6 +1205,29 @@ async def get_all_players() -> list[list]:
     data = [_row_to_player(r) for r in rows]
     _cache_set('players', data)
     return data
+
+
+async def set_player_pref(discord_id, pref_key: str, pref_value: str):
+    """Upsert one VALIDATED player preference (favourite weapon/map/faction/subclass) from
+    a Butler poll. The caller MUST have validated pref_value against a config enum first —
+    this table never stores free text, which is the whole point (the old free-form memory
+    was abused)."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO butler_prefs (discord_id, pref_key, pref_value, updated_at) "
+            "VALUES ($1,$2,$3,NOW()) "
+            "ON CONFLICT (discord_id, pref_key) DO UPDATE SET pref_value=$3, updated_at=NOW()",
+            str(discord_id), pref_key, pref_value)
+
+
+async def get_player_prefs(discord_id) -> dict:
+    """A player's declared preferences as {pref_key: pref_value}, or {} if none."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT pref_key, pref_value FROM butler_prefs WHERE discord_id=$1", str(discord_id))
+    return {r['pref_key']: r['pref_value'] for r in rows}
 
 
 async def get_player(discord_id: str) -> list | None:
