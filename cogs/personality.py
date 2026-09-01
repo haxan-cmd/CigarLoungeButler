@@ -990,6 +990,106 @@ async def _generate_absurd_question():
     return random.choice(_ABSURD_QUESTION_FALLBACKS)
 
 
+def _gather_stat_facts(subs, boards=None):
+    """Build a list of short, TRUE one-line facts from live server data — raw material for
+    a grounded tidbit. Each is a plain statement with a real number the Butler can dress up.
+    Resubmit/Unlisted excluded so figures reflect counted play."""
+    from collections import defaultdict
+    W = defaultdict(int); M = defaultdict(int)
+    rec_td = (0, None, None); rec_k = (0, None, None); rec_sc = (0, None, None)
+    n = 0
+    names = set()
+    for r in subs or []:
+        if len(r) < 12:
+            continue
+        f = (r[11] or '')
+        if 'resubmit' in f.lower() or 'unlisted' in f.lower():
+            continue
+        w = (r[3] or '').strip(); m = (r[5] or '').strip(); nm = (r[1] or '').strip()
+        if w:
+            W[w] += 1
+        if m:
+            M[m] += 1
+        if nm:
+            names.add(nm)
+        try:
+            td = int(r[7]) if r[7] else 0
+            k = int(r[8]) if r[8] else 0
+            sc = int(str(r[24]).replace(',', '')) if len(r) > 24 and r[24] else 0
+        except (ValueError, TypeError):
+            td = k = sc = 0
+        if nm and td > rec_td[0]:
+            rec_td = (td, nm, w)
+        if nm and k > rec_k[0]:
+            rec_k = (k, nm, w)
+        if nm and sc > rec_sc[0]:
+            rec_sc = (sc, nm, w)
+        n += 1
+    if n == 0:
+        return []
+    facts = []
+    top_w = sorted(W.items(), key=lambda x: -x[1])
+    if top_w:
+        facts.append(f"The most-used weapon in the lounge is the {top_w[0][0]}, with {top_w[0][1]} logged runs.")
+        _low = [x for x in sorted(W.items(), key=lambda x: x[1]) if x[1] >= 2]
+        if _low and _low[0][0] != top_w[0][0]:
+            facts.append(f"The least-touched weapon still in play is the {_low[0][0]}, a mere {_low[0][1]} runs.")
+    top_m = sorted(M.items(), key=lambda x: -x[1])
+    if top_m:
+        facts.append(f"The most-played map is {top_m[0][0]}, with {top_m[0][1]} runs to its name.")
+    if rec_td[1]:
+        facts.append(f"The highest single-game takedowns on record is {rec_td[0]}, by {rec_td[1]} on the {rec_td[2]}.")
+    if rec_k[1]:
+        facts.append(f"The most kills anyone has managed in one game is {rec_k[0]}, held by {rec_k[1]}.")
+    if rec_sc[1] and rec_sc[0] > 0:
+        facts.append(f"The highest scoreboard points in a single match is {rec_sc[0]:,}, by {rec_sc[1]}.")
+    facts.append(f"The lounge has logged {n} counted runs from {len(names)} different souls.")
+    # A reigning #1 on one of the top weapons' boards ("king of the X").
+    if boards and top_w:
+        leaders = _board_leaders(boards)
+        for w, _c in top_w[:5]:
+            _ld = leaders.get(w.lower())
+            if _ld:
+                facts.append(f"{_ld[0]} sits atop the {w} board with {int(_ld[1])} takedowns.")
+                break
+    return facts
+
+
+async def _generate_stat_tidbit(subs, boards=None):
+    """One dry Butler observation GROUNDED in a random real server stat, freshly phrased each
+    time (random fact + AI wording). Returns None if there's no data. Falls back to the raw
+    fact line if the AI is unavailable — still true, just less dressed."""
+    facts = _gather_stat_facts(subs, boards)
+    if not facts:
+        return None
+    fact = random.choice(facts)
+    if not _ai_client:
+        return f"*{fact}*"
+    try:
+        line = await _butler_complete(
+            BUTLER_SYSTEM_PROMPT,
+            (f"Here is a REAL statistic from the lounge: \"{fact}\"\n\n"
+             "Deliver it to the room as ONE dry, in-character observation in your flat, weary voice — "
+             "a passing remark, not an announcement. Keep the real number(s) EXACTLY as given; never "
+             "invent, round, or change a figure, and never add a stat that isn't here. Vary your phrasing "
+             "every time. Under 160 characters. Reply with ONLY the line — no quotes, no preamble."),
+            90,
+        )
+        line = (line or '').strip('"').strip().replace('\n', ' ')[:300]
+        if len(line) >= 8:
+            # Grounding: every real number in the fact must survive into the phrased line
+            # (comma-normalised). If the model dropped or altered a figure, post the raw
+            # fact instead of a fabricated one.
+            import re as _re
+            _norm = lambda s: {x.replace(',', '') for x in _re.findall(r'\d[\d,]*', s)}
+            if _norm(fact).issubset(_norm(line)):
+                return line
+            print(f"[TIDBIT] number drift — using raw fact. fact={fact!r} line={line!r}")
+    except Exception as e:
+        print(f"[TIDBIT] generation error: {e}")
+    return f"*{fact}*"
+
+
 _AGG_TRIGGERS = (
     'average', 'avg ', 'avg.', 'meta', 'most played', 'most-played', 'most used',
     'most-used', 'popular', 'breakdown', 'which weapon', 'which map', 'which subclass',
@@ -1837,17 +1937,32 @@ class PersonalityCog(commands.Cog):
             print("[POLL] main channel not found")
             return
 
-        if random.random() < 0.5:
-            question = _build_stats_question()
-        else:
-            question = await _generate_absurd_question()
+        # Three flavours of tidbit, weighted: ~45% a GROUNDED stat observation (real number,
+        # freshly phrased), ~30% a taste poll (invites answers -> feeds the prefs list),
+        # ~25% pure whimsy. The stat tidbit is what makes the ambient posts dynamic instead
+        # of a fixed rotation. Already-formatted tidbits (they may start with '*') aren't
+        # re-wrapped in asterisks.
+        _roll = random.random()
+        question = None
+        _preformatted = False
+        if _roll < 0.45:
+            try:
+                _subs = await _db.get_all_submissions()
+                _boards = await _db.get_all_leaderboard_data()
+                question = await _generate_stat_tidbit(_subs, _boards)
+                _preformatted = bool(question and question.startswith('*'))
+            except Exception as _te:
+                print(f"[POLL] stat tidbit error: {_te}")
+                question = None
+        if not question:
+            question = _build_stats_question() if _roll < 0.72 else await _generate_absurd_question()
 
         if not question:
             print("[POLL] no question generated, skipping")
             return
 
-        await main_ch.send(f"*{question}*")
-        print(f"[POLL] Posted question: {question}")
+        await main_ch.send(question if _preformatted else f"*{question}*")
+        print(f"[POLL] Posted: {question}")
 
     @tasks.loop(hours=6)
     async def butler_poll_post(self):
