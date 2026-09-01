@@ -990,9 +990,9 @@ async def _generate_absurd_question():
     return random.choice(_ABSURD_QUESTION_FALLBACKS)
 
 
-def _gather_stat_facts(subs, boards=None):
-    """Build a list of short, TRUE one-line facts from live server data — raw material for
-    a grounded tidbit. Each is a plain statement with a real number the Butler can dress up.
+def _gather_structured_facts(subs, boards=None):
+    """STRUCTURED live facts (dicts with a 'kind' + fields) — the raw material the tidbit
+    grammar rolls into varied sentences. Each is a real, grounded stat; nothing invented.
     Resubmit/Unlisted excluded so figures reflect counted play."""
     from collections import defaultdict
     W = defaultdict(int); M = defaultdict(int)
@@ -1030,45 +1030,137 @@ def _gather_stat_facts(subs, boards=None):
     facts = []
     top_w = sorted(W.items(), key=lambda x: -x[1])
     if top_w:
-        facts.append(f"The most-used weapon in the lounge is the {top_w[0][0]}, with {top_w[0][1]} logged runs.")
+        facts.append({'kind': 'top_weapon', 'name': top_w[0][0], 'value': top_w[0][1]})
         _low = [x for x in sorted(W.items(), key=lambda x: x[1]) if x[1] >= 2]
         if _low and _low[0][0] != top_w[0][0]:
-            facts.append(f"The least-touched weapon still in play is the {_low[0][0]}, a mere {_low[0][1]} runs.")
+            facts.append({'kind': 'low_weapon', 'name': _low[0][0], 'value': _low[0][1]})
     top_m = sorted(M.items(), key=lambda x: -x[1])
     if top_m:
-        facts.append(f"The most-played map is {top_m[0][0]}, with {top_m[0][1]} runs to its name.")
+        facts.append({'kind': 'top_map', 'name': top_m[0][0], 'value': top_m[0][1]})
     if rec_td[1]:
-        facts.append(f"The highest single-game takedowns on record is {rec_td[0]}, by {rec_td[1]} on the {rec_td[2]}.")
+        facts.append({'kind': 'record_td', 'holder': rec_td[1], 'weapon': rec_td[2] or 'something', 'value': rec_td[0]})
     if rec_k[1]:
-        facts.append(f"The most kills anyone has managed in one game is {rec_k[0]}, held by {rec_k[1]}.")
+        facts.append({'kind': 'record_kills', 'holder': rec_k[1], 'value': rec_k[0]})
     if rec_sc[1] and rec_sc[0] > 0:
-        facts.append(f"The highest scoreboard points in a single match is {rec_sc[0]:,}, by {rec_sc[1]}.")
-    facts.append(f"The lounge has logged {n} counted runs from {len(names)} different souls.")
-    # A reigning #1 on one of the top weapons' boards ("king of the X").
+        facts.append({'kind': 'record_score', 'holder': rec_sc[1], 'value': rec_sc[0]})
+    facts.append({'kind': 'totals', 'value': n, 'players': len(names)})
     if boards and top_w:
         leaders = _board_leaders(boards)
         for w, _c in top_w[:5]:
             _ld = leaders.get(w.lower())
             if _ld:
-                facts.append(f"{_ld[0]} sits atop the {w} board with {int(_ld[1])} takedowns.")
+                facts.append({'kind': 'board_king', 'holder': _ld[0], 'name': w, 'value': int(_ld[1])})
                 break
     return facts
 
 
-async def _generate_stat_tidbit(subs, boards=None):
-    """One dry Butler observation GROUNDED in a random real server stat, freshly phrased each
-    time (random fact + AI wording). Returns None if there's no data. Falls back to the raw
-    fact line if the AI is unavailable — still true, just less dressed."""
-    facts = _gather_stat_facts(subs, boards)
+# The tidbit GRAMMAR: sentence skeletons per fact kind (real fields in {}) + a shared pool of
+# dry closing tags. Rolling (fact x template x tag) gives combinatorial, always-grounded,
+# always-in-voice variety with zero AI cost. Blank tags keep some lines clean; the double
+# space a blank tag leaves is collapsed in _roll_tidbit.
+_TIDBIT_TAGS = [
+    "Predictable.", "Riveting, truly.", "Do with that what you will.",
+    "The lounge remains, statistically, a rumour of taste.", "Noted, and regretted.",
+    "I shall feign surprise.", "A triumph of sorts.", "Make of it what you can.",
+    "The bar, such as it is.", "History will not care; I am obliged to mention it anyway.",
+    "Onward, to more of the same.", "", "", "", "",
+]
+_TIDBIT_TEMPLATES = {
+    'top_weapon': [
+        "The {name} leads the armoury with {value} logged runs. {tag}",
+        "{value} runs on the {name}. The lounge has chosen its crutch. {tag}",
+        "Most-swung weapon in the house: the {name}, {value} times over. {tag}",
+        "The {name} accounts for {value} runs. Originality remains out of stock. {tag}",
+    ],
+    'low_weapon': [
+        "The {name} languishes at {value} runs. Unloved, and not without reason. {tag}",
+        "Spare a thought for the {name}: {value} runs, in total. {tag}",
+        "The least-touched weapon still drawing breath is the {name}, {value} runs. {tag}",
+    ],
+    'top_map': [
+        "{name} has absorbed {value} runs, the most-trodden ground here. {tag}",
+        "Most-played map: {name}, {value} times. The rotation will not bend for you. {tag}",
+        "{value} runs on {name}. Familiarity, and the contempt that follows. {tag}",
+    ],
+    'record_td': [
+        "The takedown ceiling stands at {value}, set by {holder} on the {weapon}. {tag}",
+        "No one has bettered {holder}'s {value} takedowns. Yet. {tag}",
+        "{holder} holds the takedown record: {value} in a single game, {weapon} in hand. {tag}",
+    ],
+    'record_kills': [
+        "The most kills in one game is {value}, held by {holder}. {tag}",
+        "{holder} once put up {value} kills in a single match. {tag}",
+    ],
+    'record_score': [
+        "The highest scoreboard total on record is {value:,} points, by {holder}. {tag}",
+        "{holder} holds the points record: {value:,} in one match. {tag}",
+    ],
+    'totals': [
+        "{value} counted runs from {players} different souls, and counting. {tag}",
+        "The ledger stands at {value} runs across {players} players. {tag}",
+    ],
+    'board_king': [
+        "{holder} sits atop the {name} board with {value} takedowns. Long may they fret over it. {tag}",
+        "The reigning {name} king is {holder}, {value} takedowns. {tag}",
+    ],
+}
+
+
+def _roll_tidbit(facts):
+    """Compose a tidbit by rolling a template for a random fact + a random dry tag — pure
+    combinatorial variety, no AI. Grounded (real fields) and in-voice by construction.
+    Returns None if it can't build one (falls through to the AI phraser)."""
+    _pool = [f for f in (facts or []) if f.get('kind') in _TIDBIT_TEMPLATES]
+    if not _pool:
+        return None
+    fact = random.choice(_pool)
+    tag = random.choice(_TIDBIT_TAGS)
+    try:
+        out = random.choice(_TIDBIT_TEMPLATES[fact['kind']]).format(tag=tag, **fact)
+    except (KeyError, IndexError, ValueError):
+        return None
+    return ' '.join(out.split()).strip()  # collapse the double space a blank {tag} leaves
+
+
+def _fact_plain(fact):
+    """A plain, unstyled sentence of a structured fact — the grounding input handed to the AI
+    phraser, and the last-resort fallback line. Real numbers, no flavour."""
+    k = fact.get('kind')
+    if k == 'top_weapon':
+        return f"The most-used weapon is the {fact['name']} with {fact['value']} runs."
+    if k == 'low_weapon':
+        return f"The least-used weapon still in play is the {fact['name']}, {fact['value']} runs."
+    if k == 'top_map':
+        return f"The most-played map is {fact['name']} with {fact['value']} runs."
+    if k == 'record_td':
+        return f"The highest single-game takedowns is {fact['value']}, by {fact['holder']} on the {fact['weapon']}."
+    if k == 'record_kills':
+        return f"The most kills in one game is {fact['value']}, by {fact['holder']}."
+    if k == 'record_score':
+        return f"The highest scoreboard points in a match is {fact['value']:,}, by {fact['holder']}."
+    if k == 'totals':
+        return f"The lounge has logged {fact['value']} counted runs from {fact['players']} players."
+    if k == 'board_king':
+        return f"{fact['holder']} tops the {fact['name']} board with {fact['value']} takedowns."
+    return ''
+
+
+async def _generate_stat_tidbit(facts):
+    """AI-phrased version of a random structured fact — for novelty beyond the grammar's
+    templates. Freshly worded each time, grounded (a number-drift guard falls back to the
+    plain fact), and degrades to the plain fact if the AI is unavailable."""
     if not facts:
         return None
     fact = random.choice(facts)
+    plain = _fact_plain(fact)
+    if not plain:
+        return None
     if not _ai_client:
-        return f"*{fact}*"
+        return f"*{plain}*"
     try:
         line = await _butler_complete(
             BUTLER_SYSTEM_PROMPT,
-            (f"Here is a REAL statistic from the lounge: \"{fact}\"\n\n"
+            (f"Here is a REAL statistic from the lounge: \"{plain}\"\n\n"
              "Deliver it to the room as ONE dry, in-character observation in your flat, weary voice — "
              "a passing remark, not an announcement. Keep the real number(s) EXACTLY as given; never "
              "invent, round, or change a figure, and never add a stat that isn't here. Vary your phrasing "
@@ -1077,17 +1169,14 @@ async def _generate_stat_tidbit(subs, boards=None):
         )
         line = (line or '').strip('"').strip().replace('\n', ' ')[:300]
         if len(line) >= 8:
-            # Grounding: every real number in the fact must survive into the phrased line
-            # (comma-normalised). If the model dropped or altered a figure, post the raw
-            # fact instead of a fabricated one.
             import re as _re
             _norm = lambda s: {x.replace(',', '') for x in _re.findall(r'\d[\d,]*', s)}
-            if _norm(fact).issubset(_norm(line)):
+            if _norm(plain).issubset(_norm(line)):
                 return line
-            print(f"[TIDBIT] number drift — using raw fact. fact={fact!r} line={line!r}")
+            print(f"[TIDBIT] number drift — using plain fact. plain={plain!r} line={line!r}")
     except Exception as e:
         print(f"[TIDBIT] generation error: {e}")
-    return f"*{fact}*"
+    return f"*{plain}*"
 
 
 _AGG_TRIGGERS = (
@@ -1949,8 +2038,15 @@ class PersonalityCog(commands.Cog):
             try:
                 _subs = await _db.get_all_submissions()
                 _boards = await _db.get_all_leaderboard_data()
-                question = await _generate_stat_tidbit(_subs, _boards)
-                _preformatted = bool(question and question.startswith('*'))
+                _facts = _gather_structured_facts(_subs, _boards)
+                if _facts:
+                    # 70% GRAMMAR roll (free, combinatorial, tight voice); 30% AI phrasing for
+                    # novelty. Either falls through to the other, then to the plain fact.
+                    if random.random() < 0.70:
+                        question = _roll_tidbit(_facts)
+                    if not question:
+                        question = await _generate_stat_tidbit(_facts)
+                    _preformatted = bool(question and question.startswith('*'))
             except Exception as _te:
                 print(f"[POLL] stat tidbit error: {_te}")
                 question = None
