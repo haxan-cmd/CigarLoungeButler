@@ -993,6 +993,16 @@ async def get_submission_by_link(message_link: str):
             r['kills'], float(r['team_kill_share']) if r['team_kill_share'] is not None else None)
 
 
+async def update_submission_vip(message_link: str, vip: bool):
+    """Set/clear a submission's VIP flag by link. VIP is not player-editable (they confuse it
+    with 'MVP'); a mod uses this to mark a genuine VIP (Duke/Heir) run or undo a wrong one.
+    Board re-propagation (VIP changes weapon-board eligibility) is the caller's job."""
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE submissions SET vip=$1 WHERE message_link=$2", bool(vip), message_link)
+    _cache_invalidate('submissions')
+
+
 async def get_full_submission_by_link(message_link: str):
     """The FULL submission row (list-of-strings, standard column indices) for one
     message_link, or None. Used by the reparse tool, which needs the id + discord_id +
