@@ -1648,7 +1648,8 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
 
 
 async def reseed_feat_boards_for_run(guild, player_name, discord_id, link,
-                                     kills, takedowns, weapon, feats, render=True):
+                                     kills, takedowns, weapon, feats, render=True,
+                                     second_place_td=None, vip=False):
     """Ensure ONE run's unlimited feat-board rows (100 Kills / 200 Takedowns / Triple /
     Flawless) exist, adding any that qualify by the run's stats/feats but are missing.
 
@@ -1671,6 +1672,14 @@ async def reseed_feat_boards_for_run(guild, player_name, discord_id, link,
         targets.append(("Triple", takedowns))
     if 'Flawless' in feats_s and takedowns > 0:
         targets.append(("Flawless", takedowns))
+    # TUFF (kills minus best teammate's takedowns) is an unlimited feat board too, so it
+    # belongs in the reseed set alongside 100 Kills / 200 TD. Without it, a reparse or a
+    # startup reconcile restores second_place_td but never lays down the TUFF row, so a
+    # thin carry silently vanishes even after a mod re-reads the card. VIP excluded, same
+    # as the live update path. Idempotent by link like the rest.
+    if (not vip and second_place_td is not None and kills is not None
+            and (kills - second_place_td) > 0):
+        targets.append(("TUFF", kills - second_place_td))
     added = []
     for board, score in targets:
         rows = await _db.get_leaderboard_by_board(board)

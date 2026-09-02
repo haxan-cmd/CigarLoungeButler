@@ -1867,7 +1867,9 @@ class PersonalityCog(commands.Cog):
                             guild, (r[1] or '').strip(), (r[2] or '').strip(),
                             (r[12] or '').strip(),
                             int(r[8]) if r[8] else 0, int(r[7]) if r[7] else 0,
-                            (r[3] or '').strip(), r[11] or '')
+                            (r[3] or '').strip(), r[11] or '',
+                            second_place_td=(int(r[22]) if len(r) > 22 and str(r[22]).strip() not in ('', 'None') else None),
+                            vip=(str(r[10]).strip().lower() == 'yes' if len(r) > 10 else False))
                         if added:
                             healed_feats.extend(added)
                     except Exception as _fe:

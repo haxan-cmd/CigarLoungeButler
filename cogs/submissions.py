@@ -2289,7 +2289,8 @@ async def _apply_edit(interaction, ev):
             try:
                 await reseed_feat_boards_for_run(
                     _edit_guild, ev.author.display_name, str(ev.author.id),
-                    ev.message_link, ev.kills, ev.takedowns, ev.weapon, (ev.feats or []))
+                    ev.message_link, ev.kills, ev.takedowns, ev.weapon, (ev.feats or []),
+                    second_place_td=ev.second_place_td, vip=ev.vip)
             except Exception as _rfe:
                 print(f"[EDIT] feat-board reseed error: {_rfe}")
     except Exception as e:
@@ -4651,7 +4652,8 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
             except Exception as _rbe:
                 print(f"[REPARSE] board rebuild error: {_rbe}")
         try:
-            await reseed_feat_boards_for_run(guild, pname, str(did), message_link, k, td, weapon, _nf)
+            await reseed_feat_boards_for_run(guild, pname, str(did), message_link, k, td, weapon, _nf,
+                                             second_place_td=_sptd, vip=vip)
         except Exception as _fre:
             print(f"[REPARSE] feat reseed error: {_fre}")
     try:
