@@ -1884,10 +1884,7 @@ class EditFieldSelect(discord.ui.Select):
             discord.SelectOption(label="Map", value="map"),
             discord.SelectOption(label="Faction", value="faction"),
             discord.SelectOption(label="Stats (TD/K/D)", value="stats"),
-            # VIP intentionally NOT editable by players: it means the Duke/Heir objective
-            # role, but players kept reading it as "MVP / highest scorer" and toggling it on
-            # (which wrongly bars the run from weapon boards). VIP defaults to No at submit;
-            # a genuine VIP run is rare and corrected by a mod (/set_vip).
+            discord.SelectOption(label="VIP", value="vip"),
             discord.SelectOption(label="Triple (score 20k+)", value="triple"),
         ]
         super().__init__(placeholder="Choose a field to edit...", options=options)
@@ -2009,8 +2006,18 @@ class EditVIPView(discord.ui.View):
         self.edit_view = edit_view
     @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
     async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.edit_view.vip = True
-        await _apply_edit(interaction, self.edit_view)
+        ev = self.edit_view
+        # Apply the SAME VIP_MAPS gate submit uses: VIP is the Duke/Heir objective role, which
+        # only exists on certain (map, faction) combos. Editing e.g. an Askandir run to VIP=Yes
+        # was the loophole — submit blocked it, the edit didn't.
+        if (ev.map_name, ev.faction) not in getattr(config, 'VIP_MAPS', set()):
+            await interaction.response.send_message(
+                f"⚠️ {ev.map_name} / {ev.faction} has no VIP objective, so VIP can't apply here — it's the "
+                "Duke/Heir role, not MVP/top scorer. Leaving it as No.",
+                ephemeral=True)
+            return
+        ev.vip = True
+        await _apply_edit(interaction, ev)
     @discord.ui.button(label='No', style=discord.ButtonStyle.red)
     async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.edit_view.vip = False
@@ -4664,62 +4671,6 @@ class SubmissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._prompted_messages: set[int] = set()
-
-    @app_commands.command(name="set_vip",
-                          description="Set or clear a submission's VIP flag (mod only). VIP = the Duke/Heir role, NOT MVP.")
-    @app_commands.describe(message_link="Link to the player's ORIGINAL scorecard message.",
-                           vip="True only if they genuinely played the VIP objective (Duke/Heir); else False.")
-    async def set_vip(self, interaction: discord.Interaction, message_link: str, vip: bool):
-        from utils.helpers import is_mod
-        if not is_mod(interaction):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        _link = message_link.strip()
-        row = await _db.get_full_submission_by_link(_link)
-        if not row:
-            await interaction.followup.send("⚠️ No submission found with that message link.", ephemeral=True)
-            return
-        did = (row[2] or '').strip(); pname = (row[1] or '').strip()
-        weapon = (row[3] or '').strip() or None
-        _map = (row[5] or '').strip() or None; fac = (row[6] or '').strip() or None
-        try:
-            await _db.update_submission_vip(_link, vip)
-            # VIP changes weapon-board eligibility, so re-place the run's weapon/map/feat
-            # boards from the corrected row (additive engine, same as the edit path).
-            from cogs.leaderboards import rebuild_score_boards, reseed_feat_boards_for_run
-            from cogs.registry import create_or_update_registry_card
-            _boards = set()
-            if weapon and weapon.lower() not in ('none', 'hybrid'):
-                _boards.add(weapon); _boards.add(f"{weapon} Kills")
-            if _map and fac:
-                _boards.add(f"{_map} - {fac}")
-            async with _BOARD_LOCK:
-                try:
-                    await _db.delete_leaderboard_entries_by_link(_link)
-                except Exception as _de:
-                    print(f"[SET_VIP] board clear error: {_de}")
-                if _boards:
-                    await rebuild_score_boards(interaction.guild, board_names=list(_boards), only_player=str(did))
-                try:
-                    _k = int(row[8]) if row[8] else 0
-                    _td = int(row[7]) if row[7] else 0
-                    await reseed_feat_boards_for_run(interaction.guild, pname, str(did), _link,
-                                                     _k, _td, weapon, row[11] or '')
-                except Exception as _fe:
-                    print(f"[SET_VIP] feat reseed error: {_fe}")
-            if did.isdigit():
-                await create_or_update_registry_card(interaction.guild, int(did), pname)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            await interaction.followup.send(f"❌ Failed: {e}", ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"✅ Set **VIP = {vip}** for {pname}'s {weapon or '?'} run. Boards and card updated"
-            + (" — the run is now eligible for its weapon board again." if not vip else
-               " — the run is now excluded from weapon boards."),
-            ephemeral=True)
 
     @app_commands.command(name="reparse_submission",
                           description="Re-read a submission's scorecard image to repair missing stats (mod only).")
