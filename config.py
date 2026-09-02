@@ -487,6 +487,7 @@ MASTERY_WEAPON_EMOJIS = {
     "Greatsword": "<a:greatswordmastery:1523019414994419863>",
     "Messer": "<a:messermaster:1523878605002899627>",
     "Battle Axe": "<a:battleaxemaster:1524768667974504630>",
+    "Heavy Mace": "<a:heavymacemastery:1544835677286309958>",
 }
 
 # Subclass primaries — only these count toward Mastered Weapon (100 submissions)
