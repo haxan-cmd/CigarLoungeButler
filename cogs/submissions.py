@@ -4834,11 +4834,16 @@ class SubmissionsCog(commands.Cog):
                           description="Refresh a run's map-kills line on its blurb, for runs posted before that line existed (mod only).")
     @app_commands.describe(message_link="Link to the player's ORIGINAL scorecard message (the image, not the bot's reply).")
     async def refresh_blurb(self, interaction: discord.Interaction, message_link: str):
+        # Defer FIRST so Discord is acked within the 3s window — any later error then
+        # surfaces as a visible followup instead of "the application did not respond".
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
         from utils.helpers import is_mod
         if not is_mod(interaction):
-            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            await interaction.followup.send("That's not for you.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True)
         try:
             res = await _refresh_blurb_by_link(
                 interaction.guild, interaction.client.user, message_link.strip())
