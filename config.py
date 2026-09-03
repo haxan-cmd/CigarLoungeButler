@@ -302,6 +302,12 @@ FEATURED_MIN_RUNS = 15
 # quips rarely name that many, so prose stays readable.
 BUTLER_MAX_LINKS = 25
 
+# Board names too generic to auto-linkify in Butler replies (case-insensitive). "Score" is
+# both a feat board AND an everyday word, so linking every "score" turned prose into channel
+# chips ("your highest <#…> is 111 kills"). Add others here (e.g. "Triple", "Flawless") if
+# they start over-linking as common words.
+BUTLER_LINKIFY_SKIP = {"Score"}
+
 # How many board threads /rebuild_boards renders to Discord in parallel. Boards that
 # share a thread still render sequentially; this only caps DISTINCT-thread fan-out.
 # discord.py paces each channel's bucket, so this is a safety cap against a burst of

@@ -677,6 +677,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         # let reasoning eat it and return blank). You only pay for what's used; usage is
         # a rounding error against the budget, the real cost is ~1-3s more latency.
         text = ''
+        _tool_trace = ''   # tool-result text, fed to the grounding check so fetched numbers aren't misflagged
         # Data questions FIRST try the TOOL path: the Butler CALLS read-only stat tools
         # to fetch exact numbers (the way the website queries the DB), instead of leaning
         # on a pre-stuffed context blob that can only answer what we pre-guessed. If tools
@@ -701,9 +702,9 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
                     "normal dry Butler voice and length; "
                     "do not dump raw tool output. If this is genuine feedback or a complaint needing "
                     "the Manager, start with EYEBALL on its own line.]" + lore_note + french_note)
-                text = await _butler_answer_with_tools(
+                text, _tool_trace = await _butler_answer_with_tools(
                     BUTLER_SYSTEM_PROMPT, _tool_prompt, 1400,
-                    reasoning_effort='low', purpose='chat_data_tools')
+                    reasoning_effort='low', purpose='chat_data_tools', return_trace=True)
             except Exception as _te:
                 print(f"[BUTLER] tool path failed, falling back to context: {_te}")
                 text = ''
@@ -718,7 +719,7 @@ async def call_butler_ai(user_message, context_messages, player_name, channel_ty
         if text.startswith('EYEBALL'):
             eyeball = True
             text = text[len('EYEBALL'):].strip()
-        return (text, eyeball)
+        return (text, eyeball, _tool_trace)
     except Exception as e:
         print(f"Butler AI error: {e}")
         return None
@@ -770,9 +771,15 @@ async def _linkify_reply(text, guild):
             return any(not (b <= s or a >= e) for s, e in spans)
 
         _max_links = getattr(config, 'BUTLER_MAX_LINKS', 5)
+        # Board names that are also everyday English words: linking every occurrence turns
+        # normal prose into a channel chip ("your highest <#…> is 111 kills", "social credit
+        # <#…>"). Skip them — the board is still reachable, the word just stays plain text.
+        _skip_link = {s.lower() for s in getattr(config, 'BUTLER_LINKIFY_SKIP', {'Score'})}
         for nm, tid, flags, is_feat, raw_tid in targets:
             if linked >= _max_links:
                 break
+            if nm.lower() in _skip_link:
+                continue
             # Apostrophe-agnostic: the model often writes a curly ' where the board
             # name has a straight ' (or vice versa). Without this, "Executioner's Axe"
             # fails to match and the linker falls through to the sub-word "Axe",
@@ -5288,7 +5295,7 @@ class PersonalityCog(commands.Cog):
                     except Exception:
                         pass
                 if result:
-                    response_text, needs_eyeball = result
+                    response_text, needs_eyeball, _tool_trace = result
                     # Deterministic archetype anchor: on a direct "what's my archetype /
                     # playstyle" question the low-effort model sometimes invents a title
                     # (e.g. "Galencourt Executioner"). If the reply doesn't already state
@@ -5354,7 +5361,12 @@ class PersonalityCog(commands.Cog):
                     if _is_data_q and player_stats_ctx and _dossier_embed is None:
                         try:
                             from utils.grounding import ungrounded_numbers as _ungr
-                            _bad = _ungr(response_text, player_stats_ctx + " " + resolved_message)
+                            # Include the TOOL results in the grounding context: the tool
+                            # path fetches exact numbers that were never in player_stats_ctx,
+                            # so without this every accurate tool answer was logged as a
+                            # fabrication (the 168h log was full of these false positives).
+                            _ground_ctx = player_stats_ctx + " " + (_tool_trace or '') + " " + resolved_message
+                            _bad = _ungr(response_text, _ground_ctx)
                             if _bad:
                                 print(f"[BUTLER][FABRICATION?] ungrounded={_bad} q={resolved_message!r}")
                                 from utils.helpers import nerve_log_fabrication as _nlf

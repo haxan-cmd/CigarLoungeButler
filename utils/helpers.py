@@ -174,7 +174,8 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
 
 async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
                                    reasoning_effort: str = 'low',
-                                   purpose: str = 'butler_tools', max_rounds: int = 5) -> str:
+                                   purpose: str = 'butler_tools', max_rounds: int = 5,
+                                   return_trace: bool = False):
     """Answer a stats question by letting the model CALL read-only data tools
     (utils.butler_tools) to fetch exactly what it needs — the way the website queries
     the DB — instead of relying on a pre-stuffed context blob. Returns '' on failure so
@@ -184,14 +185,21 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
     run them and feed the JSON results back -> repeat until it produces a final answer
     or max_rounds is hit. Tools are read-only and bounded; results are truncated. Usage
     is logged per round (purpose distinguishes it from plain butler calls on /dev)."""
+    # When return_trace=True the function returns (answer, tool_results_text). The trace is
+    # every tool's JSON output concatenated — the caller feeds it to the grounding check so
+    # numbers the model FETCHED aren't misflagged as fabrications (they weren't in the
+    # pre-stuffed context, only in the tool results).
+    _trace_parts = []
+    def _ret(_t):
+        return (_t, "\n".join(_trace_parts)) if return_trace else _t
     if not _openai_client:
-        return ''
+        return _ret('')
     import json as _json
     try:
         from utils import butler_tools as _bt
     except Exception as _ie:
         print(f"[BUTLER] tools import failed: {_ie}")
-        return ''
+        return _ret('')
     messages = [
         {'role': 'system', 'content': system},
         {'role': 'user', 'content': prompt},
@@ -241,7 +249,7 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
         msg = r.choices[0].message
         tool_calls = getattr(msg, 'tool_calls', None)
         if not tool_calls:
-            return (msg.content or '').strip()
+            return _ret((msg.content or '').strip())
         # Cap tool calls per round (each re-fetches the DB); truncate BEFORE building the
         # assistant turn so every listed call gets a matching tool result (the API requires
         # one response per tool_call, so we can't list more than we answer).
@@ -275,15 +283,17 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
                 print(f"[BUTLER-TOOL] {tc.function.name}({_json.dumps(_args, default=str)[:200]}) -> {_rs}")
             except Exception:
                 pass
+            _payload = _json.dumps(result, default=str)[:6000]
             messages.append({
                 'role': 'tool', 'tool_call_id': tc.id,
-                'content': _json.dumps(result, default=str)[:6000],
+                'content': _payload,
             })
+            _trace_parts.append(_payload)
     if last_err is not None:
         # The tool API itself failed. Return '' so the caller falls back to the classic
         # context path (a real answer) rather than a data-less deflection.
         print(f"[BUTLER] tools loop error (model={BUTLER_MODEL}): {last_err}")
-        return ''
+        return _ret('')
     # Ran out of rounds while still calling tools: force a final answer from the results
     # already gathered (messages hold the tool outputs).
     try:
@@ -293,10 +303,10 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
                 'content': 'Answer now from the tool results above. If they lacked the data, say so briefly and in character.'}],
         )
         _log_usage(r2)
-        return (r2.choices[0].message.content or '').strip()
+        return _ret((r2.choices[0].message.content or '').strip())
     except Exception as e:
         print(f"[BUTLER] tools final completion failed: {e}")
-        return ''
+        return _ret('')
 
 
 # Gemini client for vision (scorecard parsing)

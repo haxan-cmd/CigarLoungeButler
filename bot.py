@@ -764,6 +764,14 @@ async def on_error(event_method, *args, **kwargs):
         await nerve_alert(bot, f"event:{event_method}", err)
     except Exception:
         pass
+    # Also record it as an EVENT so /logs shows crashes — the event log had no error
+    # category, which meant a genuine crash-loop looked identical to fast deploys.
+    try:
+        from utils.helpers import record_event
+        _last = (err.strip().splitlines() or ['?'])[-1]
+        record_event('error', f"event:{event_method} — {_last[:200]}", 'err')
+    except Exception:
+        pass
 
 
 @bot.tree.error
@@ -798,6 +806,11 @@ async def on_app_command_error(
         _cmd = getattr(interaction.command, "name", "?")
         try:
             await nerve_alert(interaction.client, f"/{_cmd}", error)
+        except Exception:
+            pass
+        try:
+            from utils.helpers import record_event
+            record_event('error', f"/{_cmd}: {str(error)[:200]}", 'err')
         except Exception:
             pass
         try:
