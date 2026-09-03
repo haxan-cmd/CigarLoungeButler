@@ -4709,6 +4709,87 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
             'warlord': round(td / _tt_kills * 100, 1) if (_tt_kills and _tt_kills > 0) else None}
 
 
+async def _refresh_blurb_by_link(guild, bot_user, message_link: str) -> dict:
+    """Re-derive the map-KILLS placement line on an EXISTING run's blurb and edit it in
+    place. Old blurbs predate that line and their Edit button dies on a bot restart, so a
+    normal edit can't refresh them. Read-only except for editing the one blurb message — no
+    board, mark, or DB changes. Idempotent: strips any existing map-kills line first, so
+    re-running updates the rank or clears a line that no longer applies."""
+    import re as _re2
+    row = await _db.get_full_submission_by_link(message_link)
+    if not row:
+        return {'error': 'No submission found with that link. Use the ORIGINAL scorecard message link.'}
+    _map = (row[5] or '').strip()
+    _fac = (row[6] or '').strip()
+    _weapon = (row[3] or '').strip()
+    try:
+        _kills = int(str(row[8]).replace(',', '').strip()) if row[8] else 0
+    except (ValueError, TypeError):
+        _kills = 0
+    _link = (row[12] or '').strip() or message_link.strip()
+
+    # Find the bot's blurb reply to the original scorecard message.
+    try:
+        _parts = message_link.rstrip('/').split('/')
+        _ch_id, _orig_id = int(_parts[-2]), int(_parts[-1])
+    except Exception:
+        return {'error': 'Malformed message link.'}
+    try:
+        _ch = guild.get_channel(_ch_id) or await guild.fetch_channel(_ch_id)
+        _orig = await _ch.fetch_message(_orig_id)
+    except Exception as e:
+        return {'error': f'Could not fetch the original message ({e}).'}
+    _blurb = None
+    try:
+        async for m in _ch.history(after=_orig, limit=40):
+            if (m.author and bot_user and m.author.id == bot_user.id
+                    and m.reference and m.reference.message_id == _orig_id):
+                _blurb = m
+                break
+    except Exception as e:
+        return {'error': f'Could not scan for the blurb reply ({e}).'}
+    if _blurb is None:
+        return {'error': "Couldn't find the bot's blurb reply for that run (too far back, or deleted)."}
+
+    # Map-kills placement line (archer / 0-kill excluded; only when this run is the
+    # player's best on the map, i.e. its link is in the live ranking).
+    _line = None
+    try:
+        from utils.boards import is_archer_weapon as _iaw
+    except Exception:
+        _iaw = lambda w: False
+    if _map and _fac and _kills > 0 and not _iaw(_weapon):
+        try:
+            from cogs.leaderboards import (_map_kills_ranking as _mkr,
+                                           _get_lb_records as _glr, _board_jump_path as _bjp)
+            _mk_name = f"{_map} - {_fac}"
+            _rows = _mkr(_mk_name, await _db.get_all_submissions())
+            _pos = next((i + 1 for i, _r in enumerate(_rows)
+                         if (_r[2] or '').strip() == _link), None)
+            if _pos is not None:
+                _tid = None
+                try:
+                    _rec = next((r for r in await _glr()
+                                 if r['Leaderboard Name'] == _mk_name and r.get('Thread ID')), None)
+                    _tid = _bjp(_rec) if _rec else None
+                except Exception:
+                    _tid = None
+                _disp = (f"[{_mk_name}](https://discord.com/channels/{guild.id}/{_tid})"
+                         if _tid else _mk_name)
+                _line = f"💀 {_disp} kills — #{_pos}"
+        except Exception as e:
+            return {'error': f'Map-kills computation failed: {e}'}
+
+    _content = _re2.sub(r'\n?💀 [^\n]*kills — #\d+', '', _blurb.content or '').rstrip()
+    if _line:
+        _content = _content + "\n" + _line
+    try:
+        await _blurb.edit(content=_content)
+    except Exception as e:
+        return {'error': f'Could not edit the blurb ({e}).'}
+    return {'ok': True, 'player': (row[1] or '').strip(), 'line': _line}
+
+
 class SubmissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -4745,6 +4826,34 @@ class SubmissionsCog(commands.Cog):
                   if res.get('kill_share') is not None
                   else "\n⚠️ Couldn't read the team totals off this board, so Warlord/Kill Share may still be blank."))
         await interaction.followup.send(msg, ephemeral=True)
+
+    @app_commands.command(name="refresh_blurb",
+                          description="Refresh a run's map-kills line on its blurb, for runs posted before that line existed (mod only).")
+    @app_commands.describe(message_link="Link to the player's ORIGINAL scorecard message (the image, not the bot's reply).")
+    async def refresh_blurb(self, interaction: discord.Interaction, message_link: str):
+        from utils.helpers import is_mod
+        if not is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            res = await _refresh_blurb_by_link(
+                interaction.guild, interaction.client.user, message_link.strip())
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(f"❌ Refresh failed: {e}", ephemeral=True)
+            return
+        if res.get('error'):
+            await interaction.followup.send(f"⚠️ {res['error']}", ephemeral=True)
+            return
+        if res.get('line'):
+            await interaction.followup.send(
+                f"✅ Updated **{res['player']}**'s blurb — added `{res['line']}`.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"✅ Checked **{res['player']}**'s blurb — no map-kills placement applies "
+                "(not top-10, or an archer/0-kill run). Any stale line was cleared.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message):
