@@ -4780,11 +4780,14 @@ async def _refresh_blurb_by_link(guild, bot_user, message_link: str) -> dict:
         except Exception as e:
             return {'error': f'Map-kills computation failed: {e}'}
 
-    _content = _re2.sub(r'\n?💀 [^\n]*kills — #\d+', '', _blurb.content or '').rstrip()
+    # The blurb text lives in the embed DESCRIPTION (not message.content). Read/write it
+    # through the same helpers the finalise/edit paths use, so the thumbnail and the Edit
+    # button are preserved.
+    _desc = _re2.sub(r'\n?💀 [^\n]*kills — #\d+', '', _blurb_desc(_blurb)).rstrip()
     if _line:
-        _content = _content + "\n" + _line
+        _desc = _desc + "\n" + _line
     try:
-        await _blurb.edit(content=_content)
+        await _blurb_edit(_blurb, _desc, edited=True)
     except Exception as e:
         return {'error': f'Could not edit the blurb ({e}).'}
     return {'ok': True, 'player': (row[1] or '').strip(), 'line': _line}
