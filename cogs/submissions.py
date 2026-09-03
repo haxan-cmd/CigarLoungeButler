@@ -4031,7 +4031,28 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             # named in the run's feats line above — don't repeat them in the trailer.
             _shown = [(lb, pos) for lb, pos in placements if lb not in _FEAT_EMOJI]
             placement_lines = "\n".join(_placement_line(lb, pos) for lb, pos in _shown)
-            trailer = placement_lines
+            # Map KILLS ranking is a LIVE section inside the map embed, not a stored board,
+            # so it never lands in `placements`; a map kills record therefore never showed
+            # in the blurb (only a #1 got a separate main-channel shout). Surface THIS run's
+            # map-kills rank here too, mirroring the map TD line. Shown only when this run is
+            # the player's best on the map (its link is in the live ranking). VIP included /
+            # unlisted excluded (same as the board); archer runs excluded like the map #1.
+            _mk_line = None
+            if not is_ranged and selected_map and faction and kills and kills > 0:
+                try:
+                    from cogs.leaderboards import _map_kills_ranking as _mkr_blurb
+                    _mk_name = f"{selected_map} - {faction}"
+                    _mk_rows = _mkr_blurb(_mk_name, await _db.get_all_submissions())
+                    _mk_pos = next((i + 1 for i, _r in enumerate(_mk_rows)
+                                    if (_r[2] or '').strip() == (message_link or '').strip()), None)
+                    if _mk_pos is not None:
+                        _mtid = _lb_thread_map.get(_mk_name)
+                        _mk_disp = (f"[{_mk_name}](https://discord.com/channels/{_guild_id}/{_mtid})"
+                                    if _mtid else _mk_name)
+                        _mk_line = f"💀 {_mk_disp} kills — #{_mk_pos}"
+                except Exception as _mkbe:
+                    print(f"[KILLS#RANK] blurb map-kills line error: {_mkbe}")
+            trailer = "\n".join(_l for _l in (placement_lines, _mk_line) if _l)
             try:
                 placed_boards = {lb for lb, _ in placements}
                 map_lb_name = f"{selected_map} - {faction}"
