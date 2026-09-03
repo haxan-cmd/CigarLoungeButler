@@ -2562,6 +2562,25 @@ async def _apply_edit(interaction, ev):
     _shown = [(lb, pos) for lb, pos in _edit_placements if lb not in _FEAT_EMOJI]
     if _shown:
         new_summary += "\n" + "\n".join(_pline(lb, pos) for lb, pos in _shown)
+    # Map-kills ranking is a LIVE section (not a stored board), so it never lands in
+    # _edit_placements. Mirror the finalise blurb: show this run's map-kills rank when it's
+    # the player's best on the map. This is also how an OLD run's blurb picks up the line —
+    # editing it rebuilds the blurb through here. Archer/unlisted excluded, VIP included.
+    try:
+        from utils.boards import is_archer_weapon as _iaw
+    except Exception:
+        _iaw = lambda w: False
+    if not _iaw(ev.weapon) and ev.map_name and ev.faction and ev.kills and ev.kills > 0:
+        try:
+            from cogs.leaderboards import _map_kills_ranking as _mkr_e
+            _mk_name = f"{ev.map_name} - {ev.faction}"
+            _mk_rows = _mkr_e(_mk_name, await _db.get_all_submissions())
+            _mk_pos = next((i + 1 for i, _r in enumerate(_mk_rows)
+                            if (_r[2] or '').strip() == (ev.message_link or '').strip()), None)
+            if _mk_pos is not None:
+                new_summary += f"\n💀 {_blink(_mk_name, _mk_name)} kills — #{_mk_pos}"
+        except Exception as _mke2:
+            print(f"[EDIT] map-kills line error: {_mke2}")
 
     # Keep the SAME edit view attached so the Edit button stays live — users can
     # correct more than one field, one per click (previously view=None killed it
