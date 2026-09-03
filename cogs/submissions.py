@@ -4741,15 +4741,23 @@ async def _refresh_blurb_by_link(guild, bot_user, message_link: str) -> dict:
         return {'error': f'Could not fetch the original message ({e}).'}
     _blurb = None
     try:
-        async for m in _ch.history(after=_orig, limit=40):
-            if (m.author and bot_user and m.author.id == bot_user.id
-                    and m.reference and m.reference.message_id == _orig_id):
-                _blurb = m
-                break
+        async for m in _ch.history(after=_orig, limit=60):
+            if not (m.author and bot_user and m.author.id == bot_user.id):
+                continue
+            if not (m.reference and m.reference.message_id == _orig_id):
+                continue
+            # The bot posts SEVERAL replies to one scorecard (stats blurb, lethality badge,
+            # quips, stickers). Only the MAIN stats blurb carries the Edit button, so match
+            # on components — otherwise we'd overwrite the wrong reply (and _blurb_edit would
+            # force it into a bogus "Run Submitted" embed).
+            if not m.components:
+                continue
+            _blurb = m
+            break
     except Exception as e:
         return {'error': f'Could not scan for the blurb reply ({e}).'}
     if _blurb is None:
-        return {'error': "Couldn't find the bot's blurb reply for that run (too far back, or deleted)."}
+        return {'error': "Couldn't find the main run blurb (the reply with the Edit button) — too far back, or deleted."}
 
     # Map-kills placement line (archer / 0-kill excluded; only when this run is the
     # player's best on the map, i.e. its link is in the live ranking).
