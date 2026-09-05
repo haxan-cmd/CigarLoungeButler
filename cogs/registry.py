@@ -783,6 +783,7 @@ async def get_feats_for_player(discord_id, cached_data=None):
         print(f"[HH] hundred-handed match failed for {discord_id_str}: {e}")
 
     # Collect feat submissions from Submissions sheet
+    _vip_tuff_count = 0  # VIP TUFFs are kept OFF the ranked board but still RECORDED on the card
     for row in subs:
         if len(row) < 13 or row[2].strip() != discord_id_str:
             continue
@@ -813,6 +814,17 @@ async def get_feats_for_player(discord_id, cached_data=None):
         # just the board's best. Deduped against legacy board rows by link below.
         if 'Flawless' in row_feats:
             feats.append((FEAT_EMOJIS['Flawless'], link))
+        # VIP TUFF: a VIP run whose kills beat the best teammate's takedowns. VIP is kept
+        # OFF the ranked TUFF board (its inflated kills would skew the margin ranking), but
+        # the carry is still RECORDED on the player's card. Non-VIP TUFFs are counted from
+        # the board rows below; count the VIP ones here so they aren't lost. (col 10 vip,
+        # col 22 second_place_td.)
+        try:
+            _sptd = int(row[22]) if len(row) > 22 and str(row[22]).strip() not in ('', 'None') else None
+            if _sptd is not None and str(row[10]).strip().lower() == 'yes' and int(row[8]) > _sptd:
+                _vip_tuff_count += 1
+        except (ValueError, IndexError):
+            pass
 
     # Also pull legacy feat entries from LeaderboardData
     FEAT_BOARD_EMOJIS = {
@@ -851,6 +863,10 @@ async def get_feats_for_player(discord_id, cached_data=None):
                 feats.append((emoji, link))
     except Exception as e:
         print(f"LeaderboardData feats read error: {e}")
+
+    # Fold in VIP TUFFs (recorded on the card, absent from the ranked board above).
+    if _vip_tuff_count:
+        board_counts['TUFF'] = board_counts.get('TUFF', 0) + _vip_tuff_count
 
     # Apply manual feat count overrides from players table (indices 8, 9, 10).
     # If a manual value is set, it wins — ignores auto-detected leaderboard counts.
