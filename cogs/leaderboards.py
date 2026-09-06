@@ -1565,7 +1565,12 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
                 except (ValueError, TypeError):
                     score = 0
             else:  # map board: "{map} - {faction}"
-                if f"{s[5]} - {s[6]}" != nm:
+                # Normalize the raw vision map string ("Escape from Falmire",
+                # "The Battle of Falmire"…) to the canonical key before matching, or a run
+                # stored under a variant name never lands on the canonical "{Map} - {Faction}"
+                # board — leaving it under-populated so low runs wrongly fill its top-10.
+                _sm = config.MAP_ALIASES.get((s[5] or '').strip().lower(), (s[5] or '').strip())
+                if f"{_sm} - {s[6]}" != nm:
                     continue
                 if _is_pac:  # pacifist runs stay off map boards too
                     continue
@@ -2081,7 +2086,8 @@ def _map_kills_ranking(lb_name, all_subs, top=10):
             continue
         if len(s) > 11 and s[11] and 'Unlisted' in str(s[11]):
             continue
-        if f"{(s[5] or '').strip()} - {(s[6] or '').strip()}" != lb_name:
+        _sm = config.MAP_ALIASES.get((s[5] or '').strip().lower(), (s[5] or '').strip())
+        if f"{_sm} - {(s[6] or '').strip()}" != lb_name:
             continue
         try:
             k = int(s[8]) if s[8] else 0
