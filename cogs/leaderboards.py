@@ -598,6 +598,16 @@ async def _sync_board_messages(thread, embeds, message_ids, msg_content="", clos
     if not embeds:
         return list(message_ids)
     embeds = list(embeds)
+    # Board threads auto-archive after inactivity. EDITING a message in an archived thread
+    # raises "400 Bad Request (50083): Thread is archived", which was caught-and-logged
+    # below while the board silently stopped updating — the recurring "record didn't update"
+    # report on low-traffic weapon/map threads (e.g. One-Handed Spear). Un-archive first so
+    # the edits land. (Sending a message auto-unarchives, but an edit does not.)
+    try:
+        if getattr(thread, 'archived', False):
+            await thread.edit(archived=False)
+    except Exception as _unarch_e:
+        print(f"[BOARD] could not un-archive thread #{getattr(thread, 'id', '?')}: {_unarch_e}")
     # Strip any legacy baked bottom-decoration image so an in-place edit clears it.
     try:
         embeds[-1].set_image(url=None)
