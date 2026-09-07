@@ -308,6 +308,12 @@ BUTLER_MAX_LINKS = 25
 # they start over-linking as common words.
 BUTLER_LINKIFY_SKIP = {"Score"}
 
+# Seconds the submit flow waits for a scorecard vision read before giving up and falling
+# back to manual entry. Dense 64-player boards can take ~40s; a hung Gemini call used to
+# leave the UI stuck on "Reading your scorecard" forever. Below the Gemini client's own
+# 90s request timeout so the user is unblocked first.
+VISION_READ_TIMEOUT = 75
+
 # How many board threads /rebuild_boards renders to Discord in parallel. Boards that
 # share a thread still render sequentially; this only caps DISTINCT-thread fan-out.
 # discord.py paces each channel's bucket, so this is a safety cap against a burst of

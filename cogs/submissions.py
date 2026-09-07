@@ -505,13 +505,25 @@ class SubmitView(discord.ui.View):
                 vision_other_names = []
             for att in self.original_message.attachments:
                 if att.content_type and att.content_type.startswith('image/'):
-                    parsed = await asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names)
+                    try:
+                        parsed = await asyncio.wait_for(
+                            asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names),
+                            timeout=getattr(config, 'VISION_READ_TIMEOUT', 75))
+                    except asyncio.TimeoutError:
+                        print("[VISION] read timed out (dense board / hung API) — falling back to manual entry")
+                        parsed = None
                     print(f"[VISION] Raw parsed result: {parsed}")
                     break
                 elif not att.content_type:
                     # content_type can be None — fall back to filename extension check
                     if any(att.filename.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        parsed = await asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names)
+                        try:
+                            parsed = await asyncio.wait_for(
+                                asyncio.to_thread(vision_parse_scorecard_smart, att.url, vision_name_hint, vision_other_names),
+                                timeout=getattr(config, 'VISION_READ_TIMEOUT', 75))
+                        except asyncio.TimeoutError:
+                            print("[VISION] read timed out (dense board / hung API) — falling back to manual entry")
+                            parsed = None
                         print(f"[VISION] Raw parsed result (ext check): {parsed}")
                         break
     

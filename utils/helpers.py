@@ -313,7 +313,17 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
 _gemini_client = None
 try:
     from google import genai as _genai
-    _gemini_client = _genai.Client(api_key=os.environ['GOOGLE_AI_API_KEY'])
+    # Request timeout so a hung generate_content (seen on dense 64-player boards, which
+    # never returned a response and left the submit UI stuck on "Reading your scorecard")
+    # RAISES instead of blocking the worker thread forever. Timeout is in MILLISECONDS.
+    # Wrapped in its own try so an SDK version without http_options still constructs.
+    try:
+        from google.genai import types as _genai_types_init
+        _gemini_client = _genai.Client(
+            api_key=os.environ['GOOGLE_AI_API_KEY'],
+            http_options=_genai_types_init.HttpOptions(timeout=90_000))
+    except Exception:
+        _gemini_client = _genai.Client(api_key=os.environ['GOOGLE_AI_API_KEY'])
 except Exception:
     pass
 

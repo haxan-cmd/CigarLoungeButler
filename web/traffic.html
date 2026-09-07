@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Cigar Lounge — Traffic</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0e0f12; --panel:#16181d; --panel2:#1b1e24; --line:#2a2e36;
+    --ink:#e7e3d8; --dim:#9a968b; --gold:#d8b25a; --gold2:#f0d488;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:28px 20px 60px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:22px;letter-spacing:.5px;margin:0 0 2px;color:var(--gold2)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:22px}
+  .controls{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+  .controls button{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+    padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;transition:.15s}
+  .controls button:hover{color:var(--ink)}
+  .controls button.on{background:var(--gold);color:#1a1400;border-color:var(--gold);font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .tile .n{font-size:28px;font-weight:700;color:var(--gold2);line-height:1.1}
+  .tile .l{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);margin:0 0 14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  td{padding:7px 4px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  td.k{color:var(--ink)}
+  td.v{text-align:right;color:var(--gold2);font-variant-numeric:tabular-nums;font-weight:600;width:70px}
+  .bar{height:5px;background:var(--gold);border-radius:3px;margin-top:5px;opacity:.55}
+  .muted{color:var(--dim)}
+  .err{background:#2a1414;border:1px solid #6a2a2a;color:#e8b0b0;padding:14px 16px;border-radius:10px}
+  canvas{max-height:260px}
+  @media(max-width:680px){.tiles{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cigar Lounge — Website Traffic</h1>
+  <div class="sub">Private, self-hosted, cookie-free. Visitors are counted by a salted daily hash — no IPs stored.</div>
+
+  <div class="controls" id="ctl">
+    <button data-d="1">24h</button>
+    <button data-d="7">7 days</button>
+    <button data-d="30" class="on">30 days</button>
+    <button data-d="90">90 days</button>
+  </div>
+
+  <div id="body"><div class="muted">Loading…</div></div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+let chart = null;
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmt(n){return Number(n).toLocaleString();}
+
+function rows(list, total){
+  if(!list.length) return '<div class="muted">No data yet.</div>';
+  const max = Math.max(...list.map(x=>x[1]),1);
+  return '<table>'+list.map(([k,v])=>
+    `<tr><td class="k">${esc(k)}<div class="bar" style="width:${Math.round(v/max*100)}%"></div></td>`+
+    `<td class="v">${fmt(v)}</td></tr>`).join('')+'</table>';
+}
+
+async function load(days){
+  const b = document.getElementById("body");
+  try{
+    const r = await fetch(`/traffic/data?days=${days}&token=${encodeURIComponent(TOKEN)}`);
+    if(!r.ok){ b.innerHTML = `<div class="err">Can't load traffic (${r.status}). Check the token in the URL, or set ANALYTICS_TOKEN.</div>`; return; }
+    const d = await r.json();
+    render(d);
+  }catch(e){ b.innerHTML = `<div class="err">${esc(e.message||e)}</div>`; }
+}
+
+function render(d){
+  const b = document.getElementById("body");
+  b.innerHTML = `
+    <div class="tiles">
+      <div class="tile"><div class="n">${fmt(d.total)}</div><div class="l">Views · ${d.days}d</div></div>
+      <div class="tile"><div class="n">${fmt(d.visitors)}</div><div class="l">Visitors · ${d.days}d</div></div>
+      <div class="tile"><div class="n">${fmt(d.last7)}</div><div class="l">Views · 7d</div></div>
+      <div class="tile"><div class="n">${fmt(d.last24h)}</div><div class="l">Views · 24h</div></div>
+    </div>
+    <div class="panel"><h2>Daily views</h2><canvas id="chart"></canvas></div>
+    <div class="grid2">
+      <div class="panel"><h2>Top pages</h2>${rows(d.by_path)}</div>
+      <div class="panel"><h2>Traffic sources</h2>${rows(d.by_referrer)}</div>
+    </div>`;
+
+  const labels = d.by_day.map(x=>x[0]);
+  const views  = d.by_day.map(x=>x[1]);
+  const vis    = d.by_day.map(x=>x[2]);
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), {
+    type:"line",
+    data:{labels, datasets:[
+      {label:"Views", data:views, borderColor:"#d8b25a", backgroundColor:"rgba(216,178,90,.12)",
+       fill:true, tension:.3, pointRadius:0, borderWidth:2},
+      {label:"Visitors", data:vis, borderColor:"#7fa6c9", backgroundColor:"transparent",
+       fill:false, tension:.3, pointRadius:0, borderWidth:1.5, borderDash:[4,4]}
+    ]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:"#9a968b",boxWidth:12}}},
+      scales:{
+        x:{ticks:{color:"#6f6b62",maxRotation:0,autoSkip:true,maxTicksLimit:8},grid:{color:"#20242b"}},
+        y:{beginAtZero:true,ticks:{color:"#6f6b62",precision:0},grid:{color:"#20242b"}}
+      }}
+  });
+}
+
+document.getElementById("ctl").addEventListener("click", e=>{
+  const btn = e.target.closest("button"); if(!btn) return;
+  [...document.querySelectorAll("#ctl button")].forEach(x=>x.classList.remove("on"));
+  btn.classList.add("on");
+  load(btn.dataset.d);
+});
+
+load(30);
+</script>
+</body>
+</html>

@@ -3979,8 +3979,8 @@ class PersonalityCog(commands.Cog):
                             _more = f" (+{len(standings) - 20} more boards)" if len(standings) > 20 else ""
                             player_stats_ctx += (
                                 "\nLeaderboard placements (on " + str(len(standings)) + " boards, showing top 20; "
-                                "when listing placements, write one per line as 'Board — #N (+gap)'. Do NOT add any "
-                                "emoji — you cannot reproduce the server's custom emoji and will corrupt them): "
+                                "when listing placements, write one per line exactly as shown below. Do NOT add any "
+                                "emoji, you cannot reproduce the server's custom emoji and will corrupt them): "
                                 + " | ".join(_shown) + _more)
                         else:
                             player_stats_ctx += "\nLeaderboard standings: none recorded"
