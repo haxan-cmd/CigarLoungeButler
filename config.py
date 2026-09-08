@@ -77,6 +77,13 @@ CHALLENGE_RULES_CHANNEL_ID  = 1460713024082935930
 LEDGER_ENTRANCE_CHANNEL_ID  = 1520290658387099648
 COUNTING_CHANNEL_ID         = 1510068548775579868  # counting channel: stats tracker + Idiot-role insults
 COUNTING_BOT_ID             = 510016054391734273   # the "counting" bot: its ✅ react + RUINED messages are the source of truth
+# Opt-in replacement referee. A separate test channel keeps legacy live stats intact.
+COUNTING_REFEREE_ENABLED    = os.getenv('COUNTING_REFEREE_ENABLED', 'false').lower() == 'true'
+COUNTING_GAME_CHANNEL_ID    = int(os.getenv('COUNTING_GAME_CHANNEL_ID', str(COUNTING_CHANNEL_ID)) or 0)
+COUNTING_PENALTY_ROLE_ID    = int(os.getenv('COUNTING_PENALTY_ROLE_ID', '0') or 0)
+COUNTING_BEAN_ROLE_ID       = int(os.getenv('COUNTING_BEAN_ROLE_ID', '1517244986251411586') or 0)
+COUNTING_PENALTY_HOURS      = 72
+COUNTING_RECOVERY_LIMIT     = 1000
 CLOWN_TARGET_USER_ID        = 694099959066132531  # Butler clown-reacts this user often (not every post)
 
 # The "99" channel: people post 90-99 TD games that just missed the 100 cutoff.

@@ -725,6 +725,8 @@ COGS = [
     "cogs.join",
     "cogs.suggestions",
 ]
+if config.COUNTING_REFEREE_ENABLED:
+    COGS.append("cogs.counting")
 
 
 @bot.event
@@ -779,6 +781,8 @@ async def on_app_command_error(
     interaction: discord.Interaction,
     error: discord.app_commands.AppCommandError,
 ):
+    if interaction.extras.get('counting_error_handled'):
+        return
     if isinstance(error, discord.app_commands.CommandNotFound):
         # Benign and self-resolving: a client invoked a command the running instance
         # hasn't synced yet — normal right after a deploy while clients hold a stale

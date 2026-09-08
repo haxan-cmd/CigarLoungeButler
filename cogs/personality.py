@@ -3467,6 +3467,9 @@ class PersonalityCog(commands.Cog):
     _RUIN_RE = re.compile(r'RUINED IT AT\s*\**([\d,]+)', re.IGNORECASE)
 
     async def _track_count_ruin(self, message):
+        if (config.COUNTING_REFEREE_ENABLED
+                and config.COUNTING_GAME_CHANNEL_ID == COUNTING_CHANNEL_ID):
+            return  # The referee now updates these stats atomically in Postgres.
         m = self._RUIN_RE.search(message.content or '')
         if not m:
             return
@@ -3481,6 +3484,9 @@ class PersonalityCog(commands.Cog):
             print(f"[COUNTING] ruin track error: {e}")
 
     async def _track_count_valid(self, message, n):
+        if (config.COUNTING_REFEREE_ENABLED
+                and config.COUNTING_GAME_CHANNEL_ID == COUNTING_CHANNEL_ID):
+            return
         try:
             st = await _db.counting_state()
             uid = str(message.author.id)
@@ -3557,6 +3563,11 @@ class PersonalityCog(commands.Cog):
 
     # (slash command 'counting_backfill' unregistered to stay under Discord's 100-command guild cap; code kept below)
     async def counting_backfill(self, interaction: discord.Interaction):
+        if (config.COUNTING_REFEREE_ENABLED
+                and config.COUNTING_GAME_CHANNEL_ID == COUNTING_CHANNEL_ID):
+            await interaction.response.send_message(
+                "Legacy backfill is disabled while the counting referee owns this channel.", ephemeral=True)
+            return
         if not is_mod(interaction):
             await interaction.response.send_message("That's not for you.", ephemeral=True)
             return
@@ -5025,6 +5036,9 @@ class PersonalityCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        if (config.COUNTING_REFEREE_ENABLED
+                and message.channel.id == config.COUNTING_GAME_CHANNEL_ID):
+            return  # Counting cog owns this channel, including its test channel.
         # Counting channel FIRST — the counting bot's own messages carry the
         # break announcements, so this must run before the generic bot-ignore.
         # Player numbers aren't judged here; the bot's react validates them.

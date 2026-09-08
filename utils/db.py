@@ -12,6 +12,9 @@ import time as _time
 from datetime import datetime
 
 import config  # dependency-free by design, so no import cycle
+from contextlib import asynccontextmanager
+from datetime import timedelta, timezone
+from utils.counting import judge, MAX_COUNT
 
 _pool: asyncpg.Pool | None = None
 
@@ -224,6 +227,48 @@ _SCHEMA_STATEMENTS = [
 ]
 
 
+_COUNTING_SCHEMA = """
+-- Reference copy of the counting-only bootstrap in utils/db.py.
+-- Names are separate from the pre-existing counting_state/counting_users tables.
+CREATE TABLE IF NOT EXISTS counting_games (
+    channel_id BIGINT PRIMARY KEY, guild_id BIGINT NOT NULL,
+    current INTEGER NOT NULL DEFAULT 0, last_user TEXT,
+    record INTEGER NOT NULL DEFAULT 0, total_counts BIGINT NOT NULL DEFAULT 0,
+    last_message BIGINT NOT NULL DEFAULT 0, paused BOOLEAN NOT NULL DEFAULT TRUE,
+    disruption BOOLEAN NOT NULL DEFAULT FALSE, generation BIGINT NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS counting_game_users (
+    channel_id BIGINT NOT NULL REFERENCES counting_games(channel_id), discord_id TEXT NOT NULL,
+    name TEXT NOT NULL, counts BIGINT NOT NULL DEFAULT 0, breaks BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY(channel_id,discord_id)
+);
+CREATE TABLE IF NOT EXISTS counting_messages (
+    message_id BIGINT PRIMARY KEY, channel_id BIGINT NOT NULL REFERENCES counting_games(channel_id),
+    generation BIGINT NOT NULL, discord_id TEXT NOT NULL, number INTEGER NOT NULL,
+    disrupted BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE TABLE IF NOT EXISTS counting_penalties (
+    guild_id BIGINT NOT NULL, discord_id TEXT NOT NULL, role_id BIGINT NOT NULL,
+    expires_at TIMESTAMP NOT NULL, state TEXT NOT NULL DEFAULT 'pending', error TEXT,
+    PRIMARY KEY(guild_id,discord_id,role_id)
+);
+CREATE TABLE IF NOT EXISTS counting_audit (
+    id BIGSERIAL PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+    channel_id BIGINT, actor TEXT, action TEXT NOT NULL, details TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_counting_messages_channel ON counting_messages(channel_id,generation,message_id);
+CREATE INDEX IF NOT EXISTS idx_counting_penalties_due ON counting_penalties(state,expires_at);
+
+ALTER TABLE counting_games ADD COLUMN IF NOT EXISTS record_message_id BIGINT;
+ALTER TABLE counting_game_users ADD COLUMN IF NOT EXISTS highest_valid INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE counting_game_users ADD COLUMN IF NOT EXISTS highest_message_id BIGINT;
+ALTER TABLE counting_game_users ADD COLUMN IF NOT EXISTS last_active_id BIGINT;
+ALTER TABLE counting_game_users ADD COLUMN IF NOT EXISTS idiot_penalties BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE counting_messages ADD COLUMN IF NOT EXISTS expression TEXT;
+
+"""
+
+
 async def _ensure_schema():
     """Add columns/tables introduced after first creation (idempotent). Each
     statement runs in its own try so one missing table can't block the rest."""
@@ -233,6 +278,12 @@ async def _ensure_schema():
                 await conn.execute(stmt)
         except Exception as e:
             print(f"[DB] schema statement skipped ({stmt[:60]}...): {e}")
+
+    # Counting bootstrap is additive and atomic. If it fails, fail startup rather
+    # than run an enabled referee without durable state.
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(_COUNTING_SCHEMA)
 
     # Stamp discord_id onto legacy rows whose player_name still matches a current
     # player. Only fills NULLs, so it is safe to run on every boot and cannot
@@ -3247,6 +3298,191 @@ async def counting_reset_all():
         await conn.execute("DELETE FROM counting_state")
 
 
+# -- Counting referee: all new Postgres access stays in this module. -----------
+
+async def counting_game_init(channel_id, guild_id):
+    async with _pool_check().acquire() as conn:
+        async with conn.transaction():
+            created = await conn.execute('INSERT INTO counting_games(channel_id,guild_id) VALUES($1,$2) ON CONFLICT DO NOTHING',channel_id,guild_id)
+            stored = await conn.fetchval('SELECT guild_id FROM counting_games WHERE channel_id=$1',channel_id)
+            if stored != guild_id:
+                raise ValueError('Counting channel belongs to another guild.')
+            if created == 'INSERT 0 1' and channel_id == config.COUNTING_CHANNEL_ID:
+                # Import existing lifetime statistics once. The run itself stays
+                # paused until a mod checks the last number and explicitly seeds.
+                await conn.execute('''UPDATE counting_games SET record=COALESCE((SELECT record FROM counting_state WHERE id=1),0),
+                    total_counts=COALESCE((SELECT total_counts FROM counting_state WHERE id=1),0) WHERE channel_id=$1''',channel_id)
+                await conn.execute('''INSERT INTO counting_game_users(channel_id,discord_id,name,counts,breaks)
+                    SELECT $1,discord_id,COALESCE(name,discord_id),COALESCE(counts,0),COALESCE(breaks,0)
+                    FROM counting_users ON CONFLICT DO NOTHING''',channel_id)
+
+
+@asynccontextmanager
+async def _counting_locked(channel_id):
+    async with _pool_check().acquire() as conn:
+        async with conn.transaction():
+            game = await conn.fetchrow('SELECT * FROM counting_games WHERE channel_id=$1 FOR UPDATE',channel_id)
+            if not game:
+                raise ValueError('Counting game is not initialized.')
+            yield conn, game
+
+
+async def _counting_audit(conn, channel_id, actor, action, details):
+    await conn.execute('INSERT INTO counting_audit(channel_id,actor,action,details) VALUES($1,$2,$3,$4)',
+                       channel_id,str(actor) if actor is not None else None,action,details)
+
+
+async def counting_game_status(channel_id):
+    async with _pool_check().acquire() as conn:
+        row = await conn.fetchrow('SELECT * FROM counting_games WHERE channel_id=$1',channel_id)
+        return dict(row) if row else {}
+
+
+async def counting_game_attempt(channel_id, message_id, user_id, name, content, role_id, recovering=False):
+    async with _counting_locked(channel_id) as (conn, game):
+        if game['paused'] or message_id <= game['last_message']:
+            return None
+        verdict = judge(game['current'],game['last_user'],user_id,content,game['disruption'],recovering)
+        await conn.execute('UPDATE counting_games SET last_message=$2 WHERE channel_id=$1',channel_id,message_id)
+        if verdict.kind in ('accepted','failed','disruption'):
+            await conn.execute('UPDATE counting_games SET disruption=FALSE WHERE channel_id=$1',channel_id)
+        if verdict.kind == 'accepted':
+            number = game['current']+1
+            await conn.execute('''UPDATE counting_games SET current=$2,last_user=$3,record_message_id=CASE WHEN $2>record THEN $4 ELSE record_message_id END,record=GREATEST(record,$2),
+                total_counts=total_counts+1 WHERE channel_id=$1''',channel_id,number,str(user_id),message_id)
+            await conn.execute('INSERT INTO counting_messages(message_id,channel_id,generation,discord_id,number,expression) VALUES($1,$2,$3,$4,$5,$6)',
+                               message_id,channel_id,game['generation'],str(user_id),number,content)
+        elif verdict.kind == 'failed':
+            await conn.execute('UPDATE counting_games SET current=0,last_user=NULL,generation=generation+1 WHERE channel_id=$1',channel_id)
+            expires = datetime.now(timezone.utc).replace(tzinfo=None)+timedelta(hours=config.COUNTING_PENALTY_HOURS)
+            await conn.execute('''INSERT INTO counting_penalties(guild_id,discord_id,role_id,expires_at) VALUES($1,$2,$3,$4)
+                ON CONFLICT(guild_id,discord_id,role_id) DO UPDATE SET expires_at=EXCLUDED.expires_at,
+                state='pending',error=NULL''',game['guild_id'],str(user_id),role_id,expires)
+        if verdict.kind in ('accepted','failed'):
+            accepted = int(verdict.kind == 'accepted')
+            broken = 1-accepted
+            await conn.execute('''INSERT INTO counting_game_users(channel_id,discord_id,name,counts,breaks) VALUES($1,$2,$3,$4,$5)
+                ON CONFLICT(channel_id,discord_id) DO UPDATE SET name=EXCLUDED.name,
+                counts=counting_game_users.counts+EXCLUDED.counts,breaks=counting_game_users.breaks+EXCLUDED.breaks''',
+                channel_id,str(user_id),name,accepted,broken)
+            await conn.execute("""UPDATE counting_game_users SET last_active_id=$3,
+                idiot_penalties=idiot_penalties+$4,
+                highest_message_id=CASE WHEN $5>highest_valid THEN $3 ELSE highest_message_id END,
+                highest_valid=GREATEST(highest_valid,$5) WHERE channel_id=$1 AND discord_id=$2""",
+                channel_id,str(user_id),message_id,broken,game['current']+1 if accepted else 0)
+            if channel_id == config.COUNTING_CHANNEL_ID:
+                # Mirror the referee into existing Butler stats in the SAME transaction.
+                # Existing lifetime totals/records remain intact, including after seeding.
+                number = game['current']+1 if accepted else 0
+                await conn.execute('''INSERT INTO counting_state(id,current,last_user,record,total_counts) VALUES(1,$1,$2,$1,$3)
+                    ON CONFLICT(id) DO UPDATE SET current=EXCLUDED.current,last_user=EXCLUDED.last_user,
+                    record=GREATEST(counting_state.record,EXCLUDED.record),
+                    total_counts=counting_state.total_counts+EXCLUDED.total_counts''',number,str(user_id) if accepted else None,accepted)
+                await conn.execute('''INSERT INTO counting_users(discord_id,name,counts,breaks) VALUES($1,$2,$3,$4)
+                    ON CONFLICT(discord_id) DO UPDATE SET name=EXCLUDED.name,
+                    counts=counting_users.counts+EXCLUDED.counts,breaks=counting_users.breaks+EXCLUDED.breaks''',
+                    str(user_id),name,accepted,broken)
+        if verdict.kind not in ('accepted','ignore'):
+            await _counting_audit(conn,channel_id,user_id,verdict.kind,f'Message {message_id}; {verdict.reason}; next={verdict.next_number}')
+        return verdict
+
+
+async def counting_game_seed(channel_id,actor,current,last_user,cursor):
+    if not 0 <= current < MAX_COUNT or current and not last_user:
+        raise ValueError('Use a count below 2 billion and supply the last player for a nonzero count.')
+    async with _counting_locked(channel_id) as (conn, game):
+        await conn.execute('''UPDATE counting_games SET current=$2,last_user=$3,record_message_id=CASE WHEN $2>record THEN NULL ELSE record_message_id END,record=GREATEST(record,$2),last_message=$4,
+            paused=FALSE,disruption=FALSE,generation=generation+1 WHERE channel_id=$1''',
+            channel_id,current,str(last_user) if current else None,cursor)
+        if channel_id == config.COUNTING_CHANNEL_ID:
+            await conn.execute('''INSERT INTO counting_state(id,current,last_user,record,total_counts) VALUES(1,$1,$2,$1,0)
+                ON CONFLICT(id) DO UPDATE SET current=EXCLUDED.current,last_user=EXCLUDED.last_user,
+                record=GREATEST(counting_state.record,EXCLUDED.record)''',current,str(last_user) if current else None)
+        await _counting_audit(conn,channel_id,actor,'seed',f'Current={current}; last={last_user}; cursor={cursor}')
+
+
+async def counting_game_pause(channel_id,actor,reason):
+    async with _counting_locked(channel_id) as (conn, game):
+        await conn.execute('UPDATE counting_games SET paused=TRUE WHERE channel_id=$1',channel_id)
+        await _counting_audit(conn,channel_id,actor,'pause',reason)
+
+
+async def counting_game_disrupt(channel_id,message_ids):
+    async with _counting_locked(channel_id) as (conn, game):
+        rows = await conn.fetch('''UPDATE counting_messages SET disrupted=TRUE WHERE channel_id=$1 AND generation=$2
+            AND message_id=ANY($3::bigint[]) AND disrupted=FALSE RETURNING message_id''',channel_id,game['generation'],list(message_ids))
+        if not rows:
+            return None
+        await conn.execute('UPDATE counting_games SET disruption=TRUE WHERE channel_id=$1',channel_id)
+        await _counting_audit(conn,channel_id,None,'disruption',str([r['message_id'] for r in rows]))
+        return game['current']+1
+
+
+async def counting_game_latest(channel_id):
+    async with _pool_check().acquire() as conn:
+        row = await conn.fetchrow('''SELECT m.* FROM counting_messages m JOIN counting_games g USING(channel_id)
+            WHERE m.channel_id=$1 AND m.generation=g.generation ORDER BY message_id DESC LIMIT 1''',channel_id)
+        return dict(row) if row else None
+
+
+async def counting_game_message(channel_id,message_id):
+    async with _pool_check().acquire() as conn:
+        return await conn.fetchval('SELECT COALESCE(expression,number::text) FROM counting_messages WHERE channel_id=$1 AND message_id=$2',channel_id,message_id)
+
+
+async def counting_game_top(channel_id):
+    async with _pool_check().acquire() as conn:
+        return [dict(r) for r in await conn.fetch('SELECT *,counts-breaks AS score,RANK() OVER (ORDER BY counts-breaks DESC) AS place FROM counting_game_users WHERE channel_id=$1 AND counts+breaks>0 ORDER BY score DESC,discord_id LIMIT 10',channel_id)]
+
+
+async def counting_penalties_list(guild_id):
+    async with _pool_check().acquire() as conn:
+        return [dict(r) for r in await conn.fetch("SELECT * FROM counting_penalties WHERE guild_id=$1 AND state!='done' ORDER BY expires_at LIMIT 20",guild_id)]
+
+
+async def counting_penalty_recheck(guild_id,user_id=None):
+    async with _pool_check().acquire() as conn:
+        await conn.execute("UPDATE counting_penalties SET state='pending' WHERE guild_id=$1 AND state='active' AND ($2::text IS NULL OR discord_id=$2)",
+                           guild_id,str(user_id) if user_id is not None else None)
+
+
+async def counting_penalty_forgive(guild_id,user_id,actor,channel_id):
+    async with _pool_check().acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch("UPDATE counting_penalties SET expires_at=$3 WHERE guild_id=$1 AND discord_id=$2 AND state!='done' RETURNING role_id",
+                                    guild_id,str(user_id),datetime.now(timezone.utc).replace(tzinfo=None))
+            if not rows:
+                raise ValueError('No active counting penalty for that member.')
+            await _counting_audit(conn,channel_id,actor,'forgive',str(user_id))
+
+
+async def counting_penalty_sweep(guild_id,apply_role):
+    """Row lock spans the bounded Discord callback and commit. A renewal/forgive
+    waits, so an expiring worker cannot erase a concurrent new 72-hour deadline.
+    SKIP LOCKED avoids duplicate workers during rolling deploy overlap."""
+    current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    async with _pool_check().acquire() as conn:
+        jobs = await conn.fetch("SELECT discord_id,role_id FROM counting_penalties WHERE guild_id=$1 AND (state='pending' OR (state='active' AND expires_at<=$2)) ORDER BY expires_at LIMIT 50",guild_id,current_time)
+    for job in jobs:
+        async with _pool_check().acquire() as conn:
+            async with conn.transaction():
+                penalty = await conn.fetchrow("SELECT * FROM counting_penalties WHERE guild_id=$1 AND discord_id=$2 AND role_id=$3 AND (state='pending' OR (state='active' AND expires_at<=$4)) FOR UPDATE SKIP LOCKED",
+                                              guild_id,job['discord_id'],job['role_id'],datetime.now(timezone.utc).replace(tzinfo=None))
+                if not penalty:
+                    continue
+                expired = penalty['expires_at'] <= datetime.now(timezone.utc).replace(tzinfo=None)
+                try:
+                    import asyncio
+                    state = await asyncio.wait_for(apply_role(dict(penalty),expired),timeout=15)
+                    if state not in ('pending','active','done'):
+                        raise ValueError('Invalid penalty worker result.')
+                    await conn.execute('UPDATE counting_penalties SET state=$4,error=NULL WHERE guild_id=$1 AND discord_id=$2 AND role_id=$3',guild_id,job['discord_id'],job['role_id'],state)
+                    if state != penalty['state']:
+                        await _counting_audit(conn,None,job['discord_id'],'penalty_'+state,f'Role {job["role_id"]}')
+                except Exception as exc:
+                    await conn.execute('UPDATE counting_penalties SET error=$4 WHERE guild_id=$1 AND discord_id=$2 AND role_id=$3',guild_id,job['discord_id'],job['role_id'],str(exc)[:500] or type(exc).__name__)
+
+
 # -- Ko-fi --------------------------------------------------------------------
 
 async def kofi_init():
@@ -3531,3 +3767,75 @@ async def get_season_features(season_id: int) -> dict:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT slot, value FROM season_features WHERE season_id = $1", season_id)
     return {r['slot']: r['value'] for r in rows}
+
+
+async def counting_user_stats(channel_id,user_id):
+    async with _counting_locked(channel_id) as (conn,game):
+        player=await conn.fetchrow("""WITH ranked AS (
+            SELECT *,counts AS successes,breaks AS mistakes,counts-breaks AS score,
+            RANK() OVER (ORDER BY counts-breaks DESC) AS place FROM counting_game_users
+            WHERE channel_id=$1 AND counts+breaks>0) SELECT * FROM ranked WHERE discord_id=$2""",channel_id,str(user_id))
+        server=dict(game)
+        server['high_score']=server['record']
+        server['players']=await conn.fetchval('SELECT COUNT(*) FROM counting_game_users WHERE channel_id=$1 AND counts+breaks>0',channel_id)
+        return (dict(player) if player else dict(successes=0,mistakes=0,score=0,place=None,
+            idiot_penalties=0,highest_valid=0,highest_message_id=None,last_active_id=None)),server
+
+
+async def counting_member_action(channel_id,user_id,actor,apply_role,reset=False,reason=""):
+    import asyncio
+    """Serialize eligibility, role changes and resets with incoming counts across workers."""
+    async with _counting_locked(channel_id) as (conn,game):
+        player=await conn.fetchrow('SELECT * FROM counting_game_users WHERE channel_id=$1 AND discord_id=$2',channel_id,str(user_id))
+        correct=player['counts'] if player else 0
+        mistakes=player['breaks'] if player else 0
+        total=correct+mistakes
+        desired=False if reset else (correct*1000>=total*985 if total>=50 else None)
+        # Callback changes only the specific Discord role; bounded network operation.
+        change=await asyncio.wait_for(apply_role(desired),timeout=20)
+        if reset:
+            await conn.execute('DELETE FROM counting_game_users WHERE channel_id=$1 AND discord_id=$2',channel_id,str(user_id))
+            if channel_id==config.COUNTING_CHANNEL_ID:
+                await conn.execute('DELETE FROM counting_users WHERE discord_id=$1',str(user_id))
+        if reset or change:
+            await _counting_audit(conn,channel_id,actor,'reset_user' if reset else 'bean_'+change,
+                f'Target {user_id}; reason={reason}; previous {dict(player) if player else None}; role change={change}')
+        return change
+
+
+async def counting_import_sommelier(channel_id,guild_id,snapshot):
+    """One-time cutover into a never-seeded referee, preserving Sommelier resets."""
+    if snapshot.get('format') != 'sommelier-counting-v1' or snapshot.get('guild_id')!=guild_id or snapshot.get('channel_id')!=channel_id:
+        raise ValueError('Snapshot format, guild or channel does not match configuration.')
+    async with _counting_locked(channel_id) as (conn,game):
+        imported=await conn.fetchval("SELECT 1 FROM counting_audit WHERE channel_id=$1 AND action='sommelier_import' LIMIT 1",channel_id)
+        if not game['paused'] or game['last_message'] or game['generation'] or imported:
+            raise ValueError('Import requires a never-seeded referee and can only run once.')
+        state=snapshot['state']
+        if not 0<=state['current']<MAX_COUNT or not 0<=state['high_score']<=MAX_COUNT:
+            raise ValueError('Snapshot count exceeds supported range.')
+        await conn.execute('DELETE FROM counting_game_users WHERE channel_id=$1',channel_id)
+        if channel_id==config.COUNTING_CHANNEL_ID:
+            await conn.execute('DELETE FROM counting_users')
+        for p in snapshot['players']:
+            await conn.execute("""INSERT INTO counting_game_users(channel_id,discord_id,name,counts,breaks,
+                highest_valid,highest_message_id,last_active_id,idiot_penalties) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8)""",
+                channel_id,str(p['user_id']),p['successes'],p['mistakes'],p['highest_valid'],
+                p['highest_message_id'],p['last_active_id'],p['idiot_penalties'])
+            if channel_id==config.COUNTING_CHANNEL_ID:
+                await conn.execute('INSERT INTO counting_users(discord_id,name,counts,breaks) VALUES($1,$1,$2,$3)',str(p['user_id']),p['successes'],p['mistakes'])
+        await conn.execute("""UPDATE counting_games SET current=$2,last_user=$3,record=$4,total_counts=$5,
+            record_message_id=$6 WHERE channel_id=$1""",channel_id,state['current'],
+            str(state['last_user']) if state['last_user'] else None,state['high_score'],snapshot['total_counts'],state.get('record_message_id'))
+        if channel_id==config.COUNTING_CHANNEL_ID:
+            await conn.execute("""INSERT INTO counting_state(id,current,last_user,record,total_counts) VALUES(1,$1,$2,$3,$4)
+                ON CONFLICT(id) DO UPDATE SET current=EXCLUDED.current,last_user=EXCLUDED.last_user,
+                record=EXCLUDED.record,total_counts=EXCLUDED.total_counts""",state['current'],
+                str(state['last_user']) if state['last_user'] else None,state['high_score'],snapshot['total_counts'])
+        for p in snapshot['penalties']:
+            expiry=datetime.fromisoformat(p['expires_at']).astimezone(timezone.utc).replace(tzinfo=None)
+            await conn.execute("""INSERT INTO counting_penalties(guild_id,discord_id,role_id,expires_at,state)
+                VALUES($1,$2,$3,$4,'pending') ON CONFLICT(guild_id,discord_id,role_id)
+                DO UPDATE SET expires_at=GREATEST(counting_penalties.expires_at,EXCLUDED.expires_at),state='pending'""",
+                guild_id,str(p['user_id']),p['role_id'],expiry)
+        await _counting_audit(conn,channel_id,None,'sommelier_import',f"Imported {len(snapshot['players'])} players; {len(snapshot['penalties'])} penalties. Explicit seed still required.")
