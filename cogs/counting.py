@@ -347,7 +347,7 @@ class CountingCog(commands.GroupCog, group_name='count', group_description='Coun
         await interaction.followup.send('\n'.join(f'#{row["place"]}. <@{row["discord_id"]}>: {row["score"]} points'
             for i,row in enumerate(rows,1)) or 'No accepted numbers here yet.',ephemeral=True,allowed_mentions=NO_PINGS)
 
-    @app_commands.command(name='reset-server',description='Zero the server record and total correct counts; keeps the current count and player stats (mod only).')
+    @app_commands.command(name='reset-server',description='Zero the server record and total correct counts (mod only).')
     @mod_only()
     async def reset_server(self,interaction:discord.Interaction,confirm:bool=False):
         await interaction.response.defer(ephemeral=True)
