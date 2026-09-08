@@ -971,6 +971,29 @@ _ABSURD_QUESTION_FALLBACKS = [
     "Cigars or the crushing quiet between rounds? Choose your comfort.",
 ]
 
+# Seed each absurd-question generation with a RANDOM theme so the AI can't settle into one
+# tic (it had defaulted to soup/food metaphors every time and the room tired of it). One is
+# picked per call and injected into the prompt, which also bans the food default outright.
+_ABSURD_TOPICS = [
+    "a mundane household object and its secret resentments",
+    "an oddly specific pet peeve",
+    "a bleak little hypothetical about modern life",
+    "a pointless 'would you rather'",
+    "a trivial thing people irrationally defend",
+    "an everyday task reframed as a grim ordeal",
+    "animals behaving with unearned confidence",
+    "a small indignity of public life: transit, queues, weather",
+    "the private emotional life of an appliance",
+    "a harmless conspiracy theory",
+    "an overrated comfort or an underrated annoyance",
+    "the correct way to do something trivial, and who is wrong about it",
+    "a uselessly specific superpower",
+    "what a specific inanimate object would say if it could speak",
+    "a hill to die on that absolutely is not worth it",
+    "the worst possible name for something ordinary",
+    "an unspoken rule everyone follows for no reason",
+]
+
 
 async def _generate_absurd_question():
     """Ask the AI for one dry, absurd, open-ended question to pose to the room —
@@ -979,13 +1002,15 @@ async def _generate_absurd_question():
     list if the AI is unavailable or returns nothing usable."""
     if _ai_client:
         try:
+            _topic = random.choice(_ABSURD_TOPICS)
             question = await _butler_complete(
                 BUTLER_SYSTEM_PROMPT,
-                ('Pose a single dry, absurd, open-ended question to the room — nothing to do '
-                 'with the game, stats, or leaderboards. Food, hypotheticals, bleak little hot '
-                 'takes, anything. It should invite people to answer in chat. One sentence, '
-                 'under 140 characters, in your usual flat, faintly weary voice. Reply with '
-                 'ONLY the question text — no quotes, no options, no preamble.'),
+                (f'Pose a single dry, absurd, open-ended question to the room, riffing on THIS '
+                 f'theme: {_topic}. Nothing to do with the game, stats, or leaderboards. It should '
+                 'invite people to answer in chat. One sentence, under 140 characters, in your usual '
+                 'flat, faintly weary voice. Vary your imagery every time and do NOT reach for food, '
+                 'soup, broth, or kitchen metaphors. Reply with ONLY the question text — no quotes, '
+                 'no options, no preamble.'),
                 80,
             )
             question = question.strip('"').strip()
