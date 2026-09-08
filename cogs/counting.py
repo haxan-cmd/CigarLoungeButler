@@ -347,6 +347,21 @@ class CountingCog(commands.GroupCog, group_name='count', group_description='Coun
         await interaction.followup.send('\n'.join(f'#{row["place"]}. <@{row["discord_id"]}>: {row["score"]} points'
             for i,row in enumerate(rows,1)) or 'No accepted numbers here yet.',ephemeral=True,allowed_mentions=NO_PINGS)
 
+    @app_commands.command(name='reset-server',description='Zero the server record and total correct counts; keeps the current count and player stats (mod only).')
+    @mod_only()
+    async def reset_server(self,interaction:discord.Interaction,confirm:bool=False):
+        await interaction.response.defer(ephemeral=True)
+        status=await db.counting_game_status(self.channel_id)
+        if not confirm:
+            await interaction.followup.send(
+                f"This will zero the server **record** ({status.get('record',0)}) and **total correct counts** "
+                f"({status.get('total_counts',0)}). The current count, turn order and per-player stats are kept. "
+                "Re-run with `confirm:True` to apply.",ephemeral=True)
+            return
+        async with self.lock:
+            await db.counting_game_reset_totals(self.channel_id,interaction.user.id)
+        await interaction.followup.send('Server record and total correct counts reset to zero.',ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(CountingCog(bot))

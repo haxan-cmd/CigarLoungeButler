@@ -3338,6 +3338,19 @@ async def counting_game_status(channel_id):
         return dict(row) if row else {}
 
 
+async def counting_game_reset_totals(channel_id, actor):
+    """Zero the server RECORD and TOTAL correct counts for a clean-slate server. Keeps the
+    current count, turn order and per-player stats. Row-locked and audited like every other
+    state change. (Seed deliberately preserves these, so this is the explicit way to clear
+    the lifetime figures carried over from the old counting bot's import.)"""
+    async with _counting_locked(channel_id) as (conn, game):
+        await conn.execute(
+            'UPDATE counting_games SET record=0, record_message_id=NULL, total_counts=0 WHERE channel_id=$1',
+            channel_id)
+        await _counting_audit(conn, channel_id, actor, 'reset_totals',
+                              f"record {game['record']}->0, total_counts {game['total_counts']}->0")
+
+
 async def counting_game_attempt(channel_id, message_id, user_id, name, content, role_id, recovering=False):
     async with _counting_locked(channel_id) as (conn, game):
         if game['paused'] or message_id <= game['last_message']:
