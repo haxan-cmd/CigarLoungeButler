@@ -75,10 +75,13 @@ KOFI_MONTHLY_GOAL           = 20.00
 NERVE_CENTER_CHANNEL_ID     = 1520092706074787870
 CHALLENGE_RULES_CHANNEL_ID  = 1460713024082935930
 LEDGER_ENTRANCE_CHANNEL_ID  = 1520290658387099648
-COUNTING_CHANNEL_ID         = 1510068548775579868  # counting channel: stats tracker + Idiot-role insults
+# Temporary handover to Barkeep: keep counting history, disable all counting listeners.
+COUNTING_CHANNEL_ID         = 0  # legacy tracker and Idiot-role messages disabled
 COUNTING_BOT_ID             = 510016054391734273   # the "counting" bot: its ✅ react + RUINED messages are the source of truth
 # Opt-in replacement referee. A separate test channel keeps legacy live stats intact.
-COUNTING_REFEREE_ENABLED    = os.getenv('COUNTING_REFEREE_ENABLED', 'false').lower() == 'true'
+COUNTING_HANDOVER_TO_BARKEEP = True
+COUNTING_REFEREE_ENABLED    = (not COUNTING_HANDOVER_TO_BARKEEP
+                              and os.getenv('COUNTING_REFEREE_ENABLED', 'false').lower() == 'true')
 COUNTING_GAME_CHANNEL_ID    = int(os.getenv('COUNTING_GAME_CHANNEL_ID', str(COUNTING_CHANNEL_ID)) or 0)
 COUNTING_PENALTY_ROLE_ID    = int(os.getenv('COUNTING_PENALTY_ROLE_ID', '0') or 0)
 COUNTING_BEAN_ROLE_ID       = int(os.getenv('COUNTING_BEAN_ROLE_ID', '1517244986251411586') or 0)
