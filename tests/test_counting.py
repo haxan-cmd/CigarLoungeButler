@@ -38,7 +38,7 @@ def test_counting_slash_group_descriptions_fit_discord():
     tree = ast.parse((root/'cogs/counting.py').read_text(encoding='utf-8'))
     descriptions = [k.value.value for node in ast.walk(tree) if isinstance(node,ast.Call)
                     for k in node.keywords if k.arg=='description' and isinstance(k.value,ast.Constant)]
-    assert len(descriptions) == 9
+    assert len(descriptions) == 10
     assert all(0<len(d)<=100 for d in descriptions)
 
 def test_disabled_by_default_and_only_one_top_level_group():

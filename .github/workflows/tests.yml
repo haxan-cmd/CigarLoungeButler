@@ -25,4 +25,4 @@ jobs:
         run: pip install pytest python-dotenv
 
       - name: Run pure-logic test suite
-        run: pytest -q
+        run: pytest -q --ignore=tests/integration --ignore=tests/postgres

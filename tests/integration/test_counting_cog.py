@@ -23,13 +23,13 @@ def test_count_group_loads_without_changing_other_commands(monkeypatch):
             groups = bot.tree.get_commands()
             assert [g.name for g in groups]==['count']
             payload = groups[0].to_dict(bot.tree)
-            assert {c['name'] for c in payload['options']} == {'check','status','seed','pause','forgive','penalties','board','user','reset-user'}
+            assert {c['name'] for c in payload['options']} == {'check','status','seed','pause','forgive','penalties','board','user','reset-user','reset-server'}
             other_guild = SimpleNamespace(guild_id=0,response=SimpleNamespace(send_message=AsyncMock()))
             # discord.py invokes the cog/binding check through each command,
             # not through the generated Group's default interaction_check.
             assert not await groups[0].get_command('status')._check_can_run(other_guild)
             other_guild.response.send_message.assert_awaited_once()
-    # check,status,seed,pause,forgive,penalties,board: seven commands.
+    # All ten counting commands register under the single count group.
     run(check())
 
 def test_moderator_policy_and_guild_gate(monkeypatch):
