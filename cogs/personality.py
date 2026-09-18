@@ -159,6 +159,12 @@ DIAMONDZ_WAVE_ID = 1277351949079019561
 # msg_id -> {'trigger': str, 'response': str, 'player': str}
 BUTLER_RESPONSE_LOG = {}
 BUTLER_AI_COOLDOWN_SECONDS = 15
+# Global cap on PASSIVE keyword triggers ("butler"/"stats") in the main channel: if the
+# Butler already spoke in the last N sec, a mere keyword mention won't wake him again, so
+# ambient off-topic chatter can't pile up. Direct @pings and replies to the Butler bypass
+# this entirely — addressing him always gets an answer.
+BUTLER_MAIN_GLOBAL_COOLDOWN = getattr(config, 'BUTLER_MAIN_GLOBAL_COOLDOWN', 45)
+_BUTLER_MAIN_LAST = 0.0  # ts of the last keyword-triggered main-channel response
 
 # Idiot role — occasionally dismiss them with a curt line (not every message).
 BUTLER_IDIOT_REPLY_CHANCE = 0.10       # ~1 in 10 of their eligible messages
@@ -5098,12 +5104,17 @@ class PersonalityCog(commands.Cog):
         # Engagement signal: someone replied directly to a Butler line. Counts
         # whether or not it triggers another response — a reply is a reaction
         # that took effort. Fire-and-forget; never blocks the reply path.
+        _is_reply_to_butler = False
         if message.reference and message.reference.message_id:
             try:
                 _ref = message.reference.resolved
                 _ref_is_butler = (_ref.author.id == self.bot.user.id) if _ref else True
                 if _ref_is_butler:
                     await _db.butler_add_reply(message.reference.message_id)
+                # A CONFIDENT reply to the Butler (resolved author is him) counts as
+                # directly addressing him: always answers, bypasses the global cooldown.
+                if _ref is not None and getattr(_ref, 'author', None) and _ref.author.id == self.bot.user.id:
+                    _is_reply_to_butler = True
             except Exception as _fe:
                 print(f"[BUTLER] feedback reply error: {_fe}")
             # If this is a reply to one of the Butler's polls, actually "keep the list":
@@ -5144,7 +5155,7 @@ class PersonalityCog(commands.Cog):
                 return
 
         content_lower = message.content.lower()
-        mentions_butler = 'butler' in content_lower or 'clanker' in content_lower
+        mentions_butler = 'butler' in content_lower  # 'clanker' dropped: pure banter bait, not a real address
         mentions_bald_female = 'bald female' in content_lower or 'bald woman' in content_lower
         mentions_manager = 'manager' in content_lower
         mentions_stats = 'stats' in content_lower
@@ -5164,8 +5175,12 @@ class PersonalityCog(commands.Cog):
         # ── Chat channels — only respond if pinged or butler/clanker mentioned ────
         if not _butler_chat_ok:
             return
-        should_respond = (is_pinged or mentions_butler or mentions_bald_female
-                          or mentions_manager or mentions_stats or _proactive_rules)
+        # Directly addressed = an @ping or a reply to the Butler. These always answer and
+        # bypass the global cooldown. 'manager'/'bald female' were dropped as triggers (they
+        # come up constantly in banter about the Manager); 'butler' and 'stats' stay.
+        _directly_addressed = is_pinged or _is_reply_to_butler
+        should_respond = (_directly_addressed or mentions_butler or mentions_stats
+                          or _proactive_rules)
         if should_respond and _ai_client:
             # Bald Female only gets a response if she pings or uses keyword
             bald_female_id = '131581203256967168'
@@ -5174,6 +5189,18 @@ class PersonalityCog(commands.Cog):
             # when discussing the bot. Avoids the Butler talking over the Manager.
             if str(message.author.id) == bald_female_id and not is_pinged:
                 return
+
+            # Global main-chat throttle: a PASSIVE keyword trigger ("butler"/"stats"/rules)
+            # only wakes him if he hasn't already spoken in the last cooldown window, so a
+            # chatty room can't turn into a wall of Butler replies. Direct pings/replies skip
+            # this. Stamped on pass (even if the per-user cooldown below rejects) so it errs
+            # toward quieter, which is the whole point.
+            if is_main and not _directly_addressed:
+                global _BUTLER_MAIN_LAST
+                _gnow = time.time()
+                if _gnow - _BUTLER_MAIN_LAST < BUTLER_MAIN_GLOBAL_COOLDOWN:
+                    return
+                _BUTLER_MAIN_LAST = _gnow
 
             discord_id_str = str(message.author.id)
             is_registered = any(

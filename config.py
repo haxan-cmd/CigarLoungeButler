@@ -321,6 +321,11 @@ BUTLER_LINKIFY_SKIP = {"Score"}
 # 90s request timeout so the user is unblocked first.
 VISION_READ_TIMEOUT = 75
 
+# Seconds the Butler stays quiet in main chat after a PASSIVE keyword reply ("butler"/"stats")
+# before another keyword mention can wake him. Caps ambient off-topic chatter. Direct @pings
+# and replies to the Butler ignore this. Raise to make him quieter, lower to loosen.
+BUTLER_MAIN_GLOBAL_COOLDOWN = 45
+
 # How many board threads /rebuild_boards renders to Discord in parallel. Boards that
 # share a thread still render sequentially; this only caps DISTINCT-thread fan-out.
 # discord.py paces each channel's bucket, so this is a safety cap against a burst of
