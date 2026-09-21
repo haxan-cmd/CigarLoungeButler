@@ -897,6 +897,43 @@ function lobbyGameRanking(){
   card.innerHTML=html;
   return card;
 }
+function singleGameRanking(stat){
+  // Flat list of the top INDIVIDUAL runs by any stat (not per-player averages) — what
+  // people mean by "sort games by kill share". Same look as the lobby single-game list;
+  // respects the Order toggle, the active filters, and the Find-player box.
+  const rows=filtered(); let games=[];
+  for(const r of rows){ const v=val(r,stat); if(v==null) continue; games.push({r:r,v:v}); }
+  if(state.ranking.q){const _q=state.ranking.q.toLowerCase();
+    games=games.filter(function(g){return ((g.r[IDX.name]||'').toLowerCase().indexOf(_q)>=0);});}
+  if(!games.length) return null;
+  const asc=state.ranking.order==='asc';
+  games.sort(function(a,b){return asc? a.v-b.v : b.v-a.v;});
+  const total=games.length, top=games.slice(0,50);
+  const span=Math.max.apply(null,top.map(function(g){return Math.abs(g.v);}).concat([1]));
+  const card=document.createElement('div'); card.className='card';
+  let html='<h3>'+esc(LABELS[stat]||stat)+' — single games'+(activeBits().length?' (filtered)':'')+'</h3>'
+    +'<div style="color:#8b8f9a;font-size:12px;margin:-4px 0 10px">Top individual runs · '
+    +(asc?'lowest first':'highest first')+' · '+total+' games</div>';
+  top.forEach(function(g,i){
+    const r=g.r, nm=r[IDX.name]||'?', wp=r[IDX.weapon]||'', mp=r[IDX.map]||'—', lk=r[IDX.link]||'';
+    const ctx=[wp,mp].filter(Boolean).join(' · ')||'—';
+    const w=Math.max(2,Math.round(Math.abs(g.v)/span*100));
+    const col=g.v<0?'var(--coral)':'var(--teal)';
+    const dv=Math.round(g.v*10)/10;
+    const inner='<span style="color:var(--mut);width:22px;text-align:right">'+(i+1)+'.</span>'
+      +'<span style="width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nm)+'</span>'
+      +'<span style="flex:1;min-width:50px"><span style="display:inline-block;height:11px;border-radius:3px;background:'+col+';width:'+w+'%"></span></span>'
+      +'<span style="width:170px;color:var(--mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ctx)+'</span>'
+      +'<span style="width:56px;text-align:right;font-weight:600">'+dv+(lk?' <span style="color:var(--mut)">↗</span>':'')+'</span>';
+    if(lk){
+      html+='<a href="'+esc(lk)+'" target="_blank" rel="noopener" title="Open the submission in Discord" style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid);text-decoration:none;color:inherit">'+inner+'</a>';
+    } else {
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--grid)">'+inner+'</div>';
+    }
+  });
+  card.innerHTML=html;
+  return card;
+}
 function renderRanking(){
   const rows=filtered();
   const view=document.getElementById('view'); view.innerHTML='';
@@ -907,8 +944,9 @@ function renderRanking(){
   const isCareer=state.ranking.stat==='career_marks';
   const isLobby=state.ranking.stat==='lobby_difficulty';
   if(!isCareer && !isLobby){
-    ctrl.appendChild(pickSelect('Min runs',[['3','3+'],['5','5+'],['10','10+'],['20','20+']],String(state.ranking.min),function(v){state.ranking.min=+v;renderRanking();}));
-    ctrl.appendChild(pickSelect('Aggregate',[['avg','Average / run'],['total','Total (sum)']],state.ranking.agg,function(v){state.ranking.agg=v;renderRanking();}));
+    if(state.ranking.agg!=='games')  // Min runs is meaningless when each row IS one game
+      ctrl.appendChild(pickSelect('Min runs',[['3','3+'],['5','5+'],['10','10+'],['20','20+']],String(state.ranking.min),function(v){state.ranking.min=+v;renderRanking();}));
+    ctrl.appendChild(pickSelect('Aggregate',[['avg','Average / run'],['total','Total (sum)'],['games','Single games']],state.ranking.agg,function(v){state.ranking.agg=v;renderRanking();}));
   }
   ctrl.appendChild(pickSelect('Order',[['desc','Highest first'],['asc','Lowest first']],state.ranking.order,function(v){state.ranking.order=v;renderRanking();}));
   if(!isLobby){
@@ -927,6 +965,11 @@ function renderRanking(){
     return;
   }
   const stat=state.ranking.stat, isTilt=stat==='tilt', _mode=state.ranking.agg;
+  if(_mode==='games' && !isCareer){  // flat top-individual-runs list, not per-player
+    const _sg=singleGameRanking(stat);
+    view.appendChild(_sg || (function(){const c=document.createElement('div');c.className='card';c.innerHTML='<div class="empty">No runs in view — widen the filters.</div>';return c;})());
+    return;
+  }
   let players=[];
   if(isCareer){
     const filterActive=activeBits().length>0;
