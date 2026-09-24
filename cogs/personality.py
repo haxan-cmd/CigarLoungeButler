@@ -2370,20 +2370,48 @@ class PersonalityCog(commands.Cog):
                         s += w
                 return s
 
-            # --- Newspaper story builders (grounded: only real stats/feats) ---
-            def _headline(row):
-                nm = (row[1] or '').strip() or 'A citizen'
-                wpn = (row[3] or '').strip() or 'a weapon'
-                mp = (row[5] or '').strip() or 'the field'
+            # --- Newspaper story builders (grounded: only real stats/feats). Phrasing pools
+            # rotate PER CATEGORY so two same-kind runs never print the same headline/body. ---
+            _HL = {
+                'triple':   ["{nm} lands a triple on {mp}", "{nm}'s triple tears through {mp}",
+                             "Three at once: {nm} rampages across {mp}"],
+                'td200':    ["{nm} storms {mp} with {td} takedowns", "{nm} carves {td} takedowns out of {mp}",
+                             "{td} to the sword as {nm} runs riot on {mp}", "{nm} lays {td} low on {mp}"],
+                'kills':    ["{nm} piles up {kills} kills with the {wpn}", "{kills} kills: {nm}'s {wpn} works overtime",
+                             "{nm} racks {kills} kills on {mp}"],
+                'flawless': ["{nm} clears {mp} without a scratch", "Not a scratch: {nm} survives {mp}",
+                             "{nm} walks out of {mp} untouched"],
+                'tuff':     ["{nm} out-carries the lobby on the {wpn}", "{nm} drags the team through {mp}",
+                             "{nm}, a one-citizen army on {mp}", "{nm} hauls the lobby along with the {wpn}"],
+                'hard':     ["{nm} holds the line on {mp} against the odds", "Outnumbered, {nm} holds {mp}",
+                             "{nm} defies an ugly lobby on {mp}"],
+                'plain':    ["{nm} posts {td} takedowns on {mp}", "{nm} logs {td} on {mp}",
+                             "{nm} turns in {td} takedowns on {mp}", "A tidy {td} for {nm} on {mp}"],
+            }
+            _FLAT = ["A clean, decisive showing.", "Efficient work, little to embellish.",
+                     "No feats to report, only competence.", "Quietly effective.",
+                     "The numbers speak; the Butler will not."]
+            _LEADIN = ["Featuring", "Complete with", "Notable for", "The ledger:", "On the night,"]
+
+            def _cat(row):
                 td, kills = _i(row, 7), _i(row, 8)
                 ft = str(row[11]) if len(row) > 11 and row[11] else ''
-                if 'Triple' in ft: return f"{nm} lands a triple on {mp}".upper()
-                if '200 Takedowns' in ft or td >= 200: return f"{nm} storms {mp} with {td} takedowns".upper()
-                if '100 Kills' in ft or kills >= 100: return f"{nm} piles up {kills} kills with the {wpn}".upper()
-                if 'Flawless' in ft: return f"{nm} clears {mp} without a scratch".upper()
-                if _i(row, 22) and kills > _i(row, 22): return f"{nm} out-carries the lobby on the {wpn}".upper()
-                if 'Brutal' in ft or 'Outmatched' in ft: return f"{nm} holds the line on {mp} against the odds".upper()
-                return f"{nm} posts {td} takedowns on {mp}".upper()
+                if 'Triple' in ft: return 'triple'
+                if '200 Takedowns' in ft or td >= 200: return 'td200'
+                if '100 Kills' in ft or kills >= 100: return 'kills'
+                if 'Flawless' in ft: return 'flawless'
+                if _i(row, 22) and kills > _i(row, 22): return 'tuff'
+                if 'Brutal' in ft or 'Outmatched' in ft: return 'hard'
+                return 'plain'
+
+            _used = {}
+            def _headline(row):
+                c = _cat(row); pool = _HL[c]
+                t = pool[_used.get(c, 0) % len(pool)]; _used[c] = _used.get(c, 0) + 1
+                return t.format(nm=(row[1] or '').strip() or 'A citizen',
+                                wpn=(row[3] or '').strip() or 'a weapon',
+                                mp=(row[5] or '').strip() or 'the field',
+                                td=_i(row, 7), kills=_i(row, 8)).upper()
 
             def _statline(row):
                 td, kills, deaths = _i(row, 7), _i(row, 8), _i(row, 9)
@@ -2392,6 +2420,7 @@ class PersonalityCog(commands.Cog):
                 tail = ("  —  " + " · ".join([p for p in (wpn, where) if p])) if (wpn or where) else ""
                 return f"{td} TD · {kills} K · {deaths} D" + tail
 
+            _bn = {'flat': 0, 'lead': 0}
             def _body(row):
                 ft = str(row[11]) if len(row) > 11 and row[11] else ''
                 bits = []
@@ -2402,7 +2431,11 @@ class PersonalityCog(commands.Cog):
                 if _i(row, 22) and _i(row, 8) > _i(row, 22): bits.append(f"a +{_i(row, 8) - _i(row, 22)} TUFF carry")
                 ks = _f(row, 20)
                 if ks >= 15: bits.append(f"{ks:.0f}% kill share")
-                return ("Featuring " + ", ".join(bits) + ".") if bits else "A clean, decisive showing."
+                if not bits:
+                    v = _FLAT[_bn['flat'] % len(_FLAT)]; _bn['flat'] += 1
+                    return v
+                lead = _LEADIN[_bn['lead'] % len(_LEADIN)]; _bn['lead'] += 1
+                return lead + " " + ", ".join(bits) + "."
 
             rows = await _db.get_recent_submissions(24 * 60)
             scored = []
@@ -2414,7 +2447,14 @@ class PersonalityCog(commands.Cog):
             if not scored:
                 return  # quiet day, nothing to crown
             scored.sort(key=lambda t: -t[0])
-            top = [r for _s, r in scored[:5]]
+            top, _seen = [], set()   # one run per player, so the page isn't the same name twice
+            for _s, r in scored:
+                _pk = (r[2] or '').strip() or ('name:' + (r[1] or '').strip().lower())
+                if _pk in _seen:
+                    continue
+                _seen.add(_pk); top.append(r)
+                if len(top) >= 5:
+                    break
             stories = [{'headline': _headline(r), 'stats': _statline(r), 'body': _body(r)} for r in top]
 
             _d = datetime.now(timezone.utc)
