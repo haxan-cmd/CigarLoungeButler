@@ -1948,6 +1948,8 @@ class PersonalityCog(commands.Cog):
             self.events_flush_loop.start()
         if not self.traffic_digest.is_running():
             self.traffic_digest.start()
+        if not self.run_of_the_day.is_running():
+            self.run_of_the_day.start()
         # Heal anything a mid-flight deploy interrupted (bounty credit + board
         # placement). Both are top-up/additive only with no side effects. Detached so
         # they never block the ready path; each runs once.
@@ -2311,6 +2313,160 @@ class PersonalityCog(commands.Cog):
         print(f"[TRAFFIC] digest task crashed: {error}")
         if not self.traffic_digest.is_running():
             self.traffic_digest.restart()
+
+    async def _run_run_of_the_day(self, force=False):
+        """Post the standout runs from the last 24h to main as a Gazette, once a day.
+        force=True (the /gazette_now mod command) skips the once-a-day dedup for testing.
+        'Standout' is a
+        COMPOSITE (weights below are meant to be tuned): takedowns + kills + score, plus the
+        team-carry rate (Kill Share), the TUFF hard-carry margin, and bonuses for feats
+        (Triple/Flawless/100 Kills/200 TD/Predator) and hard lobbies (Uphill/Outmatched/
+        Brutal). Resubmit/Unlisted excluded. History-scan dedup so a redeploy can't double-
+        post; silent no-op on a quiet day."""
+        try:
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                return
+            # Manual test (/gazette_now, force) posts to the mod nerve-centre so drafts
+            # aren't seen by the community; the real daily post goes to main.
+            _target = NERVE_CENTER_CHANNEL_ID if force else MAIN_CHANNEL_ID
+            ch = guild.get_channel(_target) or await guild.fetch_channel(_target)
+            if not ch:
+                return
+            # Dedup: bail if a Gazette already went out in the last ~20h (skipped on force).
+            if not force:
+                try:
+                    bot_id = guild.me.id
+                    async for _m in ch.history(limit=40):
+                        if _m.author.id == bot_id and any('gazette' in (a.filename or '').lower() for a in _m.attachments):
+                            if (datetime.now(timezone.utc) - _m.created_at).total_seconds() < 20 * 3600:
+                                return
+                            break
+                except Exception as _de:
+                    print(f"[ROTD] dedup error: {_de}")
+
+            def _i(row, idx):
+                try:
+                    return int(str(row[idx]).replace(',', '').strip()) if len(row) > idx and row[idx] not in (None, '', 'None') else 0
+                except (ValueError, TypeError):
+                    return 0
+            def _f(row, idx):
+                try:
+                    return float(row[idx]) if len(row) > idx and row[idx] not in (None, '', 'None') else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+            _FEATW = {'Triple': 55, 'Flawless': 35, '200 Takedowns': 40, '100 Kills': 30,
+                      'Predator': 25, 'High Score': 12, 'Score': 8,
+                      'Brutal': 30, 'Outmatched': 20, 'Uphill': 8}
+            def _score(row):
+                td, kills, score = _i(row, 7), _i(row, 8), _i(row, 24)
+                sptd = _i(row, 22)
+                feats = str(row[11]) if len(row) > 11 and row[11] else ''
+                s = td * 1.0 + kills * 0.6 + score / 1500.0 + _f(row, 20) * 1.5  # col 20 = kill share %
+                if sptd and kills > sptd:
+                    s += (kills - sptd) * 3.0  # TUFF hard-carry margin
+                for f, w in _FEATW.items():
+                    if f in feats:
+                        s += w
+                return s
+
+            # --- Newspaper story builders (grounded: only real stats/feats) ---
+            def _headline(row):
+                nm = (row[1] or '').strip() or 'A citizen'
+                wpn = (row[3] or '').strip() or 'a weapon'
+                mp = (row[5] or '').strip() or 'the field'
+                td, kills = _i(row, 7), _i(row, 8)
+                ft = str(row[11]) if len(row) > 11 and row[11] else ''
+                if 'Triple' in ft: return f"{nm} lands a triple on {mp}".upper()
+                if '200 Takedowns' in ft or td >= 200: return f"{nm} storms {mp} with {td} takedowns".upper()
+                if '100 Kills' in ft or kills >= 100: return f"{nm} piles up {kills} kills with the {wpn}".upper()
+                if 'Flawless' in ft: return f"{nm} clears {mp} without a scratch".upper()
+                if _i(row, 22) and kills > _i(row, 22): return f"{nm} out-carries the lobby on the {wpn}".upper()
+                if 'Brutal' in ft or 'Outmatched' in ft: return f"{nm} holds the line on {mp} against the odds".upper()
+                return f"{nm} posts {td} takedowns on {mp}".upper()
+
+            def _statline(row):
+                td, kills, deaths = _i(row, 7), _i(row, 8), _i(row, 9)
+                wpn = (row[3] or '').strip(); mp = (row[5] or '').strip(); fac = (row[6] or '').strip()
+                where = (mp + ('/' + fac if fac else '')) if mp else ''
+                tail = ("  —  " + " · ".join([p for p in (wpn, where) if p])) if (wpn or where) else ""
+                return f"{td} TD · {kills} K · {deaths} D" + tail
+
+            def _body(row):
+                ft = str(row[11]) if len(row) > 11 and row[11] else ''
+                bits = []
+                for f, txt in (('Triple', 'a triple'), ('Flawless', 'not a single death'),
+                               ('200 Takedowns', 'past 200 takedowns'), ('100 Kills', 'a hundred kills'),
+                               ('Brutal', 'a brutally uphill lobby'), ('Outmatched', 'an outmatched lobby')):
+                    if f in ft: bits.append(txt)
+                if _i(row, 22) and _i(row, 8) > _i(row, 22): bits.append(f"a +{_i(row, 8) - _i(row, 22)} TUFF carry")
+                ks = _f(row, 20)
+                if ks >= 15: bits.append(f"{ks:.0f}% kill share")
+                return ("Featuring " + ", ".join(bits) + ".") if bits else "A clean, decisive showing."
+
+            rows = await _db.get_recent_submissions(24 * 60)
+            scored = []
+            for r in rows:
+                ft = str(r[11]) if len(r) > 11 and r[11] else ''
+                if 'Unlisted' in ft or 'Resubmit' in ft:
+                    continue
+                scored.append((_score(r), r))
+            if not scored:
+                return  # quiet day, nothing to crown
+            scored.sort(key=lambda t: -t[0])
+            top = [r for _s, r in scored[:5]]
+            stories = [{'headline': _headline(r), 'stats': _statline(r), 'body': _body(r)} for r in top]
+
+            _d = datetime.now(timezone.utc)
+            date_label = (_d.strftime('%B ') + str(_d.day) + _d.strftime(', %Y')).upper()
+            import io as _io2
+            try:
+                from utils import charts as _charts
+                png = await _charts.render_async(_charts.render_gazette, date_label, stories)
+                await ch.send(file=discord.File(_io2.BytesIO(png), filename='cigar_gazette.png'))
+                print(f"[ROTD] gazette posted: {len(stories)} stories, lead={(top[0][1] or '').strip()!r}")
+            except Exception as _ge:
+                # Render failed — fall back to a plain text lead so the day still gets a shout.
+                print(f"[ROTD] gazette render failed, text fallback: {_ge}")
+                _lead = top[0]
+                _lk = (_lead[12] or '').strip() if len(_lead) > 12 else ''
+                await ch.send("\U0001f4f0 **The Cigar Gazette** — run of the day\n**"
+                              + (_lead[1] or '?').strip() + "** — " + _statline(_lead)
+                              + (f"\n{_lk}" if _lk else ""))
+        except Exception as e:
+            print(f"[ROTD] error: {e}")
+
+    @tasks.loop(hours=24)
+    async def run_of_the_day(self):
+        # tasks.loop fires immediately on start; skip that first tick so a deploy doesn't
+        # dump a Gazette into main. First real post = next 24h cycle or a manual /gazette_now.
+        if not getattr(self, '_rotd_started', False):
+            self._rotd_started = True
+            return
+        await self._run_run_of_the_day()
+
+    @run_of_the_day.before_loop
+    async def before_run_of_the_day(self):
+        await self.bot.wait_until_ready()
+
+    @run_of_the_day.error
+    async def run_of_the_day_error(self, error):
+        print(f"[ROTD] task crashed: {error}")
+        if not self.run_of_the_day.is_running():
+            self.run_of_the_day.restart()
+
+    @app_commands.command(name="gazette_now", description="Post the Run-of-the-Day Gazette now, ignoring the daily dedup (mod only).")
+    async def gazette_now(self, interaction: discord.Interaction):
+        from utils.helpers import is_mod
+        if not is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self._run_run_of_the_day(force=True)
+            await interaction.followup.send("Gazette posted to the nerve centre for preview (if any runs landed in the last 24h).", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Gazette failed: {e}", ephemeral=True)
 
 
 

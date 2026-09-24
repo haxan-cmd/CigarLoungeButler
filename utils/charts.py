@@ -304,6 +304,72 @@ def render_breakdown(*, title, subtitle, pairs, value_label, footer,
     return buf.getvalue()
 
 
+def render_gazette(date_label, stories, edition='COMMUNITY EDITION · REPORTED BY THE BUTLER') -> bytes:
+    """Newspaper 'Cigar Gazette' page of the day's standout runs. stories = list of dicts
+    {'headline','stats','body'}; stories[0] is the lead. Cream paper, dark serif ink.
+    Positions are laid out by hand on a full-figure axes in [0,1] coords (y top→bottom)."""
+    import textwrap
+    _ensure_font()
+    PAPER, INK, MUT2, RULE = '#efe7d4', '#211d16', '#6c5e46', '#3a3227'
+    SERIF = 'DejaVu Serif'
+    fig = plt.figure(figsize=(10.5, 7.4), facecolor=PAPER)
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis('off')
+    ax.set_facecolor(PAPER)
+
+    def T(x, y, s, size, weight='normal', ha='center', color=INK, style='normal'):
+        ax.text(x, y, s, fontsize=size, fontweight=weight, ha=ha, va='top',
+                color=color, style=style, family=SERIF)
+
+    def hr(y, x0=0.045, x1=0.955, lw=1.2):
+        ax.plot([x0, x1], [y, y], color=RULE, lw=lw, solid_capstyle='butt')
+
+    hr(0.975, lw=3)
+    T(0.5, 0.966, 'T H E   C I G A R   L O U N G E', 10.5, 'bold', color=MUT2)
+    T(0.5, 0.942, 'THE GAZETTE', 44, 'bold')
+    hr(0.858, lw=1)
+    T(0.5, 0.849, f"{date_label}   ·   {edition}", 9, 'bold', color=MUT2)
+    hr(0.826, lw=3)
+
+    if not stories:
+        T(0.5, 0.5, 'No runs to report today.', 15, color=MUT2)
+        buf = io.BytesIO(); fig.savefig(buf, format='png', dpi=130, facecolor=PAPER)
+        plt.close(fig); return buf.getvalue()
+
+    lead = stories[0]; y = 0.79
+    for ln in (textwrap.wrap(lead.get('headline', ''), 40) or ['']):
+        T(0.045, y, ln, 23, 'bold', ha='left'); y -= 0.047
+    y -= 0.004
+    if lead.get('stats'):
+        T(0.045, y, lead['stats'], 11.5, 'bold', ha='left', color=MUT2); y -= 0.037
+    for ln in textwrap.wrap(lead.get('body', ''), 104):
+        T(0.045, y, ln, 11, ha='left'); y -= 0.03
+    lead_bottom = y - 0.015
+    hr(lead_bottom)
+
+    rest = stories[1:5]
+    if rest:
+        top = lead_bottom - 0.03
+        ax.plot([0.5, 0.5], [0.072, top + 0.006], color=RULE, lw=0.8, solid_capstyle='butt')
+        half = (len(rest) + 1) // 2
+        for ci, group in enumerate((rest[:half], rest[half:])):
+            x = 0.045 if ci == 0 else 0.525
+            yy = top
+            for st in group:
+                for ln in (textwrap.wrap(st.get('headline', ''), 34) or ['']):
+                    T(x, yy, ln, 13.5, 'bold', ha='left'); yy -= 0.033
+                if st.get('stats'):
+                    T(x, yy, st['stats'], 9.5, 'bold', ha='left', color=MUT2); yy -= 0.028
+                for ln in textwrap.wrap(st.get('body', ''), 44):
+                    T(x, yy, ln, 9.5, ha='left'); yy -= 0.025
+                yy -= 0.022
+
+    hr(0.052, lw=2.5)
+    T(0.045, 0.043, 'ALL THE RUNS FIT TO PRINT', 8, 'bold', ha='left', color=MUT2)
+    T(0.955, 0.043, 'PAGE 1 / 1', 8, 'bold', ha='right', color=MUT2)
+    buf = io.BytesIO(); fig.savefig(buf, format='png', dpi=130, facecolor=PAPER)
+    plt.close(fig); return buf.getvalue()
+
+
 def render_season_card(*, player, season_label, gp, rank, field_size,
                        rows, behind=None, footer='') -> bytes:
     """Personal season card.
