@@ -309,6 +309,9 @@ def render_gazette(date_label, stories, edition='COMMUNITY EDITION · REPORTED B
     {'headline','stats','body'}; stories[0] is the lead. Cream paper, dark serif ink.
     Positions are laid out by hand on a full-figure axes in [0,1] coords (y top→bottom)."""
     import textwrap
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
     _ensure_font()
     PAPER, INK, MUT2, RULE = '#efe7d4', '#211d16', '#6c5e46', '#3a3227'
     SERIF = 'DejaVu Serif'
