@@ -2554,7 +2554,23 @@ async def _apply_edit(interaction, ev):
             new_summary += (f"\n\n<a:passive:1365531248268673086> **Pacifist run** on {ev.weapon}. "
                             f"Add a **Score** (hit Edit) to rank it on the Pacifist board.")
     else:
-        new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}\n" + "\n".join(_ml)
+        # Mirror the fresh-submission blurb: show the weapon's combined cross-class mark
+        # total (shared weapons are tracked per class, so the per-class card number
+        # undersells the weapon). The edit has already rewritten the row and invalidated
+        # the read cache, so the recalc includes this run — use its sum directly.
+        # Suppressed when it equals this run's marks (first/only run on the weapon).
+        _tot_suffix_e = ""
+        try:
+            from cogs.registry import calculate_weapon_marks_for_player as _cwm_e
+            _cw_e = config.canonical_weapon(ev.weapon)
+            _all_wm_e = await _cwm_e(ev.author.id)
+            _wtot_e = sum(v for k, v in _all_wm_e.items()
+                          if k == _cw_e or (isinstance(k, tuple) and k[0] == _cw_e))
+            if _wtot_e and _wtot_e != _me:
+                _tot_suffix_e = f" ({_wtot_e} total)"
+        except Exception as _wtm_ee:
+            print(f"[EDIT] weapon-total marks calc failed: {_wtm_ee}")
+        new_summary += f"\n\n**{_me} Mark{'s' if _me != 1 else ''}** on {ev.weapon}{_tot_suffix_e}\n" + "\n".join(_ml)
     if ev.kills is not None and ev.second_place_td is not None and ev.kills > ev.second_place_td:
         # Drop the margin number on thin TUFFs (+1/+2): in the awards list next to
         # "+1 Submission" / "+1 High Score" the small "+N" reads like a mark count.
@@ -3391,7 +3407,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                              f"points and I couldn't read a score on this one, so it can't rank yet — "
                              f"hit **Edit** and add the score to place it.")
     else:
-        marks_summary = f"\n\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}\n" + "\n".join(marks_lines)
+        # Cross-class weapon mark total. Shared weapons (Greatsword, Messer, ...) are
+        # tracked PER CLASS, so the per-class card number undersells the weapon — e.g.
+        # 2 marks on Officer + 2 on Devastator reads as two "2/5" entries, not "4".
+        # Show the combined lifetime tally here so the real weapon total is visible,
+        # while the per-class cards stay as-is. Computed pre-insert (this run isn't in
+        # the DB yet), so add this run's marks_earned. Suppressed on a first-ever run.
+        _tot_suffix = ""
+        try:
+            _cw_tot = config.canonical_weapon(selected_weapon)
+            _all_wm = await calculate_weapon_marks_for_player(interaction.user.id)
+            _wpn_total_marks = marks_earned + sum(
+                v for k, v in _all_wm.items()
+                if k == _cw_tot or (isinstance(k, tuple) and k[0] == _cw_tot))
+            if _wpn_total_marks != marks_earned:
+                _tot_suffix = f" ({_wpn_total_marks} total)"
+        except Exception as _wtm_e:
+            print(f"[BLURB] weapon-total marks calc failed: {_wtm_e}")
+        marks_summary = f"\n\n**{marks_earned} Mark{'s' if marks_earned != 1 else ''}** on {selected_weapon}{_tot_suffix}\n" + "\n".join(marks_lines)
     # TUFF (hard carry): kills beat your best teammate's takedowns -> show the margin on the blurb.
     if kills is not None and _second_place_td is not None and kills > _second_place_td:
         # Drop the margin number on thin TUFFs (+1/+2): next to "+1 Submission" /

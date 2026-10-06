@@ -1763,6 +1763,16 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
 
     messages.append("\n".join(lines))
 
+    # Combined per-weapon mark totals across ALL subclasses. Shared weapons (Greatsword,
+    # Messer, ...) are tracked per class, so one subclass line undersells the weapon — show
+    # the true total beside it when a weapon's marks are spread across more than one class,
+    # so a per-class "2/5" isn't mistaken for the whole tally (the bug that led to a bad
+    # manual mark award).
+    _weapon_combined = {}
+    for _wk, _wv in (weapon_marks or {}).items():
+        _wn = _wk[0] if isinstance(_wk, tuple) else _wk
+        _weapon_combined[_wn] = _weapon_combined.get(_wn, 0) + _wv
+
     # --- Messages 2-5: One per class ---
     for cls, cdata in sorted(class_stats.items(), key=lambda kv: -_class_total_marks(kv[1])):
         cls_emoji = CLASS_RANK_EMOJIS.get(cdata['rank'], '')
@@ -1788,6 +1798,11 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
                 _, _, next_threshold = get_weapon_rank(marks)
                 mark_str = format_weapon_marks(marks)
                 progress_str = f"{mark_str}/{next_threshold}" if next_threshold else mark_str
+                # Shared-weapon combined total: only when this weapon's marks are split
+                # across classes (combined beats this subclass's own count). Keeps the
+                # per-class breakdown, just annotates the real per-weapon tally.
+                _wc_total = _weapon_combined.get(w, marks)
+                _total_suffix = f" ({_wc_total} total)" if (marks > 0 and _wc_total > marks) else ""
                 share_parts = []
                 if wdata.get('avg_kill_share') is not None:
                     share_parts.append(f"<a:mostlethal:1520490418817601658> {wdata['avg_kill_share']}%")
@@ -1796,7 +1811,7 @@ async def build_registry_messages(player_name, discord_id, cached_data=None, gui
                 if wdata.get('avg_lethality') is not None:
                     share_parts.append(f"\U0001fa78 {wdata['avg_lethality']}%")
                 share_str = (" " + " ".join(share_parts)) if share_parts else ""
-                return f"• {w_emoji} {w} — {progress_str}{share_str}"
+                return f"• {w_emoji} {w} — {progress_str}{_total_suffix}{share_str}"
 
             primaries = sorted(
                 [(w, d) for w, d in sdata['weapons'].items() if w in primary_set],
