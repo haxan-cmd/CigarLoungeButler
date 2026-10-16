@@ -939,8 +939,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         existing_entry = existing_score is not None
 
         if lb_name == "Pacifist":
-            # Per-player top 10, ranked fewest-takedowns-then-score. Skip if this exact
-            # run is already on the board; add it, then prune everyone to their best 10.
+            # Per-player, one row each — ranked highest-score first, ties broken by
+            # fewest takedowns (see _sort_board_entries / _prune_pacifist_board). Skip if
+            # this exact run is already on the board; add it, then prune each player to
+            # their single best run.
             if any(r[2] == discord_id and (r[4] if len(r) > 4 else '') == (message_link or '')
                    for r in board_values):
                 continue
@@ -1414,11 +1416,25 @@ async def render_peasant_board(guild):
         return
     try:
         embs = await _peasant_embed()
-        ch = guild.get_channel(int(ptr[0])) or await guild.fetch_channel(int(ptr[0]))
+        cid = int(ptr[0])
+        # Resolve a channel OR a thread. guild.get_channel() returns None for threads,
+        # so fall through to the thread getter and finally an API fetch.
+        ch = (guild.get_channel_or_thread(cid) if hasattr(guild, "get_channel_or_thread")
+              else (guild.get_channel(cid) or guild.get_thread(cid)))
+        if ch is None:
+            ch = await guild.fetch_channel(cid)
+        # A forum/thread board auto-archives after inactivity; editing a message in an
+        # archived thread silently fails and freezes the board. Unarchive it first.
+        if isinstance(ch, discord.Thread) and ch.archived:
+            try:
+                await ch.edit(archived=False)
+            except Exception:
+                pass
         msg = await ch.fetch_message(int(ptr[1]))
         await msg.edit(embeds=embs)
     except Exception as e:
-        print(f"[PEASANT] board render failed: {e}")
+        import traceback
+        print(f"[PEASANT] board render failed: {e!r}\n{traceback.format_exc()}")
 
 
 def _thread_board_order(records, thread_id_str):
