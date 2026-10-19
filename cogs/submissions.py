@@ -3764,7 +3764,24 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _weapon_hs = bool(selected_weapon) and any(
             lb in (selected_weapon, f"{selected_weapon} Kills") for lb, _ in placements)
         _map_hs = any(lb == f"{selected_map} - {faction}" for lb, _ in placements)
-        if _weapon_hs or _map_hs:
+        # Map-KILLS High Score — parity with the weapon-kills board. Map kills is a LIVE
+        # section, not a stored board, so it never lands in `placements`; a personal-best
+        # map-kills run therefore earned no High Score mark the way a weapon-kills PB does.
+        # Detect it exactly as the blurb surfaces the kills line: this run is the player's
+        # best kills on the map-faction (its own link is the one the live top-10 shows),
+        # so it's a PB that ranks and earns the same +1. Archer runs are excluded (as from
+        # the map-kills #1); pacifists never high-score.
+        _map_kills_hs = False
+        if (not is_ranged and not _is_pacifist and selected_map and faction
+                and kills and kills > 0 and message_link):
+            try:
+                from cogs.leaderboards import _map_kills_ranking as _mkr_hs
+                _mk_rows_hs = _mkr_hs(f"{selected_map} - {faction}", await _db.get_all_submissions())
+                _map_kills_hs = any((_r[2] or '').strip() == (message_link or '').strip()
+                                    for _r in _mk_rows_hs)
+            except Exception as _mkhe:
+                print(f"[MAPKILLS HS] detect error: {_mkhe}")
+        if _weapon_hs or _map_hs or _map_kills_hs:
             # Immediate visual feedback FIRST — react + bump the blurb before any
             # bookkeeping, so the user sees the High Score right away.
             react_later("<a:highscore:1360312918545269057>")
