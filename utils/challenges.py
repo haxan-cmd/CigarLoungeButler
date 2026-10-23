@@ -38,6 +38,14 @@ def parse_special(bounty):
     sc = (bounty.get('special_challenge') or '').lower()
     if not sc:
         return None
+    # A worded "deathless" challenge (with no explicit numeric death bound like
+    # "under 1 death") can't be machine-verified the way a TD/lethality bar can, and it
+    # would otherwise fall through to the 100-TD default and wrongly auto-award on any big
+    # run. Treat it as mod-judged: no auto-tracking, the text still shows on the card, and
+    # a mod awards it with /bounty_set_bonus.
+    if 'deathless' in sc and not re.search(
+            r'(?:fewer than|less than|under|sub|below|<)\s*\d+\s*death', sc):
+        return None
     td = re.search(r'(\d+)\s*takedown', sc)
     deaths = re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
     # Lethality (kills / takedowns, as a %). "high lethality" defaults to the same 60%

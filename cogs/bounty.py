@@ -1400,6 +1400,35 @@ class BountyCog(commands.Cog):
         board = await build_progress_board(bounty, top_n=10)
         await interaction.response.send_message(board)
 
+    @bounty_group.command(name="set_special", description="Set or replace the active bounty's special challenge text (mod only)")
+    @app_commands.describe(
+        text="e.g. '1 Deathless game using Halberd'. A 'deathless' challenge is mod-judged — award it with /bounty_set_bonus.")
+    async def bounty_set_special(self, interaction: discord.Interaction, text: str):
+        if not _is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        bounty = await get_active_bounty()
+        if not bounty:
+            await interaction.followup.send("No bounty is running.", ephemeral=True)
+            return
+        try:
+            await _db.update_bounty_field(bounty['id'], 'special_challenge', text)
+            bounty['special_challenge'] = text
+            try:
+                await refresh_bounty_boards(interaction.guild, bounty)
+            except Exception as _rbe:
+                print(f"[BOUNTY] set_special board refresh error: {_rbe}")
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't update the challenge: {e}", ephemeral=True)
+            return
+        # Echo how it will behave: auto-tracked (parser understood it) vs mod-judged.
+        _mode = ("auto-tracked by the bot"
+                 if _parse_special({'special_challenge': text})
+                 else "mod-judged — award it with /bounty_set_bonus @player")
+        await interaction.followup.send(
+            f"✅ Special challenge set to:\n**{text}**\n_({_mode})_", ephemeral=True)
+
     @app_commands.command(name="bounty_add_card", description="Manually create a bounty forum card for a player (mod only)")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(member="The player to create a card for")
