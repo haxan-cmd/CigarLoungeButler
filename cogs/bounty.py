@@ -960,14 +960,22 @@ async def update_bounty(guild, weapon, player_name, player_id, takedowns):
 
 
 def _build_bonus_board_text(bounty):
-    """Build the BONUS COMPLETIONS board text from bounty['bonus_completions'] list."""
+    """Build the BONUS COMPLETIONS board text from bounty['bonus_completions'] list,
+    headed by WHAT the challenge is so hunters see the objective from the channel (not
+    only via /bounty status). Falls back to the raw text for mod-judged challenges the
+    parser leaves undescribed (e.g. a worded "deathless")."""
     completers = bounty.get('bonus_completions', [])
+    _challenge = (_describe_special(_parse_special(bounty))
+                  or (bounty.get('special_challenge') or '')).strip()
     lines = [
         "```",
         "╭──────────────────────────────╮",
         f"  {bounty['theme_emoji']} BONUS COMPLETIONS {bounty['theme_emoji']}",
         "╰──────────────────────────────╯",
     ]
+    if _challenge:
+        lines.append(f"  {_challenge}")
+        lines.append("")
     if completers:
         for idx, entry in enumerate(completers, 1):
             name = entry['name'] if isinstance(entry, dict) else entry

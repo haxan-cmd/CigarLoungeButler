@@ -2290,7 +2290,7 @@ async def get_recent_submissions(minutes: int = 20) -> list[list]:
 async def update_bounty_field(bounty_id: int, field: str, value):
     pool = _pool_check()
     allowed = {'weapons', 'special_done', 'completions', 'bonus_completions', 'active', 'message_id',
-               'completions_msg_id', 'bonus_msg_id', 'progress_msg_id', 'channel_id'}
+               'completions_msg_id', 'bonus_msg_id', 'progress_msg_id', 'channel_id', 'special_challenge'}
     if field not in allowed:
         raise ValueError(f"Field {field} not allowed")
     # `active` is a real BOOLEAN column and asyncpg will not coerce a string.
