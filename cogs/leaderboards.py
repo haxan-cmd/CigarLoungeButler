@@ -930,12 +930,21 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
 
     for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
         board_values = await _db.get_leaderboard_by_board(lb_name)
-        # Find existing entry for this player on this board
-        existing_score = None
+        # Find this player's existing entry and take their HIGHEST row as the bar to beat.
+        # Match on discord_id OR name: matching on id alone missed legacy / name-variant
+        # rows (blank or stale ids), so a LOWER run was treated as a fresh entry — it placed
+        # at the bottom of the board, fired a FALSE High Score, and could overwrite the
+        # player's real higher entry. Comparing against their best across id-or-name rows
+        # fixes both the false High Score and the overwrite (and the inverse: a legit PB on
+        # a legacy row no longer gets missed).
+        _pn = (player_name or '').strip().lower()
+        _mine = []
         for row in board_values:
-            if row[2] == discord_id:
-                existing_score = int(row[3]) if row[3] else 0
-                break
+            _rid = str(row[2] or '').strip()
+            _rnm = (str(row[1]).strip().lower() if len(row) > 1 and row[1] else '')
+            if (_rid and _rid == str(discord_id)) or (_pn and _rnm == _pn):
+                _mine.append(int(row[3]) if len(row) > 3 and row[3] else 0)
+        existing_score = max(_mine) if _mine else None
         existing_entry = existing_score is not None
 
         if lb_name == "Pacifist":
