@@ -965,8 +965,9 @@ def _build_bonus_board_text(bounty):
     only via /bounty status). Falls back to the raw text for mod-judged challenges the
     parser leaves undescribed (e.g. a worded "deathless")."""
     completers = bounty.get('bonus_completions', [])
-    _challenge = (_describe_special(_parse_special(bounty))
-                  or (bounty.get('special_challenge') or '')).strip()
+    # Show the authored wording verbatim here (the channel has room) so hunters read the
+    # real objective, e.g. "1 Deathless game using Halberd", not the compact parse label.
+    _challenge = (bounty.get('special_challenge') or '').strip()
     lines = [
         "```",
         "╭──────────────────────────────╮",

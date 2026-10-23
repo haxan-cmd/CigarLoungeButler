@@ -38,16 +38,12 @@ def parse_special(bounty):
     sc = (bounty.get('special_challenge') or '').lower()
     if not sc:
         return None
-    # A worded "deathless" challenge (with no explicit numeric death bound like
-    # "under 1 death") can't be machine-verified the way a TD/lethality bar can, and it
-    # would otherwise fall through to the 100-TD default and wrongly auto-award on any big
-    # run. Treat it as mod-judged: no auto-tracking, the text still shows on the card, and
-    # a mod awards it with /bounty_set_bonus.
-    if 'deathless' in sc and not re.search(
-            r'(?:fewer than|less than|under|sub|below|<)\s*\d+\s*death', sc):
-        return None
     td = re.search(r'(\d+)\s*takedown', sc)
     deaths = re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
+    # "Deathless" means a 0-death run — same as "under 1 death". It's auto-tracked from the
+    # scoreboard's death count, and (like a lethality challenge) it doesn't drag in the
+    # 100-TD default, so "1 deathless game using Halberd" counts any no-death Halberd run.
+    has_deathless = 'deathless' in sc
     # Lethality (kills / takedowns, as a %). "high lethality" defaults to the same 60%
     # bar as the in-game high-lethality sticker; "70% lethality" sets an explicit one.
     has_leth = 'lethal' in sc
@@ -60,9 +56,12 @@ def parse_special(bounty):
              or (re.search(r'(\d+)\s+(?:\w+\s+){0,3}?(?:lethal|games?)\b', sc) if has_leth else None))
     return {
         'text': sc,
-        # A lethality bounty needn't also clear the 100-TD default; require TD only if named.
-        'min_td': int(td.group(1)) if td else (0 if has_leth else 100),
-        'max_deaths': int(deaths.group(1)) if deaths else None,
+        # A lethality or deathless bounty needn't also clear the 100-TD default; require TD
+        # only if it's actually named in the text.
+        'min_td': int(td.group(1)) if td else (0 if (has_leth or has_deathless) else 100),
+        # "under N deaths" sets N; a worded "deathless" means 0 deaths (max_deaths=1 -> the
+        # run must have fewer than 1 death).
+        'max_deaths': int(deaths.group(1)) if deaths else (1 if has_deathless else None),
         'need': max(1, int(count.group(1))) if count else 1,
         'any_weapon': ('any bounty weapon' in sc) or ('any weapon' in sc),
         'min_lethality': min_lethality,
@@ -84,7 +83,7 @@ def describe(spec):
     if spec['min_td']:
         bits.append(f"{spec['min_td']}+ TD")
     if spec['max_deaths'] is not None:
-        bits.append(f"<{spec['max_deaths']} deaths")
+        bits.append("deathless" if spec['max_deaths'] == 1 else f"<{spec['max_deaths']} deaths")
     if not bits:
         bits.append(f"{spec['min_td']}+ TD")
     label = ', '.join(bits)
