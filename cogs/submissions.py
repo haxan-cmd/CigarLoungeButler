@@ -3273,6 +3273,27 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         print(f"[TUFF] {interaction.user.display_name}: no teammate TDs read from vision "
               f"(team_td rows={len(_team_td)}) — TUFF cannot be computed")
 
+    # TUFF Kill Gap: your kills minus your BEST TEAMMATE'S KILLS (the kills cousin of
+    # TUFF, which uses best-teammate TD). Vision returns per-player teammate kills in
+    # `team_kills` -> _team_k. Vision sometimes folds the submitter's OWN row into that
+    # array, so drop one instance of our own kills before taking the max, exactly as the
+    # TUFF path does for team TDs — otherwise our own value could BE the max and null the
+    # gap. Display-only for now (blurb + log); erring toward NOT showing a gap on a thin
+    # or unreadable read, same bias as TUFF.
+    _tk_for_gap = list(_team_k)
+    if isinstance(kills, int) and kills in _tk_for_gap:
+        _tk_for_gap.remove(kills)
+    _best_teammate_kill = max(_tk_for_gap) if _tk_for_gap else None
+    _kill_gap = None
+    if _best_teammate_kill is not None and isinstance(kills, int):
+        _kill_gap = kills - _best_teammate_kill
+        print(f"[KILLGAP] {interaction.user.display_name}: kills={kills} "
+              f"best_teammate_kill={_best_teammate_kill} gap={_kill_gap:+d} "
+              f"-> {'QUALIFIES (+' + str(_kill_gap) + ')' if _kill_gap > 0 else 'no gap'}")
+    else:
+        print(f"[KILLGAP] {interaction.user.display_name}: no teammate kills read from vision "
+              f"(team_k rows={len(_team_k)}) — kill gap cannot be computed")
+
     # Visibility: vision read the faction banners but returned no roster rows,
     # so team rank and TUFF can't be computed for this run. Flag it so a mod can
     # check the scoreboard and add a missed TUFF with /add_board_score.
@@ -3431,6 +3452,10 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         # "+1 High Score" in the awards list the small "+N" reads like a mark count.
         _tm = kills - _second_place_td
         marks_summary += "\n<a:TUFF2:1520779243879927898> **TUFF**" + (f" +{_tm}" if _tm > 2 else "")
+    # TUFF Kill Gap (display-only probe): kills beat your best teammate's KILLS -> show the
+    # margin so we can validate the number against real scoreboards before building its board.
+    if _kill_gap is not None and _kill_gap > 0:
+        marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF Kill Gap** +{_kill_gap}"
     if "Flawless" in feats:
         marks_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
 
