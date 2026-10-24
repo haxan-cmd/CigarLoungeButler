@@ -138,6 +138,10 @@ _SCHEMA_STATEMENTS = [
     # both team totals. Used by get_lobbymates to stop false-positive lobby matches.
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS team_total_kills INTEGER",
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS enemy_total_kills INTEGER",
+    # Best teammate's KILLS on the submitter's side — the kills cousin of second_place_td
+    # (best teammate TD, which TUFF uses). Stored so the Kill Gap board is edit- and
+    # rebuild-aware exactly like TUFF (gap = player kills - best_teammate_kill).
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS best_teammate_kill INTEGER",
     # Peasant board: its own isolated table so it never touches marks, weapon
     # boards, or mastery. One row per logged Peasant Run; the board dedupes to the
     # best score per player per map at render time.
@@ -433,6 +437,9 @@ def _row_to_submission(r) -> list:
         # so anything indexing [25]/[26] silently got nothing; now exposed for /correlate.
         str(r['team_total_kills']) if r['team_total_kills'] is not None else '',
         str(r['enemy_total_kills']) if r['enemy_total_kills'] is not None else '',
+        # 27 — best teammate's kills (for the Kill Gap board). Appended at the end so the
+        # existing positional indices (0-26) are untouched.
+        str(r['best_teammate_kill']) if r['best_teammate_kill'] is not None else '',
     ]
 
 
@@ -631,7 +638,7 @@ async def add_submission(
     lobby_rank=None, lobby_size=None, kills_rank=None,
     team_rank=None, team_size=None, total_lobby_kills=None,
     team_td_ratio=None, team_kill_share=None, team_td_share=None, second_place_td=None, score=None,
-    team_total_kills=None, enemy_total_kills=None
+    team_total_kills=None, enemy_total_kills=None, best_teammate_kill=None
 ) -> int:
     """Insert a submission and return its id (replaces sheet row index)."""
     pool = _pool_check()
@@ -646,15 +653,15 @@ async def add_submission(
              takedowns, kills, deaths, vip, feats, message_link,
              lobby_rank, lobby_size, kills_rank, team_rank, team_size,
              total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score,
-             team_total_kills, enemy_total_kills)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+             team_total_kills, enemy_total_kills, best_teammate_kill)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
             RETURNING id
         """,
             timestamp, discord_name, str(discord_id), weapon, cls, map_name, faction,
             takedowns, kills, deaths, vip_bool, feats, message_link,
             lobby_rank, lobby_size, kills_rank, team_rank, team_size,
             total_lobby_kills, team_td_ratio, team_kill_share, team_td_share, second_place_td, score,
-            team_total_kills, enemy_total_kills
+            team_total_kills, enemy_total_kills, best_teammate_kill
         )
     # Invalidate AFTER the insert commits: doing it before left a window where a
     # concurrent read (the finalise pipeline does several) re-cached the pre-insert
@@ -2235,7 +2242,8 @@ async def get_submissions_since(minutes: int = 60) -> list[list]:
 
 async def update_submission_lobby(submission_id: int, team_kill_share=None, team_td_share=None,
                                   second_place_td=None, total_lobby_kills=None,
-                                  team_total_kills=None, enemy_total_kills=None):
+                                  team_total_kills=None, enemy_total_kills=None,
+                                  best_teammate_kill=None):
     """Write the whole-lobby / rating columns onto a submission — the fields that only a
     full scoreboard read produces (Kill Share, Warlord, TUFF, lobby difficulty). Used by
     the reparse tool to restore ratings that manual entry never captured. Only non-None
@@ -2243,7 +2251,8 @@ async def update_submission_lobby(submission_id: int, team_kill_share=None, team
     _sets, _vals = [], []
     for _col, _v in (('team_kill_share', team_kill_share), ('team_td_share', team_td_share),
                      ('second_place_td', second_place_td), ('total_lobby_kills', total_lobby_kills),
-                     ('team_total_kills', team_total_kills), ('enemy_total_kills', enemy_total_kills)):
+                     ('team_total_kills', team_total_kills), ('enemy_total_kills', enemy_total_kills),
+                     ('best_teammate_kill', best_teammate_kill)):
         if _v is not None:
             _vals.append(_v)
             _sets.append(f"{_col}=${len(_vals)}")

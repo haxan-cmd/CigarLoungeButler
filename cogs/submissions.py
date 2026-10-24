@@ -240,7 +240,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
                          lobby_rank=None, lobby_size=None, kills_rank=None,
                          team_rank=None, team_size=None, total_lobby_kills=None, team_score_ratio=None,
                          team_kill_share=None, team_td_share=None, second_place_td=None, score=None,
-                         team_total_kills=None, enemy_total_kills=None):
+                         team_total_kills=None, enemy_total_kills=None, best_teammate_kill=None):
     from datetime import datetime as _dt, timezone as _tz
     # Naive UTC: submitted_at is TIMESTAMP (no tz), asyncpg rejects aware values
     now = _dt.now(_tz.utc).replace(tzinfo=None)
@@ -275,6 +275,7 @@ async def log_submission(discord_name, discord_id, weapon, cls, map_name, factio
         score=score,
         team_total_kills=team_total_kills,
         enemy_total_kills=enemy_total_kills,
+        best_teammate_kill=best_teammate_kill,
     )
     return row_id, None
 
@@ -1838,7 +1839,7 @@ class TripleCheckView(discord.ui.View):
 class EditSubmissionView(discord.ui.View):
     def __init__(self, original_message, author, submission_row,
                  weapon, cls, map_name, faction, takedowns, kills, deaths, vip, feats, message_link,
-                 second_place_td=None, score=None):
+                 second_place_td=None, score=None, best_teammate_kill=None):
         # 24h edit window (was 5 min, which was far too short to catch a mis-picked
         # class/weapon). The button still dies on a bot restart — a persistent view is
         # the full fix if this stays a pain point.
@@ -1858,6 +1859,7 @@ class EditSubmissionView(discord.ui.View):
         self.message_link = message_link
         self.second_place_td = second_place_td
         self.score = score
+        self.best_teammate_kill = best_teammate_kill
 
     async def on_timeout(self):
         try:
@@ -2277,6 +2279,7 @@ async def _apply_edit(interaction, ev):
                     ev.takedowns, ev.kills, ev.deaths, ev.vip, (ev.feats or []),
                     ev.author.display_name, ev.message_link,
                     second_place_td=ev.second_place_td, score=ev.score,
+                    best_teammate_kill=ev.best_teammate_kill,
                 )
             except Exception as _e_upd:
                 print(f"[EDIT] update_leaderboards error: {_e_upd}")
@@ -2302,7 +2305,8 @@ async def _apply_edit(interaction, ev):
                 await reseed_feat_boards_for_run(
                     _edit_guild, ev.author.display_name, str(ev.author.id),
                     ev.message_link, ev.kills, ev.takedowns, ev.weapon, (ev.feats or []),
-                    second_place_td=ev.second_place_td, vip=ev.vip)
+                    second_place_td=ev.second_place_td, vip=ev.vip,
+                    best_teammate_kill=ev.best_teammate_kill)
             except Exception as _rfe:
                 print(f"[EDIT] feat-board reseed error: {_rfe}")
     except Exception as e:
@@ -2576,6 +2580,9 @@ async def _apply_edit(interaction, ev):
         # "+1 Submission" / "+1 High Score" the small "+N" reads like a mark count.
         _tm = ev.kills - ev.second_place_td
         new_summary += "\n<a:TUFF2:1520779243879927898> **TUFF**" + (f" +{_tm}" if _tm > 2 else "")
+    if (ev.kills is not None and ev.best_teammate_kill is not None
+            and ev.kills > ev.best_teammate_kill):
+        new_summary += f"\n<a:TUFF2:1520779243879927898> **Kill Gap** +{ev.kills - ev.best_teammate_kill}"
     if "Flawless" in _feats:
         new_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
     def _pline(lb, pos):
@@ -3514,6 +3521,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
             score=_score,
             team_total_kills=_vd_team_total if isinstance(_vd_team_total, int) else None,
             enemy_total_kills=_ett if isinstance(_ett, int) else None,
+            best_teammate_kill=_best_teammate_kill,
         )
         # log_submission returns (row_id, dup_weapon): row_id is the exact row index
         # it wrote to, or None if this was a dedup-skipped repeat — in which case
@@ -3594,7 +3602,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         original_message, interaction.user,
         submission_row, selected_weapon, selected_class,
         selected_map, faction, takedowns, kills, deaths, vip, feats, message_link,
-        _second_place_td, _score
+        _second_place_td, _score, _best_teammate_kill
     )
     # Lethality weapon-charge: render the grey->green weapon, upload it ONCE to the
     # stash channel, and use that message's CDN url as the blurb thumbnail. No file
@@ -4749,10 +4757,18 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
     if isinstance(_btv, int) and 0 < _btv <= _TDMAX and _btv != td:
         _bt.append(_btv)
     _sptd = max(_bt) if _bt else None
+    # Best teammate KILLS for the Kill Gap board (kills cousin of second_place_td). Drop
+    # one instance of the player's own kills first, same as finalise, so their own row
+    # can't BE the max and null the gap.
+    _tk_gap = list(_team_k)
+    if isinstance(k, int) and k in _tk_gap:
+        _tk_gap.remove(k)
+    _bk = max(_tk_gap) if _tk_gap else None
     try:
         await _db.update_submission_lobby(
             _id, team_kill_share=_tks, team_td_share=_ttds, second_place_td=_sptd,
-            total_lobby_kills=_tlk, team_total_kills=_tt_kills, enemy_total_kills=_et_kills)
+            total_lobby_kills=_tlk, team_total_kills=_tt_kills, enemy_total_kills=_et_kills,
+            best_teammate_kill=_bk)
     except Exception as _lbe:
         print(f"[REPARSE] lobby-field update error: {_lbe}")
     # Roster (feeds rivalries / nemesis-ally).
@@ -4784,7 +4800,7 @@ async def _reparse_submission_by_link(guild, message_link: str) -> dict:
                 print(f"[REPARSE] board rebuild error: {_rbe}")
         try:
             await reseed_feat_boards_for_run(guild, pname, str(did), message_link, k, td, weapon, _nf,
-                                             second_place_td=_sptd, vip=vip)
+                                             second_place_td=_sptd, vip=vip, best_teammate_kill=_bk)
         except Exception as _fre:
             print(f"[REPARSE] feat reseed error: {_fre}")
     try:

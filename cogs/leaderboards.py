@@ -1723,9 +1723,14 @@ async def rebuild_score_boards(guild, board_names=None, only_player=None, render
 
 async def reseed_feat_boards_for_run(guild, player_name, discord_id, link,
                                      kills, takedowns, weapon, feats, render=True,
-                                     second_place_td=None, vip=False):
+                                     second_place_td=None, vip=False, best_teammate_kill=None):
     """Ensure ONE run's unlimited feat-board rows (100 Kills / 200 Takedowns / Triple /
     Flawless) exist, adding any that qualify by the run's stats/feats but are missing.
+
+    best_teammate_kill is accepted so edit/reparse callers can pass it uniformly, but Kill
+    Gap is a PERSONAL-BEST board (one row/player, top-20), NOT an unlimited feat board — it's
+    re-placed by update_leaderboards on edits, exactly like the Score board, so it is
+    deliberately NOT in the reseed targets below (adding it here would duplicate per-run rows).
 
     These boards are NOT covered by rebuild_score_boards, so an edit that cleared a
     run's rows by link (or a failed re-add) could strand them and undercount the card.
