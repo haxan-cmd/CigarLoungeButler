@@ -3455,7 +3455,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
     # TUFF Kill Gap (display-only probe): kills beat your best teammate's KILLS -> show the
     # margin so we can validate the number against real scoreboards before building its board.
     if _kill_gap is not None and _kill_gap > 0:
-        marks_summary += f"\n<a:TUFF2:1520779243879927898> **TUFF Kill Gap** +{_kill_gap}"
+        marks_summary += f"\n<a:TUFF2:1520779243879927898> **Kill Gap** +{_kill_gap}"
     if "Flawless" in feats:
         marks_summary += "\n<a:flawless:1360358300834599062> **Flawless**"
 
