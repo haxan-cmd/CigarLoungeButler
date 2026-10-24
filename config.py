@@ -575,6 +575,7 @@ FEAT_EMOJIS = {
     "Pacifist":      "<a:passive:1365531248268673086>",
     "Hybrid":        "🔀",
     "Score":     "🏆",
+    "Kill Gap":  "<a:TUFF2:1520779243879927898>",
 }
 
 SPECIAL_OPS_EMOJIS = {

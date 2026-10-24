@@ -839,9 +839,17 @@ async def _reframe_thread_inner(guild, thread, ordered_boards):
             print(f"[REFRAME] board {lb_name} error: {e}")
 
 
+# Per-player personal-best feat boards that are capped at display time: a run ranking
+# BELOW the cap is stored for records but earns no mark/notification (it isn't on the
+# visible board). Boards not listed here are uncapped. Single source for the mark gate
+# (here) and the render trim (_sort_board_entries).
+_BOARD_DISPLAY_CAP = {"Score": 50, "Kill Gap": 20}
+
+
 async def update_leaderboards(interaction, selected_weapon, selected_map, faction,
                               takedowns, kills, deaths, vip, feats,
-                              player_name, message_link, bot_user=None, second_place_td=None, score=None):
+                              player_name, message_link, bot_user=None, second_place_td=None, score=None,
+                              best_teammate_kill=None):
     guild = interaction.guild
     discord_id = str(interaction.user.id)
     any_updated = False  # True only when player beats their own score on a weapon/feat board (not map boards)
@@ -903,6 +911,17 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
         tuff_gap = kills - second_place_td
         if tuff_gap > 0:
             updates.append(("TUFF", tuff_gap, False, False, True))
+
+    # Kill Gap: your kills minus your BEST TEAMMATE'S KILLS (the kills cousin of TUFF).
+    # One row per player, keep-higher, capped to the top 20 at display (see
+    # _BOARD_DISPLAY_CAP + _sort_board_entries). VIP excluded like TUFF — a VIP run's
+    # inflated kills would skew the margin. best_teammate_kill is passed in by the
+    # finalise path (not stored on the row), so the edit path leaves this board alone;
+    # that's intentional for a showcase board, and rebuild skips it as a feat board.
+    if not vip and best_teammate_kill is not None and kills is not None:
+        _kg = kills - best_teammate_kill
+        if _kg > 0:
+            updates.append(("Kill Gap", _kg, False, True, False))
 
     # Pacifist: highest scoreboard SCORE with 0 kills and <=10 takedowns (objective / support play).
     if is_pacifist and score and score > 0:
@@ -999,10 +1018,11 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                     # existing entry moves it (climbs past another player, or advances the
                     # player's own row) — either way it counts. (A fresh entry onto the
                     # board is the new-entry branch below.)
-                    # Score is capped at top 50 — a personal best that still ranks
-                    # beyond 50th isn't on the visible board, so it earns no
-                    # mark/notification (the row is kept for records).
-                    if lb_name != "Score" or pos <= 50:
+                    # Capped boards (Score top-50, Kill Gap top-20): a personal best
+                    # that still ranks beyond the cap isn't on the visible board, so it
+                    # earns no mark/notification (the row is kept for records).
+                    _cap = _BOARD_DISPLAY_CAP.get(lb_name)
+                    if _cap is None or pos <= _cap:
                         any_updated = True
                         placements.append((lb_name, pos))
                 else:
@@ -1027,9 +1047,10 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
                 board_scores.append(score)
                 board_scores.sort(reverse=True)
                 pos = board_scores.index(score) + 1
-                # Score caps at top 50: a first entry ranking below that is stored
-                # but earns no mark/notification (not on the visible board).
-                if lb_name != "Score" or pos <= 50:
+                # Capped boards (Score top-50, Kill Gap top-20): a first entry ranking
+                # below the cap is stored but earns no mark/notification (not visible).
+                _cap = _BOARD_DISPLAY_CAP.get(lb_name)
+                if _cap is None or pos <= _cap:
                     any_updated = True  # New entry on a board counts as a PB
                     placements.append((lb_name, pos))
         else:
@@ -1287,6 +1308,19 @@ async def _sort_board_entries(lb_name, entries):
             if did not in best or _sc > int(best[did].get('score') or 0):
                 best[did] = e
         return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0),) + _tie(e))[:50]
+    if lb_name == "Kill Gap":
+        # One row per player (their biggest kills-over-best-teammate gap), capped to
+        # the top 20 by gap. Same shape as the Score board, smaller cap.
+        best = {}
+        for e in entries:
+            did = (e.get('did') or '').strip() or ('name:' + (e.get('player') or '').strip().lower())
+            try:
+                _sc = int(e.get('score') or 0)
+            except (ValueError, TypeError):
+                _sc = 0
+            if did not in best or _sc > int(best[did].get('score') or 0):
+                best[did] = e
+        return sorted(best.values(), key=lambda e: (-int(e.get('score') or 0),) + _tie(e))[:20]
     if lb_name != "Pacifist":
         _sorted = sorted(entries, key=lambda x: (-int(x.get('score') or 0),) + _tie(x))
         # Weapon / map / kills boards are top-10. Guard the DISPLAY so a bloated
@@ -1939,6 +1973,9 @@ _LB_EMOJI = {
     "Knife":            "\U0001f5e1\ufe0f",
     "Mallet":           "\U0001f528",
     "Score":            "\U0001f3c6",   # \ud83c\udfc6 \u2014 highest match points board
+    # TUFF emoji + the label, so this reads distinctly from the TUFF board (which is
+    # emoji-only). Kills cousin of TUFF: kills minus best teammate's kills.
+    "Kill Gap":         "<a:TUFF2:1520779243879927898> Kill Gap",
 }
 
 def _lb_title(lb_name, show_title, cont=False):
@@ -4527,6 +4564,37 @@ class LeaderboardsCog(commands.Cog):
             f"✅ Created **{lb_name}** board: {thread.mention}. Ranks the highest scoreboard "
             f"points in a single match, one row per player, top 10. Landing on it earns +1 mark. "
             f"Run `/backfill_feat_boards` to seed it from history.", ephemeral=True)
+
+    @app_commands.command(name="setup_kill_gap_board", description="Create the Kill Gap board (kills vs best teammate's kills) in the feats forum (mod only).")
+    async def setup_kill_gap_board(self, interaction: discord.Interaction):
+        # One-time setup, like setup_score_board. Safe to comment out the @app_commands
+        # decorator afterwards to reclaim the slash-command slot (Discord 100-cmd cap).
+        if not is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        lb_name = "Kill Gap"
+        recs = await _get_lb_records()
+        if any(r['Leaderboard Name'] == lb_name and str(r.get('Thread ID') or '').strip() for r in recs):
+            await interaction.followup.send(f"**{lb_name}** board already exists.", ephemeral=True)
+            return
+        # Classify like the other feat personal-best boards (Score / Pacifist).
+        pac = next((r for r in recs if r['Leaderboard Name'] == "Pacifist"), None)
+        board_type = (pac.get('Type', '') if pac else '') or 'feat'
+        try:
+            forum = (interaction.guild.get_channel(FEATS_FORUM_ID)
+                     or await interaction.guild.fetch_channel(FEATS_FORUM_ID))
+            embeds = await _rated_embeds(lb_name, [], False, None, 0, False, "", True)
+            result = await forum.create_thread(name=lb_name, content=_board_header(lb_name) or None, embeds=embeds)
+            thread, first_msg = result.thread, result.message
+            await _db.upsert_leaderboard(lb_name, str(thread.id), str(first_msg.id), board_type)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Board creation failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Created **{lb_name}** board: {thread.mention}. Ranks your kills minus your best "
+            f"teammate's kills, one row per player, top 20. Board-only (no mark). It fills from new "
+            f"submissions; VIP runs are excluded, same as TUFF.", ephemeral=True)
 
     @app_commands.command(name="setup_peasant_board", description="Post the Peasant highscore board in THIS channel or thread (mod only).")
     async def setup_peasant_board(self, interaction: discord.Interaction):

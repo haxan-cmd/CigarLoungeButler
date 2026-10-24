@@ -3732,6 +3732,7 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                         bot_user=interaction.client.user,
                         second_place_td=_second_place_td,
                         score=_score,
+                        best_teammate_kill=_best_teammate_kill,
                     )
             except Exception as e:
                 # This except once hid a NameError that silently broke ALL board
@@ -4096,6 +4097,9 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
                 "200 Takedowns": "<a:200tkd:1363648828414230538>",
                 "Triple":        "<a:triple:1365532698260668466>",
                 "TUFF":          "<a:TUFF2:1520779243879927898>",
+                # Kill Gap is already named on the blurb ("Kill Gap +N"); listing it here
+                # excludes it from the placement trailer so it isn't mentioned twice.
+                "Kill Gap":      "<a:TUFF2:1520779243879927898>",
                 "Flawless":      "<a:flawless:1360358300834599062>",
                 "Mallet":        "🔨",
                 "Knife":         "🗡️",

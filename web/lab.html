@@ -1078,7 +1078,7 @@ function emojiImg(token){
   const ext = m[1]==='a' ? 'gif' : 'png';
   return html`<img class="ce" src="https://cdn.discordapp.com/emojis/${m[3]}.${ext}" alt="" title="${m[2]}">`;
 }
-const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score']);
+const FEAT_BOARDS=new Set(['100 Kills','200 Takedowns','Triple','TUFF','Flawless','Mallet','Knife','Healing Horn','Healing Banner','Pacifist','Hybrid','Score','Kill Gap']);
 function boardKind(n){ return FEAT_BOARDS.has(n)?'feat':(n.indexOf(' - ')>=0?'map':'weapon'); }
 function _brow(i,nm,sc,lk,suffix,vip){
   const _v=vip?raw(' <span style="font-size:9px;font-weight:700;color:#e0b64a;border:1px solid #6a5a2a;border-radius:6px;padding:0 4px;margin-left:5px;vertical-align:middle">VIP</span>'):'';

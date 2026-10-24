@@ -16,6 +16,7 @@ FEAT_BOARD_NAMES = {
     "100 Kills", "200 Takedowns", "Triple", "TUFF",
     "Flawless", "Mallet", "Knife", "Healing Horn", "Healing Banner", "Pacifist", "Hybrid",
     "Score",                # highest scoreboard points in a match, one row per player
+    "Kill Gap",             # your kills minus your best teammate's kills, one row/player, top 20
     "The Hundred Handed",   # progress board, not score-based
 }
 
@@ -31,7 +32,7 @@ _PROGRESS_BOARDS = {"The Hundred Handed"}
 # listed here are takedown boards. ("Top Score" is the pre-rename Score alias.)
 _BOARD_UNITS = {
     "Score": "points", "Top Score": "points", "Pacifist": "points",
-    "100 Kills": "kills", "TUFF": "kill margin",
+    "100 Kills": "kills", "TUFF": "kill margin", "Kill Gap": "kill gap",
     # Healing boards store a HEALING total, not takedowns — without this they defaulted
     # to 'TDs' and a player's healing score leaked in as their "highest takedowns" PB.
     "Healing Banner": "healing", "Healing Horn": "healing",
