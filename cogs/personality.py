@@ -232,11 +232,26 @@ def _weapon_universe():
 
 
 def extract_weapon_from_message(text):
-    """Try to find a known weapon name mentioned in the message (first/longest)."""
+    """Try to find a known weapon name mentioned in the message (first/longest).
+
+    Also consults WEAPON_ALIASES, so a spelling the caption parser already
+    understands ("quarter staff", "qs", "great sword") routes a question onto the
+    data/tool path instead of deflecting into banter. This was the "butler who is
+    king quarter staff -> I don't have that board" class of miss: the spaced form
+    never matched the single-word canonical name, so the gate read it as banter."""
     text_lower = (text or '').lower()
     for w in sorted(_weapon_universe(), key=len, reverse=True):  # longest match first
         if w.lower() in text_lower:
             return w
+    # Fall back to the alias table. A multi-word or long (>=5) alias is safe as a
+    # plain substring; a short single token (qs, gs, axe, bow) needs a word boundary
+    # so it can't fire inside an unrelated word ("legs", "elbow", "also").
+    for alias in sorted(config.WEAPON_ALIASES.keys(), key=len, reverse=True):
+        if (' ' in alias) or len(alias) >= 5:
+            if alias in text_lower:
+                return config.WEAPON_ALIASES[alias]
+        elif re.search(r'\b' + re.escape(alias) + r'\b', text_lower):
+            return config.WEAPON_ALIASES[alias]
     return None
 
 

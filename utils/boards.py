@@ -82,4 +82,11 @@ def is_archer_weapon(name):
 def board_unit(name):
     """Display unit for a board's stored score value ('points'/'kills'/'kill
     margin'/'TDs'). Prevents reporting Score points as takedowns."""
+    # Per-weapon Highest-Kills companion boards ("Quarterstaff Kills") store KILLS,
+    # not takedowns. They are never in _BOARD_UNITS (that set is hand-maintained for
+    # the named feat boards), so without this they defaulted to "TDs" and the Butler
+    # reported a kills board as a takedown board ("the kill board appears to be
+    # mislabelled"). Checked before the dict so a weapon's companion board is correct.
+    if is_kills_board(name):
+        return "kills"
     return _BOARD_UNITS.get(name, "TDs")
