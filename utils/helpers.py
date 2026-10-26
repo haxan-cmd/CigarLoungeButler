@@ -118,7 +118,9 @@ def set_bot_ref(bot):
 
 
 async def butler_complete(system: str, prompt: str, max_tokens: int,
-                          reasoning_effort: str = 'none', purpose: str = 'butler') -> str:
+                          reasoning_effort: str = 'none', purpose: str = 'butler',
+                          temperature: float = None, presence_penalty: float = None,
+                          frequency_penalty: float = None) -> str:
     """One Butler completion. Returns '' on any failure — callers supply their
     own fallback line.
 
@@ -127,12 +129,25 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
     whole allowance and return empty content. The main chat path opts UP to 'low'
     AND passes a much larger max_tokens (reasoning tokens are drawn from the same
     budget BEFORE the visible answer, so the ceiling must cover both). Never raise
-    reasoning without also raising max_tokens, or replies come back blank."""
+    reasoning without also raising max_tokens, or replies come back blank.
+
+    temperature / presence_penalty / frequency_penalty are OPTIONAL variety knobs:
+    sent only when a caller sets them (the flavour/chat paths do, to stop the Butler
+    recycling the same phrasings). Some reasoning endpoints reject non-default
+    sampling params with a 400, so if a call fails WITH them set, the retry drops
+    them and runs vanilla — variety can never cost us a reply."""
     if not _openai_client:
         return ''
     # One retry: a transient refusal (or a blip) otherwise costs the player a
     # silent non-answer, which reads as the Butler ignoring them.
     last_err = None
+    _sampling = {}
+    if temperature is not None:
+        _sampling['temperature'] = temperature
+    if presence_penalty is not None:
+        _sampling['presence_penalty'] = presence_penalty
+    if frequency_penalty is not None:
+        _sampling['frequency_penalty'] = frequency_penalty
     for _attempt in range(2):
         try:
             r = await _openai_client.chat.completions.create(
@@ -143,6 +158,7 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
                     {'role': 'system', 'content': system},
                     {'role': 'user', 'content': prompt},
                 ],
+                **_sampling,
             )
             # Record token usage (best-effort). completion_tokens from OpenAI INCLUDES
             # reasoning, so subtract it back out to store VISIBLE output separately.
@@ -162,6 +178,13 @@ async def butler_complete(system: str, prompt: str, max_tokens: int,
             return (r.choices[0].message.content or '').strip()
         except Exception as e:
             last_err = e
+            # If variety params were set, the failure may be the endpoint rejecting them
+            # (some reasoning models 400 on non-default temperature/penalties). Drop them
+            # for the retry so the Butler still answers, just without the extra variety.
+            if _sampling:
+                print(f"[BUTLER] completion failed with sampling params {list(_sampling)}; "
+                      f"retrying vanilla ({e})")
+                _sampling = {}
             if _attempt == 0:
                 await asyncio.sleep(1.5)
     print(f"[BUTLER] completion failed after retry (model={BUTLER_MODEL}): {last_err}")
