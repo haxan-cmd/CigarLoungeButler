@@ -319,6 +319,19 @@ async def _get_player_card(player=None, **_):
         archetype, damage = await get_player_descriptors(did)
     except Exception:
         pass
+    # Authoritative FEAT COUNTS — the exact numbers the registry card badge shows
+    # (Flawless / 100 Kills / 200 Takedowns / Triple / TUFF / Pacifist games). Pulled from
+    # the SAME function that renders the card (get_feats_for_player -> board_counts), so a
+    # "how many flawless/deathless games does X have" answer can never disagree with the
+    # card. Without this the tool returned no feat count and the model guessed (Roam's
+    # 6 Flawless came back as 4).
+    feat_counts = {}
+    try:
+        from cogs.registry import get_feats_for_player
+        _nf, _fs, _bc, _fl = await get_feats_for_player(did)
+        feat_counts = {k: v for k, v in (_bc or {}).items() if v}
+    except Exception:
+        pass
     return {
         'player': name, 'total_marks': total_marks, 'submissions': sub_count,
         'best_kills_game': best_k, 'best_takedowns_game': best_td,
@@ -326,6 +339,7 @@ async def _get_player_card(player=None, **_):
         'career_hundos_100kill_games': pb.get('hundos'),
         'best_lethality_pct': pb.get('lethality'), 'lethality_weapon': pb.get('lethality_weapon'),
         'boards_held': boards_held[:_RESULT_CAP],
+        'feat_counts': feat_counts,
         'archetype': archetype, 'damage_style': damage,
     }
 
@@ -476,7 +490,11 @@ TOOL_SCHEMAS = [
         'name': 'get_player_card',
         'description': ("One player's full stats: total marks, submissions, best kills / takedowns / "
                         "match-points games (with weapon+map), boards they hold and their rank, career "
-                        "100-kill games, playstyle archetype and damage lean. Use for 'what are my/X's stats'."),
+                        "100-kill games, playstyle archetype and damage lean, and feat_counts — the "
+                        "authoritative per-player FEAT TALLY exactly as the registry card shows it "
+                        "(Flawless/deathless, 100 Kills, 200 Takedowns, Triple, TUFF, Pacifist games). "
+                        "Use for 'what are my/X's stats' AND 'how many flawless/deathless/triple/etc. "
+                        "games does X have' — read the count from feat_counts, do not guess."),
         'parameters': {'type': 'object', 'properties': {
             'player': {'type': 'string', 'description': 'player name, IGN, or discord id'}},
             'required': ['player']}}},

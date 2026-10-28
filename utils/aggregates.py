@@ -372,16 +372,17 @@ SPECS = [
     AggSpec('feat_200td', ('200 takedown', '200-takedown', '200 td'),
             'board', 'Most 200 Takedowns games', _c_board('200 Takedowns'),
             reduce='count', unit=' games', override_idx=9),
-    # Count from SUBMISSIONS via the 'Flawless' feat tag — the SAME source the registry
-    # card uses (registry.get_feats_for_player counts the tag, "every flawless, not just
-    # the board's best"). The Flawless BOARD can miss runs (legacy / unseeded rows), so
-    # the old _c_board('Flawless') undercounted: Roam's card showed x6, the Butler said 4.
+    # Count the Flawless BOARD rows — the SAME source the registry card's "x6 Flawless"
+    # badge uses (registry.get_feats_for_player returns board_counts['Flawless']). The
+    # Flawless board is unlimited (one row per no-death run), so its row count is the most
+    # COMPLETE tally: some legacy runs sit on the board without ever having the 'Flawless'
+    # tag written to their submission, so a feats-tag scan UNDERCOUNTS (Roam: board 6, tag 4).
     # "deathless" is the community's word for a no-death game, i.e. the same thing, so its
-    # keywords live here and resolve to the same count instead of a separate diverging one.
+    # keywords live here and resolve to the same count the card shows.
     AggSpec('feat_flawless',
             ('flawless', 'deathless', 'no death', 'no deaths', 'no-death', 'without dying',
              'without a death', 'zero death', 'zero deaths', '0 death'),
-            'submissions', 'Most Flawless (deathless) games', _c_feat_tag('Flawless'),
+            'board', 'Most Flawless (deathless) games', _c_board('Flawless'),
             reduce='count', unit=' games'),
     AggSpec('feat_triple', ('triple',),
             'board', 'Most Triple games', _c_board('Triple'), reduce='count', unit=' games',
