@@ -3147,6 +3147,17 @@ async def _do_finalise_submission(interaction, original_message, prompt_msg, sel
         _exec_g = round(kills / total_team_kills * 100, 1)
         blurb_parts.append(f"<a:mostlethal:1520490418817601658> {_exec_g}% Kill Share")
         blurb_parts.append(f"<:warlord:1520490364039860347> {_warlord_g}% Warlord")
+        # A thin team inflates the two shares above (smaller team-kills denominator), so a
+        # game below the season team-size floor is EXCLUDED from the season Kill Share /
+        # Warlord / Dominance ratings. Surface that here so the lobby context is visible and
+        # the exclusion isn't a mystery. Same team size the season gate reads (len(_team_td)+1,
+        # stored as team_size). Volume stats, marks, and boards are unaffected.
+        _min_team_b = max(0, int(getattr(config, 'SEASON_RATE_MIN_TEAM_SIZE', 5)))
+        _team_sz_b = (len(_team_td) + 1) if _team_td else None
+        if _min_team_b > 1 and _team_sz_b is not None and _team_sz_b < _min_team_b:
+            blurb_parts.append(
+                f"\N{WARNING SIGN} Small lobby ({_team_sz_b}-player team): doesn't count toward "
+                f"season Kill Share / Warlord")
 
     # --- Lethality (kills / takedowns) — kill conversion, this game (own emoji: Kill Share took the red skull) ---
     # Pacifist runs are support play: a 0.0% Lethality line is noise, not a stat

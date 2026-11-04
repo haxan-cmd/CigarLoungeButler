@@ -160,16 +160,29 @@ async def _calculate_butler_stats_uncached(week_start=None, week_end=None):
                 kill_efficiency.setdefault(player, []).append((kills, tlk, ls2))
         except (ValueError, TypeError):
             pass
+        # Small-lobby guard for the season RATE ratings (Kill Share / Warlord / Dominance):
+        # a thin team shrinks the team-kills denominator and inflates a player's share, so a
+        # game is dropped from THOSE ratios when the team size is KNOWN to be below the floor.
+        # An unread team size (vision miss) is given the benefit of the doubt and kept — we
+        # only exclude on a confirmed small team. Weapon-meta kill share and the volume
+        # categories are untouched. Tunable via config.SEASON_RATE_MIN_TEAM_SIZE (0/1 = off).
+        _min_team = max(0, int(getattr(config, 'SEASON_RATE_MIN_TEAM_SIZE', 5)))
+        try:
+            _tsize = int(row[16]) if len(row) > 16 and row[16] else None
+        except (ValueError, TypeError):
+            _tsize = None
+        _small_lobby = _min_team > 1 and _tsize is not None and _tsize < _min_team
         # Team kill share and TD share (cols 20/21)
         try:
             tks = float(row[20]) if len(row) > 20 and row[20] else None
             if tks and 0 < tks <= 100:
-                team_kill_shares.setdefault(player, []).append(tks)
+                if not _small_lobby:
+                    team_kill_shares.setdefault(player, []).append(tks)
                 if weapon:
                     weapon_kill_shares.setdefault(weapon, []).append(tks)
                 # Warlord = takedowns / team total kills. team_total_kills = kills / kill-share,
                 # so takedowns / team_total_kills reduces to takedowns * tks / kills.
-                if kills > 0 and td > 0:
+                if not _small_lobby and kills > 0 and td > 0:
                     warlord_ratios.setdefault(player, []).append(td * tks / kills)
         except (ValueError, TypeError):
             pass
@@ -574,11 +587,15 @@ async def build_favourites_embed(stats, bot_avatar_url=None):
     embed.add_field(name="🗡️ Top Weapons", value=_table(_rows(stats.get("top_weapons"))), inline=False)
     embed.add_field(name="🗺️ Top Maps", value=_table(_rows(stats.get("top_maps"))), inline=False)
 
+    _min_team_ft = max(0, int(getattr(config, 'SEASON_RATE_MIN_TEAM_SIZE', 5)))
+    _small_note = (f" Games in underpopulated lobbies (team under {_min_team_ft}) don't count "
+                   "toward Kill Share / Warlord / Dominance, as a thin team inflates the share."
+                   if _min_team_ft > 1 else "")
     embed.set_footer(text=("Kill Share / Warlord / Lethality here are your best 5-game run for THIS "
                            "season (5+ games) -- a season peak that never drops, so keep playing to beat "
                            "it. The all-time boards show the same over your whole history. Most Dominant goes "
                            "to the Dominance leader, Warlord to the Warlord leader; a challenger must beat "
-                           "the holder by 1%."))
+                           "the holder by 1%." + _small_note))
     return embed
 
 
