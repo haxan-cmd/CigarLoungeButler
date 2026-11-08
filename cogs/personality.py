@@ -2124,8 +2124,9 @@ class PersonalityCog(commands.Cog):
         import random
         if not _ai_client or not BUTLER_ORGANIC_POSTS_ENABLED:
             return
-        # ~15% chance each 3-hour window — roughly once a day, still random
-        if random.random() > 0.15:
+        # ~4% chance each 3-hour window -> roughly one organic one-liner every 3 days.
+        # Players asked for less unprompted chatter, so keep these rare.
+        if random.random() > 0.04:
             return
         try:
             guild = self.bot.get_guild(GUILD_ID)
@@ -2136,7 +2137,7 @@ class PersonalityCog(commands.Cog):
                 return
             line = await _butler_complete(
                 BUTLER_SYSTEM_PROMPT,
-                ('Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long. Pick a genuinely fresh subject each time — the hour, the furniture, the quiet, a passing thought, the state of the lounge. Do NOT mention shiny heads, skulls, polished surfaces, gleaming helms, or the bald woman; you lean on those far too often.'),
+                ('Post a single unprompted dry observation about nothing in particular. One sentence only. No question, no exclamation mark. Make it feel like you have been sitting here alone for too long. Pick a genuinely fresh subject each time — the hour, the furniture, the quiet, a passing thought, the state of the lounge. Do NOT mention shiny heads, skulls, polished surfaces, gleaming helms, or the bald woman; you lean on those far too often. No em dashes: use a comma or a full stop.'),
                 50,
                 temperature=_FLAVOUR_TEMP, presence_penalty=_FLAVOUR_PRESENCE,
                 frequency_penalty=_FLAVOUR_FREQUENCY,
@@ -2203,13 +2204,18 @@ class PersonalityCog(commands.Cog):
         await main_ch.send(question if _preformatted else f"*{question}*")
         print(f"[POLL] Posted: {question}")
 
-    @tasks.loop(hours=6)
+    @tasks.loop(hours=12)
     async def butler_poll_post(self):
-        """Post a Butler question in main once every 6 hours. Skips the
-        immediate on-boot run (task loops fire their body on start) so
-        redeploys don't trigger an extra post — the first question lands
-        ~6h after startup. Use /force_poll to post one on demand."""
+        """Post a Butler question/tidbit in main. Wakes every 12 hours and posts
+        ~55% of the time, so it averages roughly once a day at an irregular hour
+        instead of clockwork — the ambient posts were too frequent (players asked
+        the Butler to pipe down). Skips the immediate on-boot run so redeploys don't
+        trigger an extra post. Use /force_poll to post one on demand."""
         if self.butler_poll_post.current_loop == 0:
+            return
+        # ~25% per 12h window -> roughly one ambient tidbit/poll every 2 days. Players
+        # asked the Butler to pipe down more than once, so keep these sparse.
+        if random.random() > 0.25:
             return
         try:
             await self._run_poll_logic()
