@@ -336,15 +336,14 @@ REBUILD_RENDER_CONCURRENCY = 8
 # raise this if 10-game samples still feel too light, lower it toward 5 if the field is thin.
 SEASON_RATE_MIN_GAMES = 10
 
-# Minimum TEAM SIZE for a single game to feed the season RATE ratings (Kill Share,
-# Warlord, Dominance). A thin team shrinks the team-kills denominator and inflates a
-# player's share, so an underpopulated lobby is excluded from those ratios (the game
-# still logs and still counts for marks, boards, and the VOLUME categories). Applied only
-# when team size was actually READ — an unread team size is given the benefit of the doubt.
-# Set to 12: a full public Team Objective side is ~32, so under 12 (a third of a team) is a
-# half-empty lobby where people farm weak players on big maps, not a real game. NOTE: this
-# also excludes small-format Team Clash from the ratio titles, by design. Set to 0/1 to disable.
-SEASON_RATE_MIN_TEAM_SIZE = 12
+# DISABLED (set to 1) — see note. The small-lobby filter for the season RATE ratings
+# (Kill Share / Warlord / Dominance) gated on `team_size`, but that column is NOT the real
+# team size: it's len(_team_td)+1, i.e. how many teammate rows VISION PARSED off the
+# scoreboard. Big public lobbies under-parse (OCR drops dense rows), so a full 32-player
+# team reads as ~6-10 and a floor of 12 excluded nearly every game, wiping the ratings.
+# Left here (=1, inert) until the filter is re-based on a reliable lobby-population signal
+# (team_total_kills banner total is the candidate). 0/1 = off.
+SEASON_RATE_MIN_TEAM_SIZE = 1
 
 # Minimum runs before a bar appears on an /explore RATE chart (lethality, kill
 # share, warlord, avg TD/kills). At 3, three-run outliers topped the boards --
