@@ -293,12 +293,21 @@ async def _get_player_card(player=None, **_):
     # to 0 while 18 real submissions existed). Fall back to the counter only if we somehow
     # read no rows.
     sub_count = len(_subs) if _subs else (_safe_int(prow[4]) if prow and len(prow) > 4 else None)
+    # Per-weapon and per-map game counts, so "how many <weapon>/<map> games/submissions do I
+    # have" can be answered instead of deflecting to the undivided total. Counts ALL the
+    # player's logged runs, so the breakdown sums to `submissions` above.
+    games_by_weapon = {}
+    games_by_map = {}
     try:
         for s in _subs:
             if len(s) < 9:
                 continue
             k = _safe_int(s[8]); t = _safe_int(s[7]); pts = _safe_int(s[24]) if len(s) > 24 else 0
             wpn = (s[3] or '').strip(); mp = (s[5] or '').strip()
+            if wpn:
+                games_by_weapon[wpn] = games_by_weapon.get(wpn, 0) + 1
+            if mp:
+                games_by_map[mp] = games_by_map.get(mp, 0) + 1
             if best_k is None or k > best_k['kills']:
                 best_k = {'kills': k, 'weapon': wpn, 'map': mp}
             if best_td is None or t > best_td['takedowns']:
@@ -308,6 +317,9 @@ async def _get_player_card(player=None, **_):
                 best_pts = {'points': pts, 'weapon': wpn, 'map': mp}
     except Exception:
         pass
+    # Sort by count desc; weapons are a small fixed universe so keep them all, cap maps.
+    games_by_weapon = dict(sorted(games_by_weapon.items(), key=lambda x: -x[1]))
+    games_by_map = dict(sorted(games_by_map.items(), key=lambda x: -x[1])[:_RESULT_CAP])
     boards_held = []
     try:
         for pos, bname, _emoji, gap in (await get_best_placements_for_player(did, top_n=15) or []):
@@ -340,6 +352,7 @@ async def _get_player_card(player=None, **_):
         'best_lethality_pct': pb.get('lethality'), 'lethality_weapon': pb.get('lethality_weapon'),
         'boards_held': boards_held[:_RESULT_CAP],
         'feat_counts': feat_counts,
+        'games_by_weapon': games_by_weapon, 'games_by_map': games_by_map,
         'archetype': archetype, 'damage_style': damage,
     }
 
@@ -492,9 +505,12 @@ TOOL_SCHEMAS = [
                         "match-points games (with weapon+map), boards they hold and their rank, career "
                         "100-kill games, playstyle archetype and damage lean, and feat_counts — the "
                         "authoritative per-player FEAT TALLY exactly as the registry card shows it "
-                        "(Flawless/deathless, 100 Kills, 200 Takedowns, Triple, TUFF, Pacifist games). "
-                        "Use for 'what are my/X's stats' AND 'how many flawless/deathless/triple/etc. "
-                        "games does X have' — read the count from feat_counts, do not guess."),
+                        "(Flawless/deathless, 100 Kills, 200 Takedowns, Triple, TUFF, Pacifist games), "
+                        "plus games_by_weapon and games_by_map — the player's submission count PER "
+                        "weapon and PER map. Use for 'what are my/X's stats', 'how many flawless/"
+                        "deathless/triple games does X have' (read feat_counts), AND 'how many "
+                        "<weapon>/<map> games/submissions does X have' (read games_by_weapon / "
+                        "games_by_map) — read the count, do not guess or deflect to the total."),
         'parameters': {'type': 'object', 'properties': {
             'player': {'type': 'string', 'description': 'player name, IGN, or discord id'}},
             'required': ['player']}}},
