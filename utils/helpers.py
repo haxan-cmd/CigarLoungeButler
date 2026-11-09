@@ -336,15 +336,22 @@ async def butler_answer_with_tools(system: str, prompt: str, max_tokens: int,
 _gemini_client = None
 try:
     from google import genai as _genai
+    # api_version MUST be pinned to 'v1beta': JSON mode (response_mime_type='application/json',
+    # which every vision call uses) is NOT supported on the SDK's newer default 'v1' endpoint,
+    # which 400s with "JSON mode is not enabled for api version v1. Use api version v1beta
+    # instead." A google-genai upgrade flipped the default and broke ALL scorecard parsing.
     # Request timeout so a hung generate_content (seen on dense 64-player boards, which
     # never returned a response and left the submit UI stuck on "Reading your scorecard")
     # RAISES instead of blocking the worker thread forever. Timeout is in MILLISECONDS.
-    # Wrapped in its own try so an SDK version without http_options still constructs.
+    # Wrapped in its own try so an SDK version without the timeout kwarg still constructs.
     try:
         from google.genai import types as _genai_types_init
+        try:
+            _http_opts = _genai_types_init.HttpOptions(api_version='v1beta', timeout=90_000)
+        except Exception:
+            _http_opts = _genai_types_init.HttpOptions(api_version='v1beta')
         _gemini_client = _genai.Client(
-            api_key=os.environ['GOOGLE_AI_API_KEY'],
-            http_options=_genai_types_init.HttpOptions(timeout=90_000))
+            api_key=os.environ['GOOGLE_AI_API_KEY'], http_options=_http_opts)
     except Exception:
         _gemini_client = _genai.Client(api_key=os.environ['GOOGLE_AI_API_KEY'])
 except Exception:
