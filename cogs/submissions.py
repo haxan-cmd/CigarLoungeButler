@@ -4956,6 +4956,87 @@ class SubmissionsCog(commands.Cog):
                   else "\n⚠️ Couldn't read the team totals off this board, so Warlord/Kill Share may still be blank."))
         await interaction.followup.send(msg, ephemeral=True)
 
+    @app_commands.command(name="reparse_missing_stats",
+                          description="Bulk re-read scorecards for recent runs missing lobby/rating data, e.g. after a vision outage (mod only).")
+    @app_commands.describe(hours="How far back to scan (default 72, max 720).",
+                           limit="Max runs to reparse THIS run (default 25, cap 40 to stay under the 15-min window).",
+                           dry_run="Only report how many WOULD be reparsed; change nothing.")
+    async def reparse_missing_stats(self, interaction: discord.Interaction,
+                                    hours: int = 72, limit: int = 25, dry_run: bool = False):
+        from utils.helpers import is_mod
+        if not is_mod(interaction):
+            await interaction.response.send_message("That's not for you.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        import asyncio as _asyncio
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _tdelta
+        from utils.challenges import parse_ts as _parse_ts
+        _hours = max(1, min(int(hours), 720))          # 1h .. 30 days
+        _cap = max(1, min(int(limit), 40))             # per-run cap keeps total time < 15-min token
+        _cutoff = _dt.now(_tz.utc).replace(tzinfo=None) - _tdelta(hours=_hours)
+        try:
+            _subs = await _db.get_all_submissions()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't read submissions: {e}", ephemeral=True)
+            return
+        # A run that went through the manual-entry fallback (vision down) has NO whole-lobby
+        # data: team_total_kills (col 25) is blank, so it has no Kill Share / Warlord. Those
+        # are the ones to repair. Scope to the recent window, skip resubmit/unlisted and any
+        # row with no image link to reparse. Oldest first so a partial batch heals in order.
+        _targets = []
+        for s in _subs:
+            if len(s) <= 25:
+                continue
+            _ts = _parse_ts(s[0]) if s and s[0] else None
+            if _ts is None or _ts < _cutoff:
+                continue
+            _ttk = str(s[25]).strip() if s[25] is not None else ''
+            if _ttk not in ('', 'None'):
+                continue  # already has lobby data
+            _link = (s[12] or '').strip() if len(s) > 12 else ''
+            if not _link:
+                continue
+            _feats = str(s[11] or '')
+            if 'Resubmit' in _feats or 'Unlisted' in _feats:
+                continue
+            _targets.append((_ts, _link, (s[1] or '').strip()))
+        _targets.sort(key=lambda t: t[0])
+        _total = len(_targets)
+        if dry_run:
+            await interaction.followup.send(
+                f"🔍 **{_total}** run(s) in the last {_hours}h are missing lobby data "
+                f"(Kill Share / Warlord). Re-run without `dry_run` to reparse up to {_cap} at a time.",
+                ephemeral=True)
+            return
+        if _total == 0:
+            await interaction.followup.send(
+                f"✅ No runs missing lobby data in the last {_hours}h.", ephemeral=True)
+            return
+        _ok = _rated = _failed = 0
+        _errs = []
+        for _ts, _link, _pname in _targets[:_cap]:
+            try:
+                res = await _reparse_submission_by_link(interaction.guild, _link)
+                if res.get('error'):
+                    _failed += 1
+                    _errs.append(f"{_pname or _link}: {res['error']}")
+                else:
+                    _ok += 1
+                    if res.get('kill_share') is not None:
+                        _rated += 1
+            except Exception as e:
+                _failed += 1
+                _errs.append(f"{_pname or _link}: {e}")
+            await _asyncio.sleep(1.5)   # ease off Gemini + Discord rate limits between games
+        _more = _total - min(_total, _cap)
+        _summary = (f"✅ Reparsed **{_ok}/{min(_total, _cap)}** run(s); ratings restored on **{_rated}**."
+                    + (f" {_failed} failed." if _failed else ""))
+        if _more > 0:
+            _summary += f"\n**{_more}** more still pending — run the command again to continue."
+        if _errs:
+            _summary += "\n\nFirst issues:\n" + "\n".join(f"• {e}" for e in _errs[:8])
+        await interaction.followup.send(_summary[:1900], ephemeral=True)
+
     @app_commands.command(name="refresh_blurb",
                           description="Refresh a run's map-kills line on its blurb, for runs posted before that line existed (mod only).")
     @app_commands.describe(message_link="Link to the player's ORIGINAL scorecard message (the image, not the bot's reply).")
