@@ -4957,7 +4957,7 @@ class SubmissionsCog(commands.Cog):
         await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(name="reparse_missing_stats",
-                          description="Bulk re-read scorecards for recent runs missing lobby/rating data, e.g. after a vision outage (mod only).")
+                          description="Bulk-reparse recent runs missing lobby/rating data after a vision outage (mod only).")
     @app_commands.describe(hours="How far back to scan (default 72, max 720).",
                            limit="Max runs to reparse THIS run (default 25, cap 40 to stay under the 15-min window).",
                            dry_run="Only report how many WOULD be reparsed; change nothing.")
