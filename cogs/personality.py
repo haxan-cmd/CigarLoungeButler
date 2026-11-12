@@ -5487,8 +5487,18 @@ class PersonalityCog(commands.Cog):
                 return
 
             discord_id_str = str(message.author.id)
+            _author_name = (getattr(message.author, 'display_name', '') or message.author.name or '').strip().lower()
+            # Registered = a players-table row matching the discord_id OR the display name.
+            # The name fallback is essential: legacy / renamed players routinely have a BLANK
+            # or stale discord_id on their row (the blank-id problem seen across this codebase),
+            # so an id-only check wrongly dismissed real members WITH submissions as
+            # "unregistered" and told them to move along (Domophone, 2026-11). Err toward
+            # registered — a stranger getting a reply is far better than snubbing a real player.
             is_registered = any(
-                row and row[0].strip() == discord_id_str
+                row and (
+                    ((row[0] or '').strip() == discord_id_str)
+                    or (_author_name and len(row) > 1 and (row[1] or '').strip().lower() == _author_name)
+                )
                 for row in (await _db.get_all_players())
             )
             if not is_registered:
