@@ -298,6 +298,12 @@ async def _get_player_card(player=None, **_):
     # player's logged runs, so the breakdown sums to `submissions` above.
     games_by_weapon = {}
     games_by_map = {}
+    # Aggregate "quality" accumulators (avg TD / kills / deaths / K-D / score), so quality
+    # questions ("how good/bad/low are my games") can be answered from real averages instead
+    # of deflecting. Exclude resubmit/unlisted (re-uploads and mod-hidden runs aren't a fair
+    # sample of play quality).
+    _q_td = _q_k = _q_d = _q_score = _q_n = _q_feat = 0
+    _FEAT_MARKERS = ('100 Kills', '200 Takedowns', 'Triple', 'Flawless')
     try:
         for s in _subs:
             if len(s) < 9:
@@ -315,11 +321,34 @@ async def _get_player_card(player=None, **_):
             is_pac = (k == 0 and t <= 10)
             if pts > 0 and not is_pac and (best_pts is None or pts > best_pts['points']):
                 best_pts = {'points': pts, 'weapon': wpn, 'map': mp}
+            _fs = str(s[11]) if len(s) > 11 and s[11] else ''
+            if 'Resubmit' not in _fs and 'Unlisted' not in _fs:
+                _q_td += t; _q_k += k; _q_d += (_safe_int(s[9]) if len(s) > 9 else 0)
+                _q_score += pts; _q_n += 1
+                if any(m in _fs for m in _FEAT_MARKERS):
+                    _q_feat += 1
     except Exception:
         pass
     # Sort by count desc; weapons are a small fixed universe so keep them all, cap maps.
     games_by_weapon = dict(sorted(games_by_weapon.items(), key=lambda x: -x[1]))
     games_by_map = dict(sorted(games_by_map.items(), key=lambda x: -x[1])[:_RESULT_CAP])
+    # Finalise the quality profile. A verdict on "how good are my games" reads from here:
+    # avg takedowns/kills/deaths, K/D, avg score, share of games that hit a headline feat,
+    # and marks earned per game. Real numbers, so the model characterises quality instead of
+    # inventing one or deflecting.
+    averages = {}
+    if _q_n:
+        averages = {
+            'games_sampled': _q_n,
+            'avg_takedowns': round(_q_td / _q_n, 1),
+            'avg_kills': round(_q_k / _q_n, 1),
+            'avg_deaths': round(_q_d / _q_n, 1),
+            'kd_ratio': round(_q_k / _q_d, 2) if _q_d else float(_q_k),
+            'avg_score': round(_q_score / _q_n) if _q_score else None,
+            'feat_game_rate_pct': round(_q_feat / _q_n * 100, 1),
+        }
+        if isinstance(total_marks, int) and total_marks and sub_count:
+            averages['marks_per_game'] = round(total_marks / sub_count, 2)
     boards_held = []
     try:
         for pos, bname, _emoji, gap in (await get_best_placements_for_player(did, top_n=15) or []):
@@ -353,6 +382,7 @@ async def _get_player_card(player=None, **_):
         'boards_held': boards_held[:_RESULT_CAP],
         'feat_counts': feat_counts,
         'games_by_weapon': games_by_weapon, 'games_by_map': games_by_map,
+        'averages': averages,
         'archetype': archetype, 'damage_style': damage,
     }
 
@@ -508,9 +538,12 @@ TOOL_SCHEMAS = [
                         "(Flawless/deathless, 100 Kills, 200 Takedowns, Triple, TUFF, Pacifist games), "
                         "plus games_by_weapon and games_by_map — the player's submission count PER "
                         "weapon and PER map. Use for 'what are my/X's stats', 'how many flawless/"
-                        "deathless/triple games does X have' (read feat_counts), AND 'how many "
+                        "deathless/triple games does X have' (read feat_counts), 'how many "
                         "<weapon>/<map> games/submissions does X have' (read games_by_weapon / "
-                        "games_by_map) — read the count, do not guess or deflect to the total."),
+                        "games_by_map), AND 'how good/bad/low is the quality of X's games' (read "
+                        "`averages`: avg takedowns/kills/deaths, K/D, avg score, feat_game_rate_pct, "
+                        "marks_per_game) — characterise quality from those real numbers; read the "
+                        "value, do not guess or deflect to the raw count."),
         'parameters': {'type': 'object', 'properties': {
             'player': {'type': 'string', 'description': 'player name, IGN, or discord id'}},
             'required': ['player']}}},
