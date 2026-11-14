@@ -3606,8 +3606,26 @@ class PersonalityCog(commands.Cog):
             await self._bounty_prep_reminder(guild)
             await self._health_digest(guild)
             await self._weekly_log_rollup(guild)
+            await self._daily_board_reconcile(guild)
         except Exception as e:
             print(f"[DAILY] cycle tasks error: {e}")
+
+    async def _daily_board_reconcile(self, guild):
+        """Heal weapon/map board DRIFT once a day. The per-submission board update is
+        INCREMENTAL: each run is judged once against the current 10th and then forgotten,
+        never reconsidered. Over time a board stops reflecting the true top-10 — a genuine
+        high game submitted while the bar was high gets permanently left off, and a lower
+        score settles into the open slot (the '112 sitting at #10 while higher Sword games
+        exist' report, 2026-11). rebuild_score_boards recomputes every weapon/map board from
+        the FULL submission history (additive keep-higher, re-capped to 10) and repaints only
+        the boards that actually changed, so the hot submission path stays fast and mods no
+        longer have to run /rebuild_boards by hand to undo drift."""
+        try:
+            from cogs.leaderboards import rebuild_score_boards
+            summary = await rebuild_score_boards(guild)
+            print(f"[DAILY] board reconcile: {summary}")
+        except Exception as e:
+            print(f"[DAILY] board reconcile error: {e}")
 
     async def _weekly_log_rollup(self, guild):
         """Once a week, post a rollup of the persistent event log to the nerve centre so
