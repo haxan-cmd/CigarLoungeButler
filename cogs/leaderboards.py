@@ -948,6 +948,20 @@ async def update_leaderboards(interaction, selected_weapon, selected_map, factio
     _map_rendered = False  # did the loop below already re-render the submitted map board?
 
     for lb_name, score, top_10, personal_best, unlimited_top50 in updates:
+        # Fixed-size top-10 boards (weapon / map / weapon-kills): cap the STORED board to its
+        # real top 10 BEFORE the qualification below. The incremental path only evicts one row
+        # per add, so a board already bloated with stale/duplicate rows stays bloated, and its
+        # fake low "10th place" lets a sub-par score slip onto the board and fire a false High
+        # Score (Roguedawg's 112 under a wall of 140s). Trimming here means the check compares
+        # against real entries, the bogus entry is rejected, and the board self-heals on the
+        # next submission — no manual /rebuild_boards needed. No-op on a board already <=10.
+        if top_10:
+            try:
+                _trimmed = await _db.trim_board_to_top(lb_name, 10)
+                if _trimmed:
+                    print(f"[BOARD] trimmed {_trimmed} stale row(s) off {lb_name} (was bloated past top-10)")
+            except Exception as _te:
+                print(f"[BOARD] trim {lb_name} failed (continuing): {_te}")
         board_values = await _db.get_leaderboard_by_board(lb_name)
         # Find this player's existing entry and take their HIGHEST row as the bar to beat.
         # Match on discord_id OR name: matching on id alone missed legacy / name-variant

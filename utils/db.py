@@ -2595,6 +2595,34 @@ async def delete_lowest_leaderboard_entry(board_name: str):
         """, board_name)
 
 
+async def trim_board_to_top(board_name: str, limit: int = 10) -> int:
+    """Delete all but the top `limit` rows on a board (highest score first, oldest id on
+    ties). A fixed-size top-N board (weapon / map / weapon-kills) is only ever trimmed ONE
+    row at a time by the incremental insert path, so a board that is already bloated with
+    stale or duplicate rows stays bloated — and the stale low rows below the visible top-10
+    corrupt the insert-time qualification (a sub-par score beats the fake low '10th' and
+    fires a false High Score). Calling this before the qualification keeps the stored board
+    equal to the true top-N, so the check is always computed against real entries. Returns
+    the number of rows deleted. Idempotent: a no-op on a board already at or under the cap."""
+    _cache_invalidate('leaderboard_data')
+    pool = _pool_check()
+    async with pool.acquire() as conn:
+        res = await conn.execute("""
+            DELETE FROM leaderboard_data
+            WHERE board_name = $1
+              AND id NOT IN (
+                SELECT id FROM leaderboard_data
+                WHERE board_name = $1
+                ORDER BY score DESC NULLS LAST, id ASC
+                LIMIT $2
+              )
+        """, board_name, limit)
+    try:
+        return int(res.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def delete_leaderboard_entry_by_link(board_name: str, message_link: str):
     """Delete one entry on a specific board by message link (for deduplication)."""
     _cache_invalidate('leaderboard_data')
