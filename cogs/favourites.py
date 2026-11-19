@@ -683,6 +683,34 @@ async def update_title_roles(guild, stats, include_weekly=True):
             if _inc is not None and _chal is not None and _chal <= _inc * 1.01:
                 continue  # incumbent still within 1% -> keep the title, no thrash
 
+        # All-time BOARD titles (Grand Marshal / Weapons Master / Campaign Master) are
+        # ranked by boards-held (more is better), average placement breaking ties (lower
+        # is better). When two players are exactly tied the ranking's min() is not stable
+        # across recomputes, so the role (and its announcement) thrashed between them every
+        # refresh. Require the challenger to STRICTLY outrank the incumbent before taking
+        # the title; a tie keeps the current holder, so no flip and no spam.
+        _board_key = {'grand_marshal': '_combined_placements',
+                      'weapons_master': '_weapon_placements',
+                      'campaign_master': '_map_placements'}.get(stat_key)
+        if _board_key and current_holders:
+            _pl = stats.get(_board_key) or {}
+
+            def _board_rank(_nm, _p=_pl):
+                _nm = _nm.lower()
+                for _name, _lst in _p.items():
+                    if _name.lower() == _nm and _lst:
+                        return (len(_lst), sum(_lst) / len(_lst))
+                return None
+
+            _chal = _board_rank(new_holder_name)
+            _incs = [r for r in (_board_rank(m.nick or m.display_name or '')
+                                 for m in current_holders) if r is not None]
+            _inc = max(_incs, key=lambda r: (r[0], -r[1])) if _incs else None
+            if _inc is not None and _chal is not None:
+                _better = _chal[0] > _inc[0] or (_chal[0] == _inc[0] and _chal[1] < _inc[1] - 1e-6)
+                if not _better:
+                    continue  # challenger doesn't clearly beat the incumbent -> no swap
+
         for old_member in current_holders:
             try:
                 await old_member.remove_roles(role)
