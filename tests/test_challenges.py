@@ -177,6 +177,47 @@ def test_describe_fits_the_card_column():
     assert len(FIELD_TEST['special_challenge']) > 60  # the thing we're replacing
 
 
+# Takedown-games bonus (new): N games each clearing a TD floor, any bounty weapon.
+# A sub-floor run still counts toward the main bounty; it just doesn't advance this.
+TD_GAMES = {
+    'special_challenge': '3 games with 125+ takedowns, any bounty weapon',
+    'weapons': {w: {'current': 0, 'total': 3} for w in ['Maul', 'Halberd', 'Falchion']},
+}
+
+
+def test_td_games_bonus_fields():
+    s = parse_special(TD_GAMES)
+    assert s['min_td'] == 125          # the "+" floor, not the 100 default
+    assert s['need'] == 3              # "3 games" -> three qualifying runs
+    assert s['any_weapon'] is True
+    assert s['max_deaths'] is None
+    assert s['min_lethality'] is None
+
+
+def test_td_games_phrasings_all_parse_125_x3():
+    """Different ways an author might word the same bonus must all land on
+    min_td=125, need=3 — and never read the 125 as the run count."""
+    for txt in ('3 games with 125+ takedowns, any bounty weapon',
+                '3 total 125 plus takedown games, any bounty weapon',
+                '125+ takedowns x3, any bounty weapon',
+                '125+ takedown game 3 times, any bounty weapon'):
+        s = parse_special({'special_challenge': txt, 'weapons': {'Maul': {'total': 3}}})
+        assert s['min_td'] == 125, txt
+        assert s['need'] == 3, txt
+        assert s['any_weapon'] is True, txt
+
+
+def test_td_games_describe():
+    assert describe(parse_special(TD_GAMES)) == '125+ TD x3'
+
+
+def test_plain_td_floor_still_single_run():
+    # No "games"/"times"/"x" -> one run, and the "+" floor is read.
+    s = parse_special({'special_challenge': '125+ takedowns using Maul', 'weapons': {'Maul': {'total': 1}}})
+    assert s['min_td'] == 125
+    assert s['need'] == 1
+
+
 def test_parse_ts_formats():
     assert parse_ts('2026-07-20 13:04 UTC').year == 2026
     assert parse_ts('2026-07-20 14:22:31').hour == 14

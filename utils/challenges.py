@@ -38,7 +38,9 @@ def parse_special(bounty):
     sc = (bounty.get('special_challenge') or '').lower()
     if not sc:
         return None
-    td = re.search(r'(\d+)\s*takedown', sc)
+    # Takedown floor. Accept a trailing "+" or "plus" so "125+ takedowns" and
+    # "125 plus takedowns" both read as 125 (not the 100 default).
+    td = re.search(r'(\d+)\s*(?:\+|plus)?\s*takedown', sc)
     deaths = re.search(r'(?:fewer than|less than|under|sub|below|<)\s*(\d+)\s*death', sc)
     # "Deathless" means a 0-death run — same as "under 1 death". It's auto-tracked from the
     # scoreboard's death count, and (like a lethality challenge) it doesn't drag in the
@@ -49,11 +51,34 @@ def parse_special(bounty):
     has_leth = 'lethal' in sc
     leth_num = re.search(r'(\d+)\s*%\s*(?:\+|or more|or higher)?\s*lethal', sc)
     min_lethality = (int(leth_num.group(1)) if leth_num else 60) if has_leth else None
-    # How many qualifying runs. Accept the count with any qualifier words between
-    # it and "lethal"/"games": "6 high lethality games", "6 excellent lethality
-    # games" (the in-game sticker wording), "5 games at 70% lethality".
-    count = (re.search(r'(?:complete\s*)?(\d+)\s*times', sc) or re.search(r'\bx\s*(\d+)\b', sc)
-             or (re.search(r'(\d+)\s+(?:\w+\s+){0,3}?(?:lethal|games?)\b', sc) if has_leth else None))
+
+    # How many qualifying runs are required. Prefer an explicit multiplier ("x3",
+    # "3 times"). Otherwise, when the text talks about "games"/"runs" (or it's any
+    # lethality challenge), take the first count-like number that ISN'T one of the
+    # threshold values we already parsed (takedowns / deaths / lethality %). That lets
+    # "3 games with 125+ takedowns, any bounty weapon" read as need=3 without mistaking
+    # the 125 for the count, while a plain "125+ takedowns" stays at need=1.
+    need = 1
+    mult = re.search(r'\bx\s*(\d+)\b', sc) or re.search(r'(\d+)\s*times\b', sc)
+    if mult:
+        need = max(1, int(mult.group(1)))
+    elif has_leth or re.search(r'\b(?:games?|runs?)\b', sc):
+        _used = set()
+        if td:
+            _used.add(int(td.group(1)))
+        if deaths:
+            _used.add(int(deaths.group(1)))
+        if leth_num:
+            _used.add(int(leth_num.group(1)))
+        for _m in re.finditer(r'(\d+)', sc):
+            _n = int(_m.group(1))
+            if _n in _used:
+                continue
+            if sc[_m.end():_m.end() + 1] == '%':   # a stray percentage, not a run count
+                continue
+            need = max(1, _n)
+            break
+
     return {
         'text': sc,
         # A lethality or deathless bounty needn't also clear the 100-TD default; require TD
@@ -62,7 +87,7 @@ def parse_special(bounty):
         # "under N deaths" sets N; a worded "deathless" means 0 deaths (max_deaths=1 -> the
         # run must have fewer than 1 death).
         'max_deaths': int(deaths.group(1)) if deaths else (1 if has_deathless else None),
-        'need': max(1, int(count.group(1))) if count else 1,
+        'need': need,
         'any_weapon': ('any bounty weapon' in sc) or ('any weapon' in sc),
         'min_lethality': min_lethality,
     }
