@@ -1057,7 +1057,8 @@ class BountyCog(commands.Cog):
         weapon1="Weapon slot 1 — e.g. Messer or Messer:9 for custom total (default 3)",
         weapon2="Weapon slot 2 — e.g. Dane Axe or Dane Axe:6",
         weapon3="Weapon slot 3", weapon4="Weapon slot 4",
-        weapon5="Weapon slot 5", weapon6="Weapon slot 6",
+        weapon5="Weapon slot 5",
+        weapon6="Weapon slot 6 (optional)",
         weapon7="Weapon slot 7 (optional)",
         weapon8="Weapon slot 8 (optional)",
         special_challenge="Special challenge description e.g. 100 Takedowns on Cat Claws (Katars)",
@@ -1069,8 +1070,9 @@ class BountyCog(commands.Cog):
         channel_name: str,
         theme_emoji: str,
         weapon1: str, weapon2: str, weapon3: str,
-        weapon4: str, weapon5: str, weapon6: str,
+        weapon4: str, weapon5: str,
         special_challenge: str,
+        weapon6: str = None,
         weapon7: str = None,
         weapon8: str = None,
         image: discord.Attachment = None,
@@ -1104,11 +1106,10 @@ class BountyCog(commands.Cog):
                 total = 3
             return name, total
 
-        raw_weapons = [weapon1, weapon2, weapon3, weapon4, weapon5, weapon6]
-        if weapon7:
-            raw_weapons.append(weapon7)
-        if weapon8:
-            raw_weapons.append(weapon8)
+        raw_weapons = [weapon1, weapon2, weapon3, weapon4, weapon5]
+        for extra in (weapon6, weapon7, weapon8):
+            if extra:
+                raw_weapons.append(extra)
 
         weapons = {}
         for raw in raw_weapons:
